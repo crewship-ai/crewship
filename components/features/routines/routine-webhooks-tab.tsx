@@ -1,19 +1,23 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Plus, Trash2, Webhook, Copy, Check, Eye, EyeOff } from "lucide-react"
-import { usePipelineWebhooks, type PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
+import { Plus, Trash2, Webhook, Copy, Check, Eye, EyeOff, Pencil } from "lucide-react"
+import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
 import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
+import { RoutineWebhookEditorDialog } from "./routine-webhook-editor-dialog"
 
 // RoutineWebhooksTab — event-driven trigger CRUD restyled for the
 // dashboard. Token + signing secret are revealed once on create
 // (Stripe-style); thereafter the UI only shows the public URL and
-// last-fired status. Delete + recreate is the rotation path.
+// last-fired status. Name, rate limit, inputs template and enabled state
+// edit in place via RoutineWebhookEditorDialog (F21, B9 #2362) without
+// rotating the URL; only an explicit secret rotation (still in that
+// dialog) or delete + recreate ever changes what a sender is signed with.
 
 interface Props {
   workspaceId: string
@@ -22,8 +26,31 @@ interface Props {
 }
 
 export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
-  const { webhooks, loading, error, create, remove } = usePipelineWebhooks(workspaceId)
+  const { webhooks, loading, error, create, update, remove } = usePipelineWebhooks(workspaceId)
   const ours = useMemo(() => webhooks.filter((w) => w.target_pipeline_id === pipelineId), [webhooks, pipelineId])
+
+  const [editing, setEditing] = useState<PipelineWebhook | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const saveEdit = async (body: WebhookUpdateBody) => {
+    if (!editing) return
+    setEditSaving(true)
+    try {
+      const updated = await update(editing.id, body)
+      if (updated?.signing_secret) {
+        // A rotation happened — reuse the create-time reveal card so the
+        // new secret gets the same one-shot "copy now" treatment.
+        setJustCreated(updated)
+        toast.success("Secret rotated", { description: "Copy the new signing secret now — it won't be shown again" })
+      } else {
+        toast.success("Webhook updated")
+      }
+      setEditing(null)
+    } catch (e) {
+      toast.error("Update failed", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState("")
@@ -174,16 +201,28 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                     )}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => del(w)}
-                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                  title="Delete"
-                  aria-label={`Delete webhook ${w.name || w.id}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditing(w)}
+                    className="h-8 w-8 p-0"
+                    title="Edit (name, rate limit, inputs template — URL never rotates)"
+                    aria-label={`Edit webhook ${w.name || w.id}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => del(w)}
+                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                    title="Delete"
+                    aria-label={`Delete webhook ${w.name || w.id}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </li>
             ))}
           </ol>
@@ -239,6 +278,13 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
           </div>
         </Card>
       )}
+
+      <RoutineWebhookEditorDialog
+        webhook={editing}
+        submitting={editSaving}
+        onCancel={() => setEditing(null)}
+        onSave={saveEdit}
+      />
     </div>
   )
 }

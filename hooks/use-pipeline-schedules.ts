@@ -51,17 +51,40 @@ export interface PipelineSchedule {
   consecutive_failures: number
   max_consecutive_failures: number
   disabled_reason?: string
+  // "draft" for a trigger atomic routine authoring created with
+  // activation="draft" (B8, #2359) and still awaiting MANAGER sign-off;
+  // omitted for every ordinary schedule. The editor must not offer a plain
+  // enable toggle for a draft — only the activate action clears it.
+  activation?: "draft"
 }
 
 export interface ScheduleSaveBody {
   name?: string
   target_pipeline_slug?: string
   target_pipeline_id?: string
-  target_pipeline_version?: number
-  cron_expr: string
+  // Pointer-shaped on the wire: undefined = omit the key (keep existing
+  // pin on PATCH), null = explicit clear, a number = set/re-pin.
+  target_pipeline_version?: number | null
+  cron_expr?: string
   timezone?: string
   inputs?: Record<string, unknown>
   enabled?: boolean
+  // Reliability surface (B9, §13.2). All optional and absent-keeps-
+  // existing on PATCH, mirroring the server's merge semantics exactly.
+  catchup_policy?: "skip" | "once" | "all"
+  max_consecutive_failures?: number
+  wake_pipeline_slug?: string
+  wake_pipeline_id?: string
+  wake_inputs?: Record<string, unknown>
+  wake_fail_closed?: boolean
+}
+
+// SchedulePreview is the wire shape of GET
+// /pipeline-schedules/preview (B9, #2362, §13.2 "When").
+export interface SchedulePreview {
+  cron_expr: string
+  timezone: string
+  occurrences: string[]
 }
 
 // usePipelineSchedules fetches the workspace schedule list and
@@ -178,6 +201,26 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     [workspaceId, refresh],
   )
 
+  // preview computes the next N fire times for a cron/timezone pair
+  // WITHOUT saving anything (B9, §13.2 "When") — the editor calls this on
+  // every keystroke while cron/timezone are still being drafted, so it
+  // takes them as plain arguments rather than reading from state.
+  const preview = useCallback(
+    async (cronExpr: string, timezone: string, count = 5): Promise<SchedulePreview> => {
+      if (!workspaceId) throw new Error("no workspace")
+      const params = new URLSearchParams({ cron_expr: cronExpr, timezone, count: String(count) })
+      const res = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/pipeline-schedules/preview?${params.toString()}`,
+      )
+      if (!res.ok) {
+        const txt = await res.text()
+        throw new Error(`preview failed: ${res.status} ${txt}`)
+      }
+      return res.json()
+    },
+    [workspaceId],
+  )
+
   // next_run_at moves the moment a schedule fires, so a run starting is
   // exactly when "Firing next" goes stale. Without this the upcoming
   // list kept naming a time that had already passed until someone
@@ -186,5 +229,5 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
   useRealtimeEvent("pipeline.run.completed", refresh)
   useRealtimeEvent("pipeline.saved", refresh)
 
-  return { schedules, loading, error, refresh, create, update, remove }
+  return { schedules, loading, error, refresh, create, update, remove, preview }
 }
