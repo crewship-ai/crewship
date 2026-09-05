@@ -459,6 +459,7 @@ func init() {
 	issueUpdateCmd.Flags().Int("estimate", 0, "Effort estimate")
 	issueUpdateCmd.Flags().Float64("sort-order", 0, "Manual sort order")
 	issueUpdateCmd.Flags().String("routine-id", "", "Routine (pipeline) ID; empty string = unbind")
+	issueUpdateCmd.Flags().Bool("force", false, "Move a parent to DONE/REVIEW even though a sub-issue or plan task is still open; the server records who forced it and which children were open")
 
 	// issue review flags
 	issueReviewCmd.Flags().String("action", "", "Review action: approve or request_changes (required)")

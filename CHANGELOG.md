@@ -60,6 +60,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `credentials.handle_only` marks a credential the agent may use but never
   read, enforced at the shared delivery loader on every path, Keeper on or
   off. Agent prompt, inbox card, escalation card and docs updated.
+- **`crewship issue update --force` follows the 409 the terminal-children rule
+  sends (#TBD).** #2377 taught the server to refuse moving a parent to
+  DONE/REVIEW while a sub-issue is live and to say "retry with ?force=true";
+  the CLI had no way to do that. It does now, and the override is recorded
+  as the same receipt the API writes.
+
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
 - **The Track A live validation is on record, and the PRD says what it found (#2331).**
   `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by
