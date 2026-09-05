@@ -15,6 +15,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -191,13 +192,18 @@ func TestFinishAssignment_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithAction
 	}
 
 	// The item carries a valid §12 action contract.
-	var payloadRaw, targetUserID, targetRole, blocking string
+	var payloadRaw, targetUserID, targetRole, blocking, bodyMD string
 	if err := f.db.QueryRow(
-		`SELECT payload_json, COALESCE(target_user_id,''), COALESCE(target_role,''), blocking
+		`SELECT payload_json, COALESCE(target_user_id,''), COALESCE(target_role,''), blocking, COALESCE(body_md,'')
 		   FROM inbox_items WHERE kind = ? AND source_id = ?`,
 		inbox.KindRunNeedsHuman, assignmentID,
-	).Scan(&payloadRaw, &targetUserID, &targetRole, &blocking); err != nil {
+	).Scan(&payloadRaw, &targetUserID, &targetRole, &blocking, &bodyMD); err != nil {
 		t.Fatalf("query inbox row: %v", err)
+	}
+	// The card's body must come from the run's own checkpoint (its
+	// blockers, here) — not the generic fallback and not empty.
+	if !strings.Contains(bodyMD, "missing the staging deploy credential") {
+		t.Errorf("body_md = %q, want it to carry the checkpoint's blockers", bodyMD)
 	}
 	if blocking != "1" {
 		t.Errorf("blocking = %q, want 1 (a NEEDS_HUMAN item requires action)", blocking)
