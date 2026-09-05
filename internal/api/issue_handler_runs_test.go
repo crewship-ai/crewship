@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,6 +123,67 @@ func TestIssueRuns_ReturnsAssignmentRuns(t *testing.T) {
 	}
 	if completed.ResultSummary != "wrote report" {
 		t.Fatalf("result_summary = %q, want 'wrote report'", completed.ResultSummary)
+	}
+}
+
+// TestIssueRuns_ExposesHardStopResult is the #2365 (work package B7b)
+// regression test: a client (or the dev1 live check) must be able to read
+// what a Tier 2 hard stop did from `issue runs` alone, without reading the
+// journal. hard_stop_result/hard_stop_at pass through exactly like outcome
+// (#2358) did — present when set, omitted (omitempty) when never
+// hard-stopped.
+func TestIssueRuns_ExposesHardStopResult(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	m1 := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-30", "IN_PROGRESS")
+
+	seedMissionAssignment(t, h, wsID, m1, workerID, "asg_hard_stopped", "CANCELLED", "",
+		"2026-06-01T10:00:00Z", "2026-06-01T10:00:05Z")
+	seedMissionAssignment(t, h, wsID, m1, workerID, "asg_never_stopped", "COMPLETED", "done",
+		"2026-06-01T11:00:00Z", "2026-06-01T11:00:05Z")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.Exec(`UPDATE assignments SET hard_stop_at = ?, hard_stop_result = 'TERMINATED_TERM' WHERE id = 'asg_hard_stopped'`, now); err != nil {
+		t.Fatalf("stamp hard_stop_result: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.ListRuns(rr, issueRunsRequest(t, userID, wsID, crewID, "ENG-30"))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got []issueRunDTO
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rr.Body.String())
+	}
+	var hardStopped, neverStopped *issueRunDTO
+	for i := range got {
+		switch got[i].ID {
+		case "asg_hard_stopped":
+			hardStopped = &got[i]
+		case "asg_never_stopped":
+			neverStopped = &got[i]
+		}
+	}
+	if hardStopped == nil || neverStopped == nil {
+		t.Fatalf("expected both runs in response; got %+v", got)
+	}
+	if hardStopped.HardStopResult != "TERMINATED_TERM" {
+		t.Errorf("hard_stop_result = %q, want TERMINATED_TERM", hardStopped.HardStopResult)
+	}
+	if hardStopped.HardStopAt == "" {
+		t.Errorf("hard_stop_at not populated on a hard-stopped run")
+	}
+	if neverStopped.HardStopResult != "" || neverStopped.HardStopAt != "" {
+		t.Errorf("run never hard-stopped carries hard_stop_result=%q hard_stop_at=%q, want both empty",
+			neverStopped.HardStopResult, neverStopped.HardStopAt)
+	}
+
+	// omitempty: a run that was never hard-stopped must not even carry the
+	// keys, matching outcome's own contract (#2358).
+	raw := rr.Body.String()
+	if !strings.Contains(raw, `"hard_stop_result":"TERMINATED_TERM"`) {
+		t.Errorf("raw JSON missing hard_stop_result for the hard-stopped run: %s", raw)
 	}
 }
 

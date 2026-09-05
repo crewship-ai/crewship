@@ -198,6 +198,49 @@ func TestAcceptance_IssueRuns_Table_HasSourceColumn(t *testing.T) {
 	}
 }
 
+// issueRunsFixtureWithHardStop mirrors issueRunDTO's #2365 (work package
+// B7b) addition: hard_stop_result / hard_stop_at, present on a run Tier 2
+// actually reached, absent (omitempty) on one that was never hard-stopped.
+const issueRunsFixtureWithHardStop = `[
+  {"id":"asg_hard_stopped","status":"CANCELLED","agent_name":"Riley","task":"hard-stopped run",
+   "started_at":"2026-09-04T10:00:00Z","ended_at":"2026-09-04T10:00:05Z","duration_ms":5000,
+   "hard_stop_result":"TERMINATED_TERM","hard_stop_at":"2026-09-04T10:00:05Z"},
+  {"id":"asg_never_stopped","status":"completed","agent_name":"Casey","task":"ordinary run",
+   "started_at":"2026-09-04T09:00:00Z","ended_at":"2026-09-04T09:02:00Z","duration_ms":120000}
+]`
+
+// TestAcceptance_IssueRuns_JSON_ShowsHardStopResult is the #2365 regression:
+// a live check must be able to read what a Tier 2 hard stop did
+// (`hard_stop_result`/`hard_stop_at`) from `issue runs -f json` alone,
+// without reading the journal — the same live-readable contract mission_id
+// and source got in #2313, and outcome got in #2358.
+func TestAcceptance_IssueRuns_JSON_ShowsHardStopResult(t *testing.T) {
+	stub := &issueRunsStub{runsStatus: http.StatusOK, runsBody: issueRunsFixtureWithHardStop}
+	srv := stub.start(t)
+
+	out, err := runIssueRunsCLI(t, srv.URL, "issue", "runs", "BE-42", "--format", "json")
+	if err != nil {
+		t.Fatalf("issue runs: %v\noutput: %s", err, out)
+	}
+
+	if !strings.Contains(out, `"hard_stop_result": "TERMINATED_TERM"`) {
+		t.Errorf("json output missing hard_stop_result for the hard-stopped run:\n%s", out)
+	}
+	if !strings.Contains(out, `"hard_stop_at": "2026-09-04T10:00:05Z"`) {
+		t.Errorf("json output missing hard_stop_at for the hard-stopped run:\n%s", out)
+	}
+	if strings.Contains(out, `"id": "asg_never_stopped"`) {
+		idx := strings.Index(out, `"id": "asg_never_stopped"`)
+		nextIdx := strings.Index(out[idx:], "}")
+		if nextIdx == -1 {
+			nextIdx = len(out) - idx
+		}
+		if strings.Contains(out[idx:idx+nextIdx], "hard_stop") {
+			t.Errorf("run never hard-stopped carries a hard_stop_* key, want omitempty to drop it:\n%s", out[idx:idx+nextIdx])
+		}
+	}
+}
+
 func TestAcceptance_IssueRuns_NonOKReportedAsError(t *testing.T) {
 	stub := &issueRunsStub{runsStatus: http.StatusInternalServerError, runsBody: `{"error":"boom"}`}
 	srv := stub.start(t)

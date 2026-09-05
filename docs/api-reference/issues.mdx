@@ -436,22 +436,30 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}&
   always wins. No further step is scheduled for the issue.
 
   **Tier 2 — hard, opt in with `?hard=true`.** After the Tier 1 stamp
-  above has committed, every assignment it reached that is `RUNNING`
-  gets its live exec resolved to an OS pid (`ExecInspect`) and that pid
-  signalled directly from a brand-new exec into the *same* container —
-  `SIGTERM`, then `SIGKILL` if it hasn't exited within a short grace
-  period. This never runs a container-level kill: the crew's container is
-  shared by every agent on the crew, so a sibling agent's own exec is
-  never touched, by construction — only the one resolved pid is ever
-  signalled. Bounded to a few seconds. What was signalled and the result
-  (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`,
-  `UNSUPPORTED`, or `ERROR`) is written to `assignments.hard_stop_result`
-  and to an `assignment.hard_stopped` journal entry — independent of, and
-  in addition to, the Tier 1 `CANCELLED` terminal write, which always
-  lands regardless of what the signal achieved. `UNSUPPORTED` means the
-  configured container provider cannot resolve a pid for an exec (not
-  every provider implements this); the run is still `CANCELLED` by Tier 1
-  either way.
+  above has committed, every assignment it reached that is `RUNNING` gets
+  its own tmux session ended — `tmux kill-session -t agent-{slug}`, run as
+  a brand-new exec into the *same* container the run lives in — escalating
+  to a direct `kill -KILL` on that session's own pane process group if the
+  run hasn't exited within a short grace period. Every agent run owns a
+  tmux session named for its own agent slug (the same session a web
+  terminal attaches to), a **container-visible identity**: ending it ends
+  exactly that agent's process tree. This never runs a container-level
+  kill and never signals by OS pid: the crew's container is shared by
+  every agent on the crew, and a pid resolved from outside the container
+  (`ExecInspect`'s host-namespace pid) is not safe to signal from inside
+  it — [#2365](https://github.com/crewship-ai/crewship/issues/2365) found
+  exactly that bug in the pre-fix mechanism, live on dev1. A sibling
+  agent's own session is a different name and is never touched, by
+  construction. Bounded to a few seconds. What was signalled and the
+  result (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`,
+  `NOT_FOUND`, `UNSUPPORTED`, or `ERROR`) is written to
+  `assignments.hard_stop_result` (and `hard_stop_at`) and to an
+  `assignment.hard_stopped` journal entry — independent of, and in
+  addition to, the Tier 1 `CANCELLED` terminal write, which always lands
+  regardless of what the signal achieved. `UNSUPPORTED` means there is no
+  container-visible identity to signal by (no container configured, or the
+  assignee is not an agent); the run is still `CANCELLED` by Tier 1 either
+  way.
 
   An [`@mention`](/guides/issue-mentions) can dispatch a run on an issue
   that was never started (`BACKLOG`/`TODO`) — that run is attributed to
@@ -685,6 +693,7 @@ Pages like every list: `limit` (default 100, max 500) and `offset`, with the tot
 | `agent_id`, `agent_slug`, `agent_name` | The agent that ran it — the slug is what its page is keyed on |
 | `status`, `task`, `started_at`, `ended_at`, `duration_ms`, `result_summary`, `error_message` | The execution |
 | `outcome` | The §9.6 routing decision — see [Outcome](#outcome) below |
+| `hard_stop_result`, `hard_stop_at` | What a Tier 2 hard stop did to this run, and when — see [Stop Issue](#stop-issue)'s Tier 2 paragraph above. Absent on a run that was never hard-stopped |
 
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
@@ -712,6 +721,10 @@ Pages like every list: `limit` (default 100, max 500) and `offset`, with the tot
 ]
 ```
 
+`hard_stop_result`/`hard_stop_at` are omitted here — this run was never
+hard-stopped. A run Tier 2 reached instead carries them, e.g.
+`"hard_stop_result": "TERMINATED_TERM", "hard_stop_at": "2026-09-04T10:00:05Z"`.
+
 | Field | Type | Description |
 |---|---|---|
 | `id` | string | Assignment (run) ID |
@@ -726,6 +739,8 @@ Pages like every list: `limit` (default 100, max 500) and `offset`, with the tot
 | `mission_id` | string? | The issue this run is attributed to (`assignments.mission_id`, #2256). Nil on a legacy row written before that column existed, never touched by the backfill, and found here only via the `mission_tasks` join |
 | `source` | string | Why this run is attributed to the issue: `task` (the issue's own `mission_tasks` plan), `mention` (an `@mention` dispatch, via `mission_comment_mentions`), or `delegation` (a sub-agent's own further `/assign` call mid-mission, found only via `mission_id`) |
 | `outcome` | string? | The §9.6 routing decision (work package B6, #2349) — see [Outcome](#outcome) below. Omitted on a run that predates the `outcome` column |
+| `hard_stop_result` | string? | Tier 2 hard termination's own result (work package B7b, #2365) — `TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `UNSUPPORTED`, `NOT_FOUND`, `ERROR`, or `PENDING_EXEC`. Omitted on a run that was never hard-stopped |
+| `hard_stop_at` | string? | When the hard-stop attempt above was recorded. Omitted alongside `hard_stop_result` |
 
 | Status | Condition |
 |---|---|

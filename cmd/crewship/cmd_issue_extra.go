@@ -481,6 +481,14 @@ var issueRunsCmd = &cobra.Command{
 			// Outcome is the §9.6 routing decision (work package B6, #2349) —
 			// empty on a run that predates the column.
 			Outcome string `json:"outcome,omitempty"`
+			// HardStopResult/HardStopAt (work package B7b, #2365) is Tier 2
+			// hard termination's own record — empty on a run that was never
+			// hard-stopped. Not shown as a table column (STATUS/OUTCOME
+			// already answer "what happened"); carried through for
+			// `--format json` so a live check can read it without the
+			// journal.
+			HardStopResult string `json:"hard_stop_result,omitempty"`
+			HardStopAt     string `json:"hard_stop_at,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
