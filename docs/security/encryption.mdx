@@ -198,8 +198,6 @@ The walk covers every envelope-bearing column: `credentials.encrypted_value`, `c
 **`escalations.resolution` is not in the walk.** It used to be, for `CREDENTIAL` escalations, when a human's typed answer was encrypted into it. Since the answer to a credential ask is a grant into the vault rather than a value (see [Credentials → What a `CREDENTIAL` escalation never carries](/guides/credentials#what-a-credential-escalation-never-carries)), that column only ever holds plaintext — the historical marker `[credential submitted]`, or the prose an expiry, cancel or auto-resolve leaves. Walking it could only ever produce `failed` rows, which made the `failed=0` criterion unreachable on any database that had answered a credential ask; it was removed from the inventory in `#2408`.
 </Note>
 
-One known edge case: databases created in the brief pre-release window before encrypt-on-resolve landed (March 2026) may hold credential-type escalation resolutions stored as plaintext. Those rows always count under `failed` (they are left untouched — no corruption), so a `failed: 0` state is unreachable on such a database without clearing the affected historical `escalations.resolution` rows manually.
-
 <Warning>
   Backup bundles created **before** the rotation contain credential envelopes under the old key. Restoring one requires the old key to still be resolvable (keep it archived offline), or take a fresh backup after the re-encryption run.
 
