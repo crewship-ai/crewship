@@ -161,6 +161,60 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	var credentialPurpose string
 	if escalationType == "CREDENTIAL" {
 		if proposal, ok := parseCredentialProposal(body.Metadata); ok {
+			// Keeper judges the ASK before anything is staged (#2392). Only an
+			// ASK — a PROPOSE carries a value the agent already holds and is the
+			// human approving a generated secret, not a request to grant one.
+			// DENY stages nothing and interrupts no one; the agent gets the
+			// reason. ESCALATE (and a judge outage) still stages and routes to a
+			// human, with the judge's note attached so they see why.
+			if proposal.IsAsk() {
+				dec := h.judgeAsk(r.Context(), CredentialAskInput{
+					WorkspaceID:    body.WorkspaceID,
+					CrewID:         body.CrewID,
+					AgentID:        fromAgentID,
+					AgentName:      body.FromSlug,
+					CredentialName: proposal.Name,
+					Purpose:        proposal.Purpose,
+					SecurityLevel:  int(proposal.SecurityLevel),
+				})
+				if dec.deny {
+					h.logger.Info("credential ask denied by keeper",
+						"from", body.FromSlug, "credential", proposal.Name, "crew_id", body.CrewID)
+					// Best-effort journal so a denied ask is not invisible to the
+					// operator — a spike of these is exactly what four-eyes and the
+					// watchdog exist to surface. No credential, no inbox row.
+					_, _ = h.journal.Emit(r.Context(), journal.Entry{
+						WorkspaceID: body.WorkspaceID,
+						CrewID:      body.CrewID,
+						AgentID:     fromAgentID,
+						Type:        journal.EntryKeeperDecision,
+						Severity:    journal.SeverityNotice,
+						ActorType:   journal.ActorKeeper,
+						ActorID:     "keeper",
+						Summary: fmt.Sprintf("keeper denied credential ask %q from %s",
+							proposal.Name, body.FromSlug),
+						Payload: map[string]any{
+							"decision":        "deny",
+							"credential_name": proposal.Name,
+							"security_level":  int(proposal.SecurityLevel),
+							"reason":          dec.reason,
+							"from_slug":       body.FromSlug,
+						},
+						Refs: map[string]any{"chat_id": body.ChatID},
+					})
+					writeJSON(w, http.StatusOK, map[string]any{
+						"status":          "DENIED",
+						"decision":        "deny",
+						"keeper_judged":   true,
+						"reason":          dec.reason,
+						"credential_name": proposal.Name,
+					})
+					return
+				}
+				if dec.note != "" {
+					body.Context = prependEscalationNote(body.Context, dec.note)
+				}
+			}
 			cid, outcome := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
 			switch outcome {
 			case pendingCredStaged:

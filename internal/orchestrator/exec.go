@@ -125,8 +125,11 @@ AUTH
 JSON
   "name" is the environment-variable-shaped name you will use it by. "security_level" is the tier
   you propose (1 low … 4 critical; the human can change it). "hosts" are the destinations you will
-  use it against — review information for the approver. The call blocks until a human answers
-  (up to 5 minutes). On approve the reply carries {"credential":{"name":"PG_PASSWORD",
+  use it against — review information for the approver. The Keeper reviews the ASK before it
+  reaches a human: if the reply is {"status":"DENIED","reason":"..."}, the request was not raised
+  and no one was asked — read the reason, do the work that does not need the credential, and do
+  NOT re-ask with reworded wording (it is judged the same way access is). Otherwise the call blocks
+  until a human answers (up to 5 minutes). On approve the reply carries {"credential":{"name":"PG_PASSWORD",
   "use":"keeper_execute", ...}} and NO value: use it exactly as a Keeper-guarded credential above.
   If the human is slow the wait ends with a warning and the ask stays open for days — the grant
   then appears in /secrets/{your-slug}/.env on a later run, so report that you asked and move on.

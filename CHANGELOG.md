@@ -63,6 +63,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `docs/guides/routines.mdx`'s Production notes.
 
 ### Security
+- **The Keeper judges a credential ASK before it reaches a human (#2392).**
+  A `CREDENTIAL` escalation raised as an ask (#2376) used to go straight to a
+  person's inbox — the Keeper judged credential *use* and *access* but never the
+  request to raise the ask, so an off-task or prompt-injected agent could spam
+  credential requests at the operator. `CreateEscalation` now puts the ask to
+  the same judge that guards access, over the declared name, type, tier and
+  purpose and the agent's conversation (never a value — an ask has none), before
+  anything is staged: **DENY** stages nothing, interrupts no one and returns the
+  reason to the agent (recorded in the journal); **ESCALATE**, and any judge
+  outage, stages and routes to a human with the judge's note attached;
+  **ALLOW** stages as before. With Keeper off, ask gating is off and every ask
+  reaches a human as it did. A *propose* (a value the agent generated) is not
+  judged — it is a human approving a secret, not a request to grant one. Agent
+  prompt, credentials guide and CHANGELOG updated; the `hosts` field remains
+  review metadata (egress enforcement is tracked under EPIC #1001 M2b), and a
+  handle-only credential stays a standing grant because every use of it already
+  re-enters the Keeper-judged `/keeper/execute`.
 - **A peer agent's "GO" cannot satisfy a waitpoint (#2388, PRD §18 scenario 10).** The waitpoint resolve door now takes an explicit actor and refuses an agent — a crew-bound internal token, a sidecar tool, any agent-facing route — and an unidentified caller, before the row is touched. The waitpoint stays pending for a person, the authed approve route answers `403` with `reason: waitpoint_decider_not_allowed`, and the attempt lands in the audit log as `waitpoint.decision_refused` naming the actor and the run (`crewship audit --action waitpoint.decision_refused`). The public token callback is the external holder's door and unchanged; the inbox card now states `who_can_act: ["role:MANAGER"]`.
 
 - **A credential a human supplies to an agent is a grant, never a value the agent can read (#2376).**

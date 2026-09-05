@@ -272,6 +272,14 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// TestRouter_KeeperHandlerReceivesTheJudgeProfile.
 	keeperH.SetJudgeConfig(r.keeperSettings)
 	r.keeperHandler = keeperH
+	// Gate a credential ASK on the same judge before it is staged (#2392).
+	// registerOrchestrationRoutes runs before this registrar, so r.queryHandler
+	// already exists. A nil gatekeeper inside keeperH is handled by the judge
+	// itself (errAskJudgeUnavailable → do not gate), so this wiring is
+	// unconditional and ask gating simply stays off when Keeper is unconfigured.
+	if r.queryHandler != nil {
+		r.queryHandler.SetCredentialAskJudge(keeperH)
+	}
 
 	// An ADMIN route, registered here rather than in router_admin.go because that
 	// group runs BEFORE this one and the handler does not exist yet when it does.

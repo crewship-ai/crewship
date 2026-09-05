@@ -34,6 +34,11 @@ type QueryHandler struct {
 
 	escalationMu      sync.Mutex
 	escalationWaiters map[string][]chan escalationResult
+
+	// askJudge gates a credential ASK before it is staged (#2392). nil leaves
+	// ask gating off — every ask is staged and routed to a human, the
+	// pre-#2392 behaviour. Wired via SetCredentialAskJudge at router setup.
+	askJudge CredentialAskJudge
 }
 
 // SetResolver wires the agent-config resolver so a peer query builds its run
