@@ -126,6 +126,28 @@ type AgentRunRequest struct {
 	CreatedByUserID string
 	AuthorAgentID   string
 
+	// OnExecStarted, when set, is invoked the moment the agent's own CLI
+	// exec is created (internal/orchestrator/orchestrator_run.go, right
+	// after the container.Exec that runs BuildCLICommand's argv) — before
+	// any output has streamed. execID is ExecResult.ExecID.
+	//
+	// This is the one hook a caller needs to persist "which exec is this
+	// run's live process" onto its own run row (PRD-ISSUES-AND-ROUTINES-2026
+	// §10.3 Tier 2, work package B7): Tier 2 hard termination discovers a
+	// pid from an exec id via provider.ExecPIDProvider, so a stop requested
+	// before this fires would have nothing to signal yet. Deliberately a
+	// plain callback rather than a new AgentEvent type on the handler
+	// stream — that stream reaches the chat UI, and "an exec started" is
+	// not something a user should see as a turn event. nil is the default
+	// and a legitimate choice: it just means this run's exec id is never
+	// persisted anywhere, exactly like every run before B7.
+	//
+	// Called synchronously on the run goroutine, so it must not block; a
+	// caller wanting a DB write should keep it fire-and-forget internally
+	// (best-effort, like the journal emits alongside it) rather than making
+	// this run wait on it.
+	OnExecStarted func(execID string)
+
 	// MemoryBinding is the seam the memory Ledger Store.Write plugs into
 	// (dev3 spec). Declared here so the one request-builder carries it and
 	// the two specs don't diverge on the field-set; the Ledger schema +
