@@ -373,11 +373,14 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at).
+	// 24h mission counts (completed_at for DONE, updated_at for FAILED since failed missions may lack completed_at).
 	// COALESCE needed because SUM returns NULL for empty workspaces.
+	// DONE, not COMPLETED — B13 (#2370) retired COMPLETED from
+	// missions.status; this now correctly counts issue-type completions
+	// too, which the old COMPLETED-only literal silently missed.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'DONE' AND completed_at >= ? THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END), 0)
 		FROM missions WHERE workspace_id = ?`,
 		cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h); err != nil {
@@ -402,7 +405,7 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 			CAST((julianday(completed_at) - julianday(created_at)) * 86400000 AS INTEGER)
 		), 0)
 		FROM missions
-		WHERE workspace_id = ? AND status = 'COMPLETED' AND completed_at >= ?`,
+		WHERE workspace_id = ? AND status = 'DONE' AND completed_at >= ?`,
 		wsID, cutoff).Scan(&m.AvgCompletionTimeMs); err != nil {
 		h.logger.Warn("mission metrics: avg completion time query failed", "error", err)
 	}

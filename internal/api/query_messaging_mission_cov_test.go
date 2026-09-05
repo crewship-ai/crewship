@@ -593,7 +593,7 @@ func TestCovQMMMissionMetrics_PopulatedAggregates(t *testing.T) {
 
 	// A completed mission (within 24h) + a failed one + an active one.
 	execOrFatal(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at, completed_at)
-		VALUES ('cqmm-done', ?, ?, ?, 'mtr-1', 'Done', 'COMPLETED', datetime('now','-1 hour'), datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+		VALUES ('cqmm-done', ?, ?, ?, 'mtr-1', 'Done', 'DONE', datetime('now','-1 hour'), datetime('now'), datetime('now'))`, wsID, crewID, leadID)
 	execOrFatal(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
 		VALUES ('cqmm-fail', ?, ?, ?, 'mtr-2', 'Fail', 'FAILED', datetime('now','-2 hour'), datetime('now'))`, wsID, crewID, leadID)
 	execOrFatal(t, db, `INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)

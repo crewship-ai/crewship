@@ -314,9 +314,11 @@ func TestCovMetFillIssuesClosed_None(t *testing.T) {
 	seedCrewRow(t, db, "crew-i", wsID, "ICrew", "i-crew")
 	seedAgentRow(t, db, "lead-i", wsID, "crew-i", "Lead", "lead-i", "LEAD")
 
+	// B13 (#2370): DONE is the sole terminal word on missions.status now —
+	// PRD-ISSUES-AND-ROUTINES-2026 §3.1. Both issue-type rows use DONE.
 	completed := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
 	covMetSeedMission(t, db, "iss-1", wsID, "crew-i", "lead-i", "DONE", "issue", 0, completed, completed)
-	covMetSeedMission(t, db, "iss-2", wsID, "crew-i", "lead-i", "COMPLETED", "issue", 0, completed, completed)
+	covMetSeedMission(t, db, "iss-2", wsID, "crew-i", "lead-i", "DONE", "issue", 0, completed, completed)
 	// An orchestration mission must be excluded by the mission_type filter.
 	covMetSeedMission(t, db, "orch-1", wsID, "crew-i", "lead-i", "DONE", "orchestration", 0, completed, completed)
 
