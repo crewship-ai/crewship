@@ -430,16 +430,20 @@ describe("done event edge cases", () => {
     expect(result.current.isStreaming).toBe(false)
   })
 
-  it("lifts all done metadata onto the finalized turn", () => {
+  it("adopts the persisted message id and lifts all done metadata", () => {
     const { result } = setup()
     dispatch(chatEvent("text", "answer"))
     flushFrames()
+    const temporaryId = result.current.turns[0].id
     const suggestion = { crew_name: "Web Crew", template_slug: "software-development" }
     dispatch(chatEvent("done", "", {
+      message_id: "msg-persisted-123",
       trace_id: "tr-123",
       onboarding_proposal_suggestion: suggestion,
     }))
     expect(result.current.turns[0].isStreaming).toBe(false)
+    expect(result.current.turns[0].id).toBe("msg-persisted-123")
+    expect(result.current.turns[0].id).not.toBe(temporaryId)
     expect(result.current.turns[0].metadata?.trace_id).toBe("tr-123")
     expect(result.current.turns[0].metadata?.onboarding_proposal_suggestion).toEqual(suggestion)
   })

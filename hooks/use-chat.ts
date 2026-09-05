@@ -920,8 +920,12 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       const last = cleaned[cleaned.length - 1]
       if (last?.role === "assistant" && last.isStreaming) {
         const finalParts = stripStatusParts(last.parts)
+        const persistedMessageId = typeof metadata?.message_id === "string" && metadata.message_id.trim()
+          ? metadata.message_id
+          : last.id
         const finalTurn: ChatTurn = {
           ...last,
+          id: persistedMessageId,
           parts: finalParts,
           isStreaming: false,
         }
