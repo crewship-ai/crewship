@@ -306,11 +306,17 @@ func (c *Client) trySend(data []byte) (sent bool) {
 // sender's composer state; delivered sender-only, never broadcast.
 //
 // Exported because the CLI is the second client that has to recognise this
-// frame and, unlike the frontend, it gets no `done` to fall back on: the
-// busy branch below deliberately emits no terminal frame, so a client that
-// does not know this name waits forever. `crewship run` did exactly that
-// until #2412. Both readers now name the same constant, so the string
+// frame: the busy branch below deliberately emits no terminal frame, so a
+// client that does not know this name waits forever for a `done` that is
+// never coming. `crewship run` and `crewship ask` did exactly that until
+// #2416. Every Go reader — three CLI event loops and their tests — now
+// names this constant rather than repeating the literal, so the string
 // cannot drift out from under one of them without breaking the build.
+//
+// The frontend still carries its own copy (hooks/use-chat.ts, in the
+// ChatEventType union and the switch that routes it to the error bubble);
+// nothing ties the two languages together, so a rename here means editing
+// that file too.
 const AgentBusyEventType = "agent_busy"
 
 // agentBusyNotice is the user-facing text of the sender-only busy rejection.
