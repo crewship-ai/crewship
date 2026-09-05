@@ -540,6 +540,12 @@ type internalSaveRequest struct {
 	// ChangeSummary is an optional one-line provenance note recorded on the
 	// pipeline_versions row (surfaced in the versions UI and CLI).
 	ChangeSummary string `json:"change_summary,omitempty"`
+	// Trigger + Activation are B8's atomic authoring extension (#2359):
+	// when Trigger is set, the routine, its version and this trigger are
+	// created in ONE transaction (pipeline.Store.SaveWithTrigger). See
+	// pipeline_trigger.go.
+	Trigger    *triggerRequestBody `json:"trigger,omitempty"`
+	Activation string              `json:"activation,omitempty"`
 }
 
 // userSaveRequest is the body shape for the workspace-scoped save
@@ -596,6 +602,12 @@ type userSaveRequest struct {
 	// pipeline_versions row (surfaced in the versions UI and `routine
 	// versions`). `routine iterate` writes its round/score here.
 	ChangeSummary string `json:"change_summary,omitempty"`
+	// Trigger + Activation are B8's atomic authoring extension (#2359):
+	// when Trigger is set, the routine, its version and this trigger are
+	// created in ONE transaction (pipeline.Store.SaveWithTrigger). See
+	// pipeline_trigger.go.
+	Trigger    *triggerRequestBody `json:"trigger,omitempty"`
+	Activation string              `json:"activation,omitempty"`
 }
 
 // assertAuthorAgentInCrew proves author_agent_id names a live agent of the
@@ -693,6 +705,13 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if denyNonPrivilegedFlag(w, role, "skip_governance_gate", body.SkipGovernanceGate) {
+		return
+	}
+	// B8 (#2359) atomic authoring: an optional trigger + activation, created
+	// in the SAME transaction as the routine + version below.
+	trigger, triggerErr := triggerInputFromBody(body.Trigger, body.Activation)
+	if triggerErr != nil {
+		replyError(w, http.StatusUnprocessableEntity, triggerErr.Error())
 		return
 	}
 
@@ -838,7 +857,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		h.logger.Info("pipeline save: test gate skipped", "user_id", user.ID, "role", role, "slug", body.Slug)
 	}
 
-	saved, err := h.store.Save(r.Context(), in)
+	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
 	if errors.Is(err, pipeline.ErrTestRunGateFailed) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error": "save requires a fresh, passing test_run within 5 minutes (or skip_test_gate for OWNER/ADMIN)",
@@ -847,6 +866,13 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, pipeline.ErrSlugConflict) {
 		replyError(w, http.StatusConflict, "slug already exists in workspace")
+		return
+	}
+	if isTriggerValidationError(err) {
+		// A bad cron/timezone rolled back the ENTIRE save (B8's atomicity
+		// accept line) — the routine and its version were never persisted
+		// either, so this is a 422, not a partial success.
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	if err != nil {
@@ -869,8 +895,16 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), "approved", user.ID)
 		h.broadcastInboxUpdated(workspaceID, "routine_governance_skipped")
 	}
+	// B8 (#2359): a draft trigger raises exactly one approval item, its
+	// receipt pinning the version the trigger was created against.
+	if sched != nil && sched.Activation == pipeline.TriggerActivationDraft {
+		h.proposeTriggerActivationInbox(r.Context(), workspaceID, saved, sched, "Routine author ("+user.Email+")")
+	}
 	h.broadcastRoutinesChanged(workspaceID, "saved")
-	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
+	writeJSON(w, http.StatusCreated, pipelineSaveResponse{
+		pipelineResponse: toPipelineResponse(saved, true),
+		Trigger:          toTriggerResponse(trigger, sched),
+	})
 }
 
 // InternalSave is the trusted endpoint the sidecar forwards to.
@@ -976,6 +1010,15 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// B8 (#2359) atomic authoring: an optional trigger + activation, created
+	// in the SAME transaction as the routine + version below — this is the
+	// sidecar's save_routine path, so it is also THE agent-authoring entry
+	// point for a trigger.
+	trigger, triggerErr := triggerInputFromBody(body.Trigger, body.Activation)
+	if triggerErr != nil {
+		replyError(w, http.StatusUnprocessableEntity, triggerErr.Error())
+		return
+	}
 
 	// Governance maker-checker (mirrors the user save path): classify the
 	// agent-authored save. Risky → 'proposed' (MANAGER+ approval before it can
@@ -1026,7 +1069,7 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		h.logger.Info("pipeline internal save: cleared via save_token", "crew", body.AuthorCrewID, "slug", body.Slug)
 	}
 
-	saved, err := h.store.Save(r.Context(), in)
+	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
 	if errors.Is(err, pipeline.ErrTestRunGateFailed) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error": "save requires a fresh, passing test_run (within 5 minutes)",
@@ -1037,6 +1080,13 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, "slug already exists in workspace")
 		return
 	}
+	if isTriggerValidationError(err) {
+		// A bad cron/timezone rolled back the ENTIRE save (B8's atomicity
+		// accept line) — the routine and its version were never persisted
+		// either, so this is a 422, not a partial success.
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
 	if err != nil {
 		h.logger.Error("pipeline internal save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to save pipeline")
@@ -1045,6 +1095,16 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if risky && saved.Status == "proposed" {
 		h.proposeRoutineInbox(r.Context(), body.WorkspaceID, saved, riskReasons, "Agent routine author")
 	}
+	// B8 (#2359): a draft trigger raises exactly one approval item, its
+	// receipt pinning the version the trigger was created against. This is
+	// what the routine-author skill's final message and the CLI's saved
+	// output name as the first fire time / awaiting-approval state.
+	if sched != nil && sched.Activation == pipeline.TriggerActivationDraft {
+		h.proposeTriggerActivationInbox(r.Context(), body.WorkspaceID, saved, sched, "Agent routine author")
+	}
 	h.broadcastRoutinesChanged(body.WorkspaceID, "saved")
-	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
+	writeJSON(w, http.StatusCreated, pipelineSaveResponse{
+		pipelineResponse: toPipelineResponse(saved, true),
+		Trigger:          toTriggerResponse(trigger, sched),
+	})
 }

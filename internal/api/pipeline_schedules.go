@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -548,7 +549,81 @@ func (h *PipelineHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to delete schedule")
 		return
 	}
+	// A draft awaiting activation that gets deleted instead needs its review
+	// item resolved too, or a decided-nothing card lingers in the inbox for
+	// a schedule that no longer exists.
+	if existing.Activation == pipeline.TriggerActivationDraft {
+		actorID := ""
+		if user := UserFromContext(r.Context()); user != nil {
+			actorID = user.ID
+		}
+		inbox.ResolveBySource(r.Context(), h.db, h.logger,
+			inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), "dismissed", actorID)
+		h.broadcastInboxUpdated(workspaceID, "routine_trigger_dismissed")
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ActivateSchedule turns a draft trigger on (B8, #2359): the one decision a
+// draft-activation review item asks for. MANAGER+ (canRole "create" — same
+// threshold CreateSchedule uses for an ordinary trigger, since activating
+// one is no more privileged than creating it outright).
+//
+// POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate
+func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Request) {
+	if h.schedules == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		replyError(w, http.StatusForbidden, "MANAGER+ role required to activate a routine trigger")
+		return
+	}
+	scheduleID := r.PathValue("scheduleId")
+	if scheduleID == "" {
+		replyError(w, http.StatusBadRequest, "scheduleId required")
+		return
+	}
+	existing, err := h.schedules.GetByID(r.Context(), scheduleID)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "schedule not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "failed to load schedule")
+		return
+	}
+	if existing.WorkspaceID != workspaceID {
+		replyError(w, http.StatusNotFound, "schedule not found")
+		return
+	}
+	activated, err := h.schedules.Activate(r.Context(), scheduleID)
+	if errors.Is(err, pipeline.ErrScheduleNotDraft) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "schedule is not awaiting activation",
+		})
+		return
+	}
+	if err != nil {
+		h.logger.Warn("activate pipeline schedule", "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to activate schedule")
+		return
+	}
+	actorID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		actorID = user.ID
+	}
+	inbox.ResolveBySource(r.Context(), h.db, h.logger,
+		inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), "approved", actorID)
+	h.broadcastInboxUpdated(workspaceID, "routine_trigger_activated")
+	h.broadcastRoutinesChanged(workspaceID, "trigger_activated")
+	slug := ""
+	if p, perr := h.store.GetByID(r.Context(), activated.TargetPipelineID); perr == nil {
+		slug = p.Slug
+	}
+	writeJSON(w, http.StatusOK, h.toScheduleResponse(activated, slug, ""))
 }
 
 // resolveSchedulePipelineID figures out which pipeline the schedule
