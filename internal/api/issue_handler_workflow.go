@@ -387,9 +387,20 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// assignmentMatch is the same heuristic in both branches below: mission_id
-	// (#2256) is the direct answer and the one preferred — every mission-task
-	// run (mission_tasks.go's scheduleTask), the lead-planning run
+	// hard opts into Tier 2 (§10.3, work package B7, #2356): after the Tier
+	// 1 stamp below lands, resolve each RUNNING target's live exec to a pid
+	// and signal it (TERM, then KILL after a grace period) from a new exec
+	// into its own container — never a container-level operation, so a
+	// sibling agent on the same crew is unaffected. A query flag rather
+	// than a new route: it is the same stop, with a bound on how it ends,
+	// and both tiers share every guard above this line (role, issue
+	// lookup, status check).
+	hard := r.URL.Query().Get("hard") == "true"
+
+	// assignmentMatch (issue_handler_hard_stop.go) is the same heuristic in
+	// both branches below: mission_id (#2256) is the direct answer and the
+	// one preferred — every mission-task run (mission_tasks.go's
+	// scheduleTask), the lead-planning run
 	// (mission_tasks_planning.go's dispatchLeadPlanning), and a mention
 	// dispatch (issue_mentions.go's DispatchMention) stamp it explicitly.
 	//
@@ -419,7 +430,6 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	// NOT IN (...) rather than IN ('PENDING', 'RUNNING') so a QUEUED row
 	// (#2312) is reached too, without having to enumerate every non-terminal
 	// status by name.
-	const assignmentMatch = `(mission_id = ? OR chat_id = ? OR group_id = ?) AND status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`
 
 	if status != "IN_PROGRESS" && status != "REVIEW" {
 		// #2315: a mention (DispatchMention, issue_mentions.go) can dispatch a
@@ -433,27 +443,28 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		// the runs a mention starts. So: stamp whatever is live, leave the
 		// issue's status alone, and only fall back to the original refusal
 		// when nothing was actually reachable.
-		res, err := h.db.ExecContext(r.Context(), `
-			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
-			 WHERE `+assignmentMatch,
-			now, missionID, missionID, missionID)
+		targets, err := stampCancelRequested(r.Context(), h.db, now, missionID)
 		if err != nil {
 			internalError(w, r, h.logger, "stop issue: stamp mention-dispatched runs", err)
 			return
 		}
-		runsStopped, _ := res.RowsAffected()
+		runsStopped := len(targets)
 		if runsStopped == 0 {
 			writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
 			return
 		}
+		if hard {
+			h.hardStopTargets(r.Context(), wsID, ident, targets)
+		}
 
 		h.logger.Info("issue stop: reached mention-dispatched run(s) on an issue that never started",
 			"identifier", ident, "status", status, "runs_stopped", runsStopped)
-		writeJSON(w, http.StatusOK, map[string]any{"status": status, "identifier": ident, "runs_stopped": runsStopped})
+		writeJSON(w, http.StatusOK, map[string]any{"status": status, "identifier": ident, "runs_stopped": runsStopped, "hard": hard})
 		return
 	}
 
 	var runsStopped int64
+	var cancelTargets []cancelTarget
 
 	// One transaction: the DB-visible half of "stop" — mission_tasks,
 	// assignments, and missions — moves atomically, so no reader ever
@@ -476,16 +487,14 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Signal the live assignment(s) for this issue — see assignmentMatch
-		// above for why mission_id is matched directly with a chat_id/group_id
-		// fallback.
-		res, err := tx.ExecContext(r.Context(), `
-			UPDATE assignments SET cancel_requested_at = ?, cancel_reason = 'issue stopped'
-			 WHERE `+assignmentMatch,
-			now, missionID, missionID, missionID)
-		if err != nil {
-			return err
+		// (issue_handler_hard_stop.go) for why mission_id is matched
+		// directly with a chat_id/group_id fallback.
+		var terr error
+		cancelTargets, terr = stampCancelRequested(r.Context(), tx, now, missionID)
+		if terr != nil {
+			return terr
 		}
-		runsStopped, _ = res.RowsAffected()
+		runsStopped = int64(len(cancelTargets))
 
 		// Update issue status → CANCELLED
 		if _, err := tx.ExecContext(r.Context(), `
@@ -509,6 +518,16 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	// F4.5 mission outcomes → crew memory. CANCELLED maps to neutral.
 	emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "CANCELLED", h.logger)
 
+	// Tier 2, after Tier 1 has committed (§10.3): the transaction above is
+	// what actually stops this run from starting further work, and it has
+	// already landed by this point regardless of what happens next. A hard
+	// stop is strictly additional — a run that finishes in the gap, or a
+	// signal that misses, still lands CANCELLED via finishAssignment's own
+	// cancel_requested_at check, never resurrected as COMPLETED.
+	if hard {
+		h.hardStopTargets(r.Context(), wsID, ident, cancelTargets)
+	}
+
 	h.logger.Info("issue stopped", "identifier", ident)
-	writeJSON(w, http.StatusOK, map[string]any{"status": "CANCELLED", "identifier": ident, "runs_stopped": runsStopped})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "CANCELLED", "identifier": ident, "runs_stopped": runsStopped, "hard": hard})
 }

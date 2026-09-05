@@ -242,14 +242,22 @@ crewship issue start BE-42
 
 ## `crewship issue stop`
 
-Stop an issue -- a cooperative cancel, not an instant kill. Marks pending/in-progress tasks `CANCELLED` and stamps `cancel_requested_at` on every live assignment; a run that hasn't started its exec yet never starts, one already mid-exec finishes that exec and is then recorded `CANCELLED` regardless of what it reports. No further step is scheduled. There is no container kill, so nothing mid-exec is interrupted.
+Stop an issue. Ships in two tiers, both fired by this one command:
 
-Also reaches a run an `@mention` dispatched on an issue that was never started (`BACKLOG`/`TODO`): the assignment gets the same `cancel_requested_at` stamp, and the issue's own status is left unchanged. `stop` still refuses when the issue is not `IN_PROGRESS`/`REVIEW` and has no live run to reach.
+- **Tier 1 (cooperative, always applied).** Marks pending/in-progress tasks `CANCELLED` and stamps `cancel_requested_at` on every live assignment; a run that hasn't started its exec yet never starts, and the runner polls the stamp at every step boundary. No further step is scheduled.
+- **Tier 2 (hard, opt in with `--hard`).** After the Tier 1 stamp lands, resolves each live run's exec to its OS pid (`ExecInspect`) and signals that pid directly -- `SIGTERM`, then `SIGKILL` if it hasn't exited after a short grace period -- via a brand-new exec into the *same* container. It never runs a container-level kill: the crew's container is shared by every agent on the crew, so only the target pid is ever touched and a sibling agent's own exec keeps running untouched. Bounded to a few seconds; what was signalled and the result (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`, `UNSUPPORTED`, `ERROR`) is recorded on the run and in the issue's journal. Without `--hard`, a step already mid-exec simply finishes that exec and is then recorded `CANCELLED` regardless of what it reports -- nothing mid-exec is interrupted.
+
+Also reaches a run an `@mention` dispatched on an issue that was never started (`BACKLOG`/`TODO`): the assignment gets the same `cancel_requested_at` stamp (and, with `--hard`, the same signal if it's already RUNNING), and the issue's own status is left unchanged. `stop` still refuses when the issue is not `IN_PROGRESS`/`REVIEW` and has no live run to reach.
 
 ```bash
 crewship issue stop <identifier>
 crewship issue stop BE-42
+crewship issue stop BE-42 --hard
 ```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--hard` | `bool` | `false` | Also terminate the running process (Tier 2). Cooperative stop alone only prevents further work from starting; a step already mid-exec is left to finish on its own. |
 
 ---
 

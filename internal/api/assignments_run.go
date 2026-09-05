@@ -963,6 +963,26 @@ func (h *AssignmentHandler) runAssignment(
 		return
 	}
 
+	// B7 (§10.3 Tier 2, #2356): persist which exec is this run's live
+	// process the moment it starts, so a hard stop can find it again by
+	// pid. context.Background(), not ctx: this fires from inside the run
+	// goroutine and must land even if the very next thing that happens is
+	// ctx being cancelled by a stop request racing the exec's own start —
+	// the whole point is that a hard stop arriving a moment later still
+	// finds a row to read. Best-effort like every other side-write in this
+	// path: a failed UPDATE degrades Tier 2 to "unsupported for this run",
+	// never blocks or fails the run itself.
+	req.OnExecStarted = func(execID string) {
+		if execID == "" {
+			return
+		}
+		if _, err := h.db.ExecContext(context.Background(),
+			`UPDATE assignments SET exec_id = ?, exec_container_id = ? WHERE id = ?`,
+			execID, containerID, assignmentID); err != nil {
+			h.logger.Warn("persist exec id for assignment", "error", err, "assignment_id", assignmentID)
+		}
+	}
+
 	// Refuse the run if a backup currently holds the workspace's
 	// advisory lock. Otherwise this execution would write agent
 	// state that the in-flight dump has already passed and therefore

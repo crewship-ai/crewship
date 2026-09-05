@@ -279,6 +279,48 @@ type ContainerProvider interface {
 	CopyToContainer(ctx context.Context, containerID string, dstPath string, content io.Reader) error
 }
 
+// ExecPIDProvider is an optional capability for container providers that can
+// report the OS-level process id backing a still-running exec.
+//
+// It is the one new primitive Tier 2 hard termination (PRD-ISSUES-AND-
+// ROUTINES-2026 §10.3, work package B7) needs: Docker has no "kill this
+// exec" call, and the crew container is shared by every agent on the crew
+// (docker.go's Exec/ExecAttach hijack one stream per exec, but `docker kill`
+// or a container-level signal reaches the whole container's init process
+// and every descendant under it — every sibling agent's in-flight exec
+// included). Resolving the PID lets a caller signal exactly the one process
+// behind execID (`kill -TERM/-KILL <pid>`, itself executed as a NEW exec
+// into the same container — see hardTerminateExec in
+// internal/api/issue_handler_hard_stop.go) instead of touching the
+// container at all.
+//
+// A separate, optional interface rather than a new ContainerProvider method
+// on purpose: ContainerProvider has ~20 from-scratch test fakes across
+// internal/api and internal/orchestrator that assert conformance by literal
+// struct, and none of them exercise Tier 2. Adding a required method would
+// force every one of those to grow a stub it never calls. Callers that need
+// Tier 2 type-assert for this interface and treat a provider that lacks it
+// as "hard stop unsupported here" — never as an error worth failing the
+// (already-cooperative) Tier 1 stop over.
+type ExecPIDProvider interface {
+	// ExecPID returns the pid backing execID. pid == 0 with a nil error means
+	// the provider has no PID to report (the exec already finished, or was
+	// never known) — callers must treat that as "nothing left to signal",
+	// not as an error.
+	ExecPID(ctx context.Context, execID string) (pid int, err error)
+}
+
+// KillSignalCmd builds the argv Tier 2 hard termination execs into a
+// container to deliver one signal to one pid — POSIX `kill -TERM <pid>` /
+// `kill -KILL <pid>`, run as a brand-new Exec in the SAME container the
+// target pid lives in (never `docker kill` on the container itself). One
+// place builds this argv so the production hard-stop path
+// (internal/api/issue_handler_hard_stop.go) and the in-memory test fake
+// (internal/provider/providertest) can never drift on its shape.
+func KillSignalCmd(signal string, pid int) []string {
+	return []string{"kill", "-" + signal, strconv.Itoa(pid)}
+}
+
 // AdmissionGate holds a crew container start until the host can afford one
 // more, and reports why while it waits. Implemented by
 // internal/admission.Controller; declared here so the providers depend on the

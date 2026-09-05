@@ -32,6 +32,7 @@ var AllEntryTypes = []EntryType{
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
 	EntryAssignmentFail,
+	EntryAssignmentHardStop,
 	EntryAssignmentRun,
 	EntryAuditEntityCreated,
 	EntryAuditEntityDeleted,
@@ -99,7 +100,7 @@ var AllEntryTypes = []EntryType{
 	EntryNotificationDelivered,
 	EntryNotificationDropped,
 	EntryNotificationFailed,
-	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:42:7
+	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:43:7
 	EntryPageActionDispatched,
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,

@@ -510,6 +510,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("exec agent: %w", err)
 	}
 
+	// B7 (§10.3 Tier 2, #2356): the exec that just started is this run's
+	// live process — the one a hard stop needs to find again by pid. Fired
+	// unconditionally (not gated on OnExecStarted's own error handling; it
+	// has none — see its doc) and BEFORE streamOutput below starts
+	// draining, so a hard stop requested in the same instant the exec
+	// begins still has an exec id to look up.
+	if req.OnExecStarted != nil {
+		req.OnExecStarted(result.ExecID)
+	}
+
 	// Journal tap: accumulate the agent's reply for the end-of-run
 	// chat.agent_response journal entry. CRITICAL (CodeRabbit): this tap sits
 	// AFTER the scrubber (stream → scrub → journalTap → user) so the buffer

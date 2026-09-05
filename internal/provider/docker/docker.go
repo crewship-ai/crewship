@@ -26,6 +26,7 @@ import (
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
+var _ provider.ExecPIDProvider = (*Provider)(nil)
 var _ provider.InteractiveExecProvider = (*Provider)(nil)
 var _ provider.VolumeManager = (*Provider)(nil)
 
@@ -1845,6 +1846,21 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 		return true, execRunningExitCode, nil
 	}
 	return false, resp.ExitCode, nil
+}
+
+// ExecPID implements provider.ExecPIDProvider. The moby client already
+// decodes the daemon's `GET /exec/{id}/json` Pid field into
+// ExecInspectResult.PID (see container_exec.go) — ExecInspect above just
+// never surfaced it because none of its callers needed it before B7. dockerd
+// reports Pid == 0 once the exec has finished (its process is gone), which
+// happens to match this method's own "nothing to signal" contract, so no
+// extra branch is needed here.
+func (p *Provider) ExecPID(ctx context.Context, execID string) (int, error) {
+	resp, err := p.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("exec inspect (pid): %w", err)
+	}
+	return resp.PID, nil
 }
 
 // execRunningExitCode is reported for an exec that has not finished. It is not

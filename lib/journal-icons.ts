@@ -88,6 +88,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "assignment.completed": ClipboardCheck,
   "assignment.failed": ClipboardX,
   "assignment.cancelled": Ban,
+  "assignment.hard_stopped": Ban,
   "crew.action": Briefcase,
   "task.delegated": UserCheck,
 

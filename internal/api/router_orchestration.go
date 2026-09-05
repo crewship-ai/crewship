@@ -89,6 +89,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
 	issues.SetJournal(r.Journal())
 	issues.SetStoragePath(r.storagePath)
+	issues.SetContainer(r.keeperContainer)
 	// Paging and the search alias go through helpers the body scan cannot see.
 	// openapi: query assignee_id:string crew_id:string label:string limit:integer mission_type:string offset:integer priority:string project_id:string q:string search:string sort:string status:string
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
@@ -98,6 +99,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Delete)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", roleCreate, issues.Start)
+	// openapi: query hard:boolean
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", roleCreate, issues.Stop)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", roleCreate, issues.Review)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/activity", authed(wsCtx(http.HandlerFunc(issues.ListActivity))))

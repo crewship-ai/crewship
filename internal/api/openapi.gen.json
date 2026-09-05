@@ -49612,6 +49612,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "hard",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -49629,6 +49637,9 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "hard": {
+                      "type": "boolean"
+                    },
                     "identifier": {
                       "type": "string"
                     },

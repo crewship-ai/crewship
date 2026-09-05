@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/statuses"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -36,12 +37,23 @@ type IssueHandler struct {
 	// the mention inherits the delegation caps rather than getting its own.
 	// nil = mentions are recorded and audited but dispatch nothing.
 	mentionDispatch mentionDispatcher
+	// container is the crew container runtime, used only by Stop's hard
+	// (Tier 2, §10.3, B7) path to resolve a run's exec back to a pid and
+	// signal it. nil (the default — e.g. Docker disabled, or a test that
+	// never calls SetContainer) makes a hard stop report "unsupported"
+	// rather than panic; Tier 1 cooperative stop never reads this field.
+	container provider.ContainerProvider
 }
 
 // NewIssueHandler creates a new IssueHandler.
 func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Logger) *IssueHandler {
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger, journal: noopEmitter{}}
 }
+
+// SetContainer wires the crew container runtime Stop's hard (Tier 2) path
+// uses to signal a run's process. Mirrors CrewHandler.SetContainer /
+// CredentialHandler.SetContainer's existing pattern.
+func (h *IssueHandler) SetContainer(cp provider.ContainerProvider) { h.container = cp }
 
 // rowQuerier is the minimal interface shared by *sql.DB and *sql.Tx that
 // validateAssigneeWorkspace needs — it lets Create (which validates inside

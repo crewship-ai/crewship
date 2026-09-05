@@ -191,6 +191,17 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
     case "assignment.cancelled":
       return { ...base, tone: "warn", title: "Cancelled", detail: e.summary || undefined }
 
+    case "assignment.hard_stopped":
+      // Not a run transition by itself — the run's own terminal write
+      // (assignment.cancelled) still fires separately. This just records
+      // what the Tier 2 signal did.
+      return {
+        ...base,
+        tone: "warn",
+        title: "Hard stop signalled",
+        detail: str(p, "result") ?? (e.summary || undefined),
+      }
+
     case "run.timeout":
       return { ...base, tone: "error", title: "Timed out", detail: e.summary || undefined }
 

@@ -416,37 +416,55 @@ an executable agent). This:
 ### Stop Issue
 
 ```
-POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
+POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}&hard={true|false}
 ```
 
 <Warning>
-  Stops an issue cooperatively, not instantly. When the issue is
+  Stop ships in two tiers (§10.3), both reachable from this one endpoint.
+
+  **Tier 1 — cooperative, always applied.** When the issue is
   `IN_PROGRESS` or `REVIEW`, this happens in one transaction: every
   `PENDING`/`IN_PROGRESS`/`BLOCKED` mission task is marked `CANCELLED`,
   every assignment for the issue that has not reached a terminal state —
   running, pending, or still queued behind a busy agent or the crew budget —
   gets `cancel_requested_at` stamped,
-  and the issue itself moves to `CANCELLED`. There is no container kill —
-  a run already executing when Stop is called keeps running. An
-  assignment that hasn't started its exec yet sees the stamp first and
-  never starts. One already mid-exec finishes that exec, and only then
-  is recorded — as `CANCELLED`, never `COMPLETED` or `FAILED`, even if it
+  and the issue itself moves to `CANCELLED`. An assignment that hasn't
+  started its exec yet sees the stamp first and never starts. Without
+  `hard=true`, one already mid-exec finishes that exec, and only then is
+  recorded — as `CANCELLED`, never `COMPLETED` or `FAILED`, even if it
   reports success or a late failure after Stop was called; the stamp
-  always wins. No further step is scheduled for the issue. A future hard
-  kill (interrupting a run mid-exec) is a separate, not-yet-built
-  capability.
+  always wins. No further step is scheduled for the issue.
+
+  **Tier 2 — hard, opt in with `?hard=true`.** After the Tier 1 stamp
+  above has committed, every assignment it reached that is `RUNNING`
+  gets its live exec resolved to an OS pid (`ExecInspect`) and that pid
+  signalled directly from a brand-new exec into the *same* container —
+  `SIGTERM`, then `SIGKILL` if it hasn't exited within a short grace
+  period. This never runs a container-level kill: the crew's container is
+  shared by every agent on the crew, so a sibling agent's own exec is
+  never touched, by construction — only the one resolved pid is ever
+  signalled. Bounded to a few seconds. What was signalled and the result
+  (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`,
+  `UNSUPPORTED`, or `ERROR`) is written to `assignments.hard_stop_result`
+  and to an `assignment.hard_stopped` journal entry — independent of, and
+  in addition to, the Tier 1 `CANCELLED` terminal write, which always
+  lands regardless of what the signal achieved. `UNSUPPORTED` means the
+  configured container provider cannot resolve a pid for an exec (not
+  every provider implements this); the run is still `CANCELLED` by Tier 1
+  either way.
 
   An [`@mention`](/guides/issue-mentions) can dispatch a run on an issue
   that was never started (`BACKLOG`/`TODO`) — that run is attributed to
   the issue the same way a mission-task run is. Stop reaches it too: when
   the issue is not `IN_PROGRESS`/`REVIEW` but has at least one live
-  attributed assignment, Stop stamps `cancel_requested_at` on it and
-  leaves the issue's own status unchanged (it does not move the issue to
-  `IN_PROGRESS` or `CANCELLED`). Stop only refuses with `400` when the
+  attributed assignment, Stop stamps `cancel_requested_at` on it (and,
+  with `hard=true`, signals it the same way if it is already `RUNNING`)
+  and leaves the issue's own status unchanged (it does not move the issue
+  to `IN_PROGRESS` or `CANCELLED`). Stop only refuses with `400` when the
   issue is neither `IN_PROGRESS`/`REVIEW` nor has any live attributed run.
 </Warning>
 
-**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
+**Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace; `hard` (optional, default `false`) opts into Tier 2. No request body.
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
@@ -456,14 +474,17 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
 {
   "status": "CANCELLED",
   "identifier": "ENG-42",
-  "runs_stopped": 1
+  "runs_stopped": 1,
+  "hard": false
 }
 ```
 
 `status` is `CANCELLED` when the issue was `IN_PROGRESS`/`REVIEW`; otherwise
 it echoes the issue's unchanged status (e.g. `BACKLOG`) for the
 mention-dispatched-run case above. `runs_stopped` is the number of
-assignment rows stamped.
+assignment rows stamped by Tier 1. `hard` echoes whether `?hard=true` was
+requested — it does not report per-target Tier 2 results, which live on
+each assignment row and in the journal instead.
 
 | Status | Condition |
 |---|---|

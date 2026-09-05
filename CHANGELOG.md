@@ -329,6 +329,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   journal entries carry it. `issue runs` / `crewship issue runs` and the
   routine run surfaces (`GET .../pipeline-runs/{id}`, `run-records`,
   `crewship routine records`) all expose it.
+- **Hard termination — Tier 2 stop signals the run's own process, not the crew's shared container (#2363).**
+  `crewship issue stop` (and `POST .../issues/{identifier}/stop`) gains an
+  opt-in `--hard`/`?hard=true` (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work
+  package B7): after the existing Tier 1 cooperative stamp lands, every
+  `RUNNING` assignment it reached gets its live exec resolved to an OS pid
+  (`ExecInspect`, now exposed as `provider.ExecPIDProvider`) and that pid
+  signalled — `SIGTERM`, then `SIGKILL` after a short grace period — from a
+  brand-new exec into the *same* container. There is still no `docker kill`
+  on the container itself, because one container is shared by the whole
+  crew; only the one resolved pid is ever touched, so a sibling agent's own
+  exec keeps running. `assignments.exec_id`/`exec_container_id` persist
+  which exec is a run's live process the moment it starts;
+  `hard_stop_at`/`hard_stop_result` and a new `assignment.hard_stopped`
+  journal entry record what was signalled and the result
+  (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`,
+  `UNSUPPORTED`, `ERROR`). The Tier 1 stamp always lands first and
+  independently, so a run that races the signal — or a provider that
+  cannot support Tier 2 at all — still ends `CANCELLED` (outcome
+  `CANCELLED`, B6) either way.
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

@@ -55,8 +55,19 @@ const (
 	EntryAssignmentDone   EntryType = "assignment.completed"
 	EntryAssignmentFail   EntryType = "assignment.failed"
 	EntryAssignmentCancel EntryType = "assignment.cancelled"
-	EntryCrewAction       EntryType = "crew.action"
-	EntryTaskDelegated    EntryType = "task.delegated"
+	// EntryAssignmentHardStop records one Tier 2 hard-termination attempt
+	// (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work package B7): what was
+	// signalled (container_id, exec_id, pid, signal — TERM then, if still
+	// running past the grace period, KILL) and the result. Distinct from
+	// EntryAssignmentCancel, which is the Tier 1 lifecycle terminal entry
+	// finishAssignment already emits when the row lands CANCELLED — this
+	// entry can fire with no lifecycle change at all (the exec had already
+	// finished, or the provider does not support Tier 2), and a single
+	// stop can emit both: one hard-stop entry per signalled agent, plus
+	// the one cancel entry the run's own terminal write always makes.
+	EntryAssignmentHardStop EntryType = "assignment.hard_stopped"
+	EntryCrewAction         EntryType = "crew.action"
+	EntryTaskDelegated      EntryType = "task.delegated"
 
 	// Runs — one trace per agent execution. trace_id == run.id; spans
 	// (exec/network/llm/...) belonging to the run carry the same trace_id.

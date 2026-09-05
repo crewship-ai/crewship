@@ -19,6 +19,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "assignment.completed",
   "assignment.failed",
   "assignment.cancelled",
+  "assignment.hard_stopped",
   "crew.action",
   "task.delegated",
   // Runs
@@ -239,6 +240,7 @@ export const ENTRY_TYPE_GROUPS: { label: string; types: JournalEntryType[] }[] =
       "assignment.completed",
       "assignment.failed",
       "assignment.cancelled",
+      "assignment.hard_stopped",
       "crew.action",
       "task.delegated",
     ],
