@@ -1855,6 +1855,12 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 // reports Pid == 0 once the exec has finished (its process is gone), which
 // happens to match this method's own "nothing to signal" contract, so no
 // extra branch is needed here.
+//
+// #2365: this Pid is in the HOST pid namespace — the container's own pid 1
+// sees a different, unrelated number for the same process — so it is not
+// safe to `kill` from a NEW exec run inside the container (that is the bug
+// B7b fixed). Tier 2 hard termination no longer calls this method; see
+// provider.ExecPIDProvider's doc for why it is still implemented.
 func (p *Provider) ExecPID(ctx context.Context, execID string) (int, error) {
 	resp, err := p.client.ExecInspect(ctx, execID, client.ExecInspectOptions{})
 	if err != nil {
