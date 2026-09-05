@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +37,10 @@ type FakeProvider struct {
 	lastAttachStdin bool
 	seq             int
 	execs           map[string]*fakeExec
+	// pids maps a synthetic pid back to the exec id it belongs to, so
+	// runCommand's "kill" case (and ExecPID's callers) can resolve one from the other
+	// exactly like a real container's pid table would.
+	pids map[int]string
 
 	unblockOnce sync.Once
 	unblockCh   chan struct{}
@@ -78,6 +83,21 @@ type Breaks struct {
 type fakeExec struct {
 	done     chan struct{}
 	exitCode int
+	// pid is a synthetic, unique-within-the-provider process id, assigned at
+	// creation. It stands in for the real OS pid a container runtime would
+	// report via ExecInspect, so the fake can prove out the exact primitive
+	// B7 hard termination depends on: resolve a pid from an exec id, then
+	// signal that pid — never the whole container.
+	pid int
+	// killCh delivers a signal name ("TERM", "KILL") to a running "hold"
+	// exec (see runCommand). Buffered so a TERM immediately followed by a
+	// KILL (the hard-stop grace-period escalation) never blocks the sender.
+	// Deliberately NOT selected on ctx.Done() anywhere in "hold"'s case: a
+	// real docker exec keeps running when the caller's context is
+	// cancelled (the PRD's whole reason Tier 1 cannot promise a kill), and
+	// the fake would be lying about that gap if ctx cancellation alone
+	// could stop it.
+	killCh chan string
 }
 
 // Fake command vocabulary. A Runtime's command fields are provider-specific by
@@ -87,6 +107,14 @@ var (
 	fakeEchoStdinCmd = []string{"echo-stdin"}
 	fakeStderrCmd    = []string{"stderr"}
 	fakeBlockCmd     = []string{"block"}
+	// HoldCmd starts a "process" that ignores context cancellation and only
+	// ever stops when signalled by pid via provider.KillSignalCmd (or the
+	// test's global Unblock, as a cleanup safety net) — the fake's
+	// stand-in for an agent CLI running inside a crew-shared container.
+	// Exported so an hardTerminateExec test (internal/api) can start one
+	// exec per simulated agent and drive the real hard-stop code path
+	// against it.
+	HoldCmd = []string{"hold"}
 )
 
 func fakeExitCmd(code int) []string { return []string{"exit", strconv.Itoa(code)} }
@@ -97,6 +125,7 @@ func NewFakeProvider() *FakeProvider {
 		ContainerUserValue: DefaultSafeUser,
 		StderrText:         "contract-stderr-marker",
 		execs:              make(map[string]*fakeExec),
+		pids:               make(map[int]string),
 		unblockCh:          make(chan struct{}),
 	}
 }
@@ -180,8 +209,10 @@ func (f *FakeProvider) Exec(ctx context.Context, cfg provider.ExecConfig) (*prov
 	f.lastAttachStdin = attach
 	f.seq++
 	execID := fmt.Sprintf("fake-exec-%d", f.seq)
-	entry := &fakeExec{done: make(chan struct{})}
+	pid := f.seq
+	entry := &fakeExec{done: make(chan struct{}), pid: pid, killCh: make(chan string, 2)}
 	f.execs[execID] = entry
+	f.pids[pid] = execID
 	f.mu.Unlock()
 
 	pr, pw := io.Pipe()
@@ -223,6 +254,50 @@ func (f *FakeProvider) runCommand(ctx context.Context, cfg provider.ExecConfig, 
 		case <-ctx.Done():
 		case <-time.After(30 * time.Second):
 		}
+	case len(cfg.Cmd) > 0 && cfg.Cmd[0] == "hold":
+		// Deliberately no case <-ctx.Done(): see fakeExec.killCh's doc.
+		select {
+		case sig := <-entry.killCh:
+			switch sig {
+			case "KILL":
+				code = 137 // 128 + SIGKILL(9), the real shell convention
+			default:
+				code = 143 // 128 + SIGTERM(15)
+			}
+		case <-f.unblockCh:
+			code = 143 // test cleanup safety net; treated like a TERM
+		case <-time.After(30 * time.Second):
+		}
+	case len(cfg.Cmd) == 3 && cfg.Cmd[0] == "kill":
+		// The exact argv hardTerminateExec issues for real: resolve the pid
+		// back to its owning exec and deliver the signal on ITS killCh only
+		// — never anything container-wide, and never any other exec's
+		// channel, which is what proves a sibling agent is unaffected.
+		pid, _ := strconv.Atoi(cfg.Cmd[2])
+		sig := strings.TrimPrefix(cfg.Cmd[1], "-")
+		f.mu.Lock()
+		targetID, ok := f.pids[pid]
+		var target *fakeExec
+		if ok {
+			target = f.execs[targetID]
+		}
+		f.mu.Unlock()
+		switch {
+		case !ok || target == nil:
+			code = 1 // kill: (<pid>) - No such process
+		default:
+			select {
+			case <-target.done:
+				code = 1 // already exited — nothing left to signal
+			default:
+				select {
+				case target.killCh <- sig:
+					code = 0
+				default:
+					code = 0 // already has a pending signal queued; still a "success"
+				}
+			}
+		}
 	}
 	if f.Breaks.LoseExitCode {
 		code = 0
@@ -253,6 +328,25 @@ func (f *FakeProvider) ExecInspect(_ context.Context, execID string) (bool, int,
 			return true, 0, nil
 		}
 		return true, -1, nil
+	}
+}
+
+// ExecPID implements provider.ExecPIDProvider. pid == 0 (nothing to signal)
+// once the exec's done channel has closed, matching the interface's
+// contract and the real docker provider's behaviour (dockerd reports Pid 0
+// for a finished exec).
+func (f *FakeProvider) ExecPID(_ context.Context, execID string) (int, error) {
+	f.mu.Lock()
+	entry, ok := f.execs[execID]
+	f.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("exec %s not found", execID)
+	}
+	select {
+	case <-entry.done:
+		return 0, nil
+	default:
+		return entry.pid, nil
 	}
 }
 
@@ -307,4 +401,5 @@ func (f *FakeProvider) CopyToContainer(context.Context, string, string, io.Reade
 var (
 	_ provider.ContainerProvider       = (*FakeProvider)(nil)
 	_ provider.InteractiveExecProvider = (*FakeProvider)(nil)
+	_ provider.ExecPIDProvider         = (*FakeProvider)(nil)
 )
