@@ -98,8 +98,11 @@ test("PR browser contract subset", async ({ page }) => {
   // POST carries {action, input}, and the card flips to resolved with the
   // receipt without a reload. What it does NOT prove is the server: that the
   // answer reaches the session and that `inbox_acted` lands on the issue's
-  // event log is covered by internal/api's Go tests and the CLI acceptance
-  // test, not here.
+  // event log is covered by B15's Go + CLI acceptance tests (#2399,
+  // internal/api/inbox_act.go and cmd/crewship inbox act), not here — a real
+  // card needs a NEEDS_HUMAN run behind a provider this PR gate does not
+  // have. A follow-up issue tracks a supported e2e fixture that could seed
+  // one without a live agent run; until then this step is route-mocked.
   await test.step("inbox: act on a seeded run_needs_human card (route-mocked)", async () => {
     const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
     const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id

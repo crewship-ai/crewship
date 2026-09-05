@@ -80,17 +80,23 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("run_needs_human renders its actions[]", () => {
-  it("shows one button per server-declared action, and nothing PATCH-shaped", () => {
+  it("shows one button per server-declared action, and nothing PATCH-shaped", async () => {
+    onAct.mockResolvedValueOnce(receipt("dismiss"))
     mount(card())
     expect(screen.getByRole("button", { name: "Answer" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Take over" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument()
     // The generic Dismiss the kind used to fall through to resolves the row
     // by PATCH; the one here is a server-side action. Same word, different
-    // door — the test that tells them apart is what onResolve is NOT called.
+    // door — the test that tells them apart is that onResolve is NOT called
+    // while onAct is, and the click resolves to a real receipt rather than
+    // silently falling into the error path on an unmocked onAct.
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+    await waitFor(() => expect(onAct).toHaveBeenCalledWith("dismiss", undefined))
+    const rec = await screen.findByTestId("act-receipt")
+    expect(rec).toHaveTextContent(/dismissed/i)
     expect(onResolve).not.toHaveBeenCalled()
-    expect(onAct).toHaveBeenCalledWith("dismiss", undefined)
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it("renders only the actions the card carries — a pre-B15 card offers take_over alone", () => {

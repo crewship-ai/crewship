@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Textarea } from "@/components/ui/textarea"
-import type { InboxItem } from "@/hooks/use-inbox"
+import type { InboxAction, InboxActResult, InboxItem } from "@/hooks/use-inbox"
 import { useSession } from "@/hooks/use-auth"
 import { entityHref } from "@/lib/entity-links"
 import { formatDateTime } from "@/lib/time"
@@ -39,6 +39,8 @@ interface Props {
   onInboxArchive: (item: InboxItem) => Promise<void>
   onInboxMarkUnread: (item: InboxItem) => Promise<void>
   onInboxRefresh: (item: InboxItem, action?: string) => Promise<void>
+  /** Act on a run_needs_human card (#2398) — the same act door the v1 list uses. */
+  onInboxAct: (item: InboxItem, action: InboxAction, input?: string) => Promise<InboxActResult>
   onApprovalDecide: (entry: InboxV2Entry, decision: "approved" | "denied", comment: string) => Promise<void>
   onArchiveGroup: (entry: InboxV2Entry) => Promise<void>
   /** Crews and agents by id/slug, so the pane names things instead of ids. */
@@ -103,6 +105,7 @@ export function InboxV2Detail(props: Props) {
           onArchive={() => props.onInboxArchive(item)}
           onMarkUnread={() => { void props.onInboxMarkUnread(item) }}
           onRefresh={(action) => props.onInboxRefresh(item, action)}
+          onAct={(action, input) => props.onInboxAct(item, action, input)}
           lookup={props.lookup}
           onDenyHire={props.onDenyHire}
         />
