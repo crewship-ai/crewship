@@ -231,6 +231,7 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		"internal/api/internal_mcp.go":             "MCP server credential, not an LLM provider",
 		"internal/api/internal_handler.go":         "dispatch only",
 		"internal/api/issue_code_links.go":         "forge token, not an LLM provider",
+		"internal/api/keeper_execute.go":           "#2391 store-miss fallback: injects the value as an env var into the agent's OWN container for one command, then scrubs it from the output — it is never sent to a provider or any third party",
 		"internal/api/local_model_endpoint.go":     "reads ENDPOINT_URL rows, which are already the split shape",
 		"internal/api/models.go":                   "lists models with a provider key",
 		"internal/api/oauth_creds.go":              "OAuth token storage",

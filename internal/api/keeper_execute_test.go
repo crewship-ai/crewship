@@ -48,6 +48,10 @@ type mockContainerExec struct {
 	userErr        error
 	userForceEmpty bool
 	lastExecUser   string
+
+	// lastExecEnv records the Env passed to the most recent Exec call so tests
+	// can assert which credential value was injected (#2391).
+	lastExecEnv []string
 }
 
 func (m *mockContainerExec) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
@@ -73,6 +77,7 @@ func (m *mockContainerExec) ContainerUser(_ context.Context, _ string) (string, 
 func (m *mockContainerExec) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	m.lastExecContainerID = cfg.ContainerID
 	m.lastExecUser = cfg.User
+	m.lastExecEnv = cfg.Env
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
