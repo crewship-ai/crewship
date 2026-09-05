@@ -246,6 +246,9 @@ REST. The shapes below reflect what the server actually sends.
 | `issue.started` | Issue execution started | `{ id, identifier, status }` |
 | `issues.bulk_updated` | Multiple issues updated in bulk | `{ count }` |
 | `issue.delivery.acked` | A comment mentioning an agent was received and durably recorded — pushed before any model call, so the human sees "received" without a refresh | `{ mission_id, identifier, agent_id, delivery_id, event_id, seq }` |
+| `issue.session.state` | An issue's agent session moved state (`pending`/`active`/`idle`/`error`/`awaiting_input`) — a claimed run activating it, a run ending settling it, or the outcome table routing it | `{ mission_id, identifier, session_id, agent_id, state }` |
+| `issue.checkpoint.written` | A session-bearing run wrote its end-of-run checkpoint (§11.1/§9.5) | `{ mission_id, identifier, session_id, agent_id }` |
+| `run.outcome` | A run reached a terminal status and its §9.6 outcome was decided | `{ mission_id, identifier, assignment_id, status, outcome }` |
 
 #### Projects & milestones
 

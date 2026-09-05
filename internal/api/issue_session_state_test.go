@@ -82,7 +82,7 @@ func TestActivateSessionForAssignment_PendingToActive(t *testing.T) {
 	seedSession(t, f, "sess_act_1", "pending")
 	seedSessionAssignment(t, f, "asg_act_1", "sess_act_1", "RUNNING")
 
-	activateSessionForAssignment(context.Background(), f.db, "asg_act_1")
+	activateSessionForAssignment(context.Background(), f.db, nil, "", "asg_act_1")
 
 	state, activeRunID := sessionState(t, f, "sess_act_1")
 	if state != "active" {
@@ -106,7 +106,7 @@ func TestActivateSessionForAssignment_IdleAndErrorAndAwaitingInput_AllReachActiv
 			seedSession(t, f, sessID, from)
 			seedSessionAssignment(t, f, asgID, sessID, "RUNNING")
 
-			activateSessionForAssignment(context.Background(), f.db, asgID)
+			activateSessionForAssignment(context.Background(), f.db, nil, "", asgID)
 
 			state, activeRunID := sessionState(t, f, sessID)
 			if state != "active" {
@@ -127,7 +127,7 @@ func TestActivateSessionForAssignment_ClosedSessionUntouched(t *testing.T) {
 	seedSession(t, f, "sess_closed", "closed")
 	seedSessionAssignment(t, f, "asg_closed", "sess_closed", "RUNNING")
 
-	activateSessionForAssignment(context.Background(), f.db, "asg_closed")
+	activateSessionForAssignment(context.Background(), f.db, nil, "", "asg_closed")
 
 	state, activeRunID := sessionState(t, f, "sess_closed")
 	if state != "closed" {
@@ -149,7 +149,7 @@ func TestActivateSessionForAssignment_NoSession_NoOp(t *testing.T) {
 		"asg_no_sess", f.wsID, f.missionID, f.target, f.target, f.missionID)
 
 	// Must not panic on a NULL session_id.
-	activateSessionForAssignment(context.Background(), f.db, "asg_no_sess")
+	activateSessionForAssignment(context.Background(), f.db, nil, "", "asg_no_sess")
 }
 
 // ── settleSessionForAssignment ──────────────────────────────────────────
@@ -179,7 +179,7 @@ func TestSettleSessionForAssignment_OutcomeToState(t *testing.T) {
 			seedSessionAssignment(t, f, asgID, sessID, tc.status)
 			execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, asgID, sessID)
 
-			settleSessionForAssignment(context.Background(), f.db, asgID, tc.outcome)
+			settleSessionForAssignment(context.Background(), f.db, nil, "", asgID, tc.outcome)
 
 			state, activeRunID := sessionState(t, f, sessID)
 			if state != tc.wantState {
@@ -209,7 +209,7 @@ func TestSettleSessionForAssignment_OvertakenByNewerRun_NoOp(t *testing.T) {
 	execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = 'asg_new', state = 'active' WHERE id = 'sess_race'`)
 
 	// The OLD run's finishAssignment-equivalent settle arrives late.
-	settleSessionForAssignment(context.Background(), f.db, "asg_old", orchestrator.OutcomeSucceeded)
+	settleSessionForAssignment(context.Background(), f.db, nil, "", "asg_old", orchestrator.OutcomeSucceeded)
 
 	state, activeRunID := sessionState(t, f, "sess_race")
 	if state != "active" {
@@ -229,7 +229,7 @@ func TestSettleSessionForAssignment_NoSession_NoOp(t *testing.T) {
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id)
 		VALUES (?, ?, ?, ?, ?, 'test task', 'COMPLETED', 1, datetime('now'), ?)`,
 		"asg_settle_no_sess", f.wsID, f.missionID, f.target, f.target, f.missionID)
-	settleSessionForAssignment(context.Background(), f.db, "asg_settle_no_sess", orchestrator.OutcomeSucceeded)
+	settleSessionForAssignment(context.Background(), f.db, nil, "", "asg_settle_no_sess", orchestrator.OutcomeSucceeded)
 }
 
 // ── ReconcileStaleActiveSessions, outcome-aware (§9.6, B6, #2349) ───────
@@ -397,7 +397,7 @@ func TestOwnerDied_RecoveredByLeaseSweep_VisibleInRunsAndSessions(t *testing.T) 
 	assignmentID := "asg_owner_died"
 	seedSession(t, f, sessionID, "pending")
 	seedSessionAssignment(t, f, assignmentID, sessionID, "RUNNING")
-	activateSessionForAssignment(context.Background(), f.db, assignmentID)
+	activateSessionForAssignment(context.Background(), f.db, nil, "", assignmentID)
 
 	// The owning process "died": its lease expired long ago and nothing
 	// has renewed it since.

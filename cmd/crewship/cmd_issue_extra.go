@@ -421,6 +421,137 @@ var issueActivityCmd = &cobra.Command{
 	},
 }
 
+// issueEventDTO mirrors one row of issueEventsResponse.Events
+// (internal/api/issue_events_list.go).
+type issueEventDTO struct {
+	Seq       int     `json:"seq"`
+	ActorType string  `json:"actor_type"`
+	ActorName *string `json:"actor_name"`
+	Action    string  `json:"action"`
+	Details   *string `json:"details"`
+	CreatedAt string  `json:"created_at"`
+}
+
+type issueEventsPageDTO struct {
+	Events    []issueEventDTO `json:"events"`
+	AfterSeq  int             `json:"after_seq"`
+	LatestSeq int             `json:"latest_seq"`
+}
+
+// maxIssueEventsCLIPages bounds how many 500-row server pages `issue
+// events` will follow in one invocation — a defensive cap against a
+// pathological (never-converging) latest_seq, not a realistic ceiling:
+// 200 pages is 100,000 events.
+const maxIssueEventsCLIPages = 200
+
+// fetchIssueEventsPage does one GET .../events?after_seq= call.
+func fetchIssueEventsPage(client *cli.Client, crewID, identifier string, afterSeq int) (issueEventsPageDTO, error) {
+	path := fmt.Sprintf("/api/v1/crews/%s/issues/%s/events", crewID, url.PathEscape(identifier))
+	params := url.Values{}
+	if afterSeq > 0 {
+		params.Set("after_seq", strconv.Itoa(afterSeq))
+	}
+	if enc := params.Encode(); enc != "" {
+		path += "?" + enc
+	}
+	resp, err := client.Get(path)
+	if err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	var page issueEventsPageDTO
+	if err := cli.ReadJSON(resp, &page); err != nil {
+		return issueEventsPageDTO{}, err
+	}
+	return page, nil
+}
+
+// fetchAllIssueEvents pages `GET .../events?after_seq=` starting at
+// afterSeq until the returned events actually reach latest_seq —
+// code review on #2377 caught the one-shot version silently truncating a
+// history longer than one server page (500 rows, issue_events_list.go's
+// maxIssueEventsPage) with no indication anything was missing.
+func fetchAllIssueEvents(client *cli.Client, crewID, identifier string, afterSeq int) ([]issueEventDTO, int, error) {
+	cursor := afterSeq
+	latestSeq := afterSeq
+	events := []issueEventDTO{}
+	for i := 0; i < maxIssueEventsCLIPages; i++ {
+		page, err := fetchIssueEventsPage(client, crewID, identifier, cursor)
+		if err != nil {
+			return nil, 0, err
+		}
+		latestSeq = page.LatestSeq
+		if len(page.Events) == 0 {
+			break
+		}
+		events = append(events, page.Events...)
+		for _, e := range page.Events {
+			if e.Seq > cursor {
+				cursor = e.Seq
+			}
+		}
+		if cursor >= latestSeq {
+			break
+		}
+	}
+	return events, latestSeq, nil
+}
+
+// issueEventsCmd reads the ordered B1 event log via its own cursor
+// (seq), NOT the activity timeline's created_at-ordered top-50 above. CLI
+// parity for GET /api/v1/crews/{crewId}/issues/{identifier}/events
+// (internal/api/issue_events_list.go, PRD-ISSUES-AND-ROUTINES-2026 §14.1,
+// work package B11, #2368) — the same endpoint the board's gap detector
+// calls to resync after a dropped WebSocket frame (F43).
+var issueEventsCmd = &cobra.Command{
+	Use:   "events <identifier>",
+	Short: "Show the ordered event log for an issue (seq-cursored, for resync)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		identifier := derefStr(issue.Identifier, issue.ID)
+		afterSeq, _ := cmd.Flags().GetInt("after-seq")
+
+		events, latestSeq, err := fetchAllIssueEvents(client, issue.CrewID, identifier, afterSeq)
+		if err != nil {
+			return err
+		}
+		result := issueEventsPageDTO{Events: events, AfterSeq: afterSeq, LatestSeq: latestSeq}
+
+		f := newFormatter()
+		headers := []string{"SEQ", "WHEN", "ACTOR", "ACTION", "DETAILS"}
+		rows := make([][]string, 0, len(events))
+		for _, e := range events {
+			// Actor/action/details/created_at are all server-round-tripped
+			// strings that ultimately trace back to user- or agent-authored
+			// input (a comment body, a description edit) — sanitizeTerminal
+			// strips ANSI/control sequences before anything reaches a real
+			// terminal, matching issueRunsCmd's own result-summary column.
+			rows = append(rows, []string{
+				strconv.Itoa(e.Seq),
+				sanitizeTerminal(issueRelativeTime(e.CreatedAt)),
+				fmt.Sprintf("%s/%s", sanitizeTerminal(e.ActorType), sanitizeTerminal(derefStr(e.ActorName, "-"))),
+				sanitizeTerminal(e.Action),
+				truncateStr(sanitizeTerminal(derefStr(e.Details, "")), 60),
+			})
+		}
+		return f.Auto(result, headers, rows)
+	},
+}
+
 // issueRunsCmd lists the pipeline runs triggered by an issue. CLI parity
 // for GET /api/v1/crews/{crewId}/issues/{identifier}/runs — the data the
 // dashboard's issue "Runs" tab shows.
@@ -960,6 +1091,8 @@ func init() {
 	issueCmd.AddCommand(issueUnbindRoutineCmd)
 	issueCmd.AddCommand(issueSubtasksCmd)
 	issueCmd.AddCommand(issueActivityCmd)
+	issueEventsCmd.Flags().Int("after-seq", 0, "Only show events with seq greater than this (0 = full history)")
+	issueCmd.AddCommand(issueEventsCmd)
 
 	issueBulkUpdateCmd.Flags().String("ids", "", "Comma-separated issue IDs (max 100; REQUIRED)")
 	issueBulkUpdateCmd.Flags().String("status", "", "New status for all listed issues")

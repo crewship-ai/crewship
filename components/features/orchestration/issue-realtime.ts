@@ -9,7 +9,17 @@
 // OrchestrationLayout so it's unit-testable without mounting the
 // component or a RealtimeProvider.
 
-/** Every issue.* event type that means "the board might need to redraw". */
+/**
+ * Every issue.* event type that means "the board might need to redraw".
+ *
+ * `issue.session.state` and `run.outcome` (work package B11, #2368) join
+ * the set here: §17's B11 accept line names "session state" and "outcome"
+ * alongside create/status-change/comment as things the board must move on
+ * without a refresh. Neither payload carries `crew_id` (see the Go
+ * emitters, internal/api/issue_session_realtime.go) — shouldRefetchForIssueEvent's
+ * existing "crew_id missing → can't rule it out → refetch" fallback below
+ * already covers that; no new branch needed.
+ */
 const ISSUE_BOARD_EVENT_TYPES: ReadonlySet<string> = new Set([
   "issue.created",
   "issue.updated",
@@ -17,6 +27,8 @@ const ISSUE_BOARD_EVENT_TYPES: ReadonlySet<string> = new Set([
   "issue.started",
   "issue.deleted",
   "issues.bulk_updated",
+  "issue.session.state",
+  "run.outcome",
 ])
 
 export function isIssueBoardEvent(type: string): boolean {

@@ -11,6 +11,8 @@ describe("isIssueBoardEvent", () => {
       "issue.started",
       "issue.deleted",
       "issues.bulk_updated",
+      "issue.session.state",
+      "run.outcome",
     ]) {
       expect(isIssueBoardEvent(type)).toBe(true)
     }
@@ -58,5 +60,24 @@ describe("shouldRefetchForIssueEvent", () => {
   it("ignores event types the issue board doesn't care about", () => {
     expect(shouldRefetchForIssueEvent("mission.updated", { id: "m1", crew_id: "crew-1" }, "crew-1")).toBe(false)
     expect(shouldRefetchForIssueEvent("agent.status", { crew_id: "crew-1" }, "crew-1")).toBe(false)
+  })
+
+  // B11 (#2368): session state and outcome are new board-relevant types.
+  // Neither payload carries crew_id (internal/api/issue_session_realtime.go
+  // never enriches it), so both fall into the "can't rule it out" branch
+  // and always refetch, filter or no filter.
+  it("refetches issue.session.state regardless of crew filter (no crew_id in payload)", () => {
+    expect(
+      shouldRefetchForIssueEvent("issue.session.state", { mission_id: "m1", session_id: "s1", state: "active" }, "crew-1"),
+    ).toBe(true)
+    expect(
+      shouldRefetchForIssueEvent("issue.session.state", { mission_id: "m1", session_id: "s1", state: "active" }, null),
+    ).toBe(true)
+  })
+
+  it("refetches run.outcome regardless of crew filter (no crew_id in payload)", () => {
+    expect(
+      shouldRefetchForIssueEvent("run.outcome", { mission_id: "m1", assignment_id: "a1", outcome: "SUCCEEDED" }, "crew-1"),
+    ).toBe(true)
   })
 })

@@ -85,5 +85,11 @@ export function useIssueBoardRealtime({
   useRealtimeEvent("issue.started", handleIssueBoardEvent)
   useRealtimeEvent("issue.deleted", handleIssueBoardEvent)
   useRealtimeEvent("issues.bulk_updated", handleIssueBoardEvent)
+  // B11 (§17, #2368): "the board moves without refresh for ... session
+  // state and outcome" — the last two of the five signals the accept line
+  // names. Routed through the SAME shouldRefetchForIssueEvent/debounce
+  // path as every other issue.* type above.
+  useRealtimeEvent("issue.session.state", handleIssueBoardEvent)
+  useRealtimeEvent("run.outcome", handleIssueBoardEvent)
   useRealtimeEvent("realtime.reconnected", useCallback(() => fetchIssues(), [fetchIssues]))
 }

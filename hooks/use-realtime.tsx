@@ -92,6 +92,24 @@ export type RealtimeEventType =
   // could ever produce one, closing the gap where a human watching the
   // issue learned nothing until the agent's own comment appeared.
   | "issue.delivery.acked"
+  // B11 (§14.2, #2368): the remaining new issue event types F32/F43 name —
+  // `issue.delivery.acked` above was B2's; these three are B4/B5/B6's own
+  // state transitions, wired to a broadcast for the first time in this PR
+  // (internal/api/issue_session_realtime.go). `issue.session.state` —
+  // `{mission_id, identifier, session_id, agent_id, state}` — fires on
+  // every issue_agent_sessions transition (pending->active on a claimed
+  // run, active->idle/error/awaiting_input on that run ending).
+  // `issue.checkpoint.written` — `{mission_id, identifier, session_id,
+  // agent_id}` — fires when a session-bearing run's §9.5 checkpoint lands.
+  // `run.outcome` — `{mission_id, identifier, assignment_id, status,
+  // outcome}` — fires alongside the session settle, carrying the §9.6
+  // routing decision (NO_CHANGE/SUCCEEDED/WORK_CREATED/PARTIAL/
+  // NEEDS_HUMAN/FAILED/CANCELLED). §17's B11 accept line: "the board moves
+  // without refresh for create, status change, comment, session state and
+  // outcome" — these two are the last of those five signals.
+  | "issue.session.state"
+  | "issue.checkpoint.written"
+  | "run.outcome"
   | "task.updated"
   | "peer_conversation.updated"
   | "crew.created"
@@ -245,6 +263,10 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   // appears — exactly the gap §15's "Acknowledgement under one second"
   // exists to close.
   "issue.delivery.acked",
+  // B11 (§14.2, #2368): the board's live session-state and outcome
+  // signals — see the RealtimeEventType union above for the emitter and
+  // payload shape of each.
+  "issue.session.state", "issue.checkpoint.written", "run.outcome",
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).

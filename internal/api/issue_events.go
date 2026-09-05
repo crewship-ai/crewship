@@ -161,6 +161,14 @@ type issueEvent struct {
 	// entry naming a run that never ran gives the causal walk a parent to
 	// follow into nothing and makes a person's action read as a composed hop.
 	RunID string
+	// ForcedPast (§10.4, work package B11, #2368) lists the open sub-issues
+	// and mission_tasks a DONE/REVIEW transition bypassed via ?force=true.
+	// Empty for every ordinary transition. This is the "receipt" §10.4
+	// asks for — no new table (F42: the journal is already hash-chained
+	// per workspace), just this event's own payload naming who forced it
+	// (ActorType/ActorID, already carried by every issueEvent) and which
+	// children were still open at the time.
+	ForcedPast []string
 }
 
 // issueEventPayload is the journal payload for one issue event.
@@ -178,6 +186,10 @@ func issueEventPayload(ev issueEvent) map[string]any {
 	}
 	if ev.To != "" {
 		p["to"] = ev.To
+	}
+	if len(ev.ForcedPast) > 0 {
+		p["forced"] = true
+		p["open_children"] = ev.ForcedPast
 	}
 	return p
 }

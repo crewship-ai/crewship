@@ -121,7 +121,14 @@ func (h *AssignmentHandler) recordSessionCheckpoint(ctx context.Context, assignm
 	if err := writeSessionCheckpoint(ctx, h.db, workspaceID, sessionID.String, assignmentID, cp); err != nil {
 		h.logger.Warn("record session checkpoint: write",
 			"error", err, "assignment_id", assignmentID, "session_id", sessionID.String)
+		return
 	}
+	// B11 (§14.2, #2368): `issue.checkpoint.written` — unlike the two
+	// session-state broadcasts, this write is NOT inside the same
+	// transaction as anything else in this request (writeSessionCheckpoint
+	// is its own committed statement), so there is no premature-visibility
+	// risk in announcing it immediately after success.
+	broadcastIssueCheckpointWritten(ctx, h.db, h.hub, workspaceID, sessionID.String)
 }
 
 // latestCheckpointFor returns the most recent checkpoint for a session, or

@@ -111,6 +111,44 @@ The **Runs** card lists every run on the issue, newest first — not the latest 
 
 The rail's **Related** card gathers the same links in one place: the crew, the agent, the run in flight, the journal trace, and Activity. The crew and the assignee in the identity row and in Properties are links too. Together with the run page's own Related row and the journal's issue pill, this is the loop the audit found broken: issue → run → journal → issue, with every leg a link.
 
+## The board moves without a refresh
+
+An open board or issue tab repaints live on five kinds of change: an issue
+being **created**, its **status changing**, a **comment** landing, an agent
+**session's state** moving (`pending` → `active` → `idle`/`error`/
+`awaiting_input`), and a run's **outcome** being decided. Each is a
+WebSocket event on the workspace channel — `issue.created`,
+`issue.status_changed`, `issue.updated`, `issue.session.state`, and
+`run.outcome` — and every one of them has to be on the client's realtime
+allowlist (`hooks/use-realtime.tsx`) or it is dropped silently before
+anything can react to it.
+
+Registering a type is not the same as never missing a frame, though: under
+load, the server's WebSocket hub sends non-blocking and drops a frame
+outright when a client's send buffer is full, with no client-visible
+error. The one realtime signal that carries a **sequence number**
+(`issue.delivery.acked`, the "your message was received" ack — see
+[Issue mentions](/guides/issue-mentions)) is watched for exactly that: if
+the next `seq` seen for an issue isn't one more than the last, the client
+has missed at least one frame, and it resyncs by calling
+`GET /api/v1/crews/{crewId}/issues/{identifier}/events?after_seq=` — the
+same ordered event log `crewship issue events` reads — for whatever it
+missed, instead of staying stale until someone reloads the tab.
+
+## Sub-issues must finish before their parent
+
+An issue with a sub-issue or a plan task that is still live cannot move to
+`DONE` or `REVIEW` — the PATCH is refused with a `409` naming every open
+child. Add `?force=true` to the request (there is no dedicated CLI flag;
+the check lives on the same `PATCH` every status change goes through) to
+close it anyway. Forcing past an open child is recorded like any other
+status change — one more entry on the issue's own activity/event log,
+naming who forced it and which children were still open — not a separate
+approval or a new table. "Live" means not yet `DONE`/`CANCELLED`/
+`DUPLICATE` for a sub-issue, and not yet `COMPLETED`/`FAILED`/`CANCELLED`/
+`SKIPPED` for a plan task; a `FAILED` sub-issue still counts as live on
+purpose, since a failure is not the same thing as the work being finished.
+
 ## The layout
 
 Everything on the surface is a card, including **Run activity** — it used to

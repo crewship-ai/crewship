@@ -780,7 +780,7 @@ func (h *AssignmentHandler) runAssignment(
 	// (assignments.session_id, B1/B3), that session becomes 'active' here.
 	// No-op for a run with no session (a mission task, a root /assign, or
 	// the issue_agent_sessions flag off at dispatch time).
-	activateSessionForAssignment(ctx, h.db, assignmentID)
+	activateSessionForAssignment(ctx, h.db, h.hub, body.WorkspaceID, assignmentID)
 
 	// post_task_delegation: the hand-off itself is done — the assignment
 	// exists, the run record is journaled, and the row now says RUNNING.
@@ -1285,7 +1285,14 @@ func (h *AssignmentHandler) finishAssignment(
 	// completion before this column existed. No-op for a run with no
 	// session, and a no-op if a newer run has already taken over
 	// active_run_id (see that function's CAS guard).
-	settleSessionForAssignment(ctx, h.db, assignmentID, outcome)
+	settleSessionForAssignment(ctx, h.db, h.hub, workspaceID, assignmentID, outcome)
+
+	// B11 (§14.2, #2368): `run.outcome` — the last of the five signals the
+	// board's "moves without refresh" accept line names. Broadcast right
+	// alongside the session settle above: both are decided by this exact
+	// call having won the terminal CAS, and both degrade the same way
+	// (best-effort; a missed frame is stale-until-reload, not incorrect).
+	broadcastRunOutcome(ctx, h.db, h.hub, workspaceID, assignmentID, status, outcome)
 
 	// §12/§9.6 (work package B6, #2349): the ROUTING TABLE decides whether
 	// this outcome reaches the inbox — not a literal `== NEEDS_HUMAN`

@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // activateSessionForAssignment moves assignmentID's session to 'active' and
@@ -58,7 +59,7 @@ import (
 // correctness one (the run itself, and the exclusivity index, do not
 // depend on this write landing). Matches every other post-dispatch side
 // effect in this package (hooks, hub broadcasts).
-func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID string) {
+func activateSessionForAssignment(ctx context.Context, db *sql.DB, hub *ws.Hub, workspaceID, assignmentID string) {
 	var sessionID sql.NullString
 	if err := db.QueryRowContext(ctx,
 		`SELECT session_id FROM assignments WHERE id = ?`, assignmentID,
@@ -66,11 +67,21 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `
+	res, err := db.ExecContext(ctx, `
 		UPDATE issue_agent_sessions
 		   SET state = 'active', active_run_id = ?, last_activity_at = ?, updated_at = ?
 		 WHERE id = ? AND state != 'closed'`,
 		assignmentID, now, now, sessionID.String)
+	if err != nil {
+		return
+	}
+	// B11 (§14.2, #2368): only announce a transition that actually landed —
+	// a closed session (excluded by the WHERE) never moves, and a broadcast
+	// claiming 'active' for a row that stayed 'closed' would be a false
+	// board update, not a stale one.
+	if n, raErr := res.RowsAffected(); raErr == nil && n > 0 {
+		broadcastIssueSessionState(ctx, db, hub, workspaceID, sessionID.String, "active")
+	}
 }
 
 // settleSessionForAssignment moves assignmentID's session off 'active' once
@@ -91,7 +102,7 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 // that has been overtaken is simply a no-op: whichever run's id
 // active_run_id currently holds is the one whose eventual settle gets to
 // write the next transition.
-func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, outcome string) {
+func settleSessionForAssignment(ctx context.Context, db *sql.DB, hub *ws.Hub, workspaceID, assignmentID, outcome string) {
 	var sessionID sql.NullString
 	if err := db.QueryRowContext(ctx,
 		`SELECT session_id FROM assignments WHERE id = ?`, assignmentID,
@@ -100,11 +111,21 @@ func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, o
 	}
 	newState := orchestrator.RouteForOutcome(outcome).SessionState
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = db.ExecContext(ctx, `
+	res, err := db.ExecContext(ctx, `
 		UPDATE issue_agent_sessions
 		   SET state = ?, active_run_id = NULL, last_activity_at = ?, updated_at = ?
 		 WHERE id = ? AND active_run_id = ?`,
 		newState, now, now, sessionID.String, assignmentID)
+	if err != nil {
+		return
+	}
+	// Same "only announce a landed transition" rule as activate above — a
+	// settle overtaken by a newer run's active_run_id (the race this
+	// function's own doc comment names) affects zero rows and must not
+	// broadcast a state the row never actually reached.
+	if n, raErr := res.RowsAffected(); raErr == nil && n > 0 {
+		broadcastIssueSessionState(ctx, db, hub, workspaceID, sessionID.String, newState)
+	}
 }
 
 // ReconcileExpiredEphemeralSessions closes or errors every issue_agent_

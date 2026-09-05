@@ -28,6 +28,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `PATCH` | [`/api/v1/issues/bulk`](#bulk-update) | Bulk-update up to 100 issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/events`](#list-events) | The same log, seq-cursored, for resync after a dropped realtime frame |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/runs`](#list-runs) | List an issue's agent task-runs |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/sessions`](#list-sessions) | List an issue's agent sessions |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints`](#list-checkpoints) | List a session's checkpoints |
@@ -338,12 +339,17 @@ When status changes to `DONE`, `CANCELLED`, or `DUPLICATE`, `completed_at` is au
 
 Significant changes (status, assignee, priority) are logged as activity entries.
 
+<Note>Work package B11 (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §10.4, #2368): the terminal-children rule.</Note>
+
+**The terminal-children rule.** A transition to `DONE` or `REVIEW` is refused with a `409` while the issue has a **non-terminal sub-issue** (`parent_issue_id` pointing at this issue, status not yet `DONE`/`CANCELLED`/`DUPLICATE`) or a **non-terminal plan task** (`mission_tasks` row, status not yet `COMPLETED`/`FAILED`/`CANCELLED`/`SKIPPED`). The `409` body names every blocker. Add `?force=true` to the query string to proceed anyway — the transition then commits and the status-change activity/event entry (both List Activity and [List Events](#list-events)) records `forced: true` and the list of children that were still open, alongside the usual actor fields, as the receipt: no separate approval step, no new table, just the same audit row every other status change writes, with two more facts on it. A `FAILED` sub-issue still counts as a blocker — a failure is not the same thing as the work being finished.
+
 **Response:** `200 OK` -- updated issue object.
 
 | Status | Condition |
 |---|---|
 | `400` | Invalid status transition, no fields to update, `parent_issue_id` equals issue itself, `parent_issue_id`/`routine_id` not in workspace, or `routine_inputs` not valid JSON |
 | `404` | Issue not found |
+| `409` | Transition to `DONE`/`REVIEW` blocked by a non-terminal sub-issue or plan task; retry with `?force=true` |
 
 **WebSocket event:** `issue.updated` on `workspace:{workspaceId}`
 
@@ -674,6 +680,64 @@ notifications are routed from — including the ones an agent produces through
 the internal API. A client that reads the activity list sees the same events
 a Slack/ntfy subscriber does.
 
+### List Events
+
+<Note>Work package B11 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §14.1/§17, #2368). This is the read side of the B1 event log (`mission_activity`, work package B1) — the SAME rows List Activity above returns, ordered by `seq` (not `created_at`) and not capped at 50.</Note>
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/events?workspace_id={workspaceId}&after_seq={n}
+```
+
+Exists for one reason: the realtime allowlist (`hooks/use-realtime.tsx`) only guards which event TYPES a client accepts — it says nothing about whether every frame of an accepted type actually arrived. The server's WebSocket hub sends non-blocking and silently drops a frame when a client's send buffer is full. `issue.delivery.acked` (work package B2) is the one realtime type today whose payload carries a `seq`; a client that notices its next `seq` isn't exactly one more than the last calls this endpoint with `after_seq` set to the last `seq` it has confirmed, and gets back everything in between — instead of staying stale until someone reloads the tab.
+
+<Warning>
+One call is not guaranteed to return the whole gap: a response is capped at 500 rows regardless of how large the range between `after_seq` and the mission's current `seq` is. A caller that needs everything must keep requesting with `after_seq` set to the last row's own `seq` (not the response's `latest_seq`) until the returned `events` is empty or a returned row's `seq` reaches `latest_seq`. `crewship issue events` and the board's client-side gap resync (`hooks/use-issue-event-gap-resync.ts`) both page this way; treating the first page as the whole answer silently drops everything past row 500.
+</Warning>
+
+| Query param | Type | Description |
+|---|---|---|
+| `after_seq` | integer | Only return events with `seq` greater than this. Omitted or `0` returns the full history. Must be a non-negative integer. |
+
+**Response:** `200 OK`
+
+```json
+{
+  "events": [
+    {
+      "id": "act_abc",
+      "mission_id": "issue_123",
+      "seq": 42,
+      "actor_type": "user",
+      "actor_id": "user_456",
+      "actor_name": "John Doe",
+      "action": "status_changed",
+      "details": "TODO -> IN_PROGRESS (forced past 1 open child item(s))",
+      "payload_json": "{\"action\":\"status_changed\",\"from\":\"TODO\",\"to\":\"DONE\",\"forced\":true,\"open_children\":[\"issue ENG-5 (IN_PROGRESS)\"]}",
+      "source_kind": null,
+      "source_id": null,
+      "created_at": "2024-01-15T10:00:00Z"
+    }
+  ],
+  "after_seq": 41,
+  "latest_seq": 42
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `events` | array | The page, ordered oldest-first, `seq > after_seq`. Capped at 500 rows. |
+| `after_seq` | integer | Echoes the request's cursor. |
+| `latest_seq` | integer | The issue's current high-water mark — lets a caller with an empty `events` array tell "caught up" from "server has never heard of this issue". |
+
+`payload_json` carries the same `action`/`from`/`to` shape the journal entry gets, plus `forced`/`open_children` on a status change that bypassed [the terminal-children rule](#update-issue) with `?force=true` — the receipt naming which children were still open. It is `null` on a row from before this column existed.
+
+**Auth:** any authenticated workspace member (`read`).
+
+| Status | Condition |
+|---|---|
+| `400` | `after_seq` is not a non-negative integer |
+| `404` | Issue not found in the supplied crew + workspace |
+
 ---
 
 ## Runs
@@ -801,6 +865,8 @@ part of this PR.
 
 For a session-bearing assignment, `NEEDS_HUMAN` also moves the issue's session to `awaiting_input` (see Sessions, below) — the transition that needed this column to exist before it could be reached at all.
 
+**WebSocket event:** `run.outcome` on `workspace:{workspaceId}` — `{mission_id, identifier, assignment_id, status, outcome}` (work package B11, #2368). Fired once the outcome above is decided, for a run attributed to an issue; not fired for a run with no `mission_id` (a root `/assign`).
+
 ---
 
 ## Sessions
@@ -808,6 +874,8 @@ For a session-bearing assignment, `NEEDS_HUMAN` also moves the issue's session t
 <Note>Session lifecycle: `issue_agent_sessions` is work package B1 (event log + session foundations) of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md`), extended by B3 (#2339, the run-admission guarantee: at most one `assignments` row may be `PENDING`/`QUEUED`/`RUNNING` for a given session at a time, a partial unique index rather than a read-then-write check), B4 (#2343) and B6 (#2349, the `outcome` contract): `state` genuinely moves with its runs — `pending → active` when a run wins the admission CAS, then, once that run settles, resolved through its `outcome` — `active → idle` for `NO_CHANGE`/`SUCCEEDED`/`WORK_CREATED`/`PARTIAL`/`CANCELLED`, `active → error` for `FAILED`, and `active → awaiting_input` for `NEEDS_HUMAN` (the transition B4 could not reach until `outcome` existed) — with `active_run_id` populated for as long as a run is live, cleared once it settles. What is still NOT wired: the 14-day `idle → stale` sweep. An ephemeral agent that expires mid-session is reconciled onto `error` (was active) or `closed` (otherwise) rather than left rendered `active` over a ghost.</Note>
 
 The durable, per-(issue, agent) cursor a mention resolves or creates. `UNIQUE(mission_id, agent_id)` on the underlying table means mentioning the same agent on the same issue twice never creates a second session — the second mention finds and reuses the first's row. `UNIQUE` on `assignments.session_id` (partial, live statuses only) means a session backs at most one live run: a mention that lands while the session's run is already going does not start a second one — its delivery is left unclaimed and is folded into exactly one new run once the live one finishes, rather than being marked seen by a run that never read it. See `docs/guides/issue-mentions.mdx`'s "Known limits in 1.0" for the full account.
+
+**WebSocket event:** `issue.session.state` on `workspace:{workspaceId}` — `{mission_id, identifier, session_id, agent_id, state}` (work package B11, #2368). Fired on every landed transition above; not fired for a transition the row's own guard refused (e.g. activating a `closed` session).
 
 ### List Sessions
 
@@ -868,6 +936,8 @@ GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints?
 ```
 
 Lists every `agent_session_checkpoints` row for one session, newest-first — the session's full resumable history, not just its current cursor (`GET .../sessions` already reports `last_consumed_seq`).
+
+**WebSocket event:** `issue.checkpoint.written` on `workspace:{workspaceId}` — `{mission_id, identifier, session_id, agent_id}` (work package B11, #2368). Fired when a new row lands here, so an open session panel can refresh without polling.
 
 **Request:** `crewId`, `identifier` and `sessionId` are required path parameters; `workspace_id` selects the workspace. `sessionId` must belong to the named issue, or the request 404s. No request body.
 
