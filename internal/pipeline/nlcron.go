@@ -180,7 +180,10 @@ func NextOccurrences(cronExpr, timezone string, n int, from time.Time) ([]time.T
 		n = MaxNextOccurrences
 	}
 	t := from.In(loc)
-	out := make([]time.Time, 0, n)
+	// Grown by append rather than pre-sized: the capacity must not be a
+	// function of the caller's n at all (CodeQL go/uncontrolled-allocation-size
+	// still flagged the clamped make; n is bounded above anyway).
+	var out []time.Time
 	for i := 0; i < n; i++ {
 		t = sched.Next(t)
 		out = append(out, t)
