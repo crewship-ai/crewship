@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -105,14 +106,19 @@ type RunRecord struct {
 	ErrorMessage     string
 	FailedAtStep     string
 	ErrorFingerprint string
-	InvokingCrewID   string
-	InvokingAgentID  string
-	InvokingUserID   string
-	TriggeredVia     TriggeredVia
-	TriggeredByID    string
-	IdempotencyKey   string
-	InputsJSON       string
-	ConcurrencyKey   string
+	// Outcome is the §9.6 routing decision (work package B6, #2349) —
+	// NO_CHANGE | SUCCEEDED | WORK_CREATED | PARTIAL | NEEDS_HUMAN | FAILED
+	// | CANCELLED, set once by MarkTerminal via orchestrator.DeriveOutcome
+	// and never touched again. Empty on a run that predates this column.
+	Outcome         string
+	InvokingCrewID  string
+	InvokingAgentID string
+	InvokingUserID  string
+	TriggeredVia    TriggeredVia
+	TriggeredByID   string
+	IdempotencyKey  string
+	InputsJSON      string
+	ConcurrencyKey  string
 	// MetadataJSON is a typed scratchpad threaded through the run
 	// (trigger.dev parity). Defaults to "{}"; readable from steps as
 	// {{ run.metadata.X }}.
@@ -486,6 +492,40 @@ type MarkTerminalInput struct {
 	EndedAt      time.Time
 }
 
+// deriveRunOutcome computes the §9.6 outcome for a terminal pipeline run
+// (work package B6, #2349) — the same orchestrator.DeriveOutcome
+// finishAssignment uses for assignments, so the two run tables share one
+// routing decision rather than each growing its own. Output is the run's
+// final output text; ReportedOutcome looks for either existing structured
+// hand-off shape in it (CHECKPOINT or HANDOFF) — a routine's agent_run step
+// can carry either, if its prompt asks for one. errorMessage is returned
+// updated: a run that ended cleanly (no error) but reported no valid
+// outcome gets ReasonNoOutcomeReported written into it, exactly as
+// finishAssignment does for assignments — reusing the existing column
+// rather than adding a dedicated outcome_reason one (§9.4/§9.6). A run
+// that already has a real error message is never overwritten.
+func deriveRunOutcome(status RunStatus, output, errorMessage string) (outcome, resolvedErrorMessage string) {
+	if status == RunStatusDryRunOK {
+		// A dry run is, by definition, one that made no real change — the
+		// closest of the seven values to what actually happened, and
+		// exempt from the "no outcome reported" default: nobody asks a
+		// dry-run tool call to self-report a routing decision.
+		return orchestrator.OutcomeNoChange, errorMessage
+	}
+	technical := "completed"
+	switch status {
+	case RunStatusFailed, RunStatusInterrupted:
+		technical = "failed"
+	case RunStatusCancelled:
+		technical = "cancelled"
+	}
+	outcome, reason := orchestrator.DeriveOutcome(technical, orchestrator.ReportedOutcome(output))
+	if reason != "" && errorMessage == "" {
+		errorMessage = reason
+	}
+	return outcome, errorMessage
+}
+
 // MarkTerminal commits the final state. Validates the status is
 // actually terminal so a programmer can't accidentally pass "running".
 func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error {
@@ -501,6 +541,14 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	// like failures and bulk-replay them. Stable across runs of the same
 	// bug (step id + normalized message), so a fix → bulk replay flow has
 	// a grouping key. NULL for non-failed terminal states.
+	// §9.6 outcome contract (work package B6, #2349): computed from the SAME
+	// inputs this write already commits (status, output, and whatever
+	// error_message the caller passed in) so the outcome landing here can
+	// never disagree with the row it lands on. May rewrite ErrorMessage —
+	// see deriveRunOutcome's doc comment for when and why.
+	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage)
+	in.ErrorMessage = resolvedErrorMessage
+
 	var fp any
 	if in.Status == RunStatusFailed {
 		fp = ErrorFingerprint(in.FailedAtStep, in.ErrorMessage)
@@ -510,11 +558,12 @@ UPDATE pipeline_runs
 SET status = ?, output = ?, error_message = ?, failed_at_step = ?,
     error_fingerprint = ?,
     cost_usd = ?, duration_ms = ?, ended_at = ?,
+    outcome = ?,
     updated_at = datetime('now','subsec')
 WHERE id = ?`,
 		string(in.Status), nullableStr(in.Output), nullableStr(in.ErrorMessage), nullableStr(in.FailedAtStep),
 		fp,
-		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), in.RunID)
+		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), outcome, in.RunID)
 	if err != nil {
 		return err
 	}
@@ -525,6 +574,14 @@ WHERE id = ?`,
 	// must not affect the run.
 	if s.terminalNotifier != nil && (in.Status == RunStatusCompleted || in.Status == RunStatusFailed) {
 		s.terminalNotifier(ctx, in.RunID, in.Status)
+	}
+	// §12/§9.6 (work package B6, #2349): NEEDS_HUMAN is the only outcome
+	// that reaches the inbox — same routing table finishAssignment uses for
+	// assignments (orchestrator.RouteForOutcome), applied to the OTHER run
+	// table §9.6 names. Best-effort: a run's terminal write must land
+	// regardless of whether the inbox projection does.
+	if orchestrator.RouteForOutcome(outcome).CreatesInboxItem {
+		s.createOutcomeInboxItem(ctx, in.RunID, in.ErrorMessage)
 	}
 	return nil
 }
@@ -669,13 +726,20 @@ func (s *RunStore) MarkInterrupted(ctx context.Context, runID, reason string) er
 	if reason == "" {
 		reason = "process restarted with run in flight"
 	}
+	// outcome (§9.6, work package B6, #2349): an interrupted run never gets a
+	// chance to report one — the process that would have run its agent step
+	// and parsed a hand-off is gone — so it goes straight to FAILED rather
+	// than through DeriveOutcome's "no outcome reported" default, which
+	// exists for a run that COMPLETED without saying anything, not one the
+	// server itself declared abandoned.
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = 'interrupted',
     ended_at = COALESCE(ended_at, datetime('now','subsec')),
     error_message = ?,
+    outcome = COALESCE(outcome, ?),
     updated_at = datetime('now','subsec')
-WHERE id = ? AND status IN ('queued','running','waiting')`, reason, runID)
+WHERE id = ? AND status IN ('queued','running','waiting')`, reason, orchestrator.OutcomeFailed, runID)
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: mark interrupted: %w", err)
 	}
@@ -731,8 +795,9 @@ UPDATE pipeline_runs
 SET status = 'interrupted',
     ended_at = COALESCE(ended_at, datetime('now','subsec')),
     error_message = COALESCE(NULLIF(error_message, ''), 'process restarted with run in flight'),
+    outcome = COALESCE(outcome, ?),
     updated_at = datetime('now','subsec')
-WHERE status IN ('queued','running')`)
+WHERE status IN ('queued','running')`, orchestrator.OutcomeFailed)
 	if err != nil {
 		return 0, fmt.Errorf("pipeline_runs: recover: %w", err)
 	}
@@ -782,7 +847,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
        COALESCE(warnings_json,'[]'),
        COALESCE(chain_depth,0), COALESCE(chain_origin,''),
-       created_at, updated_at
+       created_at, updated_at, COALESCE(outcome,'')
 FROM pipeline_runs`
 
 // scanRunRow is the row-scanner contract — both sql.Row and sql.Rows
@@ -813,7 +878,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,
 		&r.WarningsJSON,
 		&r.ChainDepth, &r.ChainOrigin,
-		&createdAt, &updatedAt,
+		&createdAt, &updatedAt, &r.Outcome,
 	); err != nil {
 		return nil, err
 	}

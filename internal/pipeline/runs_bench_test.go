@@ -52,6 +52,7 @@ CREATE TABLE pipeline_runs (
     warnings_json       TEXT NOT NULL DEFAULT '[]',
     chain_depth         INTEGER NOT NULL DEFAULT 0,
     chain_origin        TEXT,
+    outcome             TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
