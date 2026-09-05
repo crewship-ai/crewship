@@ -447,11 +447,16 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// through to this table so the bell + /inbox page render from
 	// one query instead of fanning out to four.
 	ih := NewInboxHandler(r.db, r.logger, r.hub)
+	ih.SetJournal(r.Journal())
 	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/inbox", authed(wsCtx(http.HandlerFunc(ih.List))))
 	r.mux.Handle("GET /api/v1/inbox/count", authed(wsCtx(http.HandlerFunc(ih.UnreadCount))))
 	r.mux.Handle("GET /api/v1/inbox/{id}", authed(wsCtx(http.HandlerFunc(ih.Get))))
 	r.authedMut("PATCH", "/api/v1/inbox/{id}", roleSelf, ih.PatchState)
+	// Acting on a run_needs_human card (B15, #2389): answer resumes the
+	// run through the mention dispatcher wired below; take_over/dismiss
+	// settle the session. Same visibility as PATCH.
+	r.authedMut("POST", "/api/v1/inbox/{id}/act", roleSelf, ih.Act)
 	// Bulk state transition — the tree-grouped UI's "resolve all under
 	// this routine / crew" action. POST so the body can carry the id list.
 	r.authedMut("POST", "/api/v1/inbox/bulk", roleSelf, ih.BulkPatchState)
@@ -820,6 +825,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// the SAME AssignmentHandler /assign uses — that is what makes a mention
 	// inherit the delegation caps rather than acquire a second, weaker set.
 	issues.SetMentionDispatcher(assign)
+	ih.SetMentionDispatcher(assign)
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
 		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine

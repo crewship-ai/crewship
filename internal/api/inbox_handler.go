@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -28,6 +29,12 @@ type InboxHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 	hub    *ws.Hub
+
+	// mentionDispatch and journal serve Act (inbox_act.go, B15): an answer
+	// on a run_needs_human card resumes the run through the same door an
+	// @mention uses, and the receipt event is mirrored into the journal.
+	mentionDispatch mentionDispatcher
+	journal         journal.Emitter
 }
 
 // inboxVisibilityClause restricts inbox results to items targeted at

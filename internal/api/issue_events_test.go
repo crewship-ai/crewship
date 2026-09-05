@@ -210,6 +210,7 @@ func TestJournalTypeForIssueAction(t *testing.T) {
 		actionAttachmentRemoved:      journal.EntryMissionStatus,
 		actionCodeLinkAdded:          journal.EntryMissionStatus,
 		actionCodeLinkRemoved:        journal.EntryMissionStatus,
+		actionInboxActed:             journal.EntryMissionStatus,
 	}
 	for _, a := range knownIssueActions {
 		exp, ok := want[a]

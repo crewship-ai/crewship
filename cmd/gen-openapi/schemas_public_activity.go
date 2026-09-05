@@ -143,10 +143,24 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"POST /api/v1/conversations/search": {Request: conversationSearch, Response: object(map[string]any{"hits": array(searchHit), "query": str(), "count": integer(), "scope": str()})},
 	}
 	inbox := map[string]DomainSchema{
-		"GET /api/v1/inbox":                  {Response: object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()})},
-		"GET /api/v1/inbox/count":            {Response: object(map[string]any{"unread_count": integer()})},
-		"GET /api/v1/inbox/{id}":             {Response: inboxItem},
-		"PATCH /api/v1/inbox/{id}":           {Request: inboxPatch, Response: object(map[string]any{"id": str(), "state": str()})},
+		"GET /api/v1/inbox":        {Response: object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer()})},
+		"GET /api/v1/inbox/count":  {Response: object(map[string]any{"unread_count": integer()})},
+		"GET /api/v1/inbox/{id}":   {Response: inboxItem},
+		"PATCH /api/v1/inbox/{id}": {Request: inboxPatch, Response: object(map[string]any{"id": str(), "state": str()})},
+		// B15 (#2389): acting on a run_needs_human card. The receipt is what
+		// the issue's inbox_acted event and the card's payload.receipt carry.
+		"POST /api/v1/inbox/{id}/act": {
+			Request: object(map[string]any{"action": str(), "input": str()}),
+			Response: object(map[string]any{
+				"id": str(), "state": str(), "action": str(),
+				"receipt": object(map[string]any{
+					"action": str(), "acted_by": str(), "acted_at": str(), "inbox_item_id": str(),
+					"session_id": str(), "agent_version": nullable(integer()), "source_run_id": str(),
+					"comment_id": str(), "delivery_id": str(), "run_id": str(), "dispatch_state": str(),
+					"event_id": str(), "seq": integer(),
+				}),
+			}),
+		},
 		"POST /api/v1/inbox/bulk":            {Request: inboxBulk, Response: anyObject()},
 		"DELETE /api/v1/inbox":               {Response: object(map[string]any{"deleted": integer()})},
 		"GET /api/v1/agents/{agentId}/inbox": {Response: object(map[string]any{"approvals_pending": integer(), "assignments_open": integer(), "escalations_open": integer(), "peer_messages": array(anyObject()), "cost_usd_this_month": map[string]any{"type": "number"}, "llm_calls_this_month": integer(), "tokens_used_this_month": integer()})},

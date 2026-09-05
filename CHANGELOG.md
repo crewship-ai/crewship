@@ -30,6 +30,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 -->
 
 ### Added
+- **Acting on a NEEDS_HUMAN inbox card resumes the run (#2389, PRD §18 scenario 15).** `POST /api/v1/inbox/{id}/act` and `crewship inbox act <id> answer|take_over|dismiss`. `answer --input` posts your text as a comment on the issue and delivers it to the same agent session that asked; the run resumes from its checkpoint with the answer as its next delivery (one delivery, one run — queued if the session is mid-run). `take_over` and `dismiss` move the session to idle. Every action leaves an `inbox_acted` receipt on the issue's event log (who, action, the session's `agent_version`, and the delivery and run an answer produced) and resolves the card in place with the receipt under `payload.receipt` — the same thread, no new card. Acting twice is `409`. The card B6 raises now offers all three actions. Migration: `mission_activity`'s action CHECK admits `inbox_acted`.
 
 - **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#2380).**
   `crewshipd` had no way to compute a p50/p95 anywhere — no Prometheus

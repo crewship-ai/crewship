@@ -30,6 +30,7 @@ the workspace `OWNER` or `ADMIN` role.
 | GET | [`/api/v1/inbox/count`](#get-apiv1inboxcount) | Unread count for the bell badge |
 | GET | [`/api/v1/inbox/{id}`](#get-apiv1inboxid) | Fetch a single item (full body + payload) |
 | PATCH | [`/api/v1/inbox/{id}`](#patch-apiv1inboxid) | Flip an item's state |
+| POST | [`/api/v1/inbox/{id}/act`](#post-apiv1inboxidact) | Act on a `run_needs_human` card: answer (resumes the run), take over, dismiss |
 | POST | [`/api/v1/inbox/bulk`](#post-apiv1inboxbulk) | Apply one state transition to many items in a single request |
 | DELETE | [`/api/v1/inbox`](#delete-apiv1inbox) | Purge items in the workspace (ADMIN only) |
 
@@ -227,6 +228,63 @@ Generic kinds (`message`, `failed_run`) flip freely between all three states.
 
   A refreshed item — one an upsert resurrects to `unread` (e.g. a stale escalation re-raised) — clears **every** caller's per-user read marker along with the shared columns, so it reads as `unread` again for everyone, including users who had read the earlier version.
 </Note>
+
+## Acting on a card
+
+A `run_needs_human` card — raised when a run reports outcome `NEEDS_HUMAN` (work package B6) — carries actions a person can perform. Performing one closes the loop with the session that asked (PRD §18 scenario 15, B15): the run resumes, a receipt is written, and the same card is updated rather than a new one raised.
+
+### `POST /api/v1/inbox/{id}/act`
+
+```json
+{ "action": "answer", "input": "Use the staging bucket, not prod." }
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `action` | `"answer"` \| `"take_over"` \| `"dismiss"` | Required. The kind's closed vocabulary; a card written before B15 offers only `take_over` in its `actions[]` but accepts all three. |
+| `input` | string | Required for `answer`, ignored otherwise. |
+
+What each action does:
+
+- **`answer`** — the input is posted as a comment on the issue, authored by you, and delivered to the **same agent session** that asked (§10.5: "the exact session that asked, never a generic assignment"). It goes through the mention door, so B2's exactly-once delivery and B3's one-turn rule apply: one delivery, one run. The run resumes from its checkpoint with your answer as the next unread delta in its context pack (B5). If the session is mid-run, the delivery queues and is consumed when that run ends.
+- **`take_over`** — you continue the work yourself. The agent's session leaves `awaiting_input` for `idle`.
+- **`dismiss`** — no further work now. Same session transition.
+
+Every action writes a **receipt**: an `inbox_acted` event on the issue's event log (`GET .../events`, seq-ordered) naming who acted, the action, the card, the session's `agent_version` (§11.6 — the `routine_version` analogue for an issue run) and, for an answer, the comment, delivery and run it produced. The card is resolved **in place** — `state: resolved`, `resolved_action: <action>`, and the same receipt merged into `payload.receipt` — so the thread stays one card.
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "ibx_run_needs_human_asg_…",
+  "state": "resolved",
+  "action": "answer",
+  "receipt": {
+    "action": "answer",
+    "acted_by": "usr_…",
+    "acted_at": "2026-09-05T15:40:00Z",
+    "inbox_item_id": "ibx_…",
+    "session_id": "ses_…",
+    "agent_version": 3,
+    "source_run_id": "asg_… (the run that asked)",
+    "comment_id": "cmt_…",
+    "delivery_id": "mcm_…",
+    "run_id": "asg_… (the resumed run)",
+    "dispatch_state": "dispatched",
+    "event_id": "act_…",
+    "seq": 14
+  }
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Unknown action, `answer` without input, invalid body |
+| `401` | No workspace context |
+| `404` | The card is not visible to the caller |
+| `409` | Already acted on (`resolved_action` and `resolved_by_user_id` in the body); the kind has no server-side action (waitpoints and escalations are decided through their source endpoints); the run behind the card is gone; or the answer was recorded as a comment but could not be delivered (`dispatch_state`, `detail`, `comment_id` in the body — the card stays open so you can retry once the cause is fixed) |
+
+CLI: [`crewship inbox act <id> <action> [--input …]`](/cli/inbox#inbox-act).
 
 ## Bulk state transition
 

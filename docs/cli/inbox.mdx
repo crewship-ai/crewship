@@ -26,6 +26,7 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `inbox read <id>` | Mark an item as read. |
 | `inbox unread <id>` | Flip an item back to unread. |
 | `inbox resolve <id>` | Mark resolved, optionally recording the action taken. |
+| `inbox act <id> <action>` | Act on a `run_needs_human` card: `answer` delivers `--input` to the agent's session and resumes the run, `take_over` / `dismiss` settle the session. Writes a receipt, resolves the card in place. |
 | `inbox archive <id>` | Resolve with `resolved_action=archived` (Gmail-style clear without a decision). |
 | `inbox bulk read` | Bulk-mark items as read. |
 | `inbox bulk resolve` | Bulk-mark items as resolved. |
@@ -47,6 +48,20 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--action <enum>` | (unset) | Record what was done: `approved`, `denied`, `retried`, `cancelled`, `acknowledged`, `dismissed`. Stored in `resolved_action` for the audit trail. |
+
+### `inbox act`
+
+```bash
+crewship inbox act <id> answer --input "Use the staging bucket, not prod."
+crewship inbox act <id> take_over
+crewship inbox act <id> dismiss
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--input <text>` | (unset) | The answer to deliver to the agent. Required for `answer`, ignored for the other two. |
+
+`answer` posts the text as your comment on the issue and delivers it to the same agent session that raised the card; the run resumes from its checkpoint with the answer as its next delivery (one delivery, one run — if the session is mid-run the delivery queues until that run ends). `take_over` and `dismiss` move the session from `awaiting_input` to `idle`. Every action leaves an `inbox_acted` receipt on the issue's event log (`crewship issue events <id>`) naming who acted, the action, the session's `agent_version` and, for an answer, the delivery and run it produced, and resolves the card in place with the same receipt under `payload.receipt`. Acting twice is refused (`409 already acted on`); waitpoints and escalations are decided through their own commands, not here.
 
 ### `inbox bulk read`
 
