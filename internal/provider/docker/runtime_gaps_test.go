@@ -117,3 +117,77 @@ func TestGapJSONFieldNames(t *testing.T) {
 		t.Errorf(`gap["detail"] = %q, want the consequence spelled out`, detail)
 	}
 }
+
+// The registry and the conformance harness used to contradict each other. The
+// registry recorded that podman below 5 cannot carry a bare numeric GID and
+// that upgrading is the only remedy; the harness failed the nightly build over
+// that same GID on a runner where it could not be otherwise. "Runtime
+// Conformance" was red for days saying something the repo already knew and had
+// written down. ClassifyConformance is the join that was missing.
+func TestClassifyConformance(t *testing.T) {
+	t.Parallel()
+
+	podman4 := KnownRuntimeGaps(DetectResult{Runtime: "podman", Version: "4.9.3"})
+	if len(podman4) == 0 {
+		t.Fatal("fixture precondition: podman 4.9.3 must report a gap")
+	}
+
+	for _, tc := range []struct {
+		name     string
+		control  string
+		honoured bool
+		gaps     []Gap
+		want     ConformanceVerdict
+		wantGap  bool
+	}{
+		{
+			name: "documented gap is expected, not a failure",
+			// The whole point: this is the exact podman 4.9.3 GroupAdd case
+			// that reddened the nightly job.
+			control: "GroupAdd", honoured: false, gaps: podman4,
+			want: ConformanceKnownGap, wantGap: true,
+		},
+		{
+			name:    "an undocumented drop is still a regression",
+			control: "PidsLimit", honoured: false, gaps: podman4,
+			want: ConformanceRegression,
+		},
+		{
+			name:    "a control nobody tracks is judged on the measurement alone",
+			control: "", honoured: false, gaps: podman4,
+			want: ConformanceRegression,
+		},
+		{
+			name:    "honoured and untracked is simply honoured",
+			control: "GroupAdd", honoured: true, gaps: nil,
+			want: ConformanceHonoured,
+		},
+		{
+			// A registry entry that outlived the defect is not harmless: it
+			// feeds doctor and /system/runtime, so it tells operators their
+			// agents cannot read memory when they can.
+			name:    "honoured despite a recorded gap means the registry is stale",
+			control: "GroupAdd", honoured: true, gaps: podman4,
+			want: ConformanceStaleGap, wantGap: true,
+		},
+		{
+			name:    "control matching ignores case and surrounding space",
+			control: " groupadd ", honoured: false, gaps: podman4,
+			want: ConformanceKnownGap, wantGap: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, gap := ClassifyConformance(tc.control, tc.honoured, tc.gaps)
+			if got != tc.want {
+				t.Errorf("ClassifyConformance(%q, %v) = %q, want %q", tc.control, tc.honoured, got, tc.want)
+			}
+			if tc.wantGap && gap.Control == "" {
+				t.Error("no Gap returned; the caller cannot print the operator-facing detail")
+			}
+			if !tc.wantGap && gap.Control != "" {
+				t.Errorf("unexpected Gap returned: %+v", gap)
+			}
+		})
+	}
+}
