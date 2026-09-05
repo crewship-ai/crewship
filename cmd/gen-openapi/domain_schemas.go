@@ -48,6 +48,9 @@ func executionSchemaComponents() map[string]any {
 		"idempotency_key": str(), "inputs": anyMap, "issue_identifier": str(), "metadata": anyMap,
 		"is_replay": boolean(), "replay_of": str(), "tags": arr(str()), "warnings": arr(refOrString("RunWarning")),
 		"sub_spans": map[string]any{"type": "object", "additionalProperties": arr(refOrString("AgentSubSpan"))},
+		// outcome (§9.6, work package B6, #2349) — the routing decision, empty
+		// for a non-terminal run or one that predates the column.
+		"outcome": str(),
 	})
 	runRecord := obj(map[string]any{
 		"id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "mode": str(),
@@ -60,6 +63,10 @@ func executionSchemaComponents() map[string]any {
 		// both arrive with triggered_via="schedule".
 		"chain_depth": integer(), "chain_origin": str(),
 		"automation_id": str(), "automation_name": str(), "trigger_event_type": str(),
+		// outcome (§9.6, work package B6, #2349) — NO_CHANGE | SUCCEEDED |
+		// WORK_CREATED | PARTIAL | NEEDS_HUMAN | FAILED | CANCELLED, empty
+		// for a non-terminal run or one that predates the column.
+		"outcome": str(),
 	})
 	schedule := obj(map[string]any{
 		"id": str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(), "target_pipeline_slug": str(),

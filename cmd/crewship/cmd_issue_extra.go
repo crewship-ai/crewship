@@ -478,6 +478,9 @@ var issueRunsCmd = &cobra.Command{
 			// "delegation" (a sub-agent's own further /assign call).
 			MissionID *string `json:"mission_id,omitempty"`
 			Source    string  `json:"source,omitempty"`
+			// Outcome is the §9.6 routing decision (work package B6, #2349) —
+			// empty on a run that predates the column.
+			Outcome string `json:"outcome,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
@@ -487,7 +490,7 @@ var issueRunsCmd = &cobra.Command{
 		defer printListFooter(f, meta, len(runs))
 		// RUN is the journal run id — what `crewship journal --run-id` and
 		// `/activity?run=` take. "—" means the assignment never reached a run.
-		headers := []string{"RUN", "AGENT", "TASK", "STATUS", "STARTED", "DURATION", "SOURCE", "RESULT"}
+		headers := []string{"RUN", "AGENT", "TASK", "STATUS", "OUTCOME", "STARTED", "DURATION", "SOURCE", "RESULT"}
 		rows := make([][]string, 0, len(runs))
 		for _, run := range runs {
 			result := run.ErrorMessage
@@ -502,6 +505,10 @@ var issueRunsCmd = &cobra.Command{
 			if source == "" {
 				source = "-"
 			}
+			outcome := run.Outcome
+			if outcome == "" {
+				outcome = "-"
+			}
 			runID := run.RunID
 			if runID == "" {
 				runID = "—"
@@ -515,6 +522,7 @@ var issueRunsCmd = &cobra.Command{
 				agent,
 				truncateStr(run.Task, 28),
 				run.Status,
+				outcome,
 				issueRelativeTime(run.StartedAt),
 				dur,
 				source,

@@ -53,6 +53,12 @@ type issueRunDTO struct {
 	// a.mission_id, a sub-agent's own /assign call mid-mission. Always one
 	// of the three; never empty.
 	Source string `json:"source,omitempty"`
+	// Outcome is the §9.6 routing decision (work package B6, #2349) —
+	// NO_CHANGE | SUCCEEDED | WORK_CREATED | PARTIAL | NEEDS_HUMAN | FAILED
+	// | CANCELLED. Empty on a run that predates the outcome column;
+	// finishAssignment writes one on every run that reaches it going
+	// forward, defaulting to FAILED when the agent reported none.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // parseRunTime accepts the timestamp shapes the engine + SQLite defaults
@@ -155,6 +161,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		SELECT DISTINCT a.id, a.status, a.started_at, a.finished_at, a.result_summary,
 		       a.error_message, a.task,
 		       COALESCE(ag.name, ''), COALESCE(ag.id, ''), COALESCE(ag.slug, ''), a.mission_id,
+		       COALESCE(a.outcome, ''),
 		       CASE
 		         WHEN EXISTS (SELECT 1 FROM mission_tasks mt
 		                      WHERE mt.assignment_id = a.id AND mt.mission_id = ?) THEN 'task'
@@ -187,7 +194,8 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		)
 		var sortKey sql.NullString
 		if err := rows.Scan(&dto.ID, &dto.Status, &started, &finished, &result,
-			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &missionIDCol, &dto.Source, &runID, &sortKey); err != nil {
+			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &missionIDCol,
+			&dto.Outcome, &dto.Source, &runID, &sortKey); err != nil {
 			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}

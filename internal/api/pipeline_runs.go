@@ -153,6 +153,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		metadataJSON, replayOf                           sql.NullString
 		isReplay                                         int64
 		warningsJSON                                     sql.NullString
+		outcome                                          sql.NullString
 	)
 	// Same LEFT JOIN as ListWorkspaceRuns so /pipeline-runs/{id}
 	// returns the human pipeline name + issue identifier without
@@ -170,7 +171,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		       r.cost_usd, r.duration_ms,
 		       r.triggered_via, r.triggered_by_id, r.idempotency_key, r.inputs_json,
 		       r.metadata_json, r.is_replay, r.replay_of, r.warnings_json,
-		       p.name, m.identifier
+		       p.name, m.identifier, r.outcome
 		FROM pipeline_runs r
 		LEFT JOIN pipelines p ON r.pipeline_id = p.id
 		                     AND p.workspace_id = r.workspace_id
@@ -187,7 +188,7 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		&costUSD, &durationMs,
 		&triggeredVia, &triggeredByID, &idempotencyKey, &inputsJSON,
 		&metadataJSON, &isReplay, &replayOf, &warningsJSON,
-		&pipelineName, &issueIdentifier,
+		&pipelineName, &issueIdentifier, &outcome,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "run not found")
@@ -240,22 +241,25 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := map[string]interface{}{
-		"id":               id,
-		"workspace_id":     wsID,
-		"pipeline_id":      pipelineID,
-		"pipeline_slug":    pipelineSlug,
-		"pipeline_name":    pipelineName.String,
-		"status":           status,
-		"mode":             mode,
-		"current_step_id":  currentStepID.String,
-		"step_outputs":     stepOutputs,
-		"output":           output.String,
-		"started_at":       startedAt,
-		"ended_at":         endedAt.String,
-		"error_message":    errorMessage.String,
-		"failed_at_step":   failedAtStep.String,
-		"cost_usd":         costUSD,
-		"duration_ms":      durationMs,
+		"id":              id,
+		"workspace_id":    wsID,
+		"pipeline_id":     pipelineID,
+		"pipeline_slug":   pipelineSlug,
+		"pipeline_name":   pipelineName.String,
+		"status":          status,
+		"mode":            mode,
+		"current_step_id": currentStepID.String,
+		"step_outputs":    stepOutputs,
+		"output":          output.String,
+		"started_at":      startedAt,
+		"ended_at":        endedAt.String,
+		"error_message":   errorMessage.String,
+		"failed_at_step":  failedAtStep.String,
+		"cost_usd":        costUSD,
+		"duration_ms":     durationMs,
+		// outcome is the §9.6 routing decision (work package B6, #2349) —
+		// empty for a non-terminal run, or one that predates the column.
+		"outcome":          outcome.String,
 		"triggered_via":    triggeredVia.String,
 		"triggered_by_id":  triggeredByID.String,
 		"idempotency_key":  idempotencyKey.String,

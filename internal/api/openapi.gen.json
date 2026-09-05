@@ -8160,6 +8160,9 @@
           "mode": {
             "type": "string"
           },
+          "outcome": {
+            "type": "string"
+          },
           "output": {
             "type": "string"
           },
@@ -10645,6 +10648,9 @@
             "type": "string"
           },
           "mode": {
+            "type": "string"
+          },
+          "outcome": {
             "type": "string"
           },
           "output": {
@@ -48732,6 +48738,9 @@
                       },
                       "mission_id": {
                         "nullable": true,
+                        "type": "string"
+                      },
+                      "outcome": {
                         "type": "string"
                       },
                       "result_summary": {
