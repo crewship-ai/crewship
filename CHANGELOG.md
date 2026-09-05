@@ -31,7 +31,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
-- **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#TBD).**
+- **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#2380).**
   `crewshipd` had no way to compute a p50/p95 anywhere — no Prometheus
   client, no histograms, and SQLite has no `PERCENTILE_CONT` (F39). New
   collectors in `internal/server/metrics_domain.go` answer the delivery,
