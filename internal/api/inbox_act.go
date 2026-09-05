@@ -272,6 +272,18 @@ func (h *InboxHandler) Act(w http.ResponseWriter, r *http.Request) {
 	// The card is resolved IN PLACE with the receipt on it: the same thread
 	// the condition was raised in, not a new card.
 	if err := h.resolveCardWithReceipt(r.Context(), id, user.ID, body.Action, payloadJSON, receipt); err != nil {
+		if errors.Is(err, errInboxCardActedConcurrently) {
+			// Two people acted at once: both passed the open-card check, the
+			// other's resolve landed first. What this request did (a comment
+			// and a delivery, for an answer) is real and on the log; the
+			// second answer queues behind the first run under B3's one-turn
+			// rule rather than racing it. Say so instead of a bare 500.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":   "someone else acted on this card at the same time; your action ran but the card carries theirs",
+				"receipt": receipt,
+			})
+			return
+		}
 		h.logger.Error("inbox act: resolve card", "error", err, "id", id)
 		replyError(w, http.StatusInternalServerError, "acted, but the card could not be updated")
 		return
@@ -310,7 +322,9 @@ func (h *InboxHandler) resolveCardWithReceipt(ctx context.Context, id, userID, a
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return errors.New("card was resolved concurrently")
+		return errInboxCardActedConcurrently
 	}
 	return nil
 }
+
+var errInboxCardActedConcurrently = errors.New("inbox card was resolved concurrently")
