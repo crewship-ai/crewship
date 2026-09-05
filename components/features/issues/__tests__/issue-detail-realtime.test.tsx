@@ -174,3 +174,103 @@ describe("IssueDetailSurface — an agent's write reaches the open tab", () => {
     await waitFor(() => expect(calls.issue).toBeGreaterThan(before))
   })
 })
+
+// B11 (§14.2/§17, #2368): `issue.session.state` and `run.outcome` are new
+// board/detail signals — neither existed before this PR, so nothing
+// subscribed and nothing repainted on them. Per §24.1's own warning ("a
+// test asserting a component SUBSCRIBES is not proof anything repaints"),
+// this drives the SAME real-frame-then-DOM-assertion shape as the
+// `issue.updated`/`mission.updated` tests above: the Runs card's STATUS
+// pill is existing, already-rendered UI (issue-runs-card.tsx) that reads
+// off `fetchSubResources`' own `runs` state — exactly what `run.outcome`
+// is supposed to keep fresh without a reload.
+function liveFetchWithRun(initialStatus: string) {
+  const server = { title: "As the reader left it", runStatus: initialStatus }
+  const calls = { issue: 0, runs: 0 }
+
+  global.fetch = vi.fn((url: string) => {
+    const u = String(url)
+    if (/\/api\/v1\/issues\/[A-Z]+-\d+\?/.test(u)) {
+      calls.issue++
+      return Promise.resolve(
+        ok({
+          id: "id-ENG-1",
+          identifier: "ENG-1",
+          title: server.title,
+          description: "",
+          status: "IN_PROGRESS",
+          crew_id: "crew-1",
+          created_at: "2026-08-01T12:00:00Z",
+          updated_at: "2026-08-01T12:00:00Z",
+          labels: [],
+        }),
+      )
+    }
+    if (/\/issues\/ENG-1\/runs\?/.test(u)) {
+      calls.runs++
+      return Promise.resolve(
+        ok([
+          {
+            id: "run-1",
+            status: server.runStatus,
+            agent_name: "Backend Dev",
+            task: "Fix the thing",
+            duration_ms: 0,
+          },
+        ]),
+      )
+    }
+    return Promise.resolve(ok([]))
+  }) as unknown as typeof fetch
+
+  return { server, calls }
+}
+
+describe("IssueDetailSurface — run.outcome and issue.session.state repaint the Runs card", () => {
+  beforeEach(() => {
+    realtime.subs.clear()
+    vi.restoreAllMocks()
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it("subscribes to run.outcome and issue.session.state", async () => {
+    liveFetchWithRun("RUNNING")
+    await openIssue()
+    expect(realtime.subs.has("run.outcome")).toBe(true)
+    expect(realtime.subs.has("issue.session.state")).toBe(true)
+  })
+
+  it("repaints the run's STATUS pill from Running to Done on run.outcome — a REAL frame, not a subscription check", async () => {
+    const { server } = liveFetchWithRun("RUNNING")
+    await openIssue()
+    await waitFor(() => expect(screen.getByText("Running")).toBeInTheDocument())
+
+    // The run finishes server-side. Only the broadcast tells this open tab.
+    server.runStatus = "COMPLETED"
+    emit("run.outcome", { mission_id: "id-ENG-1", assignment_id: "run-1", status: "COMPLETED", outcome: "SUCCEEDED" })
+
+    // formatStatus (lib/format-status.ts) renders COMPLETED as "Done".
+    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument())
+    expect(screen.queryByText("Running")).not.toBeInTheDocument()
+  })
+
+  it("issue.session.state also triggers a sub-resources refetch", async () => {
+    const { calls } = liveFetchWithRun("RUNNING")
+    await openIssue()
+    const before = calls.runs
+
+    emit("issue.session.state", { mission_id: "id-ENG-1", session_id: "s1", agent_id: "a1", state: "active" })
+
+    await waitFor(() => expect(calls.runs).toBeGreaterThan(before))
+  })
+
+  it("ignores run.outcome for a different issue", async () => {
+    const { calls } = liveFetchWithRun("RUNNING")
+    await openIssue()
+    const before = calls.runs
+
+    emit("run.outcome", { mission_id: "id-ENG-9", assignment_id: "run-9", status: "COMPLETED", outcome: "SUCCEEDED" })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(calls.runs).toBe(before)
+  })
+})

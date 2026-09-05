@@ -28,6 +28,7 @@ import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
+import { useIssueEventGapResync } from "@/hooks/use-issue-event-gap-resync"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useAutomations } from "@/hooks/use-automations"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
@@ -311,6 +312,45 @@ export function IssueDetailSurface({
   )
   useRealtimeEvent("issue.updated", onIssueEvent)
   useRealtimeEvent("mission.updated", onIssueEvent)
+
+  // B11 (§14.2/§17, #2368): `issue.session.state` and `run.outcome` —
+  // unlike the two events above, these key their payload on `mission_id`,
+  // not `id` (internal/api/issue_session_realtime.go), so they need their
+  // own filter rather than reusing onIssueEvent's. Sub-resources only
+  // (not fetchIssue): a session/outcome change does not by itself rewrite
+  // any column on `missions` — the Runs card's STATUS pill and a future
+  // session panel read off fetchSubResources' own state, and refetching
+  // the issue on every run tick would be wasted work.
+  const onSessionOrOutcomeEvent = React.useCallback(
+    (event: RealtimeEvent) => {
+      const missionId = (event.payload as { mission_id?: string } | undefined)?.mission_id
+      if (missionId && issue?.id && missionId !== issue.id) return
+      void fetchSubResources()
+    },
+    [fetchSubResources, issue?.id],
+  )
+  useRealtimeEvent("issue.session.state", onSessionOrOutcomeEvent)
+  useRealtimeEvent("run.outcome", onSessionOrOutcomeEvent)
+
+  // F43's client half (§2.6/§14.2/§17, work package B11, #2368): the hub
+  // drops frames silently under load, so registering a type (F32) is not
+  // proof this tab saw every one. A gap in the issue.delivery.acked seq
+  // stream for THIS issue resyncs via GET .../events?after_seq= and — like
+  // the two handlers above — the response is applied as a sub-resources
+  // refetch rather than a hand-rolled merge of the returned rows: this
+  // component's activity feed already reads mission_activity fresh on
+  // every fetchSubResources call, so a resync's job is just "make sure one
+  // happens", not to reconstruct the missed rows itself.
+  useIssueEventGapResync({
+    crewId: crewId ?? null,
+    onResync: React.useCallback(
+      (missionId) => {
+        if (issue?.id && missionId !== issue.id) return
+        void fetchSubResources()
+      },
+      [fetchSubResources, issue?.id],
+    ),
+  })
 
   /* ---------------------------------------------------------------- *
    *  Writes                                                           *
