@@ -581,7 +581,7 @@ WHERE id = ?`,
 	// table §9.6 names. Best-effort: a run's terminal write must land
 	// regardless of whether the inbox projection does.
 	if orchestrator.RouteForOutcome(outcome).CreatesInboxItem {
-		s.createOutcomeInboxItem(ctx, in.RunID, in.ErrorMessage)
+		s.createOutcomeInboxItem(ctx, in.RunID, in.Output)
 	}
 	return nil
 }

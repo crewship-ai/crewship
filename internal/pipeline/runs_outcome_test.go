@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -242,5 +243,16 @@ func TestMarkTerminal_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithActionCont
 	}
 	if payload.Context["issue"] != "ENG-42" {
 		t.Errorf("context.issue = %v, want ENG-42 (from triggered_by_id)", payload.Context["issue"])
+	}
+
+	// The card's body must come from the run's OWN output (the checkpoint's
+	// blockers, here) — not be empty and not be the run's error_message
+	// (empty on this clean-but-blocked completion).
+	var bodyMD string
+	if err := db.QueryRow(`SELECT COALESCE(body_md,'') FROM inbox_items WHERE kind = ? AND source_id = 'run_ibx_needs_human'`, inbox.KindRunNeedsHuman).Scan(&bodyMD); err != nil {
+		t.Fatalf("query body_md: %v", err)
+	}
+	if !strings.Contains(bodyMD, "rate limited by the upstream API") {
+		t.Errorf("body_md = %q, want it to carry the checkpoint's blockers", bodyMD)
 	}
 }

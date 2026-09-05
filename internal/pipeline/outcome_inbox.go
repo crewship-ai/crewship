@@ -24,7 +24,16 @@ import (
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
+
+// outcomeInboxScrubber redacts secrets from the run's own output before it
+// is persisted onto the inbox card's body — §16.1's "Scrub before persist"
+// rule, same instance shape as internal/api's checkpointScrubber /
+// outcomeInboxScrubber: the pattern set is fixed, so one instance is shared
+// process-wide.
+var outcomeInboxScrubber = scrubber.New()
 
 // createOutcomeInboxItem writes the §12 action contract for a pipeline run
 // whose outcome resolved to NEEDS_HUMAN. Exactly one item per run:
@@ -51,13 +60,32 @@ func (s *RunStore) createOutcomeInboxItem(ctx context.Context, runID, output str
 		return
 	}
 
-	reason := output
-	const maxReason = 500
-	if len(reason) > maxReason {
-		reason = reason[:maxReason] + "...(truncated)"
+	// §11.3's checkpoint (blockers, then next_step) or HANDOFF's summary is
+	// the concise signal, when the run's own agent_run step reported one —
+	// mirrors issue_outcome_inbox.go's createOutcomeInboxItem rather than
+	// dumping the run's ENTIRE (potentially large, potentially secret-
+	// bearing) output verbatim onto the card.
+	reason := ""
+	if cp := orchestrator.ParseCheckpoint(output); cp.Parsed {
+		switch {
+		case cp.Blockers != "":
+			reason = cp.Blockers
+		case cp.NextStep != "":
+			reason = cp.NextStep
+		}
+	}
+	if reason == "" {
+		if hd := orchestrator.ParseHandoff(output); hd.Parsed && hd.Summary != "" {
+			reason = hd.Summary
+		}
 	}
 	if reason == "" {
 		reason = "This run stopped and needs a decision, missing input, or a credential to continue."
+	}
+	reason = outcomeInboxScrubber.Scrub(reason)
+	const maxReason = 500
+	if len(reason) > maxReason {
+		reason = reason[:maxReason] + "...(truncated)"
 	}
 
 	contractContext := map[string]any{"run": runID, "routine": pipelineSlug}
