@@ -238,7 +238,7 @@ func TestMissionCaps_CrewBudgetBoundsManySmallMissions(t *testing.T) {
 
 	// A finished mission frees the slot: the budget is on concurrency, not on
 	// lifetime output — same shape as a lead's fan-out in a long chat.
-	if _, err := f.db.Exec(`UPDATE missions SET status='COMPLETED' WHERE title='m1'`); err != nil {
+	if _, err := f.db.Exec(`UPDATE missions SET status='DONE' WHERE title='m1'`); err != nil {
 		t.Fatalf("complete m1: %v", err)
 	}
 	if w := f.createMission(t, "m3", 1, nil); w.Code != http.StatusAccepted {

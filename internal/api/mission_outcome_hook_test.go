@@ -48,7 +48,8 @@ func waitForCrewLesson(t *testing.T, storagePath, crewID, mustContain string) st
 
 // TestMissionUpdate_TerminalTransitionEmitsCrewLesson verifies the
 // end-to-end F4.5 hook: a PATCH that transitions a mission from
-// REVIEW → COMPLETED must
+// REVIEW → DONE (B13 #2370 retired COMPLETED — PRD-ISSUES-AND-ROUTINES-2026
+// §3.1) must
 //
 //   - return HTTP 200 to the operator (status change succeeds even
 //     if the hook were to fail)
@@ -68,7 +69,7 @@ func TestMissionUpdate_TerminalTransitionEmitsCrewLesson(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	// Seed a mission in REVIEW so REVIEW→COMPLETED is a valid transition.
+	// Seed a mission in REVIEW so REVIEW→DONE is a valid transition.
 	if _, err := db.Exec(`INSERT INTO missions
 		(id, workspace_id, crew_id, lead_agent_id, trace_id, title, identifier, status, created_at, updated_at)
 		VALUES ('m_outcome_ok', ?, ?, ?, 'trace_outcome_ok', 'Build feature X', 'ENG-42', 'REVIEW', datetime('now'), datetime('now'))`,
@@ -79,7 +80,7 @@ func TestMissionUpdate_TerminalTransitionEmitsCrewLesson(t *testing.T) {
 	handler := NewMissionHandler(db, nil, nil, logger)
 	handler.SetStoragePath(storagePath)
 
-	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
+	body := bytes.NewBufferString(`{"status":"DONE"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/m_outcome_ok", body)
 	req.SetPathValue("crewId", crewID)
 	req.SetPathValue("missionId", "m_outcome_ok")
@@ -245,6 +246,10 @@ func TestMissionUpdate_UnwiredStoragePath_StillSucceeds(t *testing.T) {
 	// Notice: no SetStoragePath call.
 	handler := NewMissionHandler(db, nil, nil, logger)
 
+	// Legacy "COMPLETED" input doubles this as a B13 (#2370) write-
+	// compatibility check: it must normalize to DONE, not 400 or round-trip
+	// verbatim — see mission_handler_mutate.go and PRD-ISSUES-AND-
+	// ROUTINES-2026 §3.1.
 	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/m_outcome_unwired", body)
 	req.SetPathValue("crewId", crewID)
@@ -262,8 +267,8 @@ func TestMissionUpdate_UnwiredStoragePath_StillSucceeds(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if result["status"] != "COMPLETED" {
-		t.Errorf("status = %v, want COMPLETED", result["status"])
+	if result["status"] != "DONE" {
+		t.Errorf("status = %v, want DONE (legacy COMPLETED input normalized)", result["status"])
 	}
 }
 
@@ -281,7 +286,7 @@ func TestEmitMissionOutcomeLessonAsync_MissingMissionRow(t *testing.T) {
 	// Don't insert any mission row.
 	emitMissionOutcomeLessonAsync(
 		context.Background(), db, storagePath,
-		"ghost_mission_id", "COMPLETED", logger,
+		"ghost_mission_id", "DONE", logger,
 	)
 
 	// Give the goroutine 200ms; nothing should land on disk because

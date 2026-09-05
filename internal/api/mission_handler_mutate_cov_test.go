@@ -262,13 +262,14 @@ func TestCovMMUpdate_TerminalTransitionSetsCompletedAt(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "cov-lead", "LEAD")
-	// REVIEW → COMPLETED is a valid terminal transition; storagePath is unset
+	// REVIEW → DONE is a valid terminal transition; storagePath is unset
 	// so the F4.5 lesson goroutine is a no-op (skipped branch noted at top).
+	// B13 (#2370): DONE, not COMPLETED — PRD-ISSUES-AND-ROUTINES-2026 §3.1.
 	covMMSeedMission(t, db, "cm-done", wsID, crewID, leadID, "REVIEW")
 
 	handler := NewMissionHandler(db, nil, nil, covMMLogger())
 
-	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
+	body := bytes.NewBufferString(`{"status":"DONE"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/cm-done", body)
 	req.SetPathValue("crewId", crewID)
 	req.SetPathValue("missionId", "cm-done")
@@ -289,11 +290,57 @@ func TestCovMMUpdate_TerminalTransitionSetsCompletedAt(t *testing.T) {
 		Scan(&status, &completedAt); err != nil {
 		t.Fatalf("query mission: %v", err)
 	}
-	if status != "COMPLETED" {
-		t.Errorf("status = %q, want COMPLETED", status)
+	if status != "DONE" {
+		t.Errorf("status = %q, want DONE", status)
 	}
 	if !completedAt.Valid || completedAt.String == "" {
 		t.Errorf("completed_at = %v, want a timestamp on terminal transition", completedAt)
+	}
+}
+
+// TestCovMMUpdate_LegacyCompletedAliasNormalizesToDone is the B13 (#2370)
+// write-compatibility pin: a client still sending the retired "COMPLETED"
+// word must not get a 400 — it is normalized to DONE server-side, and DONE
+// (never COMPLETED) is what lands in the row and every read path.
+func TestCovMMUpdate_LegacyCompletedAliasNormalizesToDone(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	crewID := seedMissionCrew(t, db, wsID)
+	leadID := seedMissionAgent(t, db, wsID, crewID, "cov-lead-2", "LEAD")
+	covMMSeedMission(t, db, "cm-legacy", wsID, crewID, leadID, "REVIEW")
+
+	handler := NewMissionHandler(db, nil, nil, covMMLogger())
+
+	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/cm-legacy", body)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("missionId", "cm-legacy")
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "MANAGER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Update(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if result["status"] != "DONE" {
+		t.Errorf("response status = %v, want DONE (normalized from legacy COMPLETED input)", result["status"])
+	}
+
+	var status string
+	if err := db.QueryRow("SELECT status FROM missions WHERE id = 'cm-legacy'").Scan(&status); err != nil {
+		t.Fatalf("query mission: %v", err)
+	}
+	if status != "DONE" {
+		t.Errorf("stored status = %q, want DONE — COMPLETED must never be written again", status)
 	}
 }
 

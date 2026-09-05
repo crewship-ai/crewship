@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-// Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
+// Restart resets a FAILED/CANCELLED/REVIEW/DONE mission: resets non-completed tasks,
 // increments their iteration, and re-starts. Completed tasks stay completed (no re-run).
+// DONE, not COMPLETED — B13 (#2370) retired COMPLETED from missions.status;
+// see internal/statuses/transitions.go.
 func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	if !requireRole(w, r, "create") {
 		return
@@ -25,7 +27,7 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	// Atomic CAS: only restart from terminal states (prevents restarting transient states like RESUMING)
 	res, err := h.db.ExecContext(r.Context(),
 		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL
-		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
+		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('DONE', 'FAILED', 'CANCELLED')`,
 		now, missionID, crewID, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "restart: claim mission", err)

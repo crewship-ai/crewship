@@ -66,7 +66,7 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN (
 		    SELECT milestone_id,
 		           COUNT(*) AS issue_count,
-		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		           SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END) AS done_count
 		    FROM missions WHERE mission_type = 'issue' GROUP BY milestone_id
 		) ic ON ic.milestone_id = m.id
 		WHERE m.project_id = ?
@@ -261,7 +261,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 		SELECT m.id, m.project_id, m.name, m.description, m.target_date,
 		       m.status, m.position, m.created_at, m.updated_at,
 		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue' AND status = 'DONE') AS done_count
 		FROM milestones m
 		WHERE m.id = ?`, milestoneID).Scan(
 		&ms.ID, &ms.ProjectID, &ms.Name, &ms.Description, &ms.TargetDate,

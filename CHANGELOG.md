@@ -155,6 +155,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **`DONE` is now the only word for "finished" on `missions.status`; `COMPLETED` is retired (#2383).**
+  Issues moved to `DONE` while the mission engine's PATCH endpoint moved an
+  orchestrated mission to `COMPLETED` for the identical REVIEW→terminal
+  approval, sharing one column — a decision documented in
+  `docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §3.1/§23 (D20). `PATCH
+  .../missions/{id}` now writes `DONE` for both mission types; a legacy
+  `{"status":"COMPLETED"}` request is still accepted and normalized rather
+  than rejected. A migration backfills every existing `COMPLETED` row to
+  `DONE`, and the eight-plus defensive `status IN ('DONE','COMPLETED')`
+  reads across milestones, projects, and cost metrics collapse to `DONE`
+  alone. Scope is `missions.status` only — `assignments.status` and
+  `pipeline_runs.status` keep `COMPLETED`/`completed` untouched, pinned by
+  a dedicated regression test in each package.
+
 - **The issues board moves without a refresh, resyncs a dropped frame, and a parent waits for its children (#2377).**
   `issue.session.state`, `issue.checkpoint.written` and `run.outcome` are
   now broadcast on the workspace channel (`internal/api/issue_session_realtime.go`)

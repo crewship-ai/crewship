@@ -177,10 +177,14 @@ const missionAuthoredViaAgent = "agent_tool_call"
 //     ones. A status this file has never heard of counts as live, so a new
 //     mission state added elsewhere fails the cap CLOSED rather than silently
 //     leaving the budget.
+//
+// DONE, not COMPLETED — B13 (#2370) retired COMPLETED from missions.status
+// entirely (PRD-ISSUES-AND-ROUTINES-2026 §3.1); DONE is the one terminal
+// word now, for both mission_type='issue' and 'orchestration' rows.
 const missionLiveStatusFilter = `crew_id = ?
 	   AND mission_type = 'orchestration'
 	   AND authored_via = '` + missionAuthoredViaAgent + `'
-	   AND status NOT IN ('COMPLETED','FAILED','CANCELLED','DONE')`
+	   AND status NOT IN ('DONE','FAILED','CANCELLED')`
 
 // missionRefusal is a mission cap saying no, in words the agent can act on and
 // with the setting an operator would change named in the body.

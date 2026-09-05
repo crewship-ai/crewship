@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -163,6 +164,16 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Validate status transition
 	if req.Status != nil {
 		newStatus := *req.Status
+		// B13 (#2370): COMPLETED is retired from missions.status in favor
+		// of DONE (PRD-ISSUES-AND-ROUTINES-2026 §3.1) — the same
+		// REVIEW→terminal approval the issue tracker's Review handler
+		// already spells DONE. A client still sending the old word is
+		// normalized rather than rejected with a 400, so a script or CLI
+		// build that predates this change keeps working; the stored value
+		// and every read path only ever show DONE going forward.
+		if strings.EqualFold(newStatus, "COMPLETED") {
+			newStatus = "DONE"
+		}
 		allowed := validMissionTransitions[currentStatus]
 		valid := false
 		for _, s := range allowed {
@@ -177,7 +188,7 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 
 		completedAt := sql.NullString{}
-		if newStatus == "COMPLETED" || newStatus == "FAILED" || newStatus == "CANCELLED" {
+		if newStatus == "DONE" || newStatus == "FAILED" || newStatus == "CANCELLED" {
 			completedAt = sql.NullString{String: now, Valid: true}
 		}
 

@@ -127,8 +127,9 @@ func TestCovRemMissionMetrics_PopulatedAggregates(t *testing.T) {
 	h, db, userID, wsID, crewID := covRemMissionHandler(t)
 	leadID := "lead-covrem"
 
-	// COMPLETED mission inside the 24h window with created/completed stamps.
-	covRemSeedMission(t, db, "m-done", wsID, crewID, leadID, "COMPLETED")
+	// DONE mission inside the 24h window with created/completed stamps.
+	// B13 (#2370): DONE, not COMPLETED — PRD-ISSUES-AND-ROUTINES-2026 §3.1.
+	covRemSeedMission(t, db, "m-done", wsID, crewID, leadID, "DONE")
 	if _, err := db.Exec(`UPDATE missions SET created_at = datetime('now','-1 hour'), completed_at = datetime('now') WHERE id = 'm-done'`); err != nil {
 		t.Fatalf("stamp completed mission: %v", err)
 	}
@@ -207,7 +208,10 @@ func TestCovRemMissionMetrics_DBError500(t *testing.T) {
 // unblockCompletedDeps with no blocked tasks (engine nil).
 func TestCovRemRestart_CompletedTaskStaysCompleted(t *testing.T) {
 	h, db, userID, wsID, crewID := covRemMissionHandler(t)
-	covRemSeedMission(t, db, "m-r", wsID, crewID, "lead-covrem", "COMPLETED")
+	// B13 (#2370): the mission-level terminal word is DONE, not COMPLETED —
+	// PRD-ISSUES-AND-ROUTINES-2026 §3.1. The mission_tasks-level COMPLETED
+	// below is unaffected (different table, different column).
+	covRemSeedMission(t, db, "m-r", wsID, crewID, "lead-covrem", "DONE")
 	covRemSeedTask(t, db, "t-keep", "m-r", "COMPLETED", 0, "[]")
 	covRemSeedTask(t, db, "t-reset", "m-r", "FAILED", 1, `["t-keep"]`)
 

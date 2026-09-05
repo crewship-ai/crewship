@@ -234,9 +234,20 @@ PATCH /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
 |---|---|
 | `PLANNING` | `IN_PROGRESS`, `CANCELLED` |
 | `IN_PROGRESS` | `REVIEW`, `FAILED`, `CANCELLED` |
-| `REVIEW` | `COMPLETED`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
+| `REVIEW` | `DONE`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
 
-When status changes to `COMPLETED`, `FAILED`, or `CANCELLED`, `completed_at` is automatically set.
+When status changes to `DONE`, `FAILED`, or `CANCELLED`, `completed_at` is automatically set.
+
+<Note>
+  Before this release, a mission approved out of `REVIEW` moved to
+  `COMPLETED` while an *issue* approved the same way moved to `DONE` — two
+  words for the identical operator action, sharing one column
+  (`missions.status`). `COMPLETED` is now retired: this endpoint writes
+  `DONE` for both. For backward compatibility, `{"status":"COMPLETED"}` is
+  still accepted and silently normalized to `DONE` — it is never written or
+  returned again. Any script or dashboard still matching the literal string
+  `COMPLETED` on a mission's `status` field should switch to `DONE`.
+</Note>
 
 **Response:** `200 OK` -- updated mission object.
 
@@ -306,7 +317,7 @@ Validates the task dependency DAG before starting. Uses atomic compare-and-swap 
 POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspaceId}
 ```
 
-Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED tasks (PENDING if dependencies allow, BLOCKED otherwise), increments their `iteration`, clears errors, and moves the mission back to `PLANNING` (call `start` afterwards to dispatch). (`internal/api/task_state.go:14`)
+Restarts a `DONE`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED tasks (PENDING if dependencies allow, BLOCKED otherwise), increments their `iteration`, clears errors, and moves the mission back to `PLANNING` (call `start` afterwards to dispatch). (`internal/api/task_state.go:14`)
 
 **Request:** `crewId` and `missionId` are required path parameters; `workspace_id` selects the workspace. No request body.
 
@@ -321,7 +332,7 @@ Restarts a `COMPLETED`, `FAILED`, or `CANCELLED` mission. Resets non-COMPLETED t
 | Status | Condition |
 |---|---|
 | `404` | Mission not found |
-| `409` | Mission is not in a terminal state (`COMPLETED`/`FAILED`/`CANCELLED`) |
+| `409` | Mission is not in a terminal state (`DONE`/`FAILED`/`CANCELLED`) |
 
 ### Resume Mission
 
@@ -555,7 +566,7 @@ Aggregated mission metrics for the workspace. `total_missions` and `active_missi
 | `PLANNING` | Lead is analyzing and creating task breakdown |
 | `IN_PROGRESS` | Agents are working on tasks |
 | `REVIEW` | All tasks done, lead is reviewing results |
-| `COMPLETED` | Successfully finished |
+| `DONE` | Successfully finished and approved (formerly `COMPLETED` — still accepted as `PATCH` input, normalized) |
 | `FAILED` | Unresolvable problem encountered |
 | `CANCELLED` | Cancelled by user or system |
 

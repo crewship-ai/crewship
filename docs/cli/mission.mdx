@@ -101,14 +101,14 @@ Update a mission. Only changed flags are sent.
 
 ```bash
 crewship mission update <id> --title "Deploy v2.1"
-crewship mission update <id> --status COMPLETED
+crewship mission update <id> --status DONE
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--title` | `string` | | Mission title. |
 | `--description` | `string` | | Mission description. |
-| `--status` | `string` | | Status: `PLANNING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`. |
+| `--status` | `string` | | Status: `PLANNING`, `IN_PROGRESS`, `DONE`, `FAILED`. `COMPLETED` is still accepted and silently normalized to `DONE` (a retired word kept only for backward compatibility — see [API reference → Missions → Update Mission](/api-reference/missions#update-mission)). |
 
 ---
 
@@ -147,7 +147,7 @@ If the mission was created under an autonomy hold (see [Autonomy gate on agent-d
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--wait` | `false` | Block and poll `GET /api/v1/crews/{crewId}/missions/{missionId}` (the same route `mission get` uses) every 2s until the mission reaches `COMPLETED` or `FAILED`, instead of returning as soon as the start request is acknowledged. Exits non-zero on `FAILED`. |
+| `--wait` | `false` | Block and poll `GET /api/v1/crews/{crewId}/missions/{missionId}` (the same route `mission get` uses) every 2s until the mission reaches `DONE` or `FAILED`, instead of returning as soon as the start request is acknowledged. Exits non-zero on `FAILED`. |
 | `--wait-timeout` | `30m` | Max time to block with `--wait` (`0` = forever). |
 
 ---

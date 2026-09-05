@@ -1,4 +1,13 @@
-/** Lifecycle status of a mission, from backlog through completion or cancellation. */
+/**
+ * Lifecycle status of a mission, from backlog through completion or
+ * cancellation.
+ *
+ * "COMPLETED" is retired server-side (B13, #2370 — the backend now writes
+ * and returns "DONE" for every REVIEW→terminal approval, issue or
+ * orchestration mission alike) but stays in this union: `PATCH` still
+ * accepts it as a normalized-away input alias, and it is kept here so a
+ * not-yet-backfilled or legacy row never fails to type-check or render.
+ */
 export type MissionStatus =
   | "BACKLOG"
   | "TODO"

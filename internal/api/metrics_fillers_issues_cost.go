@@ -26,7 +26,7 @@ func (h *MetricsHandler) fillIssuesClosed(r *http.Request, p timeseriesParams, i
 			  AND COALESCE(m.mission_type, 'orchestration') = 'issue'
 			  AND m.completed_at IS NOT NULL
 			  AND m.completed_at >= ?
-			  AND m.status IN ('DONE','COMPLETED','REVIEW')
+			  AND m.status IN ('DONE','REVIEW')
 			GROUP BY ts, m.crew_id
 			ORDER BY ts`
 		rs, err := h.db.QueryContext(ctx, q, p.WorkspaceID, cutoff)
@@ -51,7 +51,7 @@ func (h *MetricsHandler) fillIssuesClosed(r *http.Request, p timeseriesParams, i
 			  AND COALESCE(m.mission_type, 'orchestration') = 'issue'
 			  AND m.completed_at IS NOT NULL
 			  AND m.completed_at >= ?
-			  AND m.status IN ('DONE','COMPLETED','REVIEW')
+			  AND m.status IN ('DONE','REVIEW')
 			GROUP BY ts, m.status
 			ORDER BY ts`
 		rs, err := h.db.QueryContext(ctx, q, p.WorkspaceID, cutoff)
@@ -76,7 +76,7 @@ func (h *MetricsHandler) fillIssuesClosed(r *http.Request, p timeseriesParams, i
 			  AND COALESCE(m.mission_type, 'orchestration') = 'issue'
 			  AND m.completed_at IS NOT NULL
 			  AND m.completed_at >= ?
-			  AND m.status IN ('DONE','COMPLETED','REVIEW')
+			  AND m.status IN ('DONE','REVIEW')
 			GROUP BY ts
 			ORDER BY ts`
 		rs, err := h.db.QueryContext(ctx, q, p.WorkspaceID, cutoff)

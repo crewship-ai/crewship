@@ -248,7 +248,7 @@ func init() {
 
 	missionUpdateCmd.Flags().String("title", "", "Mission title")
 	missionUpdateCmd.Flags().String("description", "", "Mission description")
-	missionUpdateCmd.Flags().String("status", "", "Status: PLANNING|IN_PROGRESS|COMPLETED|FAILED")
+	missionUpdateCmd.Flags().String("status", "", "Status: PLANNING|IN_PROGRESS|DONE|FAILED")
 
 	missionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 	missionRestartCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
@@ -266,7 +266,7 @@ func init() {
 
 	missionCloneCmd.Flags().String("title", "", "Override title for cloned mission")
 
-	missionStartCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (COMPLETED/FAILED)")
+	missionStartCmd.Flags().Bool("wait", false, "Block until the mission reaches a terminal status (DONE/FAILED)")
 	missionStartCmd.Flags().Duration("wait-timeout", 30*time.Minute, "Max time to wait with --wait (0 = forever)")
 
 	missionCmd.AddCommand(missionListCmd)

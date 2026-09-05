@@ -383,7 +383,7 @@ func TestTask_Restart_BadStatus(t *testing.T) {
 
 func TestTask_Restart_Success(t *testing.T) {
 	h, userID, wsID, crewID, _, missionID := newMissionHandlerForTasks(t)
-	h.db.Exec(`UPDATE missions SET status='COMPLETED' WHERE id=?`, missionID)
+	h.db.Exec(`UPDATE missions SET status='DONE' WHERE id=?`, missionID)
 	tID := generateCUID()
 	h.db.Exec(`INSERT INTO mission_tasks(id,mission_id,title,status,task_order,depends_on,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,datetime('now'),datetime('now'))`, tID, missionID, "Task", "FAILED", 1, "[]")

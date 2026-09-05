@@ -22,7 +22,13 @@ func TestIsValidTransition(t *testing.T) {
 		// Mission transitions
 		{"mission: PLANNING→IN_PROGRESS", ValidMissionTransitions, "PLANNING", "IN_PROGRESS", true},
 		{"mission: PLANNING→REVIEW", ValidMissionTransitions, "PLANNING", "REVIEW", false},
-		{"mission: REVIEW→COMPLETED", ValidMissionTransitions, "REVIEW", "COMPLETED", true},
+		// B13 (#2370): DONE is the sole terminal word for missions.status;
+		// COMPLETED is retired from the transitions table itself (the API
+		// layer still accepts it as an input alias, normalized to DONE
+		// before it ever reaches IsValidTransition — see
+		// internal/api/mission_handler_mutate.go).
+		{"mission: REVIEW→DONE", ValidMissionTransitions, "REVIEW", "DONE", true},
+		{"mission: REVIEW→COMPLETED (retired)", ValidMissionTransitions, "REVIEW", "COMPLETED", false},
 
 		// Task transitions
 		{"task: PENDING→IN_PROGRESS", ValidTaskTransitions, "PENDING", "IN_PROGRESS", true},
