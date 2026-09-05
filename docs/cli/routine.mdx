@@ -136,7 +136,7 @@ crewship routine save \
 | Flag | Required | Description |
 |------|:---:|-------------|
 | `--name` | ✓ | Human-readable name; slug derived from this |
-| `--description` | | One-line summary shown in `[AVAILABLE ROUTINES]` |
+| `--description` | | One-line summary shown in `[AVAILABLE ROUTINES]`. On re-save, omitting the flag preserves the stored description; pass `--description ""` to clear it. |
 | `--definition` | ✓ | Path to JSON DSL file |
 | `--author-crew` | ✓ | crew slug or id that owns this routine |
 | `--author-agent` | | Agent slug or id the routine **acts as**. Must belong to `--author-crew`. Required when the DSL has a `crewship` step using `issue.comment` |

@@ -446,9 +446,13 @@ belong to --author-crew.`,
 		saveBody := map[string]any{
 			"slug":           slugifyName(name),
 			"name":           name,
-			"description":    description,
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrewID,
+		}
+		// Omission is PATCH-like: a re-save keeps the stored description.
+		// Sending an empty string remains the explicit way to clear it.
+		if cmd.Flags().Changed("description") {
+			saveBody["description"] = description
 		}
 		if authorAgentID != "" {
 			saveBody["author_agent_id"] = authorAgentID

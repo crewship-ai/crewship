@@ -555,9 +555,11 @@ type internalSaveRequest struct {
 // authors pin a specific crew context for runtime; without it, runs
 // fall back to the first crew the saving user belongs to.
 type userSaveRequest struct {
-	Slug         string          `json:"slug"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+	// Pointer distinguishes an omitted field (preserve on re-save) from an
+	// explicit empty string (clear it).
+	Description  *string         `json:"description,omitempty"`
 	Definition   json.RawMessage `json:"definition"`
 	AuthorCrewID string          `json:"author_crew_id,omitempty"`
 	// AuthorAgentID names the agent the routine ACTS AS at run time. It is not
@@ -803,12 +805,17 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 	risky := saveStatus == "proposed"
 
+	description := ""
+	if body.Description != nil {
+		description = *body.Description
+	}
 	in := pipeline.SaveInput{
-		WorkspaceID:    workspaceID,
-		Slug:           body.Slug,
-		Name:           body.Name,
-		Description:    body.Description,
-		DefinitionJSON: string(body.Definition),
+		WorkspaceID:         workspaceID,
+		Slug:                body.Slug,
+		Name:                body.Name,
+		Description:         description,
+		PreserveDescription: body.Description == nil,
+		DefinitionJSON:      string(body.Definition),
 		Author: pipeline.AuthorMeta{
 			CrewID: body.AuthorCrewID,
 			// The agent the routine acts as (validated above). Via stays

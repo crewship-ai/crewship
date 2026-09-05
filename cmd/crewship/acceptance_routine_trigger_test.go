@@ -152,6 +152,43 @@ func TestAcceptance_RoutineSave_Trigger_NamesFirstFireTime(t *testing.T) {
 	}
 }
 
+// A save without --description must not turn flag absence into an explicit
+// empty string. This drives two saves and the readback through the built CLI
+// binary against the real router, pinning both CLI and API/store semantics.
+func TestAcceptance_RoutineSave_OmittedDescriptionPreservesStoredValue(t *testing.T) {
+	cfgPath, crewID := startRoutineTriggerAcceptanceServer(t)
+	defPath := writeRoutineDefinition(t, "acceptance-description-patch")
+
+	firstOut, err := runRoutineTriggerCLI(t, cfgPath, "routine", "save",
+		"--name", "acceptance-description-patch",
+		"--description", "keep this description",
+		"--definition", defPath,
+		"--author-crew", crewID,
+		"--author-agent", "trg-agent",
+	)
+	if err != nil {
+		t.Fatalf("first routine save failed: %v\n%s", err, firstOut)
+	}
+
+	secondOut, err := runRoutineTriggerCLI(t, cfgPath, "routine", "save",
+		"--name", "acceptance-description-patch",
+		"--definition", defPath,
+		"--author-crew", crewID,
+		"--author-agent", "trg-agent",
+	)
+	if err != nil {
+		t.Fatalf("re-save without --description failed: %v\n%s", err, secondOut)
+	}
+
+	getOut, err := runRoutineTriggerCLI(t, cfgPath, "routine", "get", "acceptance-description-patch")
+	if err != nil {
+		t.Fatalf("routine get failed: %v\n%s", err, getOut)
+	}
+	if !strings.Contains(getOut, "keep this description") {
+		t.Fatalf("description disappeared after omitted flag:\n%s", getOut)
+	}
+}
+
 // TestAcceptance_RoutineSave_Trigger_BadCron_RollsBack proves the rollback
 // through the CLI: the routine never exists after a save with a broken
 // cron expression.

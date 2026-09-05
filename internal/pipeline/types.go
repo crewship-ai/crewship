@@ -929,13 +929,17 @@ type AuthorMeta struct {
 // to Store.Save. The store enforces author metadata, hash, and the
 // test-run gate; the caller owns the raw DSL JSON + parsed slug.
 type SaveInput struct {
-	WorkspaceID    string
-	Slug           string
-	Name           string
-	Description    string
-	DSLVersion     string
-	DefinitionJSON string
-	Author         AuthorMeta
+	WorkspaceID string
+	Slug        string
+	Name        string
+	Description string
+	// PreserveDescription makes an update PATCH-like: keep the existing
+	// description rather than treating an omitted request field as a clear.
+	// Inserts still use Description, because there is no prior value to keep.
+	PreserveDescription bool
+	DSLVersion          string
+	DefinitionJSON      string
+	Author              AuthorMeta
 	// LastTestRunAt + LastTestRunPassed are written when the save
 	// handler has confirmed a test_run within the gate window. The
 	// store does NOT enforce the freshness rule itself — the handler
