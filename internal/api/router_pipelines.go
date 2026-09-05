@@ -116,6 +116,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}", roleManage, pipes.DeleteSchedule)
 	// Force-fire a schedule out of cycle (CLI: `routine schedules now`).
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run", roleCreate, pipes.RunSchedule)
+	// Activate a draft trigger raised by atomic routine authoring (B8,
+	// #2359): the one decision its inbox review item asks for.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate", roleCreate, pipes.ActivateSchedule)
 	// Run control — cancel + active list. The cancel API is the
 	// other half of concurrency control: a stuck run holds a slot
 	// until either it finishes or the operator pre-empts it.

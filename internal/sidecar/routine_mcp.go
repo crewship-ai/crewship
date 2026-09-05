@@ -45,6 +45,41 @@ var routineMCPSaveSchema = json.RawMessage(`{
 		"crew": {
 			"type": "string",
 			"description": "Slug of the crew this routine is FOR. Onboarding only: the setup guide builds routines that belong to the crew the person just created, and must name it here. That crew must already exist. Ordinary crews leave this unset — a routine belongs to the crew that writes it."
+		},
+		"trigger": {
+			"type": "object",
+			"description": "Optional trigger, created in the SAME transaction as the routine — it exists together with the routine or not at all. Omit only when the routine is genuinely never meant to run on its own; if you mean that on purpose, pass {\"kind\": \"manual\"} instead of just leaving this out, so it reads as a decision rather than an oversight.",
+			"properties": {
+				"kind": {
+					"type": "string",
+					"enum": ["schedule", "manual"],
+					"description": "\"schedule\" fires on a cron cadence; \"manual\" declares, on purpose, that this routine has no trigger."
+				},
+				"cron": {
+					"type": "string",
+					"description": "Cron expression (5-field, e.g. \"0 9 * * 1-5\"). Required when kind is \"schedule\"."
+				},
+				"timezone": {
+					"type": "string",
+					"description": "IANA timezone the cron expression is evaluated in, e.g. \"Europe/Prague\". Defaults to UTC."
+				},
+				"catchup_policy": {
+					"type": "string",
+					"enum": ["skip", "once", "all"],
+					"description": "What happens to occurrences missed while the schedule was off. Defaults to \"once\"."
+				},
+				"max_consecutive_failures": {
+					"type": "integer",
+					"description": "Circuit-breaker trip threshold: this many back-to-back failed fires auto-disables the schedule. Defaults to 5."
+				}
+			},
+			"required": ["kind"],
+			"additionalProperties": false
+		},
+		"activation": {
+			"type": "string",
+			"enum": ["draft"],
+			"description": "Omit to activate the trigger immediately. Pass \"draft\" to create it DISABLED and raise one approval item for a MANAGER instead — use this whenever the routine acts autonomously in a way a human should sign off on before it ever fires unattended."
 		}
 	},
 	"required": ["name", "definition"],
@@ -152,6 +187,14 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"`sample_inputs` for the mandatory test_run. The routine is test-run inline before " +
 			"saving: on success the saved routine is returned; on a DSL or validation error the " +
 			"exact failure is returned so you can fix the definition and call save_routine again. " +
+			"Pass `trigger` in the SAME call — it is created atomically with the routine, not as a " +
+			"separate step, and you must either give it a real trigger or pass " +
+			"{\"trigger\": {\"kind\": \"manual\"}} to say plainly that it has none. Add " +
+			"`\"activation\": \"draft\"` when the routine should not fire unattended until a human " +
+			"signs off; the response's `trigger.first_fire_at` names when it WOULD first run. " +
+			"Your final message to the user must state what was created, when it first runs (or " +
+			"that it is manual/awaiting approval), and — for a draft — that an approval item is " +
+			"now in their inbox. " +
 			"A routine belongs to the crew that runs it: if you are building for a DIFFERENT crew " +
 			"(the onboarding guide always is), pass its slug as `crew` — the routine's network " +
 			"policy, credentials and container all follow that ownership. " +

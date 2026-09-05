@@ -65,6 +65,18 @@ func checkScheduleCircuitBreaker(client doctorHTTPGetter, ws, slug string) []doc
 			maxFailures = 5
 		}
 		switch {
+		case s.Activation == "draft":
+			// B8 (#2359): a draft is disabled on purpose, awaiting a
+			// MANAGER's sign-off — reporting it under the same "healthy"
+			// bucket as a schedule with 0 failures would hide the one
+			// state a human actually needs to act on.
+			out = append(out, doctorCheck{
+				Name:  "schedule_circuit_breaker",
+				Level: doctorWarn,
+				Message: fmt.Sprintf("schedule %q is a draft awaiting activation (cron %s)",
+					s.Name, s.CronExpr),
+				Hint: fmt.Sprintf("review and run `crewship routine schedules activate %s` to turn it on", s.ID),
+			})
 		case s.DisabledReason == "circuit_breaker":
 			out = append(out, doctorCheck{
 				Name:  "schedule_circuit_breaker",

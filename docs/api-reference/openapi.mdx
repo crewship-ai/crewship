@@ -77,7 +77,7 @@ This used not to hold. Go's router matches method and path together, so an unlis
 
   {/* These eight numbers are derived from internal/api/openapi.gen.json, not typed. TestOpenAPIReferenceQuotesTheCurrentSpec in scripts/docs-inventory re-derives them on every run and prints the replacement sentence when they drift — they had gone 52 operations stale before that test existed. */}
 
-  575 of 590 operations return a named 2xx schema, 0 fall back to an unconstrained `object`, and 15 have no success body at all. 251 operations carry a request body: 247 with a named JSON schema, 4 with a non-JSON media type, and 0 with a generic JSON fallback.
+  576 of 591 operations return a named 2xx schema, 0 fall back to an unconstrained `object`, and 15 have no success body at all. 252 operations carry a request body: 248 with a named JSON schema, 4 with a non-JSON media type, and 0 with a generic JSON fallback.
 
   The spec is authoritative for **paths, methods and path parameters**; treat a derived body as a strong hint and this reference section as authoritative for meaning.
 </Note>

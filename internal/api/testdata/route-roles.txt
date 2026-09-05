@@ -325,3 +325,4 @@ PUT /api/v1/users/me/peer-consent roleSelf
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate

@@ -120,6 +120,23 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Atomic routine authoring — routine, version and trigger commit together (#2367).**
+  `save_routine` (and the user/CLI/internal save endpoints) now accept an
+  optional `trigger` block; `pipeline.Store.SaveWithTrigger` creates the
+  routine, its version, and a cron schedule in ONE transaction — a bad cron
+  expression or timezone rolls the whole save back, proven through the
+  public API. The save response (and the routine-author skill's final
+  message) names the trigger's first fire time. `"activation": "draft"`
+  creates the trigger disabled and raises exactly one MANAGER+ inbox item
+  whose payload pins the routine version it was created against;
+  `POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/activate`
+  (`crewship routine schedules activate <id>`) turns it on and resolves that
+  item. `pipeline_schedules.activation` (new, nullable) distinguishes a
+  draft awaiting its first approval from an ordinary disabled/breaker-tripped
+  schedule. Webhook and automation-binding trigger kinds are not yet
+  supported by this endpoint — only `schedule` and the explicit `manual`
+  no-op.
+
 - **One event log per issue, and a durable session per (issue, agent) (#2336).**
   `mission_activity` was a status-change audit table with no CHECK on
   `action`, no `workspace_id`, and two writers (`assignments_run.go`,

@@ -975,6 +975,49 @@ type SaveInput struct {
 	ChangeSummary string
 }
 
+// TriggerKind is the trigger kind an atomic routine save can create
+// alongside the routine + version (PRD-ISSUES-AND-ROUTINES-2026 §13.1,
+// work package B8, #2359). Only "schedule" persists anything today;
+// webhook and automation-binding triggers are left for a follow-up (noted
+// in the routine-author skill and docs) — see TriggerInput.
+type TriggerKind string
+
+const (
+	// TriggerKindSchedule creates a cron-driven pipeline_schedules row.
+	TriggerKindSchedule TriggerKind = "schedule"
+	// TriggerKindManual is an explicit no-op: the caller is stating the
+	// routine intentionally has no trigger, distinct from simply omitting
+	// the field (F17's "warning on the routine page" reads that
+	// distinction; it is a frontend concern outside B8).
+	TriggerKindManual TriggerKind = "manual"
+)
+
+// TriggerInput is the trigger optionally accompanying a routine save. When
+// non-nil and Kind == TriggerKindSchedule, Store.SaveWithTrigger creates
+// the routine, its version, AND this trigger in one transaction: all three
+// exist afterward, or none do (B8's atomicity accept line).
+type TriggerInput struct {
+	Kind TriggerKind
+
+	// Schedule fields, used when Kind == TriggerKindSchedule. Mirrors the
+	// subset of SaveScheduleInput an authoring call can set; wake gates and
+	// version pinning are edited later through the schedule endpoints
+	// (B9's reliability editor), not at atomic-authoring time.
+	Name                   string
+	CronExpr               string
+	Timezone               string
+	CatchupPolicy          string
+	MaxConsecutiveFailures int
+	Inputs                 map[string]any
+
+	// Activation is TriggerActivationActive (the default) to fire on its
+	// normal cadence immediately, or TriggerActivationDraft to create the
+	// trigger disabled and let the caller raise a single approval item —
+	// the store has no notion of inbox items, so raising it is the API
+	// handler's job (see internal/api's propose-trigger-activation code).
+	Activation string
+}
+
 // ListFilters narrows a Store.List query. Zero value = "all
 // non-deleted, workspace-visible, non-ephemeral pipelines for the
 // workspace, sorted by invocation_count DESC then name ASC".

@@ -237,7 +237,10 @@ the `outcome` column.
   "definition": {"steps": []},
   "author_crew_id": "crew_123",
   "save_token": "...",
-  "change_summary": "..."
+  "change_summary": "...",
+  "trigger": {"kind": "schedule", "cron": "0 9 * * 1-5", "timezone": "Europe/Prague",
+              "catchup_policy": "once", "max_consecutive_failures": 5},
+  "activation": "draft"
 }
 ```
 
@@ -247,6 +250,47 @@ the successful response contains an HMAC-bound `save_token`. The legacy
 `last_test_run_at`/`last_test_run_passed` fields are not proof by themselves.
 `skip_test_gate` and `skip_governance_gate` are OWNER/ADMIN-only. Risky saves
 may have status `proposed` until approved; only `active` pipelines run.
+
+### Atomic trigger authoring
+
+`trigger` is optional and, when present, is created in the SAME transaction
+as the routine and its version: either all three exist afterward, or none do
+— a malformed cron expression or unknown timezone rolls the whole save back,
+not just the trigger. `trigger.kind` is `"schedule"` (the fields above; only
+`cron` is required, the rest default the same way [schedule create](/api-reference/schedules)
+does) or `"manual"` (an explicit, on-purpose "no trigger" — distinct from
+omitting `trigger` entirely). Webhook and automation-binding trigger kinds
+are not yet supported here; create those separately via their own endpoints.
+
+`activation` (top-level, alongside `trigger`, not inside it) is `"draft"` to
+create the trigger DISABLED and raise exactly one `escalation` inbox item
+asking a MANAGER+ to turn it on — the response's `trigger.approval_required`
+is `true` and `trigger.first_fire_at` names what the first run WOULD be. Omit
+it (or send anything else) to activate the trigger immediately. Approve via
+`POST .../pipeline-schedules/{scheduleId}/activate` (see
+[Schedules](/api-reference/schedules)).
+
+The response embeds what was created as `trigger`:
+
+```json
+{
+  "...": "the usual routine fields",
+  "trigger": {
+    "kind": "schedule",
+    "schedule_id": "psched_...",
+    "cron_expr": "0 9 * * 1-5",
+    "timezone": "Europe/Prague",
+    "enabled": false,
+    "first_fire_at": "2026-09-07T07:00:00Z",
+    "approval_required": true
+  }
+}
+```
+
+`trigger` is omitted entirely when the save didn't request one. A validation
+failure in `trigger` (bad cron, unknown timezone, invalid `catchup_policy`,
+or an unsupported `kind`) is `422` and — per the atomicity guarantee above —
+the routine is not saved either.
 
 ## Replay, failures, budgets, and state
 

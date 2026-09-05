@@ -111,17 +111,36 @@ func purgeJournalForPipeline(ctx context.Context, tx *sql.Tx, pipelineID string)
 // Returns the saved Pipeline (with generated id and timestamps) so
 // the caller can echo the canonical representation back to the agent.
 func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
+	p, _, err := s.save(ctx, in, nil)
+	return p, err
+}
+
+// SaveWithTrigger is Save plus an optional trigger, created in the SAME
+// transaction as the routine + version write (PRD-ISSUES-AND-ROUTINES-2026
+// §13.1, work package B8, #2359): routine, version and trigger commit
+// together, or none of them do — a bad cron expression or timezone rolls
+// back the whole save, not just the trigger half. trigger == nil, or
+// trigger.Kind == TriggerKindManual, behaves exactly like Save.
+//
+// Returns the created Schedule when trigger.Kind == TriggerKindSchedule,
+// else nil — there is nothing else to return yet (webhook and
+// automation-binding triggers are a follow-up; see TriggerInput).
+func (s *Store) SaveWithTrigger(ctx context.Context, in SaveInput, trigger *TriggerInput) (*Pipeline, *Schedule, error) {
+	return s.save(ctx, in, trigger)
+}
+
+func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (*Pipeline, *Schedule, error) {
 	if in.WorkspaceID == "" {
-		return nil, errors.New("pipeline: workspace_id required")
+		return nil, nil, errors.New("pipeline: workspace_id required")
 	}
 	if in.Slug == "" {
-		return nil, errors.New("pipeline: slug required")
+		return nil, nil, errors.New("pipeline: slug required")
 	}
 	if in.DefinitionJSON == "" {
-		return nil, errors.New("pipeline: definition_json required")
+		return nil, nil, errors.New("pipeline: definition_json required")
 	}
 	if !in.LastTestRunPassed {
-		return nil, ErrTestRunGateFailed
+		return nil, nil, ErrTestRunGateFailed
 	}
 	// Freshness check uses time.Since (server clock) so a caller
 	// cannot mint a passing gate by claiming a stale timestamp.
@@ -131,11 +150,11 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	// small clock-skew tolerance (1 minute) so distributed callers
 	// with mildly drifting clocks don't get spurious failures.
 	if in.LastTestRunAt == nil {
-		return nil, ErrTestRunGateFailed
+		return nil, nil, ErrTestRunGateFailed
 	}
 	since := time.Since(*in.LastTestRunAt)
 	if since > testRunFreshness || since < -1*time.Minute {
-		return nil, ErrTestRunGateFailed
+		return nil, nil, ErrTestRunGateFailed
 	}
 	if in.Author.Via == "" {
 		in.Author.Via = AuthoredViaAgent
@@ -165,7 +184,7 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 	case errors.Is(err, ErrNotFound):
 		// fall through to insert
 	case err != nil:
-		return nil, fmt.Errorf("pipeline: lookup existing slug: %w", err)
+		return nil, nil, fmt.Errorf("pipeline: lookup existing slug: %w", err)
 	default:
 		// update path — wraps the in-place UPDATE + the
 		// pipeline_versions insert in a single transaction so the
@@ -175,7 +194,7 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 		// doesn't exist (or vice versa).
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
-			return nil, fmt.Errorf("pipeline: begin tx: %w", err)
+			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
 
@@ -189,7 +208,7 @@ func (s *Store) Save(ctx context.Context, in SaveInput) (*Pipeline, error) {
 		if err := tx.QueryRowContext(ctx,
 			`SELECT COALESCE(status, 'active') FROM pipelines WHERE id = ?`, existingID,
 		).Scan(&existingStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("pipeline: read existing status: %w", err)
+			return nil, nil, fmt.Errorf("pipeline: read existing status: %w", err)
 		}
 		if existingStatus == "disabled" {
 			status = "disabled"
@@ -241,7 +260,7 @@ WHERE id = ?`,
 			existingID,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("pipeline: update: %w", err)
+			return nil, nil, fmt.Errorf("pipeline: update: %w", err)
 		}
 
 		if wasDeleted {
@@ -249,7 +268,7 @@ WHERE id = ?`,
 			// checkpoint covering them (per workspace) or the resulting seq gap
 			// would later read as tampering in VerifyChain.
 			if err := purgeJournalForPipeline(ctx, tx, existingID); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -257,19 +276,28 @@ WHERE id = ?`,
 		// SaveVersion handles dedup against existing versions, so
 		// re-saving identical bytes is idempotent.
 		if err := s.saveVersionTx(ctx, tx, existingID, in, hash, now); err != nil {
-			return nil, fmt.Errorf("pipeline: save version (update): %w", err)
+			return nil, nil, fmt.Errorf("pipeline: save version (update): %w", err)
+		}
+
+		// Trigger, inside the SAME tx: a bad cron/timezone here rolls back
+		// the update and the version row above with it (B8's atomicity
+		// accept line), not just the trigger.
+		sched, err := s.createTriggerTx(ctx, tx, in, existingID, trigger)
+		if err != nil {
+			return nil, nil, fmt.Errorf("pipeline: save trigger (update): %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("pipeline: commit: %w", err)
+			return nil, nil, fmt.Errorf("pipeline: commit: %w", err)
 		}
-		return s.GetByID(ctx, existingID)
+		p, err := s.GetByID(ctx, existingID)
+		return p, sched, err
 	}
 
 	id := generatePipelineID()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
+		return nil, nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -311,23 +339,70 @@ INSERT INTO pipelines (
 		// distinguish "duplicate slug" from generic DB failures and
 		// return a proper 409 response.
 		if isUniqueViolation(err) {
-			return nil, ErrSlugConflict
+			return nil, nil, ErrSlugConflict
 		}
-		return nil, fmt.Errorf("pipeline: insert: %w", err)
+		return nil, nil, fmt.Errorf("pipeline: insert: %w", err)
 	}
 
 	// Append v1 to pipeline_versions in the same transaction so a
 	// new pipeline always has a version row from the start.
 	if err := s.saveVersionTx(ctx, tx, id, in, hash, now); err != nil {
-		return nil, fmt.Errorf("pipeline: save version (insert): %w", err)
+		return nil, nil, fmt.Errorf("pipeline: save version (insert): %w", err)
+	}
+
+	// Trigger, inside the SAME tx as the insert above (B8, #2359): the
+	// rollback test proves a bad cron/timezone leaves NEITHER the pipeline
+	// NOR its v1 version behind.
+	sched, err := s.createTriggerTx(ctx, tx, in, id, trigger)
+	if err != nil {
+		return nil, nil, fmt.Errorf("pipeline: save trigger (insert): %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("pipeline: commit (insert): %w", err)
+		return nil, nil, fmt.Errorf("pipeline: commit (insert): %w", err)
 	}
 	_ = existingCreatedAt // silence unused (kept for future audit log surface)
 
-	return s.GetByID(ctx, id)
+	p, err := s.GetByID(ctx, id)
+	return p, sched, err
+}
+
+// createTriggerTx creates or updates the optional trigger accompanying a
+// routine save (B8, #2359) through tx — the same transaction as the
+// routine + version write above, so a failure here rolls back both.
+// trigger == nil, or trigger.Kind == TriggerKindManual (an explicit "no
+// trigger, on purpose"), is a no-op.
+//
+// Uses upsertTriggerSchedule, not a plain insert: the routine-author skill
+// tells agents to send `trigger` on every save, so a re-save of the same
+// routine must update its ONE atomic-authoring-owned schedule rather than
+// insert another enabled row that would fire the routine twice per
+// cadence (code-review fix — the original version always inserted).
+func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, pipelineID string, trigger *TriggerInput) (*Schedule, error) {
+	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
+		return nil, nil
+	}
+	if trigger.Kind != TriggerKindSchedule {
+		return nil, fmt.Errorf("%w: unsupported trigger kind %q (must be %q or %q)",
+			ErrInvalidTrigger, trigger.Kind, TriggerKindSchedule, TriggerKindManual)
+	}
+	name := trigger.Name
+	if name == "" {
+		name = in.Name
+	}
+	schedIn := SaveScheduleInput{
+		WorkspaceID:            in.WorkspaceID,
+		Name:                   name,
+		TargetPipelineID:       pipelineID,
+		CronExpr:               trigger.CronExpr,
+		Timezone:               trigger.Timezone,
+		Inputs:                 trigger.Inputs,
+		Enabled:                trigger.Activation != TriggerActivationDraft,
+		CatchupPolicy:          trigger.CatchupPolicy,
+		MaxConsecutiveFailures: trigger.MaxConsecutiveFailures,
+		Activation:             trigger.Activation,
+	}
+	return upsertTriggerSchedule(ctx, tx, schedIn)
 }
 
 // saveVersionTx is the in-transaction variant of SaveVersion used by

@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS pipeline_schedules (
     last_missed_count        INTEGER NOT NULL DEFAULT 0,
     consecutive_failures     INTEGER NOT NULL DEFAULT 0,
     max_consecutive_failures INTEGER NOT NULL DEFAULT 5,
-    disabled_reason          TEXT
+    disabled_reason          TEXT,
+    activation               TEXT
 );
 `
 
