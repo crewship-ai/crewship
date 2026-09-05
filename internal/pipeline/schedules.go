@@ -98,10 +98,28 @@ type Schedule struct {
 	MaxConsecutiveFailures int
 	DisabledReason         string
 
+	// Activation is "" for an ordinary schedule (active or disabled for an
+	// ordinary reason) or TriggerActivationDraft when it was created via
+	// atomic routine authoring with activation="draft" and is still
+	// awaiting its first MANAGER sign-off (B8, #2359). Distinct from
+	// DisabledReason so a draft is never mistaken for a routine the
+	// circuit breaker or an admin killed. ActivateSchedule clears it back
+	// to "" and flips Enabled to true in the same request that resolves
+	// the review item.
+	Activation string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
+
+// Trigger activation states (B8, #2359). TriggerActivationActive is the
+// zero value — most triggers never carry an explicit activation state at
+// all — spelled out so callers can compare against a name instead of "".
+const (
+	TriggerActivationActive = ""
+	TriggerActivationDraft  = "draft"
+)
 
 // defaultMaxConsecutiveFailures is the trip threshold used when a
 // schedule doesn't specify its own MaxConsecutiveFailures (zero/negative
@@ -166,6 +184,12 @@ type SaveScheduleInput struct {
 	// on create that's a fresh default; on update the existing stored
 	// value is left untouched (see Save's CASE-guarded UPDATE).
 	MaxConsecutiveFailures int
+	// Activation is create-only: "" (TriggerActivationActive) creates the
+	// schedule as Enabled says; TriggerActivationDraft forces it disabled
+	// regardless of Enabled and stamps pipeline_schedules.activation so
+	// ActivateSchedule can find it later (B8, #2359). Rejected on update —
+	// activation is a one-time create-time decision, not an editable field.
+	Activation string
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -182,12 +206,126 @@ func NewScheduleStore(db *sql.DB) *ScheduleStore {
 	return &ScheduleStore{db: db}
 }
 
+// sqlExecQuerier narrows *sql.DB and *sql.Tx to the two methods a
+// tx-composable store function needs. Letting create/read helpers take
+// this instead of a concrete *sql.DB is what lets the atomic
+// routine-authoring path (Store.save, B8, #2359) create a schedule inside
+// the SAME transaction as the routine + version write — the alternative,
+// a second connection, cannot see the uncommitted pipeline row and cannot
+// share the rollback.
+type sqlExecQuerier interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // Save creates or updates a schedule. Cron parse is delegated to
 // the caller (CLI / API handler) so a 400 fires before we hit the
 // DB; we still re-parse here to compute next_run_at.
 func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedule, error) {
+	if in.ID == "" {
+		return createSchedule(ctx, s.db, in)
+	}
+	return s.update(ctx, in)
+}
+
+// createSchedule validates in and inserts a new schedule row through x —
+// s.db for the ordinary create path, or a *sql.Tx for the atomic
+// routine-authoring path (Store.save, B8) that must commit the routine,
+// its version and this row together or not at all. Factored out so the
+// two paths validate and insert identically and can never diverge.
+func createSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput) (*Schedule, error) {
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" || in.CronExpr == "" {
 		return nil, errors.New("pipeline_schedules: workspace_id + target_pipeline_id + cron_expr required")
+	}
+	if in.Timezone == "" {
+		in.Timezone = "UTC"
+	}
+	loc, err := time.LoadLocation(in.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timezone %q: %w", in.Timezone, err)
+	}
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	sched, err := parser.Parse(in.CronExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cron expression %q: %w", in.CronExpr, err)
+	}
+	nextRun := sched.Next(time.Now().In(loc))
+	if in.CatchupPolicy == "" {
+		in.CatchupPolicy = CatchupOnce
+	}
+	if !validCatchupPolicies[in.CatchupPolicy] {
+		return nil, fmt.Errorf("pipeline_schedules: invalid catchup_policy %q (must be %q, %q, or %q)",
+			in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
+	}
+	if in.Activation != "" && in.Activation != TriggerActivationDraft {
+		return nil, fmt.Errorf("pipeline_schedules: invalid activation %q (must be empty or %q)",
+			in.Activation, TriggerActivationDraft)
+	}
+	inputsJSON, err := json.Marshal(in.Inputs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal inputs: %w", err)
+	}
+	if string(inputsJSON) == "null" {
+		inputsJSON = []byte("{}")
+	}
+	wakeInputsJSON, err := json.Marshal(in.WakeInputs)
+	if err != nil {
+		return nil, fmt.Errorf("marshal wake inputs: %w", err)
+	}
+	if string(wakeInputsJSON) == "null" {
+		wakeInputsJSON = []byte("{}")
+	}
+	now := time.Now().UTC()
+	maxFailures := in.MaxConsecutiveFailures
+	if maxFailures <= 0 {
+		maxFailures = defaultMaxConsecutiveFailures
+	}
+	// A draft trigger must not fire before a MANAGER activates it —
+	// enforced here, not just by the caller, so a future call site can't
+	// forget the pairing and ship a draft that runs unattended.
+	enabled := in.Enabled
+	if in.Activation == TriggerActivationDraft {
+		enabled = false
+	}
+
+	id := generateScheduleID()
+	_, err = x.ExecContext(ctx, `
+INSERT INTO pipeline_schedules (
+    id, workspace_id, name, target_pipeline_id, target_pipeline_version,
+    cron_expr, timezone, inputs_json, enabled, next_run_at,
+    wake_pipeline_id, wake_inputs_json, wake_fail_closed,
+    catchup_policy,
+    max_consecutive_failures,
+    activation,
+    created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.WorkspaceID, in.Name, in.TargetPipelineID,
+		nullInt(in.TargetPipelineVersion),
+		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(enabled),
+		tsformat.Format(nextRun),
+		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
+		in.CatchupPolicy,
+		maxFailures,
+		nullStr(in.Activation),
+		tsformat.Format(now), tsformat.Format(now),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert schedule: %w", err)
+	}
+	return getScheduleByID(ctx, x, id)
+}
+
+// update is the pre-existing edit path, unchanged in behaviour — split out
+// of Save so the create path above could be shared with the atomic
+// routine-authoring path without also inheriting update's read-modify-write
+// shape (preserving a due next_run_at, the breaker reset CASEs, etc.),
+// which has no meaning for a row that doesn't exist yet.
+func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Schedule, error) {
+	if in.WorkspaceID == "" || in.TargetPipelineID == "" || in.CronExpr == "" {
+		return nil, errors.New("pipeline_schedules: workspace_id + target_pipeline_id + cron_expr required")
+	}
+	if in.Activation != "" {
+		return nil, errors.New("pipeline_schedules: activation is create-only; use ActivateSchedule to turn a draft on")
 	}
 	if in.Timezone == "" {
 		in.Timezone = "UTC"
@@ -224,37 +362,6 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 		wakeInputsJSON = []byte("{}")
 	}
 	now := time.Now().UTC()
-	maxFailures := in.MaxConsecutiveFailures
-	if maxFailures <= 0 {
-		maxFailures = defaultMaxConsecutiveFailures
-	}
-
-	if in.ID == "" {
-		// Create
-		id := generateScheduleID()
-		_, err = s.db.ExecContext(ctx, `
-INSERT INTO pipeline_schedules (
-    id, workspace_id, name, target_pipeline_id, target_pipeline_version,
-    cron_expr, timezone, inputs_json, enabled, next_run_at,
-    wake_pipeline_id, wake_inputs_json, wake_fail_closed,
-    catchup_policy,
-    max_consecutive_failures,
-    created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
-			nullInt(in.TargetPipelineVersion),
-			in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
-			tsformat.Format(nextRun),
-			nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
-			in.CatchupPolicy,
-			maxFailures,
-			tsformat.Format(now), tsformat.Format(now),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("insert schedule: %w", err)
-		}
-		return s.GetByID(ctx, id)
-	}
 
 	// Update. consecutive_failures / disabled_reason reset to a clean
 	// slate exactly when this Save re-enables a previously-disabled
@@ -316,7 +423,16 @@ WHERE id = ? AND deleted_at IS NULL`,
 
 // GetByID returns a schedule by id, or ErrNotFound.
 func (s *ScheduleStore) GetByID(ctx context.Context, id string) (*Schedule, error) {
-	rows, err := s.db.QueryContext(ctx, scheduleSelect+` WHERE id = ? AND deleted_at IS NULL`, id)
+	return getScheduleByID(ctx, s.db, id)
+}
+
+// getScheduleByID is GetByID's body, factored out to run against either
+// s.db or the *sql.Tx the atomic routine-authoring path (Store.save, B8)
+// holds — a row inserted moments ago in an uncommitted transaction is
+// invisible to any other connection, so the read-back after that insert
+// must go through the SAME tx.
+func getScheduleByID(ctx context.Context, x sqlExecQuerier, id string) (*Schedule, error) {
+	rows, err := x.QueryContext(ctx, scheduleSelect+` WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +480,46 @@ func (s *ScheduleStore) SoftDelete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// ErrScheduleNotDraft is returned by Activate when the schedule wasn't
+// created via atomic authoring with activation="draft" — there is nothing
+// for a MANAGER's sign-off to turn on.
+var ErrScheduleNotDraft = errors.New("pipeline_schedules: not awaiting activation")
+
+// Activate turns a draft trigger on: enabled=1, activation cleared, and
+// next_run_at recomputed from "now" — a schedule can sit in review for
+// days, and firing every occurrence missed while it waited would be a
+// catch-up backlog nobody asked for. It is the ONLY writer of a draft
+// schedule's enabled/activation columns (B8, #2359); the API handler pairs
+// this with resolving the review item proposeTriggerActivationInbox raised.
+func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, error) {
+	existing, err := s.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Activation != TriggerActivationDraft {
+		return nil, ErrScheduleNotDraft
+	}
+	loc, err := time.LoadLocation(existing.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("invalid timezone %q: %w", existing.Timezone, err)
+	}
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	sched, err := parser.Parse(existing.CronExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cron expression %q: %w", existing.CronExpr, err)
+	}
+	nextRun := sched.Next(time.Now().In(loc))
+	now := tsformat.Format(time.Now())
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE pipeline_schedules SET enabled = 1, activation = NULL, next_run_at = ?, updated_at = ?
+		 WHERE id = ? AND deleted_at IS NULL`,
+		tsformat.Format(nextRun), now, id,
+	); err != nil {
+		return nil, fmt.Errorf("activate schedule: %w", err)
+	}
+	return s.GetByID(ctx, id)
 }
 
 // listDueSchedules returns enabled schedules whose next_run_at has
@@ -1272,6 +1428,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(catchup_policy, 'once'), COALESCE(last_missed_count, 0),
        COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
        COALESCE(disabled_reason, ''),
+       COALESCE(activation, ''),
        created_at, updated_at, deleted_at
 FROM pipeline_schedules`
 
@@ -1300,6 +1457,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.CatchupPolicy, &s.LastMissedCount,
 		&s.ConsecutiveFailures, &s.MaxConsecutiveFailures,
 		&s.DisabledReason,
+		&s.Activation,
 		&createdAt, &updatedAt, &deletedAt,
 	)
 	if err != nil {

@@ -1,0 +1,23 @@
+-- pipeline_schedules.activation — PRD-ISSUES-AND-ROUTINES-2026 §13.1,
+-- work package B8 (#2359): atomic routine authoring.
+--
+-- A routine authored with `"activation": "draft"` gets its trigger created
+-- DISABLED (enabled = 0) plus one inbox review item asking a MANAGER to turn
+-- it on. Without a marker distinguishing THAT reason from every other reason
+-- a schedule can be disabled — an operator's manual disable, or the
+-- circuit breaker tripping (disabled_reason = 'circuit_breaker', v153) — a
+-- draft awaiting its first activation would be indistinguishable from a
+-- routine an admin killed for cause, and re-enabling it would look like
+-- reviving a disabled routine (the airbag invariant `pipeline.Store.Save`
+-- already protects) rather than what it actually is: a first activation.
+--
+-- NULL (the default, and every pre-existing row) means "not a draft" — an
+-- ordinary schedule, active or disabled for an ordinary reason. 'draft'
+-- means "created via atomic authoring with activation=draft; not yet
+-- approved". Activation flips it back to NULL and enabled to 1 in the same
+-- request that resolves the inbox item (PipelineHandler.ActivateSchedule).
+--
+-- Additive only, nullable, no backfill needed — no existing row was ever
+-- created this way.
+ALTER TABLE pipeline_schedules ADD COLUMN activation TEXT
+    CHECK (activation IS NULL OR activation IN ('draft'));
