@@ -329,7 +329,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   journal entries carry it. `issue runs` / `crewship issue runs` and the
   routine run surfaces (`GET .../pipeline-runs/{id}`, `run-records`,
   `crewship routine records`) all expose it.
-- **Hard termination — Tier 2 stop signals the run's own process, not the crew's shared container (#TBD).**
+- **Hard termination — Tier 2 stop signals the run's own process, not the crew's shared container (#2363).**
   `crewship issue stop` (and `POST .../issues/{identifier}/stop`) gains an
   opt-in `--hard`/`?hard=true` (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work
   package B7): after the existing Tier 1 cooperative stamp lands, every
