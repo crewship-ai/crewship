@@ -97,7 +97,7 @@ export function InboxList() {
   // inbox → active (unread + read, resolved excluded SERVER-side so archived
   // rows don't eat the LIMIT window); the other two map straight through.
   const stateParam = archive ? "resolved" : view === "unread" ? "unread" : "active"
-  const { items, unreadCount, loading, error, patch, refresh } = useInbox(workspaceId, stateParam)
+  const { items, unreadCount, loading, error, patch, refresh, actOnInboxItem } = useInbox(workspaceId, stateParam)
 
   // The roster the subject picker searches. Agents come from the summaries
   // every other surface already loads (React Query dedupes it); routines from
@@ -353,6 +353,28 @@ export function InboxList() {
               })
             }}
             onMarkUnread={() => void patch(selected.id, "unread").then(refresh).catch(() => {})}
+            // A run_needs_human card's own actions (#2398). The hook flips
+            // the cached row to resolved, which drops it from the active
+            // list — so `live` goes null and the pane would fall back to the
+            // pre-act snapshot, buttons and all. That is the exact stale-copy
+            // failure the snapshot rule above exists to prevent, so the
+            // snapshot is replaced with the RESOLVED card instead: the
+            // receipt stays readable until the person moves on. Failures
+            // propagate to the card, which knows which 409 is not an error.
+            onAct={async (action, input) => {
+              const id = selected.id
+              const result = await actOnInboxItem(id, action, input)
+              setSelectedId(id)
+              setSnapshot({
+                ...selected,
+                state: "resolved",
+                resolved_action: action,
+                resolved_at: result.receipt?.acted_at ?? selected.resolved_at,
+                resolved_by_user_id: result.receipt?.acted_by ?? selected.resolved_by_user_id,
+                payload: { ...(selected.payload ?? {}), receipt: result.receipt },
+              })
+              return result
+            }}
             // A source-managed decision (waitpoint / escalation) is closed by
             // its own endpoint, which cascades the inbox row server-side. The
             // pane has to move on for the same reason a dismissal does.

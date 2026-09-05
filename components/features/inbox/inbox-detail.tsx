@@ -23,11 +23,23 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import { ActorLabel } from "./inbox-actor"
 import { EvidenceFacts } from "./evidence-facts"
 import { KindActions } from "./kind-actions"
+import type { InboxActFn } from "./run-needs-human-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
+  absolute, attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
   payloadString, payloadStrings, safeChatURL, since, subjectOf, type WorkspaceRole,
 } from "./inbox-derive"
+
+/**
+ * The §12 attention class, as a pill beside the title (#2398). One place for
+ * both card shapes so the decision card and the plain card cannot spell it
+ * differently.
+ */
+function AttentionBadge({ item }: { item: InboxItem }) {
+  const badge = attentionBadge(item)
+  if (!badge) return null
+  return <Pill tone={badge.tone} data-testid="attention-badge">{badge.label}</Pill>
+}
 import { entryKindPill, entryTitle, inboxEntry } from "@/components/features/inbox-v2/inbox-v2-derive"
 
 // =============================================================================
@@ -245,7 +257,7 @@ function MessageBody({ body }: { body: string }) {
 }
 
 export function DecisionCard({
-  item, role, onResolve, onRefresh, onDenyHire, crewHref,
+  item, role, onResolve, onRefresh, onDenyHire, crewHref, onAct,
 }: {
   item: InboxItem
   role: WorkspaceRole | null
@@ -253,6 +265,7 @@ export function DecisionCard({
   onRefresh: () => void | Promise<void>
   onDenyHire?: () => Promise<void>
   crewHref?: string | null
+  onAct?: InboxActFn
 }) {
   const meta = decisionMetaFor(item)
   if (!meta) return null
@@ -275,6 +288,7 @@ export function DecisionCard({
           <span className={cn("type-section", !isResolved && meta.tone === "warn" ? "text-warn" : "text-foreground/70")}>
             {isResolved ? "Decision record" : meta.heading}
           </span>
+          <AttentionBadge item={item} />
           {/* Author-declared, never inferred. Sits with the heading rather
               than in the Context dump because it changes how the sentence
               below it should be read, and a reader who scrolls past the
@@ -347,6 +361,7 @@ export function DecisionCard({
             disabled={!allowed}
             onDenyHire={onDenyHire}
             crewHref={crewHref}
+            onAct={onAct}
           />
         )}
 
@@ -529,6 +544,8 @@ export interface InboxDetailProps {
   lookup?: InboxLookup
   /** Deny a staged hire through its approvals-queue twin. */
   onDenyHire?: () => Promise<void>
+  /** Act on a run_needs_human card through POST /inbox/{id}/act (#2398). */
+  onAct?: InboxActFn
 }
 
 /**
@@ -546,7 +563,7 @@ function fourEyesAgentOf(item: InboxItem): string | null {
   return item.sender_name ?? null
 }
 
-export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire }: InboxDetailProps) {
+export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire, onAct }: InboxDetailProps) {
   const isResolved = item.state === "resolved"
   const decision = decisionMetaFor(item)
   const jump = jumpFor(item)
@@ -600,13 +617,16 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
           disappear for exactly the rows whose only affordance it was. */}
       <Appear order={0}>
         {decision ? (
-          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} />
+          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} onAct={onAct} />
         ) : (
           <DetailCard>
             <div className="flex flex-col gap-3">
-              <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
+                <AttentionBadge item={item} />
+              </div>
               <DecisionSubject item={item} />
-              <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} />
+              <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} onAct={onAct} />
             </div>
           </DetailCard>
         )}

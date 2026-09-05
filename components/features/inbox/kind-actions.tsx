@@ -13,6 +13,7 @@ import { decideApproval } from "@/hooks/use-approvals"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { safeChatURL } from "./inbox-derive"
+import { RunNeedsHumanActions, type InboxActFn } from "./run-needs-human-actions"
 
 // The chat_url guard lives in inbox-derive now — jumpFor needs the same rule
 // and two copies of a security check drift. See safeChatURL there.
@@ -39,11 +40,18 @@ export function KindActions({
   disabled,
   onDenyHire,
   crewHref,
+  onAct,
 }: {
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
   onRefresh: (action?: string) => void | Promise<void>
   disabled: boolean
+  /**
+   * The §12 act door for a run_needs_human card (#2398) — the page binds the
+   * hook's mutation to its workspace and hands it down. Absent on a surface
+   * without one; the card's buttons then say where to act instead.
+   */
+  onAct?: InboxActFn
   /**
    * Deny a staged hire. The hire lands in two places — this waitpoint and a
    * row in the approvals queue — and only the queue row has a deny. The page
@@ -872,6 +880,12 @@ export function KindActions({
         </div>
       )
     }
+    case "run_needs_human":
+      // The §12 contract kind: the card carries its own actions[] and the
+      // server performs them (answer / take_over / dismiss, B15). Falling
+      // through to the generic Dismiss below PATCHed the row and never
+      // reached the session that asked — which is the whole point.
+      return <RunNeedsHumanActions item={item} onAct={onAct} onRefresh={onRefresh} disabled={disabled} />
     case "message":
       // Messages from the orchestrator (e.g. "ENG-1 ready for review")
       // carry the issue identifier in payload so the inbox can offer

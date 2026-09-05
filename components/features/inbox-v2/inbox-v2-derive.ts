@@ -458,6 +458,12 @@ export function entryKindPill(entry: InboxV2Entry): EntryKindPill {
     case "schedule_missed": return { label: "Missed run", tone: "warn" }
     case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "warn" }
     case "memory_consolidation": return { label: "Memory proposal", tone: "purple" }
+    // B6's NEEDS_HUMAN card (#2349) and the a4 trigger-failure kinds were
+    // written by the server long before the pill knew them, so they read as
+    // a generic "Update" — the one word that says nothing about an ask.
+    case "run_needs_human": return { label: "Needs a human", tone: "warn" }
+    case "webhook_fire_failed": return { label: "Webhook failed", tone: "danger" }
+    case "automation_enqueue_failed": return { label: "Automation failed", tone: "danger" }
     case "message":
       if (payloadString(item, "chat_url")) return { label: "Reply", tone: "blue" }
       if (payloadString(item, "issue_identifier")) return { label: "Issue", tone: "blue" }

@@ -20,9 +20,17 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import { ActorAvatar } from "./inbox-actor"
 import { SubjectPicker, type DirectoryEntry } from "./inbox-subject-picker"
 import {
-  bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, riskLevelOf, since, subjectOf,
+  attentionBadge, bucketOf, canRole, categoryOf, decisionMetaFor, expiresIn, remainingLabel, riskLevelOf, since, subjectOf,
   type WorkspaceRole,
 } from "./inbox-derive"
+
+/** The attention badge's row-sized colours, in the pane's pill vocabulary. */
+const ATTENTION_ROW_TONE: Record<NonNullable<ReturnType<typeof attentionBadge>>["tone"], string> = {
+  warn: "bg-warn/15 text-warn",
+  blue: "bg-primary/15 text-primary",
+  purple: "bg-purple/15 text-purple",
+  destructive: "bg-destructive/15 text-destructive",
+}
 import type { Bucket, GroupBy, InboxView, SubjectFacet } from "./inbox-types"
 
 // =============================================================================
@@ -627,6 +635,7 @@ function MailRow({
   const mins = expiresIn(item)
   const subject = subjectOf(item)
   const risk = riskLevelOf(item)
+  const attention = attentionBadge(item)
 
   return (
     <ListRow
@@ -678,6 +687,14 @@ function MailRow({
           {risk === "destructive" && (
             <span className="shrink-0 rounded bg-destructive/15 px-1 py-px font-semibold uppercase tracking-wide text-destructive">
               destructive
+            </span>
+          )}
+          {attention && (
+            <span
+              data-testid="attention-badge"
+              className={cn("shrink-0 rounded px-1 py-px font-medium", ATTENTION_ROW_TONE[attention.tone])}
+            >
+              {attention.label}
             </span>
           )}
           {blocked && <span className="shrink-0">· admin decides</span>}
