@@ -55,11 +55,12 @@ describe("agent draft", () => {
       expect(isIdentityValid({ ...base, name: "Test", slug: "te-st-2" })).toBe(true)
     })
 
-    it("requires crewSlug for AGENT and LEAD", () => {
+    it("allows a crewless AGENT but requires crewSlug for LEAD", () => {
       const base = { ...initialAgentDraft(null), name: "Test", slug: "test" }
-      expect(isIdentityValid({ ...base, agentRole: "AGENT" })).toBe(false)
+      expect(isIdentityValid({ ...base, agentRole: "AGENT" })).toBe(true)
       expect(isIdentityValid({ ...base, agentRole: "LEAD" })).toBe(false)
       expect(isIdentityValid({ ...base, agentRole: "AGENT", crewSlug: "eng" })).toBe(true)
+      expect(isIdentityValid({ ...base, agentRole: "LEAD", crewSlug: "eng" })).toBe(true)
     })
 
     it("rejects slugs with invalid characters (dots, spaces, slashes)", () => {

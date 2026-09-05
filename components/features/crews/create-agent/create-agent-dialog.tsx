@@ -166,7 +166,7 @@ export function CreateAgentDialog({
 
   const seed = draft.avatarSeed || draft.slug || draft.name || "agent"
   const avatarUrl = getAgentAvatarUrl(seed, draft.avatarStyle)
-  const requiresCrew = true
+  const requiresCrew = draft.agentRole === "LEAD"
   const finalPrompt = resolveFinalPrompt(draft)
   const isPromptFromTemplate =
     draft.selectedPersona !== null &&
@@ -185,7 +185,7 @@ export function CreateAgentDialog({
     if (!/^[a-z0-9-]{2,}$/.test(draft.slug))
       return "Slug must use only lowercase letters, digits, and hyphens (2+ chars)"
     if (requiresCrew && !draft.crewSlug)
-      return crews.length === 0 ? "Create a crew first — agents and leads both need one" : "Pick a crew"
+      return crews.length === 0 ? "Create a crew first — leads need one" : "Pick a crew"
     return null
   })()
   const hasNoCrews = crews.length === 0
@@ -226,11 +226,13 @@ export function CreateAgentDialog({
     setSubmitting(true)
     setRefusal(null)
     try {
-      const targetCrew = requiresCrew
+      const targetCrew = draft.crewSlug
         ? crews.find((c) => c.slug === draft.crewSlug) ?? null
         : null
-      if (requiresCrew && !targetCrew) {
-        const message = `Crew "${draft.crewSlug}" no longer exists. Please reselect.`
+      if ((draft.crewSlug || requiresCrew) && !targetCrew) {
+        const message = draft.crewSlug
+          ? `Crew "${draft.crewSlug}" no longer exists. Please reselect.`
+          : "Pick a crew before creating a lead."
         toast.error(message)
         setRefusal(message)
         submittingRef.current = false
@@ -364,9 +366,10 @@ export function CreateAgentDialog({
           )}
 
           {!pickerOpen && hasNoCrews && (
-            <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
-              This workspace has <strong className="text-foreground">no crews yet</strong>. Agents and
-              Leads both live inside a crew — create one first.
+            <CreateSurfaceNotice tone={requiresCrew ? "warn" : "info"} icon={TriangleAlert}>
+              This workspace has <strong className="text-foreground">no crews yet</strong>. {requiresCrew
+                ? "Create one before adding a Lead."
+                : "This Agent will be workspace-wide; you can assign it to a crew later."}
             </CreateSurfaceNotice>
           )}
 
@@ -525,28 +528,23 @@ export function CreateAgentDialog({
                   is a wall of near-identical strings. The icon and colour are
                   what the roster, the sidebar and every issue already use to
                   tell crews apart. */}
-              {requiresCrew ? (
-                <CreateSurfaceField label="Crew" htmlFor="agent-crew" required>
-                  <CrewPicker
-                    id="agent-crew"
-                    by="slug"
-                    crews={crews}
-                    value={draft.crewSlug}
-                    onChange={(crewSlug) => setDraft({ ...draft, crewSlug })}
-                    placeholder="Pick crew…"
-                    ariaLabel="Crew"
-                  />
-                </CreateSurfaceField>
-              ) : (
-                <CreateSurfaceField label="Crew" htmlFor="agent-crew" hint="workspace-wide, no crew">
-                  <input
-                    id="agent-crew"
-                    className={cn(INPUT_CLASS, "text-muted-foreground")}
-                    value="— workspace-wide —"
-                    disabled
-                  />
-                </CreateSurfaceField>
-              )}
+              <CreateSurfaceField
+                label="Crew"
+                htmlFor="agent-crew"
+                required={requiresCrew}
+                hint={requiresCrew ? undefined : "Optional — leave empty for a workspace-wide Agent"}
+              >
+                <CrewPicker
+                  id="agent-crew"
+                  by="slug"
+                  crews={crews}
+                  value={draft.crewSlug}
+                  onChange={(crewSlug) => setDraft({ ...draft, crewSlug })}
+                  placeholder={requiresCrew ? "Pick crew…" : "Workspace-wide (no crew)"}
+                  clearLabel={requiresCrew ? undefined : "Workspace-wide (no crew)"}
+                  ariaLabel="Crew"
+                />
+              </CreateSurfaceField>
 
               <CreateSurfaceField label="Slug" htmlFor="agent-slug" hint="auto from name">
                 <input

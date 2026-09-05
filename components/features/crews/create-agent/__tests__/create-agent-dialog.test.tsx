@@ -248,6 +248,37 @@ describe("CreateAgentDialog", () => {
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
   })
 
+  it("creates a workspace-wide Agent when no crew exists", async () => {
+    const fetchSpy = stubFetch(() =>
+      new Response(JSON.stringify({ id: "a1", name: "Solo", slug: "solo" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    renderDialog({ crews: [], defaultCrewSlug: null })
+
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Solo" } })
+    const createBtn = screen.getByRole("button", { name: /create agent/i })
+    expect(createBtn).toBeEnabled()
+    fireEvent.click(createBtn)
+
+    await waitFor(() => expect(agentsPost(fetchSpy)).toBeDefined())
+    const [, init] = agentsPost(fetchSpy)!
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      agent_role: "AGENT",
+      crew_id: null,
+    })
+  })
+
+  it("still requires a crew for Lead", async () => {
+    renderDialog({ crews: [], defaultCrewSlug: null })
+    fireEvent.click(await screen.findByRole("radio", { name: /^Lead/ }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Lead" } })
+
+    expect(screen.getByRole("button", { name: /create agent/i })).toBeDisabled()
+    expect(screen.getByText(/create a crew first — leads need one/i)).toBeInTheDocument()
+  })
+
   it("does NOT submit when validation fails (name too short)", () => {
     const fetchSpy = stubFetch(() => new Response("{}", { status: 200 }))
     renderDialog()
@@ -397,13 +428,24 @@ describe("CreateAgentDialog", () => {
         expect(screen.getByRole("combobox", { name: "Crew" }).textContent).toContain("Research"),
       )
     })
+
+    it("lets an Agent clear a preselected crew to become workspace-wide", async () => {
+      renderDialog()
+      fireEvent.click(await screen.findByRole("combobox", { name: "Crew" }))
+      fireEvent.click(await screen.findByText("Workspace-wide (no crew)"))
+
+      await waitFor(() =>
+        expect(screen.getByRole("combobox", { name: "Crew" }).textContent).toContain("Workspace-wide"),
+      )
+    })
   })
 
   // -- The copy must not promise a role this door can't deliver ----------
   //
   // #2166: the empty-workspace banner, the crew-required validation hint,
-  // and the (unreachable while requiresCrew is a literal `true`) crew-field
-  // hint all told the user about a "Coordinator" role — workspace-wide, no
+  // and the crew-field hint (unreachable at the time, behind a `requiresCrew`
+  // that was a literal `true` until #2170) all told the user about a
+  // "Coordinator" role — workspace-wide, no
   // crew needed. The Role control just above has never offered more than
   // Agent and Lead. A user in a brand-new workspace — the exact moment the
   // banner fires — followed the product's own instructions into a dead end.
@@ -470,9 +512,8 @@ describe("CreateAgentDialog", () => {
       }
     })
 
-    // Some of this door's copy sits behind `requiresCrew`, a literal `true`
-    // (a separate capability question — #2170). No prop can make that branch
-    // render, so dead copy is only reachable by reading the source.
+    // Some copy is role-conditional, so reading the source complements the
+    // rendered checks and guards both the Agent and Lead branches.
     it("the component source names no role the Role control does not offer", async () => {
       renderDialog({ crews: [], defaultCrewSlug: null })
       const offered = await offeredRoles()
