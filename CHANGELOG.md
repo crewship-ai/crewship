@@ -9,6 +9,37 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+
+- **`crewship run` and `crewship ask` no longer hang forever against a busy
+  agent.** An agent serves one run at a time, and since #2269 a send that
+  arrives while it is busy is bounced with a sender-only `agent_busy` event —
+  with, by design, no terminal `done` after it: emitting one would travel the
+  shared session channel and finalize the *winning* sender's live turn
+  mid-generation. The web frontend renders that frame. Neither CLI event loop
+  knew it, so both fell through and went back to waiting for a `done` the
+  server had already decided not to send. Measured on dev3: two of three
+  concurrent `crewship run` calls against one agent printed nothing for 200 s
+  and exited only on the caller's own timeout, while the server logged both
+  the rejection and the frame it sent. They now print
+  `[busy] The agent is busy with another run right now.` and exit non-zero in
+  under a second.
+
+  `run` has **two** event loops — the streaming switch and
+  `collectAgentStream`, which is what `--no-stream`/`--wait` select and which
+  `routine iterate` shares — and the first cut of this fix patched only the
+  first. The unit test passed and the live run still hung, because the test
+  drove the path the flag did not select. Both loops handle the frame now, and
+  both are pinned by tests; `collectAgentStream` is the strict case, since
+  `runNoStream` passes it timeout 0 and there is no deadline to end the wait.
+  The event name is one exported constant (`ws.AgentBusyEventType`) named by
+  server, clients and tests alike, and the scripted-event test harness now
+  builds frames from the server's own `ws.ServerMessage`/`ws.ChatEvent` rather
+  than from the client's mirror of them — a client-shaped fixture is what let
+  this stay green in CI while failing against every real server. Unknown event
+  types are no longer swallowed in silence: under `--verbose` both loops name
+  what arrived, which is how this was found.
+
 ### Added
 
 - **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
 // runFanout sends the same prompt to N agents in parallel and prints each
@@ -222,6 +223,15 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 		switch event.Type {
 		case "text":
 			text.WriteString(event.Content)
+		case wsproto.AgentBusyEventType:
+			// The send bounced off the per-agent run lock (#2269). No
+			// terminal `done` follows this frame by design (internal/ws/
+			// client.go), so this is where the exchange ends — returning
+			// here is what keeps a fan-out that lands on a busy agent from
+			// blocking until the whole `ask` gives up. Reported per agent,
+			// like every other slot error, so the other N-1 answers still
+			// print.
+			return text.String(), fmt.Errorf("agent busy: %s", event.Content)
 		case "error":
 			return text.String(), fmt.Errorf("agent error: %s", event.Content)
 		case "done":
