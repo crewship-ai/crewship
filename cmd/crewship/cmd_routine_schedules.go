@@ -527,6 +527,12 @@ type scheduleActionResult struct {
 	// Enabled is a pointer: enable/disable must be able to report the
 	// meaningful value `false` without omitempty swallowing it.
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// Activated reports a successful `schedules activate` (B8, #2359) —
+	// distinct from Enabled/enable: activating a draft also clears
+	// pipeline_schedules.activation and resolves the one approval item
+	// atomic authoring raised.
+	Activated   bool   `json:"activated,omitempty" yaml:"activated,omitempty"`
+	FirstFireAt string `json:"first_fire_at,omitempty" yaml:"first_fire_at,omitempty"`
 }
 
 var routineSchedulesEnableCmd = &cobra.Command{
@@ -582,6 +588,51 @@ var routineSchedulesNowCmd = &cobra.Command{
 		return resolvedFormatter(cmd).AutoHuman(
 			scheduleActionResult{ID: args[0], Fired: true},
 			func() { fmt.Printf("Schedule %s fired (out-of-cycle).\n", args[0]) },
+		)
+	},
+}
+
+var routineSchedulesActivateCmd = &cobra.Command{
+	Use:   "activate <schedule_id>",
+	Short: "Activate a draft trigger created by atomic routine authoring (B8)",
+	Long: `Turns a draft trigger on: the schedule is enabled and its
+"activation" marker is cleared. Only meaningful for a schedule created
+with activation=draft (routine save --draft, or an agent's save_routine
+call with "activation": "draft") — it is the one decision the trigger's
+approval item in the workspace inbox asks for. Resolves that item as
+approved. Fails with a conflict if the schedule isn't awaiting activation.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		resp, err := client.Post(
+			fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules/%s/activate", ws, args[0]),
+			map[string]interface{}{},
+		)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var activated scheduleRow
+		if err := json.NewDecoder(resp.Body).Decode(&activated); err != nil {
+			return fmt.Errorf("decode activate response: %w", err)
+		}
+		firstFire := ""
+		if activated.NextRunAt != nil {
+			firstFire = *activated.NextRunAt
+		}
+		return resolvedFormatter(cmd).AutoHuman(
+			scheduleActionResult{ID: args[0], Activated: true, FirstFireAt: firstFire},
+			func() { fmt.Printf("Schedule %s activated. First run: %s\n", args[0], firstFire) },
 		)
 	},
 }
@@ -736,6 +787,7 @@ func init() {
 	routineSchedulesCmd.AddCommand(routineSchedulesEnableCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesDisableCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesNowCmd)
+	routineSchedulesCmd.AddCommand(routineSchedulesActivateCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesDeleteCmd)
 
 	pipelineCmd.AddCommand(routineSchedulesCmd)

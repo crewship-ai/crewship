@@ -110,6 +110,22 @@ type pipelineRowJSON struct {
 	// MarshalYAML that hands the encoder the document's SHAPE; `-f json` still
 	// gets the server's bytes back verbatim.
 	Definition cli.RawJSON `json:"definition,omitempty" yaml:"definition,omitempty"`
+	// Trigger reports what B8 atomic authoring (#2359) created alongside the
+	// routine — nil when the save didn't request one (a plain save, or a
+	// re-save of a routine whose trigger was created separately).
+	Trigger *pipelineTriggerJSON `json:"trigger,omitempty" yaml:"trigger,omitempty"`
+}
+
+// pipelineTriggerJSON mirrors internal/api's triggerResponse — the trigger
+// fragment on a routine save response (B8, #2359).
+type pipelineTriggerJSON struct {
+	Kind             string `json:"kind" yaml:"kind"`
+	ScheduleID       string `json:"schedule_id,omitempty" yaml:"schedule_id,omitempty"`
+	CronExpr         string `json:"cron_expr,omitempty" yaml:"cron_expr,omitempty"`
+	Timezone         string `json:"timezone,omitempty" yaml:"timezone,omitempty"`
+	Enabled          bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	FirstFireAt      string `json:"first_fire_at,omitempty" yaml:"first_fire_at,omitempty"`
+	ApprovalRequired bool   `json:"approval_required,omitempty" yaml:"approval_required,omitempty"`
 }
 
 var pipelineListCmd = &cobra.Command{
@@ -317,6 +333,12 @@ belong to --author-crew.`,
 		authorAgent, _ := cmd.Flags().GetString("author-agent")
 		sampleInputsRaw, _ := cmd.Flags().GetString("sample-inputs")
 		changeSummary, _ := cmd.Flags().GetString("change-summary")
+		cronExpr, _ := cmd.Flags().GetString("cron")
+		timezone, _ := cmd.Flags().GetString("timezone")
+		catchupPolicy, _ := cmd.Flags().GetString("catchup-policy")
+		maxConsecutiveFailures, _ := cmd.Flags().GetInt("max-consecutive-failures")
+		triggerManual, _ := cmd.Flags().GetBool("trigger-manual")
+		draft, _ := cmd.Flags().GetBool("draft")
 
 		if definitionPath == "" {
 			return fmt.Errorf("--definition <path> required")
@@ -326,6 +348,12 @@ belong to --author-crew.`,
 		}
 		if authorCrew == "" {
 			return fmt.Errorf("--author-crew required (the crew that owns this routine)")
+		}
+		if cronExpr != "" && triggerManual {
+			return fmt.Errorf("--cron and --trigger-manual are mutually exclusive")
+		}
+		if draft && cronExpr == "" {
+			return fmt.Errorf("--draft requires --cron (there is nothing to hold back activating otherwise)")
 		}
 
 		definitionRaw, err := os.ReadFile(definitionPath)
@@ -435,6 +463,27 @@ belong to --author-crew.`,
 		if testResult.SaveToken != "" {
 			saveBody["save_token"] = testResult.SaveToken
 		}
+		// B8 (#2359): the trigger is created in the SAME transaction as the
+		// routine above — either everything commits, or nothing does.
+		switch {
+		case cronExpr != "":
+			trigger := map[string]any{"kind": "schedule", "cron": cronExpr}
+			if timezone != "" {
+				trigger["timezone"] = timezone
+			}
+			if catchupPolicy != "" {
+				trigger["catchup_policy"] = catchupPolicy
+			}
+			if maxConsecutiveFailures > 0 {
+				trigger["max_consecutive_failures"] = maxConsecutiveFailures
+			}
+			saveBody["trigger"] = trigger
+			if draft {
+				saveBody["activation"] = "draft"
+			}
+		case triggerManual:
+			saveBody["trigger"] = map[string]any{"kind": "manual"}
+		}
 		saveResp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", ws), saveBody)
 		if err != nil {
 			return err
@@ -455,6 +504,21 @@ belong to --author-crew.`,
 			shortHash = shortHash[:12]
 		}
 		fmt.Printf("Saved routine %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
+		// B8 (#2359): name the trigger's first fire time, or the fact that
+		// there isn't one, right where the save is reported — the same
+		// thing the agent's save_routine final message states.
+		switch t := saved.Trigger; {
+		case t == nil:
+			// No trigger was requested on this save.
+		case t.Kind == "manual":
+			fmt.Println("Trigger: none (manual only)")
+		case t.ApprovalRequired:
+			fmt.Printf("Trigger: schedule %s — DISABLED, awaiting MANAGER approval (first run would be %s)\n",
+				t.CronExpr, t.FirstFireAt)
+			fmt.Println("One approval item is now in the workspace inbox: crewship routine schedules activate " + t.ScheduleID)
+		default:
+			fmt.Printf("Trigger: schedule %s — first run %s\n", t.CronExpr, t.FirstFireAt)
+		}
 		fmt.Printf("Invoke with: crewship routine run %s\n", saved.Slug)
 		return nil
 	},
@@ -1058,6 +1122,14 @@ func init() {
 	pipelineSaveCmd.Flags().String("author-agent", "", "agent slug or id the routine ACTS AS (must be in --author-crew). Required for a crewship issue.comment step")
 	pipelineSaveCmd.Flags().String("sample-inputs", "", "JSON inputs the test_run uses to validate the DSL")
 	pipelineSaveCmd.Flags().String("change-summary", "", "one-line note stored on the version row (shown by 'routine versions' and the versions UI)")
+	// B8 (#2359): the trigger is created in the SAME transaction as the
+	// routine — either everything commits, or nothing does.
+	pipelineSaveCmd.Flags().String("cron", "", "cron expression for a schedule trigger, created atomically with the routine (e.g. \"0 9 * * 1-5\")")
+	pipelineSaveCmd.Flags().String("timezone", "", "IANA timezone the --cron expression is evaluated in (default UTC)")
+	pipelineSaveCmd.Flags().String("catchup-policy", "", "skip|once|all — what happens to occurrences missed while the schedule was off (default once)")
+	pipelineSaveCmd.Flags().Int("max-consecutive-failures", 0, "circuit-breaker trip threshold for the schedule (default 5)")
+	pipelineSaveCmd.Flags().Bool("trigger-manual", false, "explicitly declare the routine has no trigger, instead of just omitting one")
+	pipelineSaveCmd.Flags().Bool("draft", false, "create the trigger disabled and raise one approval item instead of activating it immediately")
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")
