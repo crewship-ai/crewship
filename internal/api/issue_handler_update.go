@@ -269,7 +269,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate status transition
-	var forcedPastChildren []string
+	var needsTerminalGuard bool
 	if req.Status != nil {
 		newStatus := *req.Status
 		if !h.validateStatusTransition(currentStatus, newStatus) {
@@ -283,18 +283,28 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// is still live, unless the caller passes ?force=true — in which
 		// case the transition proceeds and the blockers are named on the
 		// status_changed event below (the "receipt").
-		if newStatus != currentStatus && isTerminalIssueTarget(newStatus) {
+		//
+		// This only decides whether a TRANSACTION is warranted below; it
+		// is deliberately NOT where the check happens for a transition
+		// that turns out to need one. See the write block for why (review
+		// on #2377: a bare read-then-write here left a window for a child
+		// to appear or reopen between this check and the UPDATE).
+		needsTerminalGuard = newStatus != currentStatus && isTerminalIssueTarget(newStatus)
+		if needsTerminalGuard && r.URL.Query().Get("force") != "true" {
+			// Advisory fast path only: most requests against a clean
+			// parent (the common case) can 409 or proceed without ever
+			// opening a transaction. A request that passes this and
+			// still finds blockers at write time gets caught by the
+			// authoritative, transaction-scoped re-check below instead of
+			// silently succeeding.
 			blockers, bErr := openChildBlockers(r.Context(), h.db, missionID)
 			if bErr != nil {
 				internalError(w, r, h.logger, "check open children for terminal transition", bErr)
 				return
 			}
 			if len(blockers) > 0 {
-				if r.URL.Query().Get("force") != "true" {
-					writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
-					return
-				}
-				forcedPastChildren = blockers
+				writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
+				return
 			}
 		}
 
@@ -311,11 +321,61 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var forcedPastChildren []string
 	if !ub.Empty() {
 		query, args := ub.Build("missions", "id = ?", missionID)
-		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-			internalError(w, r, h.logger, "update issue", err)
-			return
+		switch {
+		case needsTerminalGuard:
+			// §10.4's actual enforcement point. database.Open sets
+			// `_txlock=immediate` on every connection, so BeginTx here
+			// acquires SQLite's single write lock at BEGIN — the same
+			// property missionactivity.Emit's seq allocation and
+			// nextIssueIdentifierTx rely on — which is what makes this
+			// re-check race-free against a concurrent write that creates,
+			// reopens, or resolves a child: nothing else can change a
+			// mission_tasks/sub-issue row between this SELECT and the
+			// UPDATE two lines below.
+			tx, txErr := h.db.BeginTx(r.Context(), nil)
+			if txErr != nil {
+				internalError(w, r, h.logger, "begin terminal-transition tx", txErr)
+				return
+			}
+			committed := false
+			defer func() {
+				if !committed {
+					_ = tx.Rollback()
+				}
+			}()
+			blockers, bErr := openChildBlockers(r.Context(), tx, missionID)
+			if bErr != nil {
+				internalError(w, r, h.logger, "re-check open children for terminal transition", bErr)
+				return
+			}
+			if len(blockers) > 0 {
+				if r.URL.Query().Get("force") != "true" {
+					// The advisory pre-check above passed, but a child
+					// appeared or reopened in the window between it and
+					// this transaction — the exact race this re-check
+					// exists to catch.
+					writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
+					return
+				}
+				forcedPastChildren = blockers
+			}
+			if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+				internalError(w, r, h.logger, "update issue", err)
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				internalError(w, r, h.logger, "commit terminal transition", err)
+				return
+			}
+			committed = true
+		default:
+			if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+				internalError(w, r, h.logger, "update issue", err)
+				return
+			}
 		}
 	}
 

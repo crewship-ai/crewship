@@ -47,10 +47,28 @@ var terminalTaskStatuses = map[string]bool{
 	"SKIPPED":   true,
 }
 
+// childQueryer is the subset of *sql.DB / *sql.Tx openChildBlockers needs.
+// Accepting the interface (rather than *sql.DB) is what lets the Update
+// handler re-run this SAME check inside a transaction right before its
+// write, closing the check-then-act race a plain *sql.DB parameter would
+// leave open: two concurrent requests could otherwise both read "no open
+// children" and both proceed, one of them racing a THIRD request that
+// opens or reopens a child in between (caught in review on #2377).
+type childQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // openChildBlockers returns a human-readable line per non-terminal
 // sub-issue and non-terminal mission_task blocking missionID from reaching
 // DONE/REVIEW. An empty, nil-error result means nothing is blocking.
-func openChildBlockers(ctx context.Context, db *sql.DB, missionID string) ([]string, error) {
+//
+// Callers that intend to act on a clean result (proceed with the
+// transition) MUST re-run this check inside the SAME transaction as the
+// write that follows — see issue_handler_update.go's Update for the
+// pattern. A caller that only wants a cheap, advisory pre-check (to fail
+// fast on the common case before opening a transaction at all) may pass
+// h.db directly; that read is not itself the enforcement point.
+func openChildBlockers(ctx context.Context, db childQueryer, missionID string) ([]string, error) {
 	var blockers []string
 
 	subRows, err := db.QueryContext(ctx, `
