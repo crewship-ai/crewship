@@ -121,4 +121,65 @@ describe("useIssueEventGapResync", () => {
     expect(api.apiFetch).not.toHaveBeenCalled()
     expect(onResync).not.toHaveBeenCalled()
   })
+
+  // Code review on #2377: a gap spanning more than one server page (the
+  // endpoint caps a page at 500 rows) must not let the client mark itself
+  // "caught up" at the server's true latest_seq while never having
+  // fetched the middle chunk. This pins the fix: the resync PAGES until
+  // it has actually seen every event up to latest_seq.
+  it("pages until caught up when a gap spans more than one page", async () => {
+    const onResync = vi.fn()
+    api.apiFetch
+      .mockResolvedValueOnce(jsonResponse({ events: [{ seq: 6 }, { seq: 7 }], after_seq: 5, latest_seq: 20 }))
+      .mockResolvedValueOnce(jsonResponse({ events: [{ seq: 8 }, { seq: 9 }], after_seq: 7, latest_seq: 20 }))
+      .mockResolvedValueOnce(jsonResponse({ events: [], after_seq: 9, latest_seq: 20 }))
+    renderHook(() => useIssueEventGapResync({ crewId: "crew-1", onResync }))
+
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 5 })
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 9 })
+
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    const urls = api.apiFetch.mock.calls.map((c) => c[0])
+    expect(urls).toEqual([
+      "/api/v1/crews/crew-1/issues/ENG-1/events?after_seq=5",
+      "/api/v1/crews/crew-1/issues/ENG-1/events?after_seq=7",
+      "/api/v1/crews/crew-1/issues/ENG-1/events?after_seq=9",
+    ])
+    expect(onResync).toHaveBeenCalledWith("m1", "ENG-1", [{ seq: 6 }, { seq: 7 }, { seq: 8 }, { seq: 9 }])
+
+    // A SUBSEQUENT consecutive ack (seq 10, one past the true watermark
+    // this resync converged on) must read as consecutive, not another gap.
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 10 })
+    expect(api.apiFetch).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not fan out a second concurrent resync for the same mission while one is in flight", async () => {
+    const onResync = vi.fn()
+    let resolveFirst: (v: Response) => void = () => {}
+    api.apiFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFirst = resolve
+        }),
+    )
+    renderHook(() => useIssueEventGapResync({ crewId: "crew-1", onResync }))
+
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 5 })
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 8 }) // triggers the pending fetch
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 12 }) // another gap while in flight
+
+    expect(api.apiFetch).toHaveBeenCalledTimes(1)
+
+    resolveFirst(jsonResponse({ events: [{ seq: 6 }], after_seq: 5, latest_seq: 6 }))
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Once the in-flight fetch clears, the mission is no longer guarded —
+    // this only asserts no SECOND request fired while the first was
+    // outstanding, not that a later, independent gap never resyncs again.
+    expect(api.apiFetch).toHaveBeenCalledTimes(1)
+  })
 })
