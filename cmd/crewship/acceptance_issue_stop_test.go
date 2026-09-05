@@ -31,6 +31,7 @@ import (
 type issueStopStub struct {
 	mu          sync.Mutex
 	stopCalls   []string // paths the stop route was hit with
+	stopQueries []string // raw query strings ("" for none) the stop route was hit with, same index as stopCalls
 	stopStatus  int
 	stopBody    string // overrides the default success/error body when set
 	issueStatus string // status the GET .../issues/BE-42 stub reports (default IN_PROGRESS)
@@ -62,6 +63,7 @@ func (s *issueStopStub) start(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/crews/crew_1/issues/BE-42/stop":
 			s.mu.Lock()
 			s.stopCalls = append(s.stopCalls, r.URL.Path)
+			s.stopQueries = append(s.stopQueries, r.URL.RawQuery)
 			status := s.stopStatus
 			body := s.stopBody
 			s.mu.Unlock()
@@ -91,6 +93,13 @@ func (s *issueStopStub) calls(t *testing.T) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.stopCalls...)
+}
+
+func (s *issueStopStub) queries(t *testing.T) []string {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.stopQueries...)
 }
 
 func runIssueStopCLI(t *testing.T, serverURL string, args ...string) (string, error) {
@@ -181,5 +190,60 @@ func TestAcceptance_IssueStop_NonOKReportedAsError(t *testing.T) {
 	}
 	if !strings.Contains(out, "IN_PROGRESS or REVIEW") {
 		t.Errorf("output = %q, want the server's error detail surfaced", out)
+	}
+}
+
+// TestAcceptance_IssueStop_HardFlagSendsHardQueryAndTerminationWording is
+// the built-binary half of B7 (PRD-ISSUES-AND-ROUTINES-2026 §10.3 Tier 2,
+// #2356): `--hard` is a wire-contract change (a new query param) with its
+// own success wording, the exact class of drift a stub test asserting
+// against Go code — not the compiled CLI's printed text — would miss. See
+// this file's own header comment for why the acceptance suite drives the
+// binary for every `issue stop` behavior, including this one.
+func TestAcceptance_IssueStop_HardFlagSendsHardQueryAndTerminationWording(t *testing.T) {
+	stub := &issueStopStub{
+		stopStatus: http.StatusOK,
+		stopBody:   `{"status":"CANCELLED","identifier":"BE-42","runs_stopped":1,"hard":true}`,
+	}
+	srv := stub.start(t)
+
+	out, err := runIssueStopCLI(t, srv.URL, "issue", "stop", "BE-42", "--hard")
+	if err != nil {
+		t.Fatalf("issue stop --hard: %v\noutput: %s", err, out)
+	}
+
+	calls := stub.calls(t)
+	queries := stub.queries(t)
+	if len(calls) != 1 || calls[0] != "/api/v1/crews/crew_1/issues/BE-42/stop" {
+		t.Fatalf("stop calls = %v, want exactly one call to the stop route", calls)
+	}
+	if len(queries) != 1 || !strings.Contains(queries[0], "hard=true") {
+		t.Errorf("stop query = %v, want it to carry hard=true", queries)
+	}
+	if !strings.Contains(out, "Hard stop requested for BE-42") {
+		t.Errorf("output = %q, want the Tier 2 success wording", out)
+	}
+	if !strings.Contains(out, "terminated") {
+		t.Errorf("output = %q, want it to name the process termination", out)
+	}
+}
+
+// TestAcceptance_IssueStop_PlainStopSendsNoHardQuery is the control: without
+// --hard, the CLI must not opt an issue into Tier 2 by accident.
+func TestAcceptance_IssueStop_PlainStopSendsNoHardQuery(t *testing.T) {
+	stub := &issueStopStub{stopStatus: http.StatusOK}
+	srv := stub.start(t)
+
+	out, err := runIssueStopCLI(t, srv.URL, "issue", "stop", "BE-42")
+	if err != nil {
+		t.Fatalf("issue stop: %v\noutput: %s", err, out)
+	}
+
+	queries := stub.queries(t)
+	if len(queries) != 1 || strings.Contains(queries[0], "hard=true") {
+		t.Errorf("stop query = %v, plain stop must not send hard=true", queries)
+	}
+	if strings.Contains(out, "Hard stop requested") {
+		t.Errorf("output = %q, plain stop must not print the Tier 2 wording", out)
 	}
 }
