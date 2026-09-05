@@ -68,7 +68,10 @@ func newSpendBackedServer(t *testing.T) *httptest.Server {
 
 	const wsID = "c000000000000000000acc"
 	tsFmt := func(tm time.Time) string { return tm.UTC().Format("2006-01-02T15:04:05.000000000Z07:00") }
-	now := time.Now().UTC()
+	// Anchored at midday so the rows seeded 1–2 h before it never straddle a UTC
+	// date boundary — with time.Now() both spend tests failed between 00:00
+	// and 02:00 UTC every day (#2360).
+	now := time.Date(2026, time.September, 4, 12, 0, 0, 0, time.UTC)
 
 	// Two cost.incurred rows for agent_a → total 2.00, one by-agent bucket.
 	for i, c := range []float64{1.25, 0.75} {

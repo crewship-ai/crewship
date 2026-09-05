@@ -77,7 +77,10 @@ func TestJournalHandler_Spend_HappyPath(t *testing.T) {
 	if _, err := h.db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, status) VALUES ('agent_a', ?, 'crew_a', 'Agent A', 'agent-a', 'IDLE')`, wsID); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	now := time.Now().UTC()
+	// Anchored at midday so the rows seeded 1–2 h before it never straddle a UTC
+	// date boundary — with time.Now() both spend tests failed between 00:00
+	// and 02:00 UTC every day (#2360).
+	now := time.Date(2026, time.September, 4, 12, 0, 0, 0, time.UTC)
 	seedCostIncurredRow(t, h, "je-spend-1", wsID, "crew_a", "agent_a", 1.25, now.Add(-1*time.Hour))
 	seedCostIncurredRow(t, h, "je-spend-2", wsID, "crew_a", "agent_a", 0.75, now.Add(-2*time.Hour))
 
