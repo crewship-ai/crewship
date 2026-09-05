@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -620,11 +621,53 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 
 	plainValue, found := h.secrets.Get(body.CredentialID)
 	if !found {
-		h.logger.Error("keeper execute: secret not in store", "credential_id", body.CredentialID)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "credential not available in secrets store",
-		})
-		return
+		// #2391: the Keeper secrets store is loaded ONCE at boot
+		// (server.newSecretsAdapter → store.Reload) and never refreshed, and it
+		// only ever held type='SECRET' rows. So a credential that became ACTIVE
+		// after boot is absent from it — which is EVERY credential created by
+		// the #2376 ask→supply flow, plus any handle-only credential whose type
+		// is not SECRET (the store would never load those even after a restart).
+		// Such a credential is usable ONLY through /keeper/execute, so a store
+		// miss here made the delivered grant unusable until the next restart.
+		//
+		// Fall back to a live decrypt from the vault — the same source, key and
+		// ciphertext every OTHER delivery path already reads at request time
+		// (loadDeliveredCredentials and friends never preload; only Keeper did).
+		// This is not a second trust decision: the credential was re-validated
+		// ACTIVE, assigned to this agent and lease-live in the query directly
+		// above, so the row named here is exactly the one that check approved.
+		// The store stays a boot cache; on a miss it is bypassed, not trusted.
+		var encValue string
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT encrypted_value FROM credentials
+			 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			body.CredentialID, body.WorkspaceID).Scan(&encValue); err != nil {
+			h.logger.Error("keeper execute: secret not in store and vault lookup failed",
+				"credential_id", body.CredentialID, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "credential not available",
+			})
+			return
+		}
+		dec, derr := encryption.Decrypt(encValue)
+		if derr != nil {
+			h.logger.Error("keeper execute: secret not in store and decrypt failed",
+				"credential_id", body.CredentialID, "error", derr)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "credential not available",
+			})
+			return
+		}
+		// A PENDING/REQUESTED row carries a sentinel, not a value — never inject
+		// it. The status='ACTIVE' re-validation above already excludes these, so
+		// this is defence in depth matching every other decrypt site.
+		if isPendingSentinel(dec) {
+			h.logger.Error("keeper execute: resolved credential still carries a pending sentinel",
+				"credential_id", body.CredentialID)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})
+			return
+		}
+		plainValue = dec
 	}
 
 	// #1016: pin the exec target to the requesting agent's OWN crew container,

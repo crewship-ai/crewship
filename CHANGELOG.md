@@ -62,6 +62,19 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `credentials.handle_only` marks a credential the agent may use but never
   read, enforced at the shared delivery loader on every path, Keeper on or
   off. Agent prompt, inbox card, escalation card and docs updated.
+- **A handle-only credential supplied on a running server is usable at once, not only after a restart (#2391).**
+  A handle-only credential's only usage path is `/keeper/execute`, which read
+  the plaintext from the Keeper secrets store — a map loaded once at boot
+  (`type='SECRET'` rows only) and never refreshed. Every credential from the
+  #2376 ask→supply flow becomes `ACTIVE` after boot, so it was absent from the
+  store and an `ALLOW` returned `500 credential not available in secrets
+  store`: the agent was granted a credential it could not use until the next
+  restart, and a handle-only credential of a non-`SECRET` type never entered
+  the store at all. `/keeper/execute` now falls back to a live vault decrypt on
+  a store miss — the same source, key and ciphertext every other delivery path
+  already reads at request time — after the credential has been re-validated
+  `ACTIVE`, assigned and lease-live, and refuses a pending sentinel. Fails
+  closed either way; the store stays a boot cache.
 - **`crewship issue update --force` follows the 409 the terminal-children rule
   sends (#2382).** #2377 taught the server to refuse moving a parent to
   DONE/REVIEW while a sub-issue is live and to say "retry with ?force=true";
