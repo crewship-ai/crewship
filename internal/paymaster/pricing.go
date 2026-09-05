@@ -22,8 +22,8 @@ type modelPrice struct {
 // the provider sent "claude-opus-4-7" or "Claude-Opus-4-7". Adding a model is
 // a one-line change here; missing models fall through to providerFallback.
 //
-// Sources verified 2026-04-30: Anthropic platform docs, OpenAI rate card,
-// Google AI pricing, xAI docs, DeepSeek API pricing, Mistral pricing.
+// Sources verified through 2026-09-05: Anthropic platform docs, OpenAI rate
+// card, Google AI pricing, xAI docs, DeepSeek API pricing, Mistral pricing.
 // Where a 2026 number is in flux (Gemini 3.x, GPT-5.5 nano), we picked the
 // nearest published tier and noted the assumption; tighten on next sweep.
 var priceTable = map[string]modelPrice{
@@ -41,10 +41,12 @@ var priceTable = map[string]modelPrice{
 
 	// OpenAI — GPT-5.x family. Cached-input ratio mirrors OpenAI's published
 	// 0.10–0.25× prompt-cache discount. OpenAI does not charge a separate
-	// write fee, so cache_write equals input rate.
-	"openai/gpt-5.5":      {InputPerM: 4.00, OutputPerM: 24.00, CachedInputPerM: 0.40, CacheWritePerM: 4.00},
+	// write fee, so cache_write equals input rate. GPT-5.5 doubles input/cache
+	// and charges 1.5× output above 272K input tokens; Estimate has no context
+	// length, so its row deliberately uses that upper tier to avoid under-billing.
+	"openai/gpt-5.5":      {InputPerM: 10.00, OutputPerM: 45.00, CachedInputPerM: 1.00, CacheWritePerM: 10.00},
 	"openai/gpt-5.4-mini": {InputPerM: 0.75, OutputPerM: 4.50, CachedInputPerM: 0.075, CacheWritePerM: 0.75},
-	"openai/gpt-5.4-nano": {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.01, CacheWritePerM: 0.10},
+	"openai/gpt-5.4-nano": {InputPerM: 0.20, OutputPerM: 1.25, CachedInputPerM: 0.02, CacheWritePerM: 0.20},
 	"openai/o3-pro":       {InputPerM: 20.00, OutputPerM: 80.00, CachedInputPerM: 5.00, CacheWritePerM: 20.00},
 	// Aliases so older agents pinned to "gpt-5", "gpt-5-mini", "gpt-5-nano" still
 	// resolve to the right tier. Keeps the rate card honest without churning
@@ -58,8 +60,8 @@ var priceTable = map[string]modelPrice{
 	// rather than under. Refactor Estimate signature later if precision
 	// matters.
 	"google/gemini-2.5-pro":        {InputPerM: 2.50, OutputPerM: 15.00, CachedInputPerM: 0.625, CacheWritePerM: 2.50},
-	"google/gemini-2.5-flash":      {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.025, CacheWritePerM: 0.10},
-	"google/gemini-2.5-flash-lite": {InputPerM: 0.05, OutputPerM: 0.20, CachedInputPerM: 0.0125, CacheWritePerM: 0.05},
+	"google/gemini-2.5-flash":      {InputPerM: 0.30, OutputPerM: 2.50, CachedInputPerM: 0.03, CacheWritePerM: 0.30},
+	"google/gemini-2.5-flash-lite": {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.01, CacheWritePerM: 0.10},
 
 	// xAI — Grok 4 family. No separate cached-input pricing in xAI docs as of
 	// 2026-04, so cached/cache_write mirror input as a conservative default.

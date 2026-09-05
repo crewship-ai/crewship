@@ -1218,6 +1218,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
   now also floors the `authedMut`-scanned count so the regex going blind
   again fails the build.
+- **Paymaster no longer under-bills Gemini 2.5 Flash, Gemini 2.5 Flash-Lite, GPT-5.4 nano, or long-context GPT-5.5 calls (#2013).** The hand-verified rate card now matches the providers' published prices, including GPT-5.5's conservative >272K-token tier, and its catalogue-drift guard has no remaining stale-row exceptions.
 - **`review-status.sh` reported `reviewed` when CodeRabbit's only activity on
   the head commit was a bodyless reply inside an existing thread, not a read
   of the diff (#2145).** A `COMMENTED` review with an empty body was promoted

@@ -35,7 +35,7 @@ func TestExplainRate_Source(t *testing.T) {
 		// says table, which is the truth — the row exists and someone checked
 		// it against an invoice.
 		{"hand-written row the snapshot agrees with", "anthropic", "claude-opus-4-7", rateFromTable},
-		{"hand-written row that disagrees with the catalog", "openai", "gpt-5.5", rateFromTable},
+		{"hand-written row verified against the catalog", "openai", "gpt-5.5", rateFromTable},
 		{"alias row the catalog has no equivalent for", "openai", "gpt-5-mini", rateFromTable},
 		{"catalog fills a gap the table leaves", "openai", "gpt-4o", rateFromCatalog},
 		{"catalog reaches a provider with no codec", "openrouter", "qwen/qwen3-coder-flash", rateFromCatalog},
@@ -75,8 +75,8 @@ func TestExplainRate_NormalizesIdentity(t *testing.T) {
 	}
 }
 
-// A shadowed catalog row is still reported, because "the table says $4 and
-// upstream says $5" is exactly the discrepancy an operator is looking for.
+// A shadowed catalog row is still reported even when it agrees with the table,
+// so an operator can see the independent source used to check the billed rate.
 func TestExplainRate_ShadowedCatalogIsStillReported(t *testing.T) {
 	got := explainRate("openai", "gpt-5.5")
 	if got.Source != rateFromTable {
@@ -85,8 +85,8 @@ func TestExplainRate_ShadowedCatalogIsStillReported(t *testing.T) {
 	if got.Catalog == nil {
 		t.Fatal("Catalog is nil: the snapshot carries openai/gpt-5.5 and the shadowed rate must survive")
 	}
-	if *got.Catalog == got.Rates {
-		t.Errorf("catalog rate %+v equals the billed rate: this fixture only tests anything while they differ", *got.Catalog)
+	if *got.Catalog != got.Rates {
+		t.Errorf("catalog rate %+v differs from corrected billed rate %+v", *got.Catalog, got.Rates)
 	}
 }
 
@@ -163,13 +163,14 @@ func TestPriceCall_ChannelsSumToEstimate(t *testing.T) {
 }
 
 func TestPriceCall_Channels(t *testing.T) {
-	// openai/gpt-5.5 is hand-written: $4 in, $24 out, $0.40 cached, $4 write.
+	// openai/gpt-5.5 uses the conservative >272K tier: $10 in, $45 out,
+	// $1 cached, $10 write.
 	res := priceCall("openai", "gpt-5.5", priceUsage{In: 3000, Out: 500, CachedIn: 9000, CacheCreate: 1000})
 	want := []priceChannel{
-		{Name: "input", Tokens: 3000, PerMTok: 4.00, CostUSD: 0.012},
-		{Name: "output", Tokens: 500, PerMTok: 24.00, CostUSD: 0.012},
-		{Name: "cached input", Tokens: 9000, PerMTok: 0.40, CostUSD: 0.0036},
-		{Name: "cache write", Tokens: 1000, PerMTok: 4.00, CostUSD: 0.004},
+		{Name: "input", Tokens: 3000, PerMTok: 10.00, CostUSD: 0.030},
+		{Name: "output", Tokens: 500, PerMTok: 45.00, CostUSD: 0.0225},
+		{Name: "cached input", Tokens: 9000, PerMTok: 1.00, CostUSD: 0.009},
+		{Name: "cache write", Tokens: 1000, PerMTok: 10.00, CostUSD: 0.010},
 	}
 	if len(res.Channels) != len(want) {
 		t.Fatalf("channels = %+v", res.Channels)
@@ -261,8 +262,8 @@ func TestAcceptance_ModelPrice_Offline(t *testing.T) {
 	if want := paymaster.Estimate("openai", "gpt-5.5", 3000, 500, 9000, 0); got.TotalUSD != want {
 		t.Errorf("total_usd = %v, want %v", got.TotalUSD, want)
 	}
-	if got.Rates.InputPerM != 4.00 {
-		t.Errorf("input rate = %v, want 4", got.Rates.InputPerM)
+	if got.Rates.InputPerM != 10.00 {
+		t.Errorf("input rate = %v, want 10", got.Rates.InputPerM)
 	}
 }
 

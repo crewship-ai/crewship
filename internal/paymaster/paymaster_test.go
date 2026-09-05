@@ -188,10 +188,10 @@ func TestEstimate(t *testing.T) {
 			want: 0,
 		},
 		{
-			name:     "openai gpt-5 alias maps to 5.5 rate",
+			name:     "openai legacy gpt-5 alias",
 			provider: "openai", model: "gpt-5",
 			in: 1000, out: 500,
-			// gpt-5 alias resolves to gpt-5.5 rate: $4 in / $24 out per 1M.
+			// The legacy unversioned alias retains its own $4/$24 rate.
 			// 1000 * 4/1e6 + 500 * 24/1e6
 			want: 0.004 + 0.012,
 		},
@@ -199,7 +199,8 @@ func TestEstimate(t *testing.T) {
 			name:     "openai gpt-5.5 flagship",
 			provider: "openai", model: "gpt-5.5",
 			in: 1000, out: 500,
-			want: 0.004 + 0.012,
+			// Conservative >272K tier: $10 input / $45 output per 1M.
+			want: 0.010 + 0.0225,
 		},
 		{
 			name:     "gemini 2.5 pro",
