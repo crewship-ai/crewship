@@ -15,16 +15,14 @@ package pipeline
 // scheduler + executor, asserting on the real pipeline_runs table rather
 // than a mock runner's call count.
 //
-// Clock note: PipelineScheduler.now() (schedules.go) IS injectable via the
+// Clock note: PipelineScheduler.now() (schedules.go) is injectable via the
 // unexported nowFn field, but listDueSchedules (the "is this row due"
-// filter) compares next_run_at against a fresh time.Now() every time —
-// it is NOT injectable. So "no sleeping" here means: seed next_run_at
-// (and any other due-timestamps) as real-clock offsets taken once per
-// test, then invoke tick()/fireOne() immediately and synchronously. No
-// call in this file sleeps, polls, or waits on wall-clock elapse; every
-// due/missed-occurrence computation is anchored to a single time.Now()
-// read at the top of the test. This is the same pattern the pre-existing
-// schedules_catchup_test.go uses (proven not to flake).
+// filter) compares next_run_at against a fresh time.Now() every time. Most
+// scenarios therefore seed real-clock offsets and fire synchronously. Tests
+// that assert an exact number of cron-grid occurrences instead pin nowFn and
+// use a fixed historical due timestamp: listDueSchedules still sees it as
+// due, while scheduler work cannot cross another cron boundary on a slow
+// runner (#2386).
 
 import (
 	"context"
@@ -295,8 +293,13 @@ func TestGolden11_WakeGate_FailOpen_ProbeErrors_Fires(t *testing.T) {
 // runs, once -> exactly 1, all -> exactly 3. Also asserts
 // last_missed_count reflects reality for each policy.
 func TestGolden12_Catchup_AllThreePolicies(t *testing.T) {
-	nowTrunc := time.Now().UTC().Truncate(time.Minute)
-	dueAt := nowTrunc.Add(-2 * time.Minute)
+	// Both ends of the missed-occurrence window must be fixed. Deriving dueAt
+	// from time.Now while fireOne reads time.Now again lets a slow runner cross
+	// a minute boundary between setup and tick, adding one occurrence to every
+	// policy. This historical instant remains due to listDueSchedules' ambient
+	// clock while the scheduler itself sees exactly the three named occurrences.
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	dueAt := now.Add(-2 * time.Minute)
 
 	cases := []struct {
 		policy       string
@@ -311,6 +314,7 @@ func TestGolden12_Catchup_AllThreePolicies(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.policy, func(t *testing.T) {
 			db, store, sched := newGoldenRig(t)
+			sched.nowFn = func() time.Time { return now }
 			pipeID := "pipe_" + tc.policy
 			schedID := "psched_" + tc.policy
 			goldenSeedAgentPipeline(t, db, pipeID, tc.policy, "agent_lead")
