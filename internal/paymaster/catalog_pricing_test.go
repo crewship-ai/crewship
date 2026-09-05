@@ -532,15 +532,27 @@ func maxFloat(a, b float64) float64 {
 // re-checks it against the provider's published price and either corrects the
 // row or records why the table is deliberately lower.
 //
-// This list is not an excuse — it is the open work, tracked in #2013. An entry
-// stays only as long as nobody has verified it. Adding a new entry to silence a
-// failure is the wrong move: a table row below the catalogue is under-billing,
-// which is the one direction this whole rate card refuses to be wrong in.
-var staleTableRows = map[string]string{
-	"google/gemini-2.5-flash":      "table 0.10/0.40 vs catalogue 0.30/2.50 — 6.25x under on output",
-	"google/gemini-2.5-flash-lite": "table 0.05/0.20 vs catalogue 0.10/0.40 — 2x under on both",
-	"openai/gpt-5.4-nano":          "table 0.10/0.40 vs catalogue 0.20/1.25 — 3.1x under on output",
-	"openai/gpt-5.5":               "table 4.00/24.00 vs catalogue 10.00/45.00 — 1.9x under on output",
+// This list is not an excuse. Adding an entry to silence a failure is the wrong
+// move: a table row below the catalogue is under-billing, which is the one
+// direction this whole rate card refuses to be wrong in. An exception belongs
+// here only after the provider's published price has been checked and the
+// reason the catalogue is higher is recorded. There are currently none.
+var staleTableRows = map[string]string{}
+
+func TestCorrectedPriceRowsMatchPublishedRates(t *testing.T) {
+	tests := map[string]modelPrice{
+		"google/gemini-2.5-flash":      {InputPerM: 0.30, OutputPerM: 2.50, CachedInputPerM: 0.03, CacheWritePerM: 0.30},
+		"google/gemini-2.5-flash-lite": {InputPerM: 0.10, OutputPerM: 0.40, CachedInputPerM: 0.01, CacheWritePerM: 0.10},
+		"openai/gpt-5.4-nano":          {InputPerM: 0.20, OutputPerM: 1.25, CachedInputPerM: 0.02, CacheWritePerM: 0.20},
+		// GPT-5.5's >272K context tier. RateCard cannot choose by context
+		// length yet, so the conservative ceiling is the only safe row.
+		"openai/gpt-5.5": {InputPerM: 10.00, OutputPerM: 45.00, CachedInputPerM: 1.00, CacheWritePerM: 10.00},
+	}
+	for key, want := range tests {
+		if got := priceTable[key]; got != want {
+			t.Errorf("priceTable[%q] = %+v, want %+v", key, got, want)
+		}
+	}
 }
 
 // A hand-written row must not be cheaper than what the snapshot says the model
