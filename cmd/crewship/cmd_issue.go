@@ -468,6 +468,12 @@ func init() {
 	// issue delete flags
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
+	// issue stop flags (§10.3 Tier 2, B7, #2356): --hard signals the run's
+	// own process (TERM then, after a grace period, KILL) from inside its
+	// container, bounded to a few seconds, on top of plain stop's Tier 1
+	// cooperative cancel. Never affects a sibling agent on the same crew.
+	issueStopCmd.Flags().Bool("hard", false, "also terminate the running process (Tier 2); cooperative stop alone only prevents further work from starting")
+
 	// issue comment flags
 	issueCommentCmd.Flags().String("body", "", "Comment body (alternative to positional args)")
 	issueCommentCmd.Flags().StringArray("mention", nil, "Mention an agent by slug (repeatable) — resolved to the "+

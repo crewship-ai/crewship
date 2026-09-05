@@ -156,7 +156,7 @@ var issueStartCmd = &cobra.Command{
 
 var issueStopCmd = &cobra.Command{
 	Use:   "stop <identifier>",
-	Short: "Stop an issue — cooperative cancel; a step already running finishes",
+	Short: "Stop an issue — cooperative cancel; --hard also terminates the running process",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -166,6 +166,8 @@ var issueStopCmd = &cobra.Command{
 			return err
 		}
 
+		hard, _ := cmd.Flags().GetBool("hard")
+
 		client := newAPIClient()
 		iss, err := fetchIssue(client, args[0])
 		if err != nil {
@@ -174,7 +176,11 @@ var issueStopCmd = &cobra.Command{
 		identifier := derefStr(iss.Identifier, iss.ID)
 		escaped := url.PathEscape(identifier)
 
-		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/stop", iss.CrewID, escaped), nil)
+		path := fmt.Sprintf("/api/v1/crews/%s/issues/%s/stop", iss.CrewID, escaped)
+		if hard {
+			path += "?hard=true"
+		}
+		resp, err := client.Post(path, nil)
 		if err != nil {
 			return err
 		}
@@ -182,6 +188,10 @@ var issueStopCmd = &cobra.Command{
 			return err
 		}
 		resp.Body.Close()
+		if hard {
+			cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent process is being terminated (TERM, then KILL after a grace period)", identifier))
+			return nil
+		}
 		cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
 		return nil
 	},
