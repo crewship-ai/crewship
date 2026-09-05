@@ -203,8 +203,13 @@ scripting; the default is a human-readable table.
 An agent runs one message at a time. A send that arrives while the agent
 already has a live run is bounced with `agent_busy` and no `done` follows it —
 that frame ends the exchange. `run` reports it and exits non-zero rather than
-waiting; retry once the live run finishes, or use `crewship assign`, whose
-dispatches queue behind the running one instead of bouncing.
+waiting, so retry once the live run finishes.
+
+Chat sends bounce; assignment dispatches do not. A dispatch that loses the same
+per-agent lock — an `/assign` or an `@mention` of a busy agent — is queued
+behind the live run with `queued_reason: agent_busy` and drained by the
+completion pump instead. Prefer that route when you want work to wait its turn
+rather than be rejected.
 
 A dropped WebSocket connection mid-run exits non-zero so wrapping scripts (`crewship run x "y" || alert`) catch it.
 
