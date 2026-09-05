@@ -646,8 +646,8 @@ func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, err
 // passed. Called by the scheduler tick.
 //
 // next_run_at is compared as a string, so both sides use the
-// fixed-width tsformat (#990). Legacy rows written pre-fix with
-// RFC3339Nano (cron-derived whole seconds render with NO fraction)
+// fixed-width tsformat (#990). Legacy rows written pre-fix with the
+// variable-width nanosecond layout (cron-derived whole seconds render with NO fraction)
 // compare greater than a fractional bound for their boundary second —
 // a one-poll-tick firing delay that self-heals as soon as the bound
 // crosses into the next second, and disappears once the row's next
