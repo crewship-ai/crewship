@@ -95,6 +95,11 @@ func executionSchemaComponents() map[string]any {
 		"cron_expr": str(), "timezone": str(), "inputs": anyMap, "enabled": boolean(), "wake_pipeline_slug": str(),
 		"wake_pipeline_id": str(), "wake_inputs": anyMap, "wake_fail_closed": boolean(), "catchup_policy": str(), "max_consecutive_failures": integer(),
 	})
+	// SchedulePreview — B9 (#2362), §13.2 "When". Stateless: no schedule id,
+	// just the cron/timezone/count that produced the occurrences.
+	schedulePreview := obj(map[string]any{
+		"cron_expr": str(), "timezone": str(), "occurrences": arr(timeString()),
+	})
 	replayRequest := obj(map[string]any{"pinned_version": integer()})
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})
@@ -127,7 +132,7 @@ func executionSchemaComponents() map[string]any {
 		"RunResult": runResult, "DryRunStep": dryRunStep, "PipelineRun": pipelineRun, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
 		"RunRecord": runRecord, "RunRecordList": arr(refOrString("RunRecord")), "PipelineRunTree": arr(obj(map[string]any{"id": str(), "parent_id": str(), "pipeline_slug": str(), "status": str(), "triggered_via": str(), "cost_usd": number()})),
 		"RunLogEntry": obj(map[string]any{"ts": timeString(), "level": str(), "message": str(), "type": str()}), "RunLogList": arr(refOrString("RunLogEntry")),
-		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),
+		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "SchedulePreview": schedulePreview, "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),
 		"StateEntry": stateEntry, "StateBucket": stateBucket, "Waitpoint": waitpoint, "WaitpointList": arr(refOrString("Waitpoint")),
 		"ReplayOutcome": replayOutcome, "BulkReplayResult": obj(map[string]any{"requested": integer(), "replayed": integer(), "results": arr(refOrString("ReplayOutcome"))}),
 		"FailureGroup": failureGroup, "FailureGroupList": obj(map[string]any{"groups": arr(refOrString("FailureGroup"))}), "RunWarning": warning, "AgentSubSpan": span,
@@ -147,6 +152,7 @@ func executionResponseSchemas() map[string]string {
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records": "RunRecordList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints":         "WaitpointList",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules":           "ScheduleList",
+		"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview":   "SchedulePreview",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/runs/active":        "ActiveRunList",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs":                "PipelineRunList",
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}":        "PipelineRun",
