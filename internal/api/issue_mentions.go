@@ -408,6 +408,17 @@ func (m mentionRecorder) deliverAndDispatch(
 		if _, rErr := releaseClaimedDelivery(ctx, m.db, delivery.ID); rErr != nil {
 			m.logf("release delivery back to pending after session-busy", mc, rErr)
 		}
+		// B3b (#2350, §11.5/§9.3): a comment that arrives while the session
+		// already has a run in flight IS a correction — an event with a
+		// priority, consumed at the next safe boundary. Reclassify the
+		// released delivery so dispatchQueuedFollowUpsForSession folds it
+		// into the next step AHEAD of ordinary follow-ups and labels it as
+		// a correction. Best-effort: on failure it stays 'normal' and is
+		// still delivered, just not hoisted — never a reason to fail the
+		// dispatch result.
+		if pErr := markDeliveryPriority(ctx, m.db, delivery.ID, deliveryPriorityCorrection); pErr != nil {
+			m.logf("mark delivery as correction after session-busy", mc, pErr)
+		}
 		return state, assignmentID, detail
 	}
 
