@@ -53,6 +53,16 @@ const (
 	// automation-side twin of KindWebhookFireFailed, same Upsert-not-Insert
 	// reasoning. See Registry.emitEnqueueFailed, internal/automation/registry.go.
 	KindAutomationEnqueueFailed = "automation_enqueue_failed"
+	// KindRunNeedsHuman surfaces a run (issue-session assignment, or
+	// routine/pipeline run) whose §9.6 outcome contract came back
+	// NEEDS_HUMAN — blocked on a decision, missing input, or a credential
+	// (PRD-ISSUES-AND-ROUTINES-2026 §9.6/§12, work package B6, #2349).
+	// Written via Insert, not Upsert: source_id is the run/assignment id,
+	// which never fires twice for the SAME run, so there is nothing to
+	// resurrect — a second NEEDS_HUMAN on the same subject is a NEW run
+	// with its own id. Payload carries the §12 action contract
+	// (attention_class, thread_key, actions, who_can_act, context).
+	KindRunNeedsHuman = "run_needs_human"
 )
 
 // AllKinds is the canonical set of inbox_items.kind values the product
@@ -74,6 +84,7 @@ var AllKinds = []string{
 	KindScheduleCircuitBreakerTripped,
 	KindWebhookFireFailed,
 	KindAutomationEnqueueFailed,
+	KindRunNeedsHuman,
 }
 
 // ExternalNotifier is the injected seam that fans a freshly-committed

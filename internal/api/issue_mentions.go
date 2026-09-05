@@ -114,8 +114,13 @@ facts: <identifiers, decisions and constraints worth carrying forward, or "none"
 blockers: <anything stopping progress, or "none">
 next_step: <the single next action to take>
 confidence: <low|medium|high>
+outcome: <NO_CHANGE|SUCCEEDED|WORK_CREATED|PARTIAL|NEEDS_HUMAN|FAILED>
 ---END CHECKPOINT---
-This block is REQUIRED on every run.`
+This block is REQUIRED on every run. outcome tells the system what to do with this run: NO_CHANGE
+(ran, nothing to do) and SUCCEEDED (did the work) stay in history; WORK_CREATED and PARTIAL also get
+an issue comment; NEEDS_HUMAN puts this in a human's inbox with an action to take — use it when you
+are blocked on a decision, missing input, or a credential; FAILED means you could not complete the
+work. Leaving outcome out is treated as FAILED, so always include it.`
 
 // mentionTaskMaxField bounds each single-line field copied into the brief (the
 // names, the issue title, the identifier). None of the four columns behind them

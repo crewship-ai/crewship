@@ -18,25 +18,24 @@ package api
 //     "only a live run may hold active" (§10.1) — this is where a run
 //     becomes live.
 //   - settleSessionForAssignment, called from finishAssignment right after
-//     the terminal-state CAS is WON (assignments_run.go) — status is
-//     already COMPLETED/FAILED/CANCELLED by the time this runs, so the
-//     session transition and the run's own terminal status can never
+//     the terminal-state CAS is WON (assignments_run.go) — status (and now
+//     outcome, §9.6/B6) is already decided by the time this runs, so the
+//     session transition and the run's own terminal outcome can never
 //     disagree about whether the run is still live.
 //
-// What is deliberately NOT implemented here: `active -> awaiting_input`.
-// That transition fires on outcome=NEEDS_HUMAN (§9.6), and `outcome` does
-// not exist on `assignments` until B6 — without it there is no way to
-// distinguish "finished, nothing more needed" from "finished, blocked on a
-// human" other than the run's own status, which this file uses for the two
-// transitions status CAN answer honestly: COMPLETED/CANCELLED -> idle
-// (nothing further is owed), FAILED -> error (something needs a retry).
-// Naming this rather than guessing at NEEDS_HUMAN from status keeps the
-// state machine honest until B6 gives it the real signal.
+// `active -> awaiting_input` (work package B6, #2349): fires on
+// outcome=NEEDS_HUMAN, resolved through orchestrator.RouteForOutcome —
+// previously undecidable from status alone (COMPLETED could mean "nothing
+// more needed" or "blocked on a human" and status could not tell them
+// apart), this is the transition B4 named as deliberately unreachable until
+// `outcome` existed.
 
 import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // activateSessionForAssignment moves assignmentID's session to 'active' and
@@ -75,9 +74,11 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 }
 
 // settleSessionForAssignment moves assignmentID's session off 'active' once
-// the run has reached a terminal status — COMPLETED/CANCELLED -> idle
-// (nothing further owed), FAILED -> error (needs a retry). See the file
-// header for why NEEDS_HUMAN/awaiting_input is not reachable here.
+// the run has reached a terminal outcome — resolved through
+// orchestrator.RouteForOutcome (§9.6, work package B6, #2349): NO_CHANGE /
+// SUCCEEDED / WORK_CREATED / PARTIAL / CANCELLED -> idle (nothing further
+// owed), FAILED -> error (needs a retry), and — the transition B4 could not
+// reach without this column — NEEDS_HUMAN -> awaiting_input.
 //
 // `AND active_run_id = ?` is the guard that makes this safe against the
 // race the exclusivity slot's own release creates: finishAssignment's
@@ -90,17 +91,14 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 // that has been overtaken is simply a no-op: whichever run's id
 // active_run_id currently holds is the one whose eventual settle gets to
 // write the next transition.
-func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, runStatus string) {
+func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, outcome string) {
 	var sessionID sql.NullString
 	if err := db.QueryRowContext(ctx,
 		`SELECT session_id FROM assignments WHERE id = ?`, assignmentID,
 	).Scan(&sessionID); err != nil || !sessionID.Valid || sessionID.String == "" {
 		return
 	}
-	newState := "idle"
-	if runStatus == "FAILED" {
-		newState = "error"
-	}
+	newState := orchestrator.RouteForOutcome(outcome).SessionState
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, _ = db.ExecContext(ctx, `
 		UPDATE issue_agent_sessions
@@ -167,10 +165,16 @@ func (h *AssignmentHandler) ReconcileExpiredEphemeralSessions(ctx context.Contex
 // scheduler, per F48) means that gap self-heals within one tick interval
 // regardless of why the original write was missed.
 //
-// FAILED -> 'error', COMPLETED/CANCELLED -> 'idle' — the identical mapping
-// settleSessionForAssignment uses, so a session's resting state does not
-// depend on whether the direct write or this reconciliation was what
-// actually landed it. A session already 'idle'/'error'/'closed'/'stale' is
+// Resolved through outcome when the terminal row has one (§9.6, work
+// package B6, #2349) — the identical orchestrator.RouteForOutcome
+// settleSessionForAssignment uses, so NEEDS_HUMAN lands here on
+// 'awaiting_input' too, not just 'idle'/'error'. Falls back to the
+// FAILED -> 'error', everything else -> 'idle' mapping by status alone for
+// a row with no outcome (NULL: it predates this migration, or was written
+// by a path other than finishAssignment) — the same fallback DeriveOutcome
+// itself uses, so a session's resting state does not depend on whether the
+// direct write or this reconciliation was what actually landed it. A
+// session already 'idle'/'error'/'awaiting_input'/'closed'/'stale' is
 // untouched (its active_run_id, if any, is stale bookkeeping only, not a
 // live-state discrepancy this function needs to fix).
 func (h *AssignmentHandler) ReconcileStaleActiveSessions(ctx context.Context) (int, error) {
@@ -178,7 +182,12 @@ func (h *AssignmentHandler) ReconcileStaleActiveSessions(ctx context.Context) (i
 	res, err := h.db.ExecContext(ctx, `
 		UPDATE issue_agent_sessions
 		   SET state = CASE
-		                  WHEN (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id) = 'FAILED'
+		                  WHEN (SELECT a.outcome FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id) = 'NEEDS_HUMAN'
+		                  THEN 'awaiting_input'
+		                  WHEN COALESCE(
+		                         (SELECT a.outcome FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id),
+		                         (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id)
+		                       ) = 'FAILED'
 		                  THEN 'error' ELSE 'idle'
 		                END,
 		       active_run_id = NULL,
