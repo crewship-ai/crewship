@@ -163,7 +163,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   a pointer to the routine's own Editor tab rather than adding a control
   that would silently change every trigger of that routine at once.
 
-- **The attention contract — server-side thread merge, versioned receipts, and a digest (#TBD).**
+- **The attention contract — server-side thread merge, versioned receipts, and a digest (#2378).**
   `inbox_items` gains real `thread_key` / `attention_class` / `actions_json`
   columns (PRD-ISSUES-AND-ROUTINES-2026 §12, work package B10) instead of
   the payload-only fields B6 introduced; `internal/inbox.WriteThreaded` is
