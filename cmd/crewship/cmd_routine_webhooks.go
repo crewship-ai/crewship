@@ -7,7 +7,11 @@ package main
 // a signing_secret configured.
 //
 // Stripe-style secret reveal: the signing secret is shown ONCE on
-// create response. To rotate, delete + recreate.
+// create response and once more on an explicit `update --rotate-secret`
+// (F21, B9 #2362). Everything else about a webhook — name, rate limit,
+// inputs template, enabled state — is editable in place via `update`
+// without touching the token, so existing senders never see their URL
+// change.
 
 import (
 	"encoding/json"
@@ -281,6 +285,112 @@ var routineWebhooksCreateCmd = &cobra.Command{
 	},
 }
 
+// webhookUpdateResult is `routine webhooks update`'s machine payload. The
+// signing secret only appears when this call actually rotated it
+// (--rotate-secret) — same show-once contract as create.
+type webhookUpdateResult struct {
+	WebhookRow `json:",inline" yaml:",inline"`
+	Rotated    bool `json:"rotated" yaml:"rotated"`
+}
+
+var routineWebhooksUpdateCmd = &cobra.Command{
+	Use:   "update <webhook_id>",
+	Short: "Edit a webhook in place (F21) — name, rate limit, inputs template; the URL never rotates",
+	Long: `Edit an existing webhook without losing the URL a sender already has
+configured. Before this command the only way to change anything about a
+webhook was delete + recreate, which mints a new token and therefore a new
+URL — every configured sender broke.
+
+The signing secret is preserved unless --rotate-secret is passed explicitly;
+the token (and so the public URL) never changes through this command at
+all — rotating the URL still requires delete + recreate.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		body := map[string]interface{}{}
+		if v, _ := cmd.Flags().GetString("name"); v != "" {
+			body["name"] = v
+		}
+		if v, _ := cmd.Flags().GetString("slug"); v != "" {
+			body["target_pipeline_slug"] = v
+		}
+		if cmd.Flags().Changed("rate-limit") {
+			v, _ := cmd.Flags().GetInt("rate-limit")
+			if v <= 0 {
+				return fmt.Errorf("--rate-limit must be a positive integer")
+			}
+			body["rate_limit_per_min"] = v
+		}
+		if v, _ := cmd.Flags().GetString("inputs-template"); v != "" {
+			var tpl map[string]interface{}
+			if err := json.Unmarshal([]byte(v), &tpl); err != nil {
+				return fmt.Errorf("--inputs-template must be valid JSON: %w", err)
+			}
+			body["inputs_template"] = tpl
+		}
+		if cmd.Flags().Changed("enabled") {
+			v, _ := cmd.Flags().GetBool("enabled")
+			body["enabled"] = v
+		}
+		// Version pin — same --pin-version/--unpin pair as `schedules
+		// update`: absent mentions neither and keeps the existing pin,
+		// --unpin sends an explicit null to clear it.
+		unpin, _ := cmd.Flags().GetBool("unpin")
+		if cmd.Flags().Changed("pin-version") {
+			if unpin {
+				return fmt.Errorf("--pin-version and --unpin are mutually exclusive")
+			}
+			pin, _ := cmd.Flags().GetInt("pin-version")
+			if pin < 1 {
+				return fmt.Errorf("--pin-version must be a positive routine version number")
+			}
+			body["target_pipeline_version"] = pin
+		}
+		if unpin {
+			body["target_pipeline_version"] = nil
+		}
+		rotate, _ := cmd.Flags().GetBool("rotate-secret")
+		if rotate {
+			body["rotate_secret"] = true
+		}
+		if len(body) == 0 {
+			return fmt.Errorf("at least one of --name / --slug / --rate-limit / --inputs-template / --enabled / --pin-version / --unpin / --rotate-secret required")
+		}
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		resp, err := client.Patch(fmt.Sprintf("/api/v1/workspaces/%s/pipeline-webhooks/%s", ws, args[0]), body)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var w WebhookRow
+		if err := json.NewDecoder(resp.Body).Decode(&w); err != nil {
+			return fmt.Errorf("webhook may have been updated but response decode failed: %w", err)
+		}
+		result := webhookUpdateResult{WebhookRow: w, Rotated: w.SigningSecret != ""}
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			fmt.Printf("Webhook %s updated.\n", w.ID)
+			fmt.Printf("  Name:       %s\n", w.Name)
+			fmt.Printf("  Rate limit: %d / minute\n", w.RateLimitPerMin)
+			if w.SigningSecret != "" {
+				fmt.Println()
+				fmt.Println("== New HMAC signing secret (shown once, copy now) ==")
+				fmt.Println(w.SigningSecret)
+			} else {
+				fmt.Println("  URL/secret: unchanged")
+			}
+		})
+	},
+}
+
 var routineWebhooksUrlCmd = &cobra.Command{
 	Use:   "url <webhook_id>",
 	Short: "Print the public URL for a webhook (no secret reveal)",
@@ -439,11 +549,21 @@ func init() {
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")
 	routineWebhooksCreateCmd.Flags().Int("pin-version", 0, "pin the webhook to a specific routine version — every fire executes that immutable version instead of head; if the version is later deleted the fire FAILS (409) rather than silently running head")
 
+	routineWebhooksUpdateCmd.Flags().String("name", "", "new webhook name")
+	routineWebhooksUpdateCmd.Flags().String("slug", "", "retarget to a different routine slug")
+	routineWebhooksUpdateCmd.Flags().Int("rate-limit", 0, "new max fires per minute")
+	routineWebhooksUpdateCmd.Flags().String("inputs-template", "", "replace the JSON template merged with the request body to form routine inputs")
+	routineWebhooksUpdateCmd.Flags().Bool("enabled", false, "set enabled state — explicit flag presence required (--enabled / --enabled=false)")
+	routineWebhooksUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head")
+	routineWebhooksUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
+	routineWebhooksUpdateCmd.Flags().Bool("rotate-secret", false, "mint a new HMAC signing secret (shown once); the URL/token is NEVER rotated by this command regardless")
+
 	routineWebhooksUrlCmd.Flags().String("base-url", "", "override the public base URL")
 	routineWebhooksDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
 	routineWebhooksCmd.AddCommand(routineWebhooksListCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksCreateCmd)
+	routineWebhooksCmd.AddCommand(routineWebhooksUpdateCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksUrlCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksDeleteCmd)
 

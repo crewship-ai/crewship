@@ -40,6 +40,21 @@ export interface WebhookSaveBody {
   rate_limit_per_min?: number
 }
 
+// WebhookUpdateBody is PATCH /pipeline-webhooks/{id} (F21, B9 #2362).
+// Every field absent-keeps-existing; rotate_secret is the one explicit,
+// opt-in escape hatch — there is deliberately no field here that can
+// change the token/URL.
+export interface WebhookUpdateBody {
+  name?: string
+  target_pipeline_slug?: string
+  target_pipeline_id?: string
+  target_pipeline_version?: number | null
+  inputs_template?: Record<string, unknown>
+  enabled?: boolean
+  rate_limit_per_min?: number
+  rotate_secret?: boolean
+}
+
 export function usePipelineWebhooks(workspaceId: string | null | undefined) {
   const [webhooks, setWebhooks] = useState<PipelineWebhook[]>([])
   const [loading, setLoading] = useState(false)
@@ -131,6 +146,25 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     [workspaceId, refresh],
   )
 
+  const update = useCallback(
+    async (id: string, body: WebhookUpdateBody): Promise<PipelineWebhook | null> => {
+      if (!workspaceId) return null
+      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipeline-webhooks/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) {
+        const t = await res.text()
+        throw new Error(`update webhook: ${res.status} ${t}`)
+      }
+      const out: PipelineWebhook = await res.json()
+      await refresh()
+      return out
+    },
+    [workspaceId, refresh],
+  )
+
   const remove = useCallback(
     async (id: string): Promise<void> => {
       if (!workspaceId) return
@@ -145,5 +179,5 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
     [workspaceId, refresh],
   )
 
-  return { webhooks, loading, error, refresh, create, remove }
+  return { webhooks, loading, error, refresh, create, update, remove }
 }

@@ -229,6 +229,17 @@ export function RoutineCardDetail({
     () => crewshipActionsInDefinition(routine.definition),
     [routine.definition],
   )
+  // §13.2 "If it overlaps" (F18/B9) — concurrency_key/max_concurrent live on
+  // the DSL, not on any one schedule, so the reliability editor reads them
+  // straight from the parsed definition rather than a schedule field.
+  const concurrencyKey = React.useMemo(() => {
+    const raw = (routine.definition as { concurrency_key?: unknown })?.concurrency_key
+    return typeof raw === "string" && raw ? raw : undefined
+  }, [routine.definition])
+  const maxConcurrent = React.useMemo(() => {
+    const raw = (routine.definition as { max_concurrent?: unknown })?.max_concurrent
+    return typeof raw === "number" && raw > 0 ? raw : undefined
+  }, [routine.definition])
   // Losing the automations view when the last rule is deleted must not strand
   // the card on an empty pane.
   React.useEffect(() => {
@@ -605,6 +616,8 @@ export function RoutineCardDetail({
                     workspaceId={workspaceId}
                     pipelineId={routine.id}
                     slug={routine.slug}
+                    concurrencyKey={concurrencyKey}
+                    maxConcurrent={maxConcurrent}
                   />
                 )
               ) : triggerKind === "webhooks" ? (

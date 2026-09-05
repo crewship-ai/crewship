@@ -147,6 +147,11 @@ func parseTimeOfDay(s string) (int, int, error) {
 	return hour, minute, nil
 }
 
+// MaxNextOccurrences bounds how many future fire times NextOccurrences will
+// compute in one call, whatever the caller asks for. Previews want five;
+// nothing legitimate wants more than a year of daily fires.
+const MaxNextOccurrences = 366
+
 // NextOccurrences computes the next n fire times for a cron expression in
 // the given IANA timezone, starting strictly after `from`. Shared by the
 // `--when` NL confirmation flow and can be reused anywhere a caller wants
@@ -168,8 +173,17 @@ func NextOccurrences(cronExpr, timezone string, n int, from time.Time) ([]time.T
 	if n < 0 {
 		n = 0
 	}
+	if n > MaxNextOccurrences {
+		// The handler already clamps the request's count; this is the
+		// library's own bound, so no caller can turn n into an allocation
+		// sized by user input (CodeQL go/uncontrolled-allocation-size).
+		n = MaxNextOccurrences
+	}
 	t := from.In(loc)
-	out := make([]time.Time, 0, n)
+	// Grown by append rather than pre-sized: the capacity must not be a
+	// function of the caller's n at all (CodeQL go/uncontrolled-allocation-size
+	// still flagged the clamped make; n is bounded above anyway).
+	var out []time.Time
 	for i := 0; i < n; i++ {
 		t = sched.Next(t)
 		out = append(out, t)

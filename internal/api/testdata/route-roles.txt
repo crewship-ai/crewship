@@ -121,6 +121,7 @@ PATCH /api/v1/workspaces/{workspaceId}/members/{memberId} roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities roleManage
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
+PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
 PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance roleCreate
 PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget roleManage
 POST /api/v1/admin/backups roleManage

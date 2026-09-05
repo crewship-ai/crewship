@@ -93,6 +93,87 @@ func TestNextOccurrences(t *testing.T) {
 	}
 }
 
+// TestNextOccurrences_PragueDSTSpring proves the preview endpoint's
+// arithmetic against REAL tzdata across the spring-forward transition
+// (B9, #2362 accept line). Europe/Prague jumps 02:00 CET -> 03:00 CEST on
+// the last Sunday of March; 2026's is 2026-03-29, so a daily 02:30 cron has
+// no valid local time that day at all and must be skipped entirely rather
+// than firing twice or crashing — this is what a real cron daemon does,
+// and it's what the underlying tz database (not our code) decides.
+func TestNextOccurrences_PragueDSTSpring(t *testing.T) {
+	from := time.Date(2026, 3, 27, 0, 0, 0, 0, time.UTC) // Friday, two days before the jump
+	occs, err := NextOccurrences("30 2 * * *", "Europe/Prague", 5, from)
+	if err != nil {
+		t.Fatalf("NextOccurrences: %v", err)
+	}
+	if len(occs) != 5 {
+		t.Fatalf("got %d occurrences, want 5", len(occs))
+	}
+	for _, o := range occs {
+		if o.Day() == 29 && o.Month() == time.March {
+			t.Fatalf("2026-03-29 02:30 Europe/Prague does not exist (spring-forward skips 02:00-02:59) — got an occurrence on it: %v", o)
+		}
+	}
+	want := []struct {
+		day    int
+		hour   int
+		offset string
+	}{
+		{27, 2, "+01:00"}, // Fri, still CET
+		{28, 2, "+01:00"}, // Sat, still CET
+		// 29th (Sunday) is skipped — no 02:30 exists that day
+		{30, 2, "+02:00"}, // Mon, now CEST
+		{31, 2, "+02:00"}, // Tue, CEST
+	}
+	// Only 4 calendar days are named above (the 29th is the skip); the 5th
+	// occurrence lands the following day, still CEST.
+	for i, w := range want {
+		if occs[i].Day() != w.day || occs[i].Hour() != w.hour {
+			t.Errorf("occurrence[%d] = %v, want day %d hour %d", i, occs[i], w.day, w.hour)
+		}
+		if got := occs[i].Format("-07:00"); got != w.offset {
+			t.Errorf("occurrence[%d] offset = %s, want %s (day %d)", i, got, w.offset, w.day)
+		}
+	}
+	if occs[4].Day() != 1 || occs[4].Month() != time.April {
+		t.Errorf("occurrence[4] = %v, want 2026-04-01 (CEST)", occs[4])
+	}
+}
+
+// TestNextOccurrences_PragueDSTAutumn proves the fall-back transition: on
+// 2026-10-25 Europe/Prague clocks go 03:00 CEST -> 02:00 CET, so local
+// 02:30 occurs TWICE that day (once at CEST, once an hour later at CET).
+// A cron scheduler samples wall-clock time, so it really does see 02:30
+// twice — the two occurrences below are exactly one hour apart in UTC,
+// which is the only unambiguous way to state "twice" against real tzdata.
+func TestNextOccurrences_PragueDSTAutumn(t *testing.T) {
+	from := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC) // Friday, two days before the fold
+	occs, err := NextOccurrences("30 2 * * *", "Europe/Prague", 5, from)
+	if err != nil {
+		t.Fatalf("NextOccurrences: %v", err)
+	}
+	if len(occs) != 5 {
+		t.Fatalf("got %d occurrences, want 5", len(occs))
+	}
+	// occs[0]=Fri 23rd, occs[1]=Sat 24th, occs[2]&occs[3]=Sun 25th (twice), occs[4]=Mon 26th.
+	if occs[2].Day() != 25 || occs[3].Day() != 25 {
+		t.Fatalf("expected 2026-10-25 to appear twice (occs[2] and occs[3]), got %v and %v", occs[2], occs[3])
+	}
+	if got := occs[2].Format("-07:00"); got != "+02:00" {
+		t.Errorf("occs[2] (first 02:30 on the fold day) offset = %s, want +02:00 (still CEST)", got)
+	}
+	if got := occs[3].Format("-07:00"); got != "+01:00" {
+		t.Errorf("occs[3] (second 02:30 on the fold day) offset = %s, want +01:00 (now CET)", got)
+	}
+	gap := occs[3].UTC().Sub(occs[2].UTC())
+	if gap != time.Hour {
+		t.Errorf("the two 02:30s on the fold day must be exactly 1h apart in UTC, got %v", gap)
+	}
+	if occs[4].Day() != 26 {
+		t.Errorf("occurrence[4] = %v, want 2026-10-26", occs[4])
+	}
+}
+
 func TestNextOccurrences_InvalidCron(t *testing.T) {
 	if _, err := NextOccurrences("not a cron", "UTC", 3, time.Now()); err == nil {
 		t.Fatal("expected error for invalid cron expression")
@@ -102,5 +183,18 @@ func TestNextOccurrences_InvalidCron(t *testing.T) {
 func TestNextOccurrences_InvalidTimezone(t *testing.T) {
 	if _, err := NextOccurrences("0 9 * * *", "Not/AZone", 3, time.Now()); err == nil {
 		t.Fatal("expected error for invalid timezone")
+	}
+}
+
+// TestNextOccurrences_BoundsTheCount pins the library-side clamp: a caller
+// asking for a million fire times gets MaxNextOccurrences, not a
+// user-sized allocation.
+func TestNextOccurrences_BoundsTheCount(t *testing.T) {
+	occs, err := NextOccurrences("* * * * *", "UTC", 1_000_000, time.Date(2026, 9, 5, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("NextOccurrences: %v", err)
+	}
+	if len(occs) != MaxNextOccurrences {
+		t.Fatalf("len = %d, want the clamp %d", len(occs), MaxNextOccurrences)
 	}
 }

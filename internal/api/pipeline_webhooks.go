@@ -132,6 +132,15 @@ type webhookRequestBody struct {
 	InputsTemplate        map[string]any `json:"inputs_template"`
 	Enabled               *bool          `json:"enabled,omitempty"`
 	RateLimitPerMin       int            `json:"rate_limit_per_min"`
+	// RotateSecret is PATCH-only (F21, B9 #2362): the explicit, opt-in
+	// signal to mint a new HMAC signing secret. Absent/false means "leave
+	// the existing secret alone" — the whole point of this endpoint over
+	// the old delete+recreate dance is that an ordinary edit (rename,
+	// change the rate limit, tweak the inputs template) never invalidates
+	// what the sender already has configured. The token — and therefore
+	// the webhook's public URL — never rotates through this endpoint at
+	// all; that still requires delete + recreate.
+	RotateSecret bool `json:"rotate_secret,omitempty"`
 }
 
 // CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
@@ -217,6 +226,148 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	// once, the user copies it into the sender, and we never expose
 	// it again. Stripe / GitHub use the same one-shot pattern.
 	writeJSON(w, http.StatusCreated, h.toWebhookResponse(saved, slug, true))
+}
+
+// UpdateWebhook PATCH /workspaces/{wsId}/pipeline-webhooks/{webhookId}
+//
+// F21 (B9, #2362): the only way to change a webhook used to be delete +
+// recreate, which mints a new token and therefore a new URL — every sender
+// configured against the old one breaks. This edits in place: name,
+// target pipeline (+ version pin), inputs_template, enabled and
+// rate_limit_per_min all follow the same absent-keeps-existing convention
+// UpdateSchedule uses. The token is never touched by this handler, full
+// stop — there is no field that rotates it. The signing secret is
+// preserved unless the caller explicitly sets rotate_secret:true, in which
+// case a freshly minted secret is revealed once in the response, exactly
+// like CreateWebhook's create-time reveal.
+func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
+	if h.webhooks == nil {
+		replyError(w, http.StatusServiceUnavailable, "pipeline_webhooks backend not wired")
+		return
+	}
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	// Same tier as UpdateSchedule: an edit changes what a sender's request
+	// does (retarget, disable, reshape inputs) — manage, not create.
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	webhookID := r.PathValue("webhookId")
+	if webhookID == "" {
+		replyError(w, http.StatusBadRequest, "webhookId required")
+		return
+	}
+	existing, err := h.webhooks.GetByID(r.Context(), webhookID)
+	if err != nil {
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "webhook not found")
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "failed to load webhook")
+		return
+	}
+	if existing.WorkspaceID != workspaceID {
+		replyError(w, http.StatusNotFound, "webhook not found")
+		return
+	}
+
+	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxExecBodyBytes))
+	if err != nil {
+		replyError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
+	var body webhookRequestBody
+	if err := json.Unmarshal(rawBody, &body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
+		return
+	}
+	// Distinguish "target_pipeline_version absent — keep the pin" from an
+	// explicit null clearing it, same reasoning as UpdateSchedule.
+	var rawKeys map[string]json.RawMessage
+	_ = json.Unmarshal(rawBody, &rawKeys)
+	if _, mentioned := rawKeys["target_pipeline_version"]; !mentioned {
+		body.TargetPipelineVersion = existing.TargetPipelineVersion
+	}
+
+	pipelineID := existing.TargetPipelineID
+	slug := ""
+	if body.TargetPipelineSlug != "" || body.TargetPipelineID != "" {
+		pid, sl, rerr := h.resolveWebhookPipelineID(r, workspaceID, &body)
+		if rerr != nil {
+			replyError(w, http.StatusBadRequest, rerr.Error())
+			return
+		}
+		pipelineID, slug = pid, sl
+	} else if p, perr := h.store.GetByID(r.Context(), pipelineID); perr == nil {
+		// Unchanged target — reuse UpdateSchedule's shape (pipeline_schedules.go)
+		// rather than resolving twice: resolveWebhookPipelineID above already
+		// returns the slug on the retarget path, so this lookup only runs
+		// when the target didn't change.
+		slug = p.Slug
+	}
+
+	enabled := existing.Enabled
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	}
+	inputsTemplate := body.InputsTemplate
+	if _, mentioned := rawKeys["inputs_template"]; !mentioned {
+		_ = json.Unmarshal([]byte(existing.InputsTemplateJSON), &inputsTemplate)
+	}
+	// Mentioned-only, matching every other field in this merge (and
+	// CreateWebhook, which stores whatever value it's given verbatim — the
+	// fire path's defaultWebhookRatePerMin floor is what turns 0 into
+	// "effectively unlimited-ish default", not this handler). An earlier
+	// version additionally required > 0, which silently dropped an
+	// explicit 0 or negative value with a 200 that echoed the OLD limit —
+	// indistinguishable from success to a caller resetting to default.
+	rateLimit := existing.RateLimitPerMin
+	if _, mentioned := rawKeys["rate_limit_per_min"]; mentioned {
+		rateLimit = body.RateLimitPerMin
+	}
+
+	// Secret rotation is explicit and opt-in (F21). Every other path keeps
+	// the existing plaintext (GetByID already decrypted it) so Save's
+	// re-encrypt is a no-op change in content.
+	signingSecret := existing.SigningSecret
+	rotated := false
+	if body.RotateSecret {
+		gen, gerr := generateWebhookSigningSecret()
+		if gerr != nil {
+			h.logger.Error("update pipeline webhook: rotate signing secret", "error", gerr)
+			replyError(w, http.StatusInternalServerError, "failed to rotate signing secret")
+			return
+		}
+		signingSecret = gen
+		rotated = true
+	}
+
+	in := pipeline.SaveWebhookInput{
+		ID:                    webhookID,
+		WorkspaceID:           workspaceID,
+		Name:                  defaultIfBlank(body.Name, existing.Name),
+		TargetPipelineID:      pipelineID,
+		TargetPipelineVersion: body.TargetPipelineVersion,
+		SigningSecret:         signingSecret,
+		InputsTemplate:        inputsTemplate,
+		Enabled:               enabled,
+		RateLimitPerMin:       rateLimit,
+	}
+	saved, err := h.webhooks.Save(r.Context(), in)
+	if err != nil {
+		h.logger.Warn("update pipeline webhook", "error", err)
+		if errors.Is(err, encryption.ErrPlaintextRefused) {
+			replyError(w, http.StatusInternalServerError, encryptionNotConfiguredMsg)
+			return
+		}
+		replyError(w, http.StatusInternalServerError, "failed to update webhook")
+		return
+	}
+	// Reveal the new secret only when this call minted one — same
+	// show-once contract CreateWebhook uses. An ordinary edit (no
+	// rotate_secret) never returns the secret, rotated or not.
+	writeJSON(w, http.StatusOK, h.toWebhookResponse(saved, slug, rotated))
 }
 
 // ListWebhooks GET /workspaces/{wsId}/pipeline-webhooks

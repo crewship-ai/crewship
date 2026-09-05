@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Plus, Trash2, Calendar, Power, PowerOff } from "lucide-react"
-import { usePipelineSchedules, type PipelineSchedule } from "@/hooks/use-pipeline-schedules"
+import { Plus, Trash2, Calendar, Power, PowerOff, Pencil } from "lucide-react"
+import { usePipelineSchedules, type PipelineSchedule, type SchedulePatchBody } from "@/hooks/use-pipeline-schedules"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
@@ -12,6 +12,7 @@ import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
 // Card-wrapped list + inline form, Pill states, readable typography,
@@ -21,14 +22,41 @@ interface Props {
   workspaceId: string
   pipelineId: string
   slug: string
+  /**
+   * §13.2 "If it overlaps" — concurrency_key/max_concurrent (F18). These are
+   * DSL fields on the ROUTINE, shared by every schedule/webhook/manual run
+   * of it, not a per-schedule setting — so this tab shows them read-only
+   * rather than offering a control that would silently change every
+   * trigger's behaviour from one schedule's dialog. The routine's own
+   * Editor tab (POST .../pipelines/save) is the existing, correct door.
+   */
+  concurrencyKey?: string
+  maxConcurrent?: number
 }
 
-export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
-  const { schedules, loading, error, create, update, remove } = usePipelineSchedules(workspaceId)
+export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrencyKey, maxConcurrent }: Props) {
+  const { schedules, loading, error, create, update, remove, preview } = usePipelineSchedules(workspaceId)
   const ours = useMemo(
     () => schedules.filter((s) => s.target_pipeline_id === pipelineId || s.target_pipeline_slug === slug),
     [schedules, pipelineId, slug],
   )
+
+  // Reliability editor (B9, #2362) — every §13.2 row, opened per schedule.
+  const [editing, setEditing] = useState<PipelineSchedule | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const saveEdit = async (body: SchedulePatchBody) => {
+    if (!editing) return
+    setEditSaving(true)
+    try {
+      await update(editing.id, body)
+      toast.success("Schedule updated")
+      setEditing(null)
+    } catch (e) {
+      toast.error("Update failed", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState("")
@@ -104,6 +132,26 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
           <div className="px-4 py-3 text-sm text-warn">{error}</div>
         </Card>
       )}
+
+      {/* §13.2 "If it overlaps" — read-only: concurrency_key/max_concurrent
+          are routine-wide DSL fields, not per-schedule, so the writable
+          door is the Editor tab, not a control here. */}
+      <Card title="If it overlaps" subtitle="applies to every trigger of this routine">
+        <div className="px-4 py-3 text-[12px] text-muted-foreground" data-testid="schedule-concurrency-readonly">
+          {concurrencyKey ? (
+            <>
+              Serialized by <span className="font-mono text-foreground/85">{concurrencyKey}</span>, up to{" "}
+              <span className="text-foreground/85">{maxConcurrent && maxConcurrent > 0 ? maxConcurrent : 1}</span> at once — a new run beyond
+              that limit is rejected (429), not queued.
+            </>
+          ) : (
+            "Unbounded — no concurrency_key set, so runs of this routine never wait on each other."
+          )}
+          {" "}Change it in the routine's Editor tab (
+          <span className="font-mono">concurrency_key</span> / <span className="font-mono">max_concurrent</span>
+          ).
+        </div>
+      </Card>
 
       {/* List card */}
       {ours.length === 0 && !formOpen ? (
@@ -241,6 +289,16 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
                   <Button
                     size="sm"
                     variant="ghost"
+                    onClick={() => setEditing(s)}
+                    className="h-8 w-8 p-0"
+                    title="Edit reliability settings"
+                    aria-label={`Edit schedule ${s.name}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     onClick={() => toggle(s)}
                     className="h-8 w-8 p-0"
                     title={s.enabled ? "Disable" : "Enable"}
@@ -323,6 +381,14 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug }: Props) {
           </div>
         </Card>
       )}
+
+      <RoutineScheduleEditorDialog
+        schedule={editing}
+        submitting={editSaving}
+        onCancel={() => setEditing(null)}
+        onSave={saveEdit}
+        onPreview={preview}
+      />
     </div>
   )
 }

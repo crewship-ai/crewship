@@ -108,6 +108,17 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"target_pipeline_version": nullable(integer()), "signing_secret": str(), "inputs_template": anyObject(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(),
 	}, "name")
+	// webhookUpdateRequest — F21 (B9, #2362): edit in place. Every field is
+	// optional (absent = keep existing, the same convention ScheduleRequest
+	// uses for PATCH); rotate_secret is the one explicit, opt-in escape
+	// hatch to mint a new HMAC signing secret. There is deliberately no
+	// field that can change the token — the whole point of this endpoint
+	// over delete+recreate is that the public URL never moves.
+	webhookUpdateRequest := request(map[string]any{
+		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
+		"target_pipeline_version": nullable(integer()), "inputs_template": anyObject(),
+		"enabled": nullable(boolean()), "rate_limit_per_min": integer(), "rotate_secret": boolean(),
+	})
 
 	chatDomain := map[string]DomainSchema{
 		"GET /api/v1/agents/{agentId}/chats":                                   {Response: array(chat)},
@@ -144,10 +155,11 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/audit": {Response: object(map[string]any{"data": array(auditEntry), "pagination": pagination})},
 	}
 	webhooks := map[string]DomainSchema{
-		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks":  {Response: array(webhook)},
-		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks": {Request: webhookRequest, Response: webhook},
-		"POST /api/v1/webhooks/{token}":                           {Response: object(map[string]any{"run_id": str(), "status": str()})},
-		"POST /api/v1/webhooks/{crewId}/{agentId}/trigger":        {Response: anyObject()},
+		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks":               {Response: array(webhook)},
+		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":              {Request: webhookRequest, Response: webhook},
+		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}": {Request: webhookUpdateRequest, Response: webhook},
+		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str()})},
+		"POST /api/v1/webhooks/{crewId}/{agentId}/trigger":                     {Response: anyObject()},
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,

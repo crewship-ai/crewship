@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -632,6 +633,63 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 		slug = p.Slug
 	}
 	writeJSON(w, http.StatusOK, h.toScheduleResponse(activated, slug, ""))
+}
+
+// schedulePreviewMaxCount caps how many fire times a single preview call
+// can compute. 20 mirrors the catch-up backfill cap (schedules.go) — enough
+// to sanity-check a cadence by eye, small enough that a hostile ?count=
+// can't be used to burn CPU on cron arithmetic.
+const schedulePreviewMaxCount = 20
+
+// schedulePreviewDefaultCount is what the editor and the CLI both ask for
+// when the caller doesn't override it — B9's "next five fire times".
+const schedulePreviewDefaultCount = 5
+
+// PreviewSchedule computes the next N fire times for a cron expression in a
+// timezone WITHOUT requiring a saved schedule (B9, #2362, §13.2 "When").
+// Stateless by design: the editor calls this on every keystroke while a
+// cron/timezone pair is still being drafted, before Save exists to read one
+// back from. The same computation backs `crewship routine schedules preview`.
+//
+// GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview
+//
+//	?cron_expr=...&timezone=...&count=...
+func (h *PipelineHandler) PreviewSchedule(w http.ResponseWriter, r *http.Request) {
+	cronExpr := strings.TrimSpace(r.URL.Query().Get("cron_expr"))
+	if cronExpr == "" {
+		replyError(w, http.StatusBadRequest, "cron_expr required")
+		return
+	}
+	timezone := r.URL.Query().Get("timezone")
+	if timezone == "" {
+		timezone = "UTC"
+	}
+	count := schedulePreviewDefaultCount
+	if raw := r.URL.Query().Get("count"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			replyError(w, http.StatusBadRequest, "count must be a positive integer")
+			return
+		}
+		count = n
+	}
+	if count > schedulePreviewMaxCount {
+		count = schedulePreviewMaxCount
+	}
+	occurrences, err := pipeline.NextOccurrences(cronExpr, timezone, count, time.Now())
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out := make([]string, len(occurrences))
+	for i, t := range occurrences {
+		out[i] = t.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"cron_expr":   cronExpr,
+		"timezone":    timezone,
+		"occurrences": out,
+	})
 }
 
 // resolveSchedulePipelineID figures out which pipeline the schedule

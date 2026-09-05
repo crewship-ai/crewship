@@ -1598,6 +1598,54 @@ Re-enabling clears the slate — the counter resets to 0 and `disabled_reason` c
 crewship routine schedules enable <schedule_id>
 ```
 
+### The reliability editor
+
+The routine detail page's Triggers card (Manage → Schedules) is an in-place
+editor for every field above, not just a read-only list (B9, #2362,
+fixing F18 — the create form used to offer name/cron/timezone/inputs only,
+even though the backend already accepted the rest). Opening a schedule's
+edit dialog exposes:
+
+- **When** — cron expression + timezone, with a **live preview of the next
+  five fire times** computed server-side as you type (see below).
+- **After downtime** — the [catch-up policy](#missed-occurrences-on-recovery).
+- **Only run if** — the [wake gate](#wake-gates), including fail-open/closed.
+- **On repeated failure** — the [circuit breaker](#circuit-breaker) threshold.
+- **Version** — the pin, or track head.
+- **Health** — last run, next run, consecutive failures, disabled reason,
+  missed count and wake stats stay read-only on the list row; they are
+  telemetry, not settings.
+
+**If it overlaps** (`concurrency_key` / `max_concurrent`) is shown read-only
+here too, but for a different reason: those fields live on the routine's
+DSL, shared by every schedule/webhook/manual run of it, not on any one
+schedule — so the dialog links to the routine's own Editor tab instead of
+offering a control that would silently change every trigger's behaviour at
+once.
+
+Every field the dialog can set is backed by the same `PATCH
+.../pipeline-schedules/{id}` endpoint `crewship routine schedules update`
+already used — nothing new server-side for this half.
+
+#### Next-fire-times preview
+
+`GET .../pipeline-schedules/preview?cron_expr=&timezone=&count=` (`crewship
+routine schedules preview --cron ... --timezone ... --count 5`) computes
+upcoming fire times WITHOUT requiring a saved schedule, using real IANA
+tzdata — so it reflects DST transitions exactly as the scheduler will, not
+an approximation:
+
+```bash
+crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague --count 5
+```
+
+A spring-forward day with no valid `02:30` local time is skipped entirely
+(the day the clock jumps 02:00→03:00 has none); a fall-back day's ambiguous
+local time can appear twice, exactly one hour apart in UTC. Both are what a
+real cron daemon does against real tzdata, not a client-side guess — which
+is the whole reason this is a server endpoint and not a JS cron library
+running in the browser.
+
 ### Missed occurrences on recovery
 
 `next_run_at` is always computed from `time.Now()` at fire time, so downtime spanning several cron occurrences (server down for 3 hours on an hourly schedule) yields **at most one fire** on recovery — the routine still only runs once, it does not backfill the missed occurrences. Before #1409 that gap was invisible; now the scheduler emits **one** `pipeline.schedule.missed_occurrences` journal event per schedule when it detects the gap, reporting how many occurrences were skipped and the time window: "schedule X skipped 11 occurrence(s) between `<window_start>` and `<window_end>`". This is observability only — pair it with the [circuit breaker](#circuit-breaker) and journal search if you need to know a schedule went dark for a while.
@@ -1687,8 +1735,36 @@ Redelivered events dedupe **synchronously**: a replay (same `Idempotency-Key` / 
 
 **Fire failure visibility.** A fire that never becomes a run — governance/pin/concurrency rejected it, or the dispatch itself errored before a run existed — records a `pipeline.webhook.fire_failed` journal entry **every time**. A single failure is not surfaced beyond that: it is treated as noise-tolerant (a momentary DB busy, a governance load hiccup). Once the **same webhook** fails **3 times in a row**, a MANAGER inbox card is raised; further failures past the third do not raise additional cards, and a later successful fire resets the streak so a future run of failures can alert again. This does not cover a run that started and whose routine then genuinely failed — that already has full per-run visibility via the routine's own failed-run journal entry and the Runs view.
 
+#### Editing a webhook in place (F21)
+
+Before `PATCH .../pipeline-webhooks/{id}` existed, changing anything about a
+webhook meant delete + recreate — which mints a new token and therefore a
+new public URL, breaking every sender already configured against the old
+one. `crewship routine webhooks update` (B9, #2362) fixes that: name, rate
+limit, inputs template and enabled state all edit in place, and the
+token/URL **never** rotates through this command, under any combination of
+flags:
+
+```bash
+crewship routine webhooks update wh_abc123 \
+    --name "github-pr-reviews-v2" --rate-limit 120 \
+    --inputs-template '{"source":"github"}'
+```
+
+Rotating the HMAC signing secret is still supported, but as one explicit,
+opt-in flag rather than the only way to change anything:
+
+```bash
+crewship routine webhooks update wh_abc123 --rotate-secret
+```
+
 <Warning>
-The signing secret is shown **once**. To rotate it: delete the webhook + create a new one. There is no in-place rotation by design.
+The signing secret is still shown **once** per reveal — on create, or on an
+update that passes `--rotate-secret`. `--rotate-secret` invalidates the
+OLD secret for every sender still signing with it (the URL keeps working;
+senders need the new secret to keep passing HMAC verification). Rotating
+the **URL** itself still requires delete + recreate — that is the one
+thing `update` deliberately does not do.
 </Warning>
 
 ### Manual
