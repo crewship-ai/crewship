@@ -116,9 +116,16 @@ type RunRecord struct {
 	InvokingUserID  string
 	TriggeredVia    TriggeredVia
 	TriggeredByID   string
-	IdempotencyKey  string
-	InputsJSON      string
-	ConcurrencyKey  string
+	// DueAt is the cron occurrence a scheduled run was fired FOR
+	// (v20260905172327): the schedule's next_run_at at the moment the
+	// scheduler took it, stamped by fireSingleOccurrence and nothing else.
+	// nil on every other trigger — a manual, webhook, automation or
+	// call_pipeline run has no due time. StartedAt minus DueAt is the
+	// §19.3 "scheduled fire punctuality" delta the metrics endpoint reports.
+	DueAt          *time.Time
+	IdempotencyKey string
+	InputsJSON     string
+	ConcurrencyKey string
 	// MetadataJSON is a typed scratchpad threaded through the run
 	// (trigger.dev parity). Defaults to "{}"; readable from steps as
 	// {{ run.metadata.X }}.
@@ -314,8 +321,8 @@ INSERT INTO pipeline_runs (
     invoking_crew_id, invoking_agent_id, invoking_user_id,
     triggered_via, triggered_by_id, idempotency_key,
     inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json,
-    chain_depth, chain_origin, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    chain_depth, chain_origin, created_at, updated_at, due_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
@@ -323,7 +330,7 @@ INSERT INTO pipeline_runs (
 		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID),
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
 		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON,
-		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt))
+		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt), nullableTime(r.DueAt))
 	if err != nil {
 		return fmt.Errorf("pipeline_runs: insert: %w", err)
 	}
@@ -861,7 +868,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
        COALESCE(warnings_json,'[]'),
        COALESCE(chain_depth,0), COALESCE(chain_origin,''),
-       created_at, updated_at, COALESCE(outcome,'')
+       created_at, updated_at, COALESCE(outcome,''), due_at
 FROM pipeline_runs`
 
 // scanRunRow is the row-scanner contract — both sql.Row and sql.Rows
@@ -876,7 +883,7 @@ type scanRunRow interface {
 func scanRun(row scanRunRow) (*RunRecord, error) {
 	var r RunRecord
 	var version sql.NullInt64
-	var endedAt sql.NullString
+	var endedAt, dueAt sql.NullString
 	var startedAt, createdAt, updatedAt string
 	var status, mode, triggeredVia string
 	var isReplay int64
@@ -892,7 +899,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,
 		&r.WarningsJSON,
 		&r.ChainDepth, &r.ChainOrigin,
-		&createdAt, &updatedAt, &r.Outcome,
+		&createdAt, &updatedAt, &r.Outcome, &dueAt,
 	); err != nil {
 		return nil, err
 	}
@@ -916,6 +923,10 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 	if endedAt.Valid && endedAt.String != "" {
 		t, _ := parseRFC3339Opt(endedAt.String)
 		r.EndedAt = &t
+	}
+	if dueAt.Valid && dueAt.String != "" {
+		t, _ := parseRFC3339Opt(dueAt.String)
+		r.DueAt = &t
 	}
 	r.CreatedAt, _ = parseRFC3339Opt(createdAt)
 	r.UpdatedAt, _ = parseRFC3339Opt(updatedAt)

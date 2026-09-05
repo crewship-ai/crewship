@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	_ "modernc.org/sqlite"
 )
 
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     chain_depth         INTEGER NOT NULL DEFAULT 0,
     chain_origin        TEXT,
     outcome             TEXT,
+    due_at              TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
@@ -472,6 +474,69 @@ VALUES ('psched_due', 'ws_test', 'due', 'pipe_1', '0 8 * * *', 'UTC', '{}', 1, ?
 	}
 	if runCount != 1 {
 		t.Errorf("pipeline_runs row for %s: got %d rows, want 1 — a due schedule fired but left no persisted run", got.LastRunID, runCount)
+	}
+}
+
+// TestPipelineScheduler_Tick_StampsDueAtOnTheRun pins the B16 stamp
+// (v20260905172327): a scheduled fire persists the occurrence it fired FOR
+// as pipeline_runs.due_at — the schedule's next_run_at at the moment the
+// scheduler took it, not the moment the executor started. Without it the
+// occurrence survives only inside the SHA-256 idempotency key, and §19.3's
+// "scheduled fire punctuality" has nothing to subtract started_at from.
+func TestPipelineScheduler_Tick_StampsDueAtOnTheRun(t *testing.T) {
+	db := openScheduleTestDB(t)
+	defer db.Close()
+	seedPipeline(t, db, "pipe_1", "x")
+	_, err := db.ExecContext(context.Background(),
+		`UPDATE pipelines SET definition_json = ?, last_test_run_at = ?, last_test_run_passed = 1 WHERE id = 'pipe_1'`,
+		`{"name":"x","steps":[{"id":"s1","type":"agent_run","agent":"agent_lead","prompt":"hi"}]}`,
+		tsformat.Format(time.Now()),
+	)
+	if err != nil {
+		t.Fatalf("update pipeline def: %v", err)
+	}
+
+	scheduleStore := NewScheduleStore(db)
+	pipelineStore := NewStore(db)
+	exec := newScheduleExecutor(pipelineStore, NewResolver(db), &stubAgentRunner{}, db)
+
+	// The occurrence: 90 s ago, on a whole second so the round-trip through
+	// the fixed-width timestamp column compares exactly.
+	dueAt := time.Now().UTC().Add(-90 * time.Second).Truncate(time.Second)
+	now := tsformat.Format(time.Now())
+	_, err = db.ExecContext(context.Background(), `
+INSERT INTO pipeline_schedules
+  (id, workspace_id, name, target_pipeline_id, cron_expr, timezone, inputs_json, enabled, next_run_at, created_at, updated_at)
+VALUES ('psched_due', 'ws_test', 'due', 'pipe_1', '0 8 * * *', 'UTC', '{}', 1, ?, ?, ?)`,
+		tsformat.Format(dueAt), now, now)
+	if err != nil {
+		t.Fatalf("seed due: %v", err)
+	}
+
+	NewPipelineScheduler(scheduleStore, pipelineStore, exec, nil).tick(context.Background())
+
+	got, err := scheduleStore.GetByID(context.Background(), "psched_due")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.LastRunID == "" {
+		t.Fatalf("schedule row has no last_run_id to check pipeline_runs against")
+	}
+	run, err := NewRunStore(db).Get(context.Background(), got.LastRunID)
+	if err != nil {
+		t.Fatalf("load run %s: %v", got.LastRunID, err)
+	}
+	if run.DueAt == nil {
+		t.Fatalf("run %s has no due_at: the schedule fire path did not stamp the occurrence it fired for", run.ID)
+	}
+	if !run.DueAt.Equal(dueAt) {
+		t.Errorf("due_at = %v, want the occurrence %v (the schedule's next_run_at when it was taken)", run.DueAt, dueAt)
+	}
+	if run.StartedAt.Before(*run.DueAt) {
+		t.Errorf("started_at %v precedes due_at %v: a fire cannot start before it was due", run.StartedAt, run.DueAt)
+	}
+	if late := run.StartedAt.Sub(*run.DueAt); late < 90*time.Second {
+		t.Errorf("started_at - due_at = %v, want >= 90s: the delta must measure the occurrence, not the tick", late)
 	}
 }
 

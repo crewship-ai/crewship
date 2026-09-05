@@ -170,6 +170,7 @@ func (s *Server) collectDomainMetrics(ctx context.Context, b *strings.Builder, h
 	s.collectContainerMetrics(b, hostname)
 	s.collectMigrationVersionMetric(ctx, b, hostname)
 	s.collectB12InstrumentationMetrics(ctx, b, hostname)
+	s.collectB16InstrumentationMetrics(ctx, b, hostname)
 }
 
 func (s *Server) collectAssignmentMetrics(ctx context.Context, b *strings.Builder, hostname string) {

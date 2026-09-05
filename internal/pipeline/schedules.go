@@ -1220,6 +1220,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 	// chokepoint, while each distinct occurrence in a backlog gets its own
 	// key and actually runs.
 	occBucket := occurrence.UTC().Format(time.RFC3339)
+	dueAt := occurrence.UTC()
 
 	in := RunInput{
 		PipelineID: pipeline.ID,
@@ -1235,6 +1236,11 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		Mode:          ModeRun,
 		TriggeredVia:  TriggeredViaSchedule,
 		TriggeredByID: sched.ID,
+		// The occurrence itself, persisted on the run as due_at so the
+		// punctuality of this fire (started_at - due_at) is a fact the
+		// schema holds, not one that has to be inferred from the schedule
+		// row's since-advanced next_run_at (§19.3, B16).
+		DueAt: &dueAt,
 		// Exactly-once on the cron path: dedupe a re-fire of the same
 		// occurrence (duplicate tick / restart before next_run_at advanced).
 		IdempotencyKey: ScheduledFireIdempotencyKey("sched", sched.ID, occBucket),

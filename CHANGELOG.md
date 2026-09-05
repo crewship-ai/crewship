@@ -30,6 +30,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 -->
 
 ### Added
+- **The two §19.3 service levels that had no series — scheduled fire punctuality and inbox items per successful run (#2396).**
+  A scheduled run recorded only when it started; the occurrence it fired
+  for survived only inside the idempotency key's hash, so "how late did
+  this fire" was not a question the schema could answer. The schedule fire
+  path now stamps that occurrence on the run as `pipeline_runs.due_at`
+  (migration; NULL on every non-scheduled run and on runs from before the
+  column), and `/metrics` reports `crewshipd_schedule_fire_punctuality_seconds`
+  p50/p95 over the most recent scheduled runs. And §12's hard rule —
+  a `SUCCEEDED` or `NO_CHANGE` run never creates an inbox item — is now
+  measured rather than trusted: `crewshipd_inbox_items_per_successful_run`
+  joins `inbox_items` to both run tables, with its two raw counts alongside.
+  Both follow the #2380 conventions: a percentile or ratio with nothing to
+  compute is absent, never a fabricated `0`. See
+  [Prometheus metrics](/observability/metrics).
+
 - **Acting on a NEEDS_HUMAN inbox card resumes the run (#2389, PRD §18 scenario 15).** `POST /api/v1/inbox/{id}/act` and `crewship inbox act <id> answer|take_over|dismiss`. `answer --input` posts your text as a comment on the issue and delivers it to the same agent session that asked; the run resumes from its checkpoint with the answer as its next delivery (one delivery, one run — queued if the session is mid-run). `take_over` and `dismiss` move the session to idle. Every action leaves an `inbox_acted` receipt on the issue's event log (who, action, the session's `agent_version`, and the delivery and run an answer produced) and resolves the card in place with the receipt under `payload.receipt` — the same thread, no new card. Acting twice is `409`. The card B6 raises now offers all three actions. Migration: `mission_activity`'s action CHECK admits `inbox_acted`.
 
 - **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#2380).**

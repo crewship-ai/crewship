@@ -92,6 +92,7 @@ CREATE TABLE pipeline_runs (
     definition_hash     TEXT,
     status              TEXT NOT NULL,
     outcome             TEXT,
+    due_at              TEXT,
     mode                TEXT NOT NULL DEFAULT 'run',
     started_at          TEXT NOT NULL,
     ended_at            TEXT,
