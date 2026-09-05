@@ -102,6 +102,13 @@ func validateCredentialType(t string) string {
 const (
 	pendingSentinelOAuth    = "__CREWSHIP_PENDING_OAUTH_4f2c8a91-3b6d-4e5a-9f8c-1d2e3f4a5b6c__"
 	pendingSentinelManifest = "__CREWSHIP_PENDING_MANIFEST_7e8d9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b__"
+	// pendingSentinelRequested fills a REQUESTED row — an agent asked a human
+	// for a credential it does not have (#2376). The row carries the name,
+	// type and tier the agent declared and no value until a human supplies
+	// one; like the two above it is never ACTIVE, so no delivery query sees
+	// it, and like them it is unguessable so a real value can never be
+	// mistaken for it.
+	pendingSentinelRequested = "__CREWSHIP_PENDING_REQUESTED_2b7e4c1d-9f3a-4e8b-a5c6-0d1e2f3a4b5c__"
 )
 
 // isPendingSentinel reports whether a decrypted credential value is
@@ -109,7 +116,8 @@ const (
 // that resolves credentials for env-var injection or token forwarding
 // should bail when this returns true.
 func isPendingSentinel(decrypted string) bool {
-	return decrypted == pendingSentinelOAuth || decrypted == pendingSentinelManifest
+	return decrypted == pendingSentinelOAuth || decrypted == pendingSentinelManifest ||
+		decrypted == pendingSentinelRequested
 }
 
 // maxCredentialValueLen caps a single credential value (and refresh

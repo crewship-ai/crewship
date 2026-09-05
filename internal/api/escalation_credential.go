@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,27 +13,94 @@ import (
 )
 
 // credentialProposal is the structured payload an agent sends in a CREDENTIAL
-// escalation's `metadata` field to propose a secret for the vault. The agent
-// generated the value (e.g. a DB password for infra it set up); the server
-// stores it as a PENDING_APPROVAL credential and a human approves it.
+// escalation's `metadata` field. Two shapes share it, and the presence of
+// `value` is what tells them apart:
+//
+//   - a PROPOSAL carries `value`. The agent generated the secret (a DB
+//     password for infra it just set up); the server stores it as a
+//     PENDING_APPROVAL credential and a human approves it.
+//   - an ASK carries no `value`. The agent needs a secret only a human has.
+//     The server stores a REQUESTED credential — name, type, tier, purpose,
+//     no value — and the human supplies the value through
+//     POST /escalations/{id}/supply. The agent is answered with a GRANT
+//     (#2376): the name it may use the credential by, never the value.
 type credentialProposal struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Provider string `json:"provider"`
 	Value    string `json:"value"`
+	// SecurityLevel is the tier the agent proposes for the credential (1..4).
+	// Advisory: the approver sees it and the human who supplies the value can
+	// override it. 0 means unset.
+	SecurityLevel flexInt `json:"security_level"`
+	// Purpose is what the credential is for, in the agent's words. Stored as
+	// the credential's description so it outlives the escalation that asked.
+	Purpose string `json:"purpose"`
+	// Hosts are the destinations the agent says it will use the credential
+	// against. Review metadata for the approver, NOT an enforced binding —
+	// there is no per-credential egress policy (the model-scoped credentials
+	// PRD records the same honest limit), and a list that looks enforced but
+	// is not would be worse than none.
+	Hosts []string `json:"hosts"`
 }
+
+// IsAsk reports whether the proposal carries no value — the agent is asking a
+// human to supply one.
+func (p credentialProposal) IsAsk() bool { return p.Value == "" }
+
+// flexInt decodes a JSON number or a numeric string. Agents assemble the
+// metadata blob by hand inside a shell heredoc, and "security_level":"3" is a
+// far more likely slip than a wrong number; refusing the whole proposal for
+// it would silently downgrade the ask to a free-text escalation.
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
+	if s == "" || s == "null" {
+		*f = 0
+		return nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return err
+	}
+	*f = flexInt(n)
+	return nil
+}
+
+const (
+	// maxProposalPurposeLen bounds the agent-authored purpose. It lands in a
+	// credential's description and in the inbox card, both bounded surfaces.
+	maxProposalPurposeLen = 500
+	// maxProposalHosts bounds the declared destinations. A hostname is at most
+	// 253 characters; twenty of them is more than any real ask names.
+	maxProposalHosts = 20
+)
 
 // redactedMetadata returns the proposal as JSON with the secret value stripped,
 // safe to persist on the escalation row, surface in ListEscalations, and emit to
 // the journal. The raw proposal (with `value`) must NEVER be written anywhere
 // except the encrypted credentials.encrypted_value column.
 func (p credentialProposal) redactedMetadata(credentialID string) string {
-	b, _ := json.Marshal(map[string]string{
+	m := map[string]any{
 		"name":          p.Name,
 		"type":          p.Type,
 		"provider":      p.Provider,
 		"credential_id": credentialID,
-	})
+	}
+	if p.IsAsk() {
+		m["requested"] = true
+	}
+	if p.SecurityLevel > 0 {
+		m["security_level"] = int(p.SecurityLevel)
+	}
+	if p.Purpose != "" {
+		m["purpose"] = p.Purpose
+	}
+	if len(p.Hosts) > 0 {
+		m["hosts"] = p.Hosts
+	}
+	b, _ := json.Marshal(m)
 	return string(b)
 }
 
@@ -62,8 +130,9 @@ func metadataCarriesValue(metadata string) bool {
 
 // parseCredentialProposal decodes the escalate `metadata` JSON. ok=false (no
 // error) when the metadata is absent or not a usable credential proposal — the
-// caller then falls back to a plain CREDENTIAL escalation (the legacy
-// human-supplies-the-secret flow). Defaults type→SECRET, provider→NONE.
+// caller then records a plain CREDENTIAL escalation with no credential behind
+// it. A proposal needs a name; a value makes it a PROPOSAL, its absence an ASK
+// (see credentialProposal). Defaults type→SECRET, provider→NONE.
 func parseCredentialProposal(metadata string) (credentialProposal, bool) {
 	s := strings.TrimSpace(metadata)
 	if s == "" || s[0] != '{' {
@@ -76,7 +145,7 @@ func parseCredentialProposal(metadata string) (credentialProposal, bool) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Type = strings.TrimSpace(p.Type)
 	p.Provider = strings.TrimSpace(p.Provider)
-	if p.Name == "" || p.Value == "" {
+	if p.Name == "" {
 		return credentialProposal{}, false
 	}
 	if p.Type == "" {
@@ -85,6 +154,22 @@ func parseCredentialProposal(metadata string) (credentialProposal, bool) {
 	if p.Provider == "" {
 		p.Provider = "NONE"
 	}
+	if p.SecurityLevel < 0 || p.SecurityLevel > 4 {
+		p.SecurityLevel = 0
+	}
+	p.Purpose = truncate(strings.TrimSpace(p.Purpose), maxProposalPurposeLen)
+	hosts := p.Hosts[:0]
+	for _, h := range p.Hosts {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" || len(h) > 253 {
+			continue
+		}
+		hosts = append(hosts, h)
+		if len(hosts) == maxProposalHosts {
+			break
+		}
+	}
+	p.Hosts = hosts
 	return p, true
 }
 
@@ -131,10 +216,17 @@ func prependEscalationNote(existing, note string) string {
 	return note + "\n\n" + existing
 }
 
-// createPendingCredential inserts an agent-proposed credential in
-// PENDING_APPROVAL state. Such a row is filtered out of every credential
-// delivery path (agent_config, keeper, models, auto-assign), so no agent can
-// use it until a human flips it to ACTIVE via ResolveEscalation.
+// createPendingCredential inserts the credential an agent's escalation
+// metadata describes, in a state no delivery path serves:
+//
+//   - a PROPOSAL (value present) as PENDING_APPROVAL — a human flips it to
+//     ACTIVE via ResolveEscalation;
+//   - an ASK (no value) as REQUESTED, holding a sentinel instead of a value and
+//     marked handle_only — a human fills it through SupplyEscalationCredential,
+//     and the agent is answered with a grant, never the value (#2376).
+//
+// Either way the row is filtered out of every credential delivery path
+// (agent_config, keeper, models, auto-assign) until a human acts.
 //
 // Returns (credentialID, pendingCredStaged) on success. On failure the second
 // return classifies why (see pendingCredResult); the credentialID is "". The
@@ -146,7 +238,7 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 			"type", p.Type, "agent_id", fromAgentID)
 		return "", pendingCredInvalidType
 	}
-	if len(p.Value) > maxCredentialValueLen {
+	if !p.IsAsk() && len(p.Value) > maxCredentialValueLen {
 		h.logger.Warn("pending credential: value exceeds cap, falling back to plain escalation",
 			"bytes", len(p.Value), "agent_id", fromAgentID)
 		return "", pendingCredValueTooLarge
@@ -199,7 +291,7 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 	if _, err := h.db.ExecContext(ctx, `
 		UPDATE credentials
 		   SET status = 'REJECTED', deleted_at = ?, updated_at = ?
-		 WHERE workspace_id = ? AND name = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL
+		 WHERE workspace_id = ? AND name = ? AND status IN ('PENDING_APPROVAL', 'REQUESTED') AND deleted_at IS NULL
 		   AND NOT EXISTS (
 		       SELECT 1 FROM escalations e
 		        WHERE e.credential_id = credentials.id AND e.status = 'PENDING'
@@ -227,10 +319,27 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 		return "", pendingCredNameConflict
 	}
 
-	enc, err := encryption.Encrypt(p.Value)
+	// An ASK has no value to keep. The sentinel is what every PENDING-shaped
+	// row carries (isPendingSentinel): defence in depth behind the status
+	// filter, so a query that ever forgot `status = 'ACTIVE'` would deliver a
+	// placeholder rather than nothing at all — and never a real secret,
+	// because there is none.
+	//
+	// handle_only is set on the ASK and only the ask. The whole point of the
+	// row is that the agent gets to USE the value a human types and never to
+	// read it; a proposal's value the agent already knows.
+	toStore, status, handleOnly := p.Value, "PENDING_APPROVAL", 0
+	if p.IsAsk() {
+		toStore, status, handleOnly = pendingSentinelRequested, "REQUESTED", 1
+	}
+	enc, err := encryption.Encrypt(toStore)
 	if err != nil {
 		h.logger.Error("pending credential: encrypt", "error", err)
 		return "", pendingCredVaultError
+	}
+	level := 1
+	if p.SecurityLevel > 0 {
+		level = int(p.SecurityLevel)
 	}
 
 	credID := generateCUID()
@@ -238,21 +347,29 @@ func (h *QueryHandler) createPendingCredential(ctx context.Context, wsID, fromAg
 	if _, err := h.db.ExecContext(ctx, `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, security_level, status, created_by, created_at, updated_at,
-			created_by_actor_type, created_by_actor_id)
-		VALUES (?, ?, ?, '', ?, ?, ?, 'WORKSPACE', 1, 'PENDING_APPROVAL', ?, ?, ?, 'agent', ?)`,
-		credID, wsID, p.Name, enc, p.Type, p.Provider, ownerID, now, now, fromAgentID); err != nil {
+			created_by_actor_type, created_by_actor_id, handle_only)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'WORKSPACE', ?, ?, ?, ?, ?, 'agent', ?, ?)`,
+		credID, wsID, p.Name, p.Purpose, enc, p.Type, p.Provider, level, status, ownerID, now, now,
+		fromAgentID, handleOnly); err != nil {
 		h.logger.Error("pending credential: insert", "error", err, "name", p.Name)
 		return "", pendingCredVaultError
 	}
 
 	recordCredentialEventBestEffort(ctx, h.db, h.logger, credID,
 		AuditEventCreated, fromAgentID, "", map[string]any{
-			"status":     "PENDING_APPROVAL",
-			"actor_type": "agent",
-			"proposed":   true,
+			"status":      status,
+			"actor_type":  "agent",
+			"proposed":    !p.IsAsk(),
+			"requested":   p.IsAsk(),
+			"handle_only": handleOnly == 1,
 		})
 
-	h.logger.Info("agent proposed credential (pending approval)",
-		"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)
+	if p.IsAsk() {
+		h.logger.Info("agent requested credential (awaiting a human-supplied value)",
+			"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)
+	} else {
+		h.logger.Info("agent proposed credential (pending approval)",
+			"credential_id", credID, "name", p.Name, "agent_id", fromAgentID)
+	}
 	return credID, pendingCredStaged
 }

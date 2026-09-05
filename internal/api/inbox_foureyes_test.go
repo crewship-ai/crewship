@@ -249,9 +249,13 @@ func TestInboxList_FourEyesMatchesResolve(t *testing.T) {
 				t.Errorf("inbox get says required=%v but the list says %v", one.SecondApproverRequired, row.SecondApproverRequired)
 			}
 
-			rr := covEscResolve(qh, ownerID, wsID, inboxFourEyesEscID, map[string]string{
-				"resolution": "granted", "action": "approve",
-			})
+			// A CREDENTIAL escalation takes no resolution text (#2376); a
+			// TEXT one is answered with it.
+			body := map[string]string{"action": "approve"}
+			if tc.escType != "CREDENTIAL" {
+				body["resolution"] = "granted"
+			}
+			rr := covEscResolve(qh, ownerID, wsID, inboxFourEyesEscID, body)
 			if rr.Code != tc.wantStatus {
 				t.Fatalf("resolve status = %d, want %d; body=%s", rr.Code, tc.wantStatus, rr.Body.String())
 			}
@@ -298,7 +302,7 @@ func TestInboxList_FourEyesFollowsATierChange(t *testing.T) {
 		t.Errorf("security_level_label = %q, want %q", after.SecurityLevelLabel, tierFloor.Label())
 	}
 	rr := covEscResolve(qh, ownerID, wsID, inboxFourEyesEscID, map[string]string{
-		"resolution": "granted", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("resolve after re-tiering = %d, want 403; body=%s", rr.Code, rr.Body.String())
@@ -325,7 +329,7 @@ func TestInboxList_FourEyesFollowsTheWorkspaceToggle(t *testing.T) {
 		t.Errorf("after enabling the workspace toggle the inbox still offers an unguarded Approve: %+v", after)
 	}
 	rr := covEscResolve(qh, ownerID, wsID, inboxFourEyesEscID, map[string]string{
-		"resolution": "granted", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("resolve after enabling the toggle = %d, want 403; body=%s", rr.Code, rr.Body.String())

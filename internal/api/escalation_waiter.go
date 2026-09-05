@@ -7,7 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/credname"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 )
 
 // escalationResult is the response delivered to a waiting sidecar when an
@@ -24,11 +25,108 @@ import (
 // the wire-level expression of the product decision in escalation_lifecycle.go:
 // an agent may continue without an answer, but never without being told.
 type escalationResult struct {
-	Resolution string `json:"resolution"`
+	Resolution string `json:"resolution,omitempty"`
 	Action     string `json:"action"`
 	RedirectTo string `json:"redirect_to,omitempty"`
 	Status     string `json:"status,omitempty"`
 	Warning    string `json:"warning,omitempty"`
+	// Credential is the answer to a CREDENTIAL escalation (#2376): the handle
+	// the agent may use the credential by. It replaces Resolution entirely on
+	// that type — the value is in the vault and reaches a command only through
+	// /keeper/execute, never this channel.
+	Credential *escalationCredentialHandle `json:"credential,omitempty"`
+	// CredentialEscalation says the row is a CREDENTIAL escalation even when
+	// there is no handle to give (a rejection), so the wire body can omit the
+	// resolution key rather than send an empty one that reads like silence.
+	CredentialEscalation bool `json:"-"`
+}
+
+// escalationCredentialHandle is what an agent receives in place of a secret:
+// enough to USE the credential and nothing that would let it read one.
+type escalationCredentialHandle struct {
+	ID string `json:"id"`
+	// Name is the credential_name /keeper/execute resolves — the grant's env
+	// var name, which is also the file name it would have under /secrets/ if
+	// it were ever delivered there.
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	SecurityLevel int    `json:"security_level"`
+	HandleOnly    bool   `json:"handle_only"`
+	// Granted says an agent_credentials row exists for the asking agent. An
+	// approved PROPOSAL on a workspace without auto-lease activates the
+	// credential but grants nothing (see grantLeasedCredentialOnApprove); the
+	// agent is told so rather than left to discover a 404 from /keeper/execute.
+	Granted        bool   `json:"granted"`
+	LeaseExpiresAt string `json:"lease_expires_at,omitempty"`
+	// Use is the only way the agent may reach the value: "keeper_execute" for
+	// a handle-only or Keeper-gated credential, "environment" for a type the
+	// delivery policy hands over at boot.
+	Use string `json:"use"`
+}
+
+// resolvedEscalationBody is the wire body for a RESOLVED answer, shared by the
+// live wake-up and the two read-it-back paths so the three cannot disagree
+// about what a CREDENTIAL answer looks like: it has a `credential` and no
+// `resolution`, whatever the row's resolution column holds.
+func resolvedEscalationBody(res escalationResult) map[string]interface{} {
+	body := map[string]interface{}{
+		"status":      escalationStatusResolved,
+		"action":      res.Action,
+		"redirect_to": res.RedirectTo,
+	}
+	switch {
+	case res.Credential != nil:
+		body["credential"] = res.Credential
+	case res.CredentialEscalation:
+		// A rejected or redirected ask: no handle, and no text either.
+	default:
+		body["resolution"] = res.Resolution
+	}
+	return body
+}
+
+// credentialHandleFor builds the handle for credentialID as agentID sees it,
+// or nil when the credential is not ACTIVE (rejected, disposed, still
+// waiting). Reads the grant so Name is the env var the agent must actually use.
+func (h *QueryHandler) credentialHandleFor(ctx context.Context, workspaceID, credentialID, agentID string) *escalationCredentialHandle {
+	if credentialID == "" {
+		return nil
+	}
+	var (
+		name, credType, status string
+		level                  int
+		handleOnly             bool
+		envVar, leaseExpires   string
+	)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT c.name, c.type, COALESCE(c.security_level, 1), c.handle_only, c.status,
+		       COALESCE(ac.env_var_name, ''), COALESCE(ac.expires_at, '')
+		FROM credentials c
+		LEFT JOIN agent_credentials ac ON ac.credential_id = c.id AND ac.agent_id = ?
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`,
+		agentID, credentialID, workspaceID).
+		Scan(&name, &credType, &level, &handleOnly, &status, &envVar, &leaseExpires)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Warn("credential handle: lookup failed", "error", err, "credential_id", credentialID)
+		}
+		return nil
+	}
+	if status != "ACTIVE" {
+		return nil
+	}
+	granted := envVar != ""
+	if !granted {
+		envVar, _ = credname.Canonical(name)
+	}
+	use := "environment"
+	if handleOnly || credpolicy.IsKeeperGated(credType) {
+		use = "keeper_execute"
+	}
+	return &escalationCredentialHandle{
+		ID: credentialID, Name: envVar, Type: credType, SecurityLevel: level,
+		HandleOnly: handleOnly, Granted: granted, LeaseExpiresAt: leaseExpires, Use: use,
+	}
 }
 
 // terminalStatus normalises the zero value to RESOLVED. See the Status field.
@@ -182,33 +280,11 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 		}
 	}
 
-	status, escalationType, resolution, action, redirectTo := row.status, row.escalationType, row.resolution, row.action, row.redir
-
-	// A terminal state that is not an answer. The agent is told which one and
-	// why, never left to infer silence.
-	if status == escalationStatusExpired || status == escalationStatusCancelled {
-		writeJSON(w, http.StatusOK, escalationNoAnswerBody(status))
-		return
-	}
-
-	if status == escalationStatusResolved {
-		// Already resolved — decrypt CREDENTIAL resolutions and return immediately.
-		resolved := resolution.String
-		if escalationType == "CREDENTIAL" && resolved != "" {
-			dec, decErr := encryption.Decrypt(resolved)
-			if decErr != nil {
-				h.logger.Error("decrypt credential resolution", "error", decErr)
-				replyError(w, http.StatusInternalServerError, "Internal server error")
-				return
-			}
-			resolved = dec
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":      "RESOLVED",
-			"resolution":  resolved,
-			"action":      action.String,
-			"redirect_to": redirectTo.String,
-		})
+	// Already terminal — an answer, or a terminal state that is not one. Either
+	// way the row is what it is, and the agent is told which; a CREDENTIAL
+	// answer comes back as a handle, never as text (#2376).
+	if row.status != escalationStatusPending {
+		h.replyWithSettledEscalation(w, r.Context(), escalationID, row)
 		return
 	}
 
@@ -248,12 +324,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			writeJSON(w, http.StatusOK, escalationNoAnswerBody(st))
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":      escalationStatusResolved,
-			"resolution":  result.Resolution,
-			"action":      result.Action,
-			"redirect_to": result.RedirectTo,
-		})
+		writeJSON(w, http.StatusOK, resolvedEscalationBody(result))
 	case <-deadlineC:
 		// The AGENT's window closed. Re-read FIRST: a human may have decided in
 		// the same instant, and `select` picks at random between a ready channel
@@ -273,7 +344,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			return
 		}
 		if settled.status != escalationStatusPending {
-			h.replyWithSettledEscalation(w, escalationID, settled)
+			h.replyWithSettledEscalation(w, r.Context(), escalationID, settled)
 			return
 		}
 
@@ -295,7 +366,7 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 			// Lost the CAS: somebody decided in the same instant. Their answer,
 			// not our expiry.
 			if again, aerr := scoped(); aerr == nil {
-				h.replyWithSettledEscalation(w, escalationID, again)
+				h.replyWithSettledEscalation(w, r.Context(), escalationID, again)
 				return
 			}
 		}
@@ -395,25 +466,26 @@ type escalationWaitRow struct {
 
 // replyWithSettledEscalation answers with whatever terminal state the row
 // actually holds, for the deadline path that lost its compare-and-swap.
-func (h *QueryHandler) replyWithSettledEscalation(w http.ResponseWriter, escalationID string, row escalationWaitRow) {
+func (h *QueryHandler) replyWithSettledEscalation(w http.ResponseWriter, ctx context.Context, escalationID string, row escalationWaitRow) {
 	if row.status != escalationStatusResolved {
 		writeJSON(w, http.StatusOK, escalationNoAnswerBody(row.status))
 		return
 	}
-	resolved := row.resolution.String
-	if row.escalationType == "CREDENTIAL" && resolved != "" {
-		dec, decErr := encryption.Decrypt(resolved)
-		if decErr != nil {
-			h.logger.Error("decrypt credential resolution", "error", decErr, "escalation_id", escalationID)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		resolved = dec
+	res := escalationResult{
+		Action:               row.action.String,
+		RedirectTo:           row.redir.String,
+		CredentialEscalation: row.escalationType == "CREDENTIAL",
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":      escalationStatusResolved,
-		"resolution":  resolved,
-		"action":      row.action.String,
-		"redirect_to": row.redir.String,
-	})
+	if res.CredentialEscalation {
+		// The resolution column is never read for a CREDENTIAL row (#2376): a
+		// historical one holds the "[credential submitted]" marker, a current
+		// one NULL, and neither is something an agent should be handed. The
+		// answer is the grant, read live so a lease issued since is reflected.
+		if row.action.String == "approve" {
+			res.Credential = h.credentialHandleFor(ctx, row.scope.workspaceID, row.scope.credentialID, row.scope.fromAgentID)
+		}
+	} else {
+		res.Resolution = row.resolution.String
+	}
+	writeJSON(w, http.StatusOK, resolvedEscalationBody(res))
 }

@@ -62,13 +62,36 @@ crewship escalation list --crew backend-team --since 7d --limit 20
 crewship escalation list --crew backend-team --format json | jq
 ```
 
+## `crewship escalation supply <id>`
+
+`POST /api/v1/escalations/{id}/supply`. Answers a `CREDENTIAL` escalation with the value the agent asked for. The value is read from **stdin and nowhere else** — there is no `--value` flag, so the secret never appears in `argv`, the process table or shell history. It is stored in the vault as a **handle-only** credential, granted to the agent that asked, and the agent receives the credential's **name** — never the value. See [Asking a human for a credential](/guides/credentials#asking-a-human-for-a-credential).
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `--name <NAME>` | string | (unset) | Credential name for a **free-text** ask that staged no credential (an environment-variable name, e.g. `PG_PASSWORD`). Ignored when the agent's ask already named one. |
+| `--type <type>` | string | `SECRET` | Credential type for a free-text ask: `SECRET`, `CLI_TOKEN`, `GENERIC_SECRET`, `USERPASS`, `SSH_KEY`, `CERTIFICATE`, `API_KEY`. |
+| `--security-level <1-4>` | int | (the agent's proposal, else 1) | Tier to store the credential at. |
+
+```bash
+printf '%s' "$PG_PASSWORD" | crewship escalation supply esc_abc
+crewship escalation supply esc_abc < ~/.ssh/deploy_key            # multi-line values arrive intact
+printf '%s' "$TOKEN" | crewship escalation supply esc_abc --name GH_TOKEN --type CLI_TOKEN
+crewship escalation supply esc_abc                                  # interactive: prompts without echo
+```
+
+From a pipe or file the whole stream is the value, minus one trailing newline (what `echo` and an interactive prompt append). Use `printf '%s'` when the secret itself ends in one.
+
+Prints what was stored and granted, the lease deadline when the workspace auto-leases, and — when the agent had already stopped waiting — the same note `resolve` prints: the credential is active and granted, and the agent's next run has it.
+
+The [four-eyes rule](#crewship-escalation-resolve-id) applies to supplying exactly as to approving: it is the same decision.
+
 ## `crewship escalation resolve <id>`
 
 `PATCH /api/v1/escalations/{id}/resolve`. Optional notes land in the audit row.
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
-| `--resolution <text>` | string | (unset) | Free-form notes recorded with the resolve. |
+| `--resolution <text>` | string | (unset) | Free-form notes recorded with the resolve. **Refused (400) on a `CREDENTIAL` escalation** — a value goes through [`escalation supply`](#crewship-escalation-supply-id), and approve/reject need no words. |
 | `--action <verb>` | string | `approve` | Resolution action: `approve`, `reject`, or `redirect`. The server defaults a missing action to `approve`. |
 | `--redirect-to <slug>` | string | (unset) | Agent slug to redirect to. **Requires `--action redirect`** (and `--action redirect` requires this flag). |
 

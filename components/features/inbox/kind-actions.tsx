@@ -504,10 +504,17 @@ export function KindActions({
           : ""
       const resolveEsc = (action: "approve" | "reject") =>
         wrap(action, async () => {
+          // A CREDENTIAL escalation takes no resolution text (#2376): the
+          // server refuses it, because the only text anyone ever typed there
+          // was the secret. Every other type is answered with words.
           const res = await escalationResolve(
             item.source_id,
             action,
-            action === "approve" ? "Approved from inbox" : "Rejected from inbox",
+            escType === "CREDENTIAL"
+              ? ""
+              : action === "approve"
+                ? "Approved from inbox"
+                : "Rejected from inbox",
             item.workspace_id,
           )
           if (!res.ok) {
@@ -529,8 +536,9 @@ export function KindActions({
       // CREDENTIAL escalations: when the agent already proposed a value, it is
       // sitting in the vault as PENDING_APPROVAL, so Approve just activates it
       // (no secret to type here) and Reject discards it — one-click both ways.
-      // Legacy CREDENTIAL escalations (no pending credential, the human must
-      // supply the secret) keep Reject-only and point at the crew panel.
+      // An ASK (#2376: needs_credential_value, or a legacy free-text ask)
+      // needs the masked input on the crew's escalation card, which posts the
+      // value to /supply — never through this row, never through /resolve.
       if (escType === "CREDENTIAL") {
         if (item.payload?.has_pending_credential === true) {
           return (
@@ -570,7 +578,9 @@ export function KindActions({
               {busy === "reject" ? "Rejecting…" : "Reject"}
             </Button>
             <span className="text-[11px] text-muted-foreground">
-              To grant the credential, resolve from the crew’s escalations panel.
+              {item.payload?.needs_credential_value === true
+                ? "The agent is asking for a value it does not have — supply it from the crew’s escalations panel. It goes into the vault; the agent gets a name, never the value."
+                : "To grant the credential, supply it from the crew’s escalations panel."}
             </span>
           </div>
         )

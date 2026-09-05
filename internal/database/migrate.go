@@ -2064,6 +2064,12 @@ END;
 	// one of them as a person's conversation on upgrade.
 	// See migrate_consts_chat_origin_routine.go.
 	{version: 20260831072918, name: "chat_origin_routine", sql: migrationChatOriginRoutine},
+
+	// The answer to a credential ask is a grant, not a value (#2376):
+	// credentials.handle_only, and the ciphertext a human-supplied secret used
+	// to leave in escalations.resolution replaced by the marker every surface
+	// already showed for it. See migrate_consts_credential_handle_only.go.
+	{version: 20260905091400, name: "credential_handle_only", sql: migrationCredentialHandleOnly},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

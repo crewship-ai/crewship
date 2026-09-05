@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 )
 
 // Which credentials does an agent receive? — one definition, three consumers.
@@ -103,6 +104,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       COALESCE(c.provider, '')    AS provider,
 	       COALESCE(c.username, '')    AS username,
 	       COALESCE(ac.expires_at, '') AS lease_expires_at,
+	       c.handle_only     AS handle_only,
 	       %d AS source_rank
 	FROM agent_credentials ac
 	JOIN credentials c ON c.id = ac.credential_id
@@ -119,6 +121,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       COALESCE(c.provider, '') AS provider,
 	       COALESCE(c.username, '') AS username,
 	       ''  AS lease_expires_at,
+	       c.handle_only AS handle_only,
 	       rb.spec AS source_rank
 	FROM resolved_bindings rb
 	JOIN credentials c ON c.id = rb.credential_id
@@ -139,6 +142,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	       COALESCE(c.provider, '') AS provider,
 	       COALESCE(c.username, '') AS username,
 	       ''  AS lease_expires_at,
+	       c.handle_only AS handle_only,
 	       %d AS source_rank
 	FROM agent_scope s
 	JOIN credential_crews cc ON cc.crew_id = s.crew_id
@@ -186,6 +190,12 @@ type deliveredCredential struct {
 	Provider       string
 	Username       string
 	LeaseExpiresAt string
+	// HandleOnly is credentials.handle_only (#2376): the agent may USE this
+	// value — through /keeper/execute or the sidecar proxy — but never read
+	// it. Every loader that turns a row into a delivered credential leaves the
+	// value empty when this is set, and does so regardless of Keeper state:
+	// it is a property of the secret, not of the instance's configuration.
+	HandleOnly bool
 	// Source is one of the credSource* ranks: where this row came from, and
 	// how specific it is. Nothing branches on it today; it exists so a caller
 	// that needs to distinguish an explicit grant from a workspace-wide
@@ -226,6 +236,19 @@ type deliveredSlotNotice struct {
 	Requested    string
 	Delivered    string
 	Reason       string
+}
+
+// logHandleOnlyWithheld is the one line every delivery path writes when it
+// leaves a handle-only credential's value behind (#2376). Env-var name only,
+// never the value — the same discipline as the Keeper withhold log, and for
+// the same reason: this is where the plaintext would have been, so it is the
+// place an operator looks when an agent says the credential is "missing".
+func logHandleOnlyWithheld(logger *slog.Logger, agentID, envVar string) {
+	if logger == nil {
+		return
+	}
+	logger.Warn("handle-only credential withheld from delivery — usable through /keeper/execute only",
+		"agent_id", agentID, "env_var", envVar)
 }
 
 // loadDeliveredCredentials runs the shared derivation for one agent.
@@ -292,7 +315,7 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 		// shift every later field into the wrong struct member silently, with
 		// no error from database/sql.
 		if err := rows.Scan(&d.ID, &d.EnvVar, &d.Priority, &d.EncryptedValue,
-			&d.Type, &d.Provider, &d.Username, &d.LeaseExpiresAt, &d.Source); err != nil {
+			&d.Type, &d.Provider, &d.Username, &d.LeaseExpiresAt, &d.HandleOnly, &d.Source); err != nil {
 			return nil, nil, fmt.Errorf("scan delivered credential: %w", err)
 		}
 		out = append(out, d)

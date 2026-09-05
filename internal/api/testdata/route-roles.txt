@@ -211,6 +211,7 @@ POST /api/v1/crews/{crewId}/refresh-image roleCreate
 POST /api/v1/crews/{crewId}/restart-agents roleCreate
 POST /api/v1/escalations/sweep-expired roleManage
 POST /api/v1/escalations/{escalationId}/cancel roleCreate
+POST /api/v1/escalations/{escalationId}/supply roleCreate
 POST /api/v1/eval/regression roleManage
 POST /api/v1/eval/replay roleManage
 POST /api/v1/feature-flags roleManage
@@ -272,6 +273,7 @@ POST /api/v1/workspaces/{workspaceId}/members roleManage
 POST /api/v1/workspaces/{workspaceId}/members/provision roleManage
 POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules roleInline
+POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/import roleCreate
@@ -326,4 +328,3 @@ PUT /api/v1/users/me/peer-consent roleSelf
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
-POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate

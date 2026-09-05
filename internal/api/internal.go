@@ -198,6 +198,11 @@ type mcpCredEntry struct {
 	// credential. Always empty for other types — the sidecar mount
 	// path branches on Type and only reads Username for USERPASS.
 	Username string `json:"username,omitempty"`
+	// HandleOnly (#2376): the agent may use this credential through
+	// /keeper/execute or the proxy but never read it. Value is always empty
+	// when set — blanked at the loader, not here, so a prompt builder cannot
+	// un-blank it. omitempty keeps the pre-#2376 payload byte-identical.
+	HandleOnly bool `json:"handle_only,omitempty"`
 	// LeaseExpiresAt is the delivering grant's credential-lease deadline in
 	// RFC3339 UTC, empty for a standing grant (#1373). It rides the boot payload
 	// into the sidecar's CredStore, which refuses and then evicts a credential

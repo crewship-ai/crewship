@@ -106,7 +106,7 @@ func TestResolveEscalation_SegregationOfDuties(t *testing.T) {
 				approver = ownerID
 			}
 			rr := covEscResolve(h, approver, wsID, "sod-esc", map[string]string{
-				"resolution": "test resolution", "action": tc.action,
+				"action": tc.action,
 			})
 			if rr.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.wantStatus, rr.Body.String())
@@ -153,7 +153,7 @@ func TestResolveEscalation_SegregationOfDuties_DeniedAttemptAudited(t *testing.T
 
 	// Owner (also the initiator) attempts to self-approve — must be blocked.
 	rr := covEscResolve(h, ownerID, wsID, "sod-esc4", map[string]string{
-		"resolution": "test resolution", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
@@ -232,7 +232,7 @@ func TestResolveEscalation_SegregationOfDuties_NoRecordedOwner(t *testing.T) {
 
 	h := NewQueryHandler(db, nil, nil, "", newTestLogger())
 	rr := covEscResolve(h, ownerID, wsID, "sod-esc3", map[string]string{
-		"resolution": "handled", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (no recorded owner -> rule can't be enforced); body=%s", rr.Code, rr.Body.String())
@@ -258,7 +258,7 @@ func TestResolveEscalation_SuccessJournalCarriesActorID(t *testing.T) {
 	h.SetJournal(jw)
 
 	rr := covEscResolve(h, ownerID, wsID, "sod-esc5", map[string]string{
-		"resolution": "approved", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())

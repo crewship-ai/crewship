@@ -209,3 +209,6 @@ api-contract-artifacts/
 # locally when you want to read it.
 docs/prd/reports/release-1-0-api-cli-inventory.json
 docs/prd/reports/release-1-0-api-cli-inventory.md
+
+# a symlinked node_modules (a worktree borrowing the main clone's) is not a directory, so `node_modules/` above does not match it
+/node_modules

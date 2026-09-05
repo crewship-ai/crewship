@@ -57,6 +57,11 @@ const (
 	// leaseSourceEscalationApprove: a human approved an agent-proposed
 	// CREDENTIAL escalation, which grants the proposing agent access.
 	leaseSourceEscalationApprove = "escalation_approve"
+	// leaseSourceEscalationSupply: a human supplied the value an agent asked
+	// for (#2376). The grant is the answer the agent receives, so it is minted
+	// in the same transaction as the value; the lease, when the workspace has
+	// opted in, is issued on top of it exactly as on approve.
+	leaseSourceEscalationSupply = "escalation_supply"
 )
 
 // leaseIssueInput identifies the grant to lease and the approval that authorised

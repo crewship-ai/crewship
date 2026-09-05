@@ -473,8 +473,10 @@ func TestResolveEscalation_MissingResolution(t *testing.T) {
 
 	h.ResolveEscalation(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	// Whether text is required depends on the escalation's type (#2376), so
+	// the row is read first and an unknown id answers 404.
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

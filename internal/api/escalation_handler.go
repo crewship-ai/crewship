@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -154,6 +153,12 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// no pending row was created (e.g. name collision, no workspace owner).
 	var credentialID interface{}
 	var credentialName string
+	// credentialRequested marks an ASK (#2376): the agent has no value and is
+	// asking a human for one. The inbox card must then offer a masked input
+	// that goes to the supply endpoint, not a one-click Approve.
+	var credentialRequested bool
+	var credentialHosts []string
+	var credentialPurpose string
 	if escalationType == "CREDENTIAL" {
 		if proposal, ok := parseCredentialProposal(body.Metadata); ok {
 			cid, outcome := h.createPendingCredential(r.Context(), body.WorkspaceID, fromAgentID, proposal)
@@ -161,6 +166,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 			case pendingCredStaged:
 				credentialID = cid
 				credentialName = proposal.Name
+				credentialRequested = proposal.IsAsk()
+				credentialHosts = proposal.Hosts
+				credentialPurpose = proposal.Purpose
 			case pendingCredNameConflict:
 				// Recoverable: no credential was staged, but a human should still
 				// be told. Lead the escalation with a note so the reporter isn't
@@ -241,6 +249,11 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	inboxBody := inbox.RedactSecrets(body.Context)
 	if escalationType == "CREDENTIAL" {
 		inboxBody = "🔒 A credential is being requested — the secret is handled in the credential flow and is not shown here.\n\n" + inboxBody
+		if credentialRequested {
+			inboxBody = "🔒 The agent is asking you for a credential it does not have. " +
+				"Supply the value from the escalation card: it goes straight into the vault, " +
+				"and the agent receives a name to use it by — never the value.\n\n" + inboxBody
+		}
 	}
 	inboxPayload := map[string]interface{}{
 		"crew_id":         body.CrewID,
@@ -266,8 +279,21 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	// Approve (vs the legacy human-supplies-the-secret flow that routes to the
 	// crew escalations panel).
 	if cid, ok := credentialID.(string); ok && cid != "" {
-		inboxPayload["has_pending_credential"] = true
 		inboxPayload["credential_id"] = cid
+		if credentialRequested {
+			// An ASK: the card needs an input, not an Approve. Hosts and purpose
+			// are agent-authored review metadata — redacted like every other
+			// agent field on this projection, and never enforced.
+			inboxPayload["needs_credential_value"] = true
+			if len(credentialHosts) > 0 {
+				inboxPayload["credential_hosts"] = credentialHosts
+			}
+			if credentialPurpose != "" {
+				inboxPayload["credential_purpose"] = inbox.RedactSecrets(credentialPurpose)
+			}
+		} else {
+			inboxPayload["has_pending_credential"] = true
+		}
 	}
 	// A credential proposal reads more naturally in the inbox as a credential
 	// approval than as a generic "Agent escalation". The proposal name is
@@ -277,6 +303,9 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	inboxTitle := fmt.Sprintf("Agent escalation: %s", truncate(inbox.RedactSecrets(body.Reason), 80))
 	if credentialName != "" {
 		inboxTitle = fmt.Sprintf("Credential approval: %s", credentialName)
+		if credentialRequested {
+			inboxTitle = fmt.Sprintf("Credential requested: %s", credentialName)
+		}
 	}
 	inbox.Insert(r.Context(), h.db, h.logger, inbox.Item{
 		WorkspaceID: body.WorkspaceID,
@@ -359,7 +388,7 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		"crew_id", body.CrewID,
 	)
 
-	writeJSON(w, http.StatusCreated, map[string]any{
+	created := map[string]any{
 		"escalation_id": escalationID,
 		"status":        escalationStatusPending,
 		// The contract the sidecar bounds its long poll on. Publishing both
@@ -374,7 +403,15 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		// how long it stays actionable, and the number they must NOT be shown is
 		// the agent's poll window.
 		"answer_deadline_at": answerDeadlineAt,
-	})
+	}
+	// The name the agent will be able to use the credential by, so it can say
+	// so in its report before the human has even answered. Never a value.
+	if cid, ok := credentialID.(string); ok && cid != "" {
+		created["credential_id"] = cid
+		created["credential_name"] = credentialName
+		created["credential_requested"] = credentialRequested
+	}
+	writeJSON(w, http.StatusCreated, created)
 }
 
 // ResolveEscalation handles PATCH /api/v1/escalations/{escalationId}/resolve.
@@ -403,10 +440,8 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
 		return
 	}
-	if body.Resolution == "" {
-		replyError(w, http.StatusBadRequest, "resolution required")
-		return
-	}
+	// "resolution required" is decided below, once the escalation's type is
+	// known: a CREDENTIAL escalation takes none at all (#2376).
 
 	// Default action to "approve" for backward compatibility.
 	if body.Action == "" {
@@ -476,6 +511,36 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// What this channel may carry depends on the type (#2376). A CREDENTIAL
+	// escalation takes NO text: the only thing a human ever typed into this
+	// field for one was the secret, and that now goes through the supply
+	// endpoint into the vault. Refusing the field outright, rather than
+	// redacting it, is what makes "paste it into the resolution box" stop
+	// being a path at all. For every other type the text IS the answer.
+	if escalationType == "CREDENTIAL" {
+		if body.Resolution != "" {
+			replyError(w, http.StatusBadRequest,
+				"a CREDENTIAL escalation takes no resolution text — supply the value with "+
+					"POST /api/v1/escalations/{id}/supply (crewship escalation supply), "+
+					"which stores it in the vault and hands the agent a name, never the value")
+			return
+		}
+		if body.Action == "approve" && credentialID.Valid && credentialID.String != "" {
+			var credStatus string
+			if err := h.db.QueryRowContext(r.Context(),
+				`SELECT status FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+				credentialID.String, workspaceID).Scan(&credStatus); err == nil && credStatus == credentialStatusRequested {
+				replyError(w, http.StatusConflict,
+					"the agent is asking you for a value it does not have — approving records nothing; "+
+						"supply it with POST /api/v1/escalations/{id}/supply (crewship escalation supply)")
+				return
+			}
+		}
+	} else if body.Resolution == "" {
+		replyError(w, http.StatusBadRequest, "resolution required")
+		return
+	}
+
 	// Segregation of duties (issue #1084): a workspace can opt in to a strict
 	// four-eyes rule for CREDENTIAL escalations — the human recorded as the
 	// initiating agent's owner (agents.created_by_user_id, v100) may not also
@@ -495,101 +560,24 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// self-approve. Tightening this to the actual requester needs the escalation
 	// to record the driving user at raise time (follow-up); until then this is a
 	// four-eyes control keyed on ownership, which covers the common case.
-	if escalationType == "CREDENTIAL" && initiatorUserID.Valid && initiatorUserID.String != "" {
-		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
-		// The workspace toggle is the opt-in. The credential's tier can also demand
-		// it: an L4 credential is one an operator marked as production-critical, and
-		// "one person can close out a request their own agent raised" is exactly the
-		// hole four-eyes exists to close — so the tier forces the rule on whether or
-		// not the workspace opted in. A workspace that has NOT opted in still gets
-		// the rule for L4 only, which is the narrowest reading of what the level
-		// means (internal/keeper/tier.go).
-		// The tier is read here and the escalation is resolved by the
-		// compare-and-swap UPDATE further down, so a tier change committed in
-		// between would be decided against. Left as a read rather than folded into
-		// a transaction spanning the resolve, deliberately:
-		//
-		// changing a credential's tier needs roleManage — the same right this
-		// handler already requires — so an admin who wanted to escape their own
-		// four-eyes requirement can lower the tier and approve SERIALLY. The race
-		// grants nothing the actor cannot do without it, and the workspace toggle
-		// is unaffected either way. Making it atomic means a transaction around
-		// the resolve, the credential activation and the lease mint; worth doing,
-		// not worth doing inside this branch.
-		tierForces := false
-		if credentialID.Valid && credentialID.String != "" {
-			var lvl int
-			if err := h.db.QueryRowContext(r.Context(),
-				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
-				credentialID.String, workspaceID).Scan(&lvl); err == nil {
-				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
-			} else if !errors.Is(err, sql.ErrNoRows) {
-				// A read failure must not silently drop a security control: treat an
-				// unreadable tier as the strict case, the same fail-closed default the
-				// tier table itself takes for an unknown level.
-				h.logger.Warn("resolve escalation: credential tier unreadable; enforcing four-eyes",
-					"error", err, "credential_id", credentialID.String)
-				tierForces = true
-			}
-		}
-		if gov.RequireSecondApprover || tierForces {
-			forcedBy := "workspace policy"
-			if tierForces {
-				// The tier is the more specific reason, so it is the one named.
-				forcedBy = "critical credential tier"
-			}
-			approverID := ""
-			if user := UserFromContext(r.Context()); user != nil {
-				approverID = user.ID
-			}
-			if approverID != "" && approverID == initiatorUserID.String {
-				// Audit the blocked self-approval. A user attempting to resolve a
-				// credential escalation their own agent raised is exactly the
-				// security event a four-eyes control exists to catch, so it must
-				// leave a trail — the successful resolution is journaled downstream,
-				// but the denial otherwise left none.
-				_, _ = h.journal.Emit(r.Context(), journal.Entry{
-					WorkspaceID: workspaceID,
-					CrewID:      crewID,
-					Type:        journal.EntryKeeperDecision,
-					Severity:    journal.SeverityError,
-					ActorType:   journal.ActorUser,
-					ActorID:     approverID,
-					Summary: fmt.Sprintf(
-						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
-						body.Action, fromSlug),
-					Payload: map[string]any{
-						"rule":            "segregation_of_duties",
-						"action":          body.Action,
-						"escalation_type": escalationType,
-						"from_slug":       fromSlug,
-						// Which of the two rules fired. An incident review asking "why
-						// was this blocked" should not have to infer it from the
-						// workspace settings as they stand weeks later.
-						"forced_by":         forcedBy,
-						"initiator_user_id": initiatorUserID.String,
-					},
-					Refs: map[string]any{"escalation_id": escalationID, "chat_id": chatID},
-				})
-				replyError(w, http.StatusForbidden,
-					"a second approver is required ("+forcedBy+"): you cannot resolve a credential escalation raised by an agent you own")
-				return
-			}
-		}
+	if h.refuseCredentialSelfApproval(w, r, secondApproverInput{
+		workspaceID: workspaceID, crewID: crewID, chatID: chatID, escalationID: escalationID,
+		escalationType: escalationType, fromSlug: fromSlug, action: body.Action,
+		credentialID: credentialID, initiatorUserID: initiatorUserID,
+	}) {
+		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// For CREDENTIAL escalations encrypt the value at rest; for others store as-is.
-	storedResolution := body.Resolution
-	if escalationType == "CREDENTIAL" {
-		enc, encErr := encryption.Encrypt(body.Resolution)
-		if encErr != nil {
-			h.logger.Error("encrypt credential resolution", "error", encErr)
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		storedResolution = enc
+	// A CREDENTIAL escalation stores no resolution at all (#2376). This column
+	// used to hold the human-typed secret, encrypted — a second vault with no
+	// tier, lease, rotation or audit timeline, read by exactly one caller,
+	// which handed the plaintext to the agent. NULL, not a marker: a marker
+	// would be a value that pretends to be a decision.
+	var storedResolution interface{}
+	if escalationType != "CREDENTIAL" {
+		storedResolution = body.Resolution
 	}
 
 	var redirectToVal interface{}
@@ -653,7 +641,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		case "reject":
 			res, credErr := h.db.ExecContext(r.Context(), `
 				UPDATE credentials SET status = 'REJECTED', deleted_at = ?, updated_at = ?
-				WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL
+				WHERE id = ? AND workspace_id = ? AND status IN ('PENDING_APPROVAL', 'REQUESTED') AND deleted_at IS NULL
 			`, now, now, credentialID.String, workspaceID)
 			if credErr != nil {
 				h.logger.Error("reject pending credential", "error", credErr, "credential_id", credentialID.String)
@@ -700,7 +688,9 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// second policy that only fires on one escalation type.
 	resolutionForJournal := truncate(inbox.RedactSecrets(body.Resolution), maxJournalEscalationFieldLen)
 	if escalationType == "CREDENTIAL" {
-		resolutionForJournal = "***REDACTED:credential***"
+		// Refused above when non-empty. The marker this used to write
+		// described a secret that no longer passes through here at all.
+		resolutionForJournal = ""
 	}
 	_, _ = h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: workspaceID,
@@ -715,6 +705,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			"redirect_to":     body.RedirectTo,
 			"state":           "resolved",
 			"escalation_type": escalationType,
+			"credential_id":   credentialID.String,
 			// Whether the decision reached the run that asked for it. An
 			// operator reconstructing "why did that agent proceed without my
 			// approval" needs this on the resolution entry, not only on the
@@ -725,16 +716,29 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		Refs: map[string]any{"escalation_id": escalationID},
 	})
 
-	// Notify any waiting sidecar that the escalation has been resolved.
-	h.notifyEscalationWaiter(escalationID, escalationResult{
-		Resolution: body.Resolution,
-		Action:     body.Action,
-		RedirectTo: body.RedirectTo,
-	})
+	// Notify any waiting sidecar that the escalation has been resolved. A
+	// CREDENTIAL answer is a HANDLE (#2376): the name the agent may use the
+	// credential by and how, never a value — there is none on this path.
+	waiterResult := escalationResult{
+		Action:               body.Action,
+		RedirectTo:           body.RedirectTo,
+		CredentialEscalation: escalationType == "CREDENTIAL",
+	}
+	if escalationType == "CREDENTIAL" {
+		if body.Action == "approve" {
+			waiterResult.Credential = h.credentialHandleFor(r.Context(), workspaceID, credentialID.String, fromAgentID)
+		}
+	} else {
+		waiterResult.Resolution = body.Resolution
+	}
+	h.notifyEscalationWaiter(escalationID, waiterResult)
 
 	broadcastResolution := body.Resolution
 	if escalationType == "CREDENTIAL" {
-		broadcastResolution = "[credential submitted]"
+		broadcastResolution = "[credential " + body.Action + "d]"
+		if body.Action == "redirect" {
+			broadcastResolution = "[credential request redirected]"
+		}
 	}
 	broadcastChannelEvent(h.hub, "session", chatID, "escalation_resolved",
 		map[string]string{
@@ -831,6 +835,11 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		// PENDING_APPROVAL credential it created; non-null means "approve here
 		// activates it" (no secret to type).
 		CredentialID *string `json:"credential_id"`
+		// CredentialStatus is the linked credential's status: REQUESTED means
+		// the agent is asking for a value the console must collect (supply),
+		// PENDING_APPROVAL means the agent proposed one (approve). Absent when
+		// no credential is linked (#2376).
+		CredentialStatus *string `json:"credential_status,omitempty"`
 
 		// The two clocks, and the stamp that says which of them has run out.
 		//
@@ -883,7 +892,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
 		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
 		       e.credential_id, e.deadline_at, e.answer_deadline_at, e.agent_gave_up_at,
-		       from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level
+		       from_a.name, from_a.slug, from_a.created_by_user_id, c.security_level, c.status
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
 		LEFT JOIN credentials c ON c.id = e.credential_id AND c.workspace_id = e.workspace_id
@@ -912,7 +921,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
 			&item.CredentialID, &item.DeadlineAt, &item.AnswerDeadlineAt, &item.AgentGaveUpAt,
 			&item.FromName, &item.FromSlug,
-			&item.initiatorUserID, &item.securityLevel,
+			&item.initiatorUserID, &item.securityLevel, &item.CredentialStatus,
 		); err != nil {
 			replyInternalError(w, h.logger, "scan escalation", err)
 			return
@@ -1008,4 +1017,109 @@ func (h *QueryHandler) PurgeEscalations(w http.ResponseWriter, r *http.Request) 
 	}
 	deleted, _ := res.RowsAffected()
 	writeJSON(w, http.StatusOK, map[string]int64{"deleted": deleted})
+}
+
+// secondApproverInput is what the four-eyes rule needs to know about the
+// escalation being decided. Both deciders — ResolveEscalation and
+// SupplyEscalationCredential — hand it the same row, so the rule is written
+// once and cannot drift between "approve the agent's value" and "type the
+// value yourself", which are the same act of trust.
+type secondApproverInput struct {
+	workspaceID, crewID, chatID, escalationID string
+	escalationType, fromSlug, action          string
+	credentialID, initiatorUserID             sql.NullString
+}
+
+// refuseCredentialSelfApproval enforces segregation of duties on a CREDENTIAL
+// escalation (issue #1084): the human recorded as the initiating agent's owner
+// may not also be the one who decides it, when the workspace opted in or the
+// credential's tier forces it. Writes the 403 and journals the blocked attempt;
+// returns true when the caller must stop. See the comment block at its call
+// site in ResolveEscalation for the known scope limit (ownership as a proxy
+// for the initiating human).
+func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *http.Request, in secondApproverInput) bool {
+	if in.escalationType == "CREDENTIAL" && in.initiatorUserID.Valid && in.initiatorUserID.String != "" {
+		gov := governance.Resolve(r.Context(), h.db, h.logger, in.workspaceID)
+		// The workspace toggle is the opt-in. The credential's tier can also demand
+		// it: an L4 credential is one an operator marked as production-critical, and
+		// "one person can close out a request their own agent raised" is exactly the
+		// hole four-eyes exists to close — so the tier forces the rule on whether or
+		// not the workspace opted in. A workspace that has NOT opted in still gets
+		// the rule for L4 only, which is the narrowest reading of what the level
+		// means (internal/keeper/tier.go).
+		// The tier is read here and the escalation is resolved by the
+		// compare-and-swap UPDATE further down, so a tier change committed in
+		// between would be decided against. Left as a read rather than folded into
+		// a transaction spanning the resolve, deliberately:
+		//
+		// changing a credential's tier needs roleManage — the same right this
+		// handler already requires — so an admin who wanted to escape their own
+		// four-eyes requirement can lower the tier and approve SERIALLY. The race
+		// grants nothing the actor cannot do without it, and the workspace toggle
+		// is unaffected either way. Making it atomic means a transaction around
+		// the resolve, the credential activation and the lease mint; worth doing,
+		// not worth doing inside this branch.
+		tierForces := false
+		if in.credentialID.Valid && in.credentialID.String != "" {
+			var lvl int
+			if err := h.db.QueryRowContext(r.Context(),
+				`SELECT COALESCE(security_level, 1) FROM credentials WHERE id = ? AND workspace_id = ?`,
+				in.credentialID.String, in.workspaceID).Scan(&lvl); err == nil {
+				tierForces = keeper.SecurityLevel(lvl).Tier().SecondApprover
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				// A read failure must not silently drop a security control: treat an
+				// unreadable tier as the strict case, the same fail-closed default the
+				// tier table itself takes for an unknown level.
+				h.logger.Warn("resolve escalation: credential tier unreadable; enforcing four-eyes",
+					"error", err, "credential_id", in.credentialID.String)
+				tierForces = true
+			}
+		}
+		if gov.RequireSecondApprover || tierForces {
+			forcedBy := "workspace policy"
+			if tierForces {
+				// The tier is the more specific reason, so it is the one named.
+				forcedBy = "critical credential tier"
+			}
+			approverID := ""
+			if user := UserFromContext(r.Context()); user != nil {
+				approverID = user.ID
+			}
+			if approverID != "" && approverID == in.initiatorUserID.String {
+				// Audit the blocked self-approval. A user attempting to resolve a
+				// credential escalation their own agent raised is exactly the
+				// security event a four-eyes control exists to catch, so it must
+				// leave a trail — the successful resolution is journaled downstream,
+				// but the denial otherwise left none.
+				_, _ = h.journal.Emit(r.Context(), journal.Entry{
+					WorkspaceID: in.workspaceID,
+					CrewID:      in.crewID,
+					Type:        journal.EntryKeeperDecision,
+					Severity:    journal.SeverityError,
+					ActorType:   journal.ActorUser,
+					ActorID:     approverID,
+					Summary: fmt.Sprintf(
+						"blocked self-approval: user tried to %s a credential escalation raised by agent %s they own",
+						in.action, in.fromSlug),
+					Payload: map[string]any{
+						"rule":            "segregation_of_duties",
+						"action":          in.action,
+						"escalation_type": in.escalationType,
+						"from_slug":       in.fromSlug,
+						// Which of the two rules fired. An incident review asking "why
+						// was this blocked" should not have to infer it from the
+						// workspace settings as they stand weeks later.
+						"forced_by":         forcedBy,
+						"initiator_user_id": in.initiatorUserID.String,
+					},
+					Refs: map[string]any{"escalation_id": in.escalationID, "chat_id": in.chatID},
+				})
+				replyError(w, http.StatusForbidden,
+					"a second approver is required ("+forcedBy+"): you cannot resolve a credential escalation raised by an agent you own")
+				return true
+			}
+		}
+	}
+
+	return false
 }

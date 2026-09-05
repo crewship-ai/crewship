@@ -298,6 +298,16 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			HandleOnly:     d.HandleOnly,
+		}
+		// Handle-only (#2376): the name crosses the sub-agent boundary, the
+		// value does not — this is the path #2261 found handing SECRET plaintext
+		// to a sub-agent regardless of Keeper, and a handle-only row must not
+		// depend on that decision.
+		if d.HandleOnly {
+			logHandleOnlyWithheld(h.logger, agentID, d.EnvVar)
+			creds = append(creds, c)
+			continue
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {

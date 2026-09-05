@@ -230,7 +230,6 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		"internal/api/internal_credentials.go":     "sidecar boot payload; the sidecar splits on its own side",
 		"internal/api/internal_mcp.go":             "MCP server credential, not an LLM provider",
 		"internal/api/internal_handler.go":         "dispatch only",
-		"internal/api/escalation_waiter.go":        "reads a notification credential",
 		"internal/api/issue_code_links.go":         "forge token, not an LLM provider",
 		"internal/api/local_model_endpoint.go":     "reads ENDPOINT_URL rows, which are already the split shape",
 		"internal/api/models.go":                   "lists models with a provider key",

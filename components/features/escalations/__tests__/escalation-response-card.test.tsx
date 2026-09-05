@@ -105,3 +105,79 @@ describe("EscalationResponseCard four-eyes notice (#1559)", () => {
     expect(note).toHaveTextContent(/regardless/i)
   })
 })
+
+// #2376 — the answer to a credential ask is a grant, not a value. The card is
+// the one place a human types the secret, and it must go to /supply: never
+// through /resolve, which refuses text on a CREDENTIAL escalation.
+describe("EscalationResponseCard credential asks (#2376)", () => {
+  beforeEach(() => {
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValue({ ok: true, json: async () => ({ credential: { name: "PG_PASSWORD" } }) })
+  })
+
+  it("an ask shows a masked input and posts the value to /supply", async () => {
+    const { fireEvent } = await import("@testing-library/react")
+    renderCard({ credential_id: "cred1", credential_status: "REQUESTED" })
+
+    expect(screen.getByTestId("escalation-credential-ask")).toBeInTheDocument()
+    const input = screen.getByLabelText("Credential value") as HTMLInputElement
+    expect(input.type).toBe("password")
+    // No name field: the agent's ask already named the credential.
+    expect(screen.queryByLabelText("Credential name")).not.toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: "s3cret" } })
+    fireEvent.click(screen.getByRole("button", { name: /supply/i }))
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    const [url, init] = apiFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/api/v1/escalations/esc1/supply")
+    expect(url).not.toContain("/resolve")
+    expect(JSON.parse(String(init.body))).toEqual({ value: "s3cret" })
+  })
+
+  it("a free-text ask needs a name and sends it alongside the value", async () => {
+    const { fireEvent } = await import("@testing-library/react")
+    renderCard({ credential_id: null, credential_status: null })
+
+    const supply = screen.getByRole("button", { name: /supply/i })
+    fireEvent.change(screen.getByLabelText("Credential value"), { target: { value: "tok" } })
+    expect(supply).toBeDisabled()
+    fireEvent.change(screen.getByLabelText("Credential name"), { target: { value: "gh_token" } })
+    expect(supply).toBeEnabled()
+    fireEvent.click(supply)
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    const [, init] = apiFetch.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ value: "tok", name: "GH_TOKEN" })
+  })
+
+  it("a proposal has nothing to type and approves through /resolve with no text", async () => {
+    const { fireEvent } = await import("@testing-library/react")
+    renderCard({ credential_id: "cred1", credential_status: "PENDING_APPROVAL" })
+
+    expect(screen.getByTestId("escalation-credential-proposal")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Credential value")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }))
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    const [url, init] = apiFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/resolve")
+    const body = JSON.parse(String(init.body))
+    expect(body.action).toBe("approve")
+    expect(body.resolution).toBe("")
+  })
+
+  it("rejecting a credential ask needs no text and sends none", async () => {
+    const { fireEvent } = await import("@testing-library/react")
+    renderCard({ credential_id: "cred1", credential_status: "REQUESTED" })
+
+    const reject = screen.getByRole("button", { name: /reject/i })
+    expect(reject).toBeEnabled()
+    fireEvent.click(reject)
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    const [url, init] = apiFetch.mock.calls[0] as [string, RequestInit]
+    expect(url).toContain("/resolve")
+    expect(JSON.parse(String(init.body))).toMatchObject({ action: "reject", resolution: "" })
+  })
+})

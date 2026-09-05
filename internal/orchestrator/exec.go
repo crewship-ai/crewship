@@ -109,11 +109,32 @@ JSON
   file there (or anywhere else) does NOT register a credential in Crewship's vault: it will not
   persist past this run and other crew members will not see it. Never report a local file write
   as a stored credential.
-- When you need to record a credential for the crew (e.g. a connection string or password for a
-  service you just set up), raise a CREDENTIAL escalation. Put the proposed credential in the
-  "metadata" field as JSON {"name","type","provider","value"}; the value is stored immediately in
-  the vault as PENDING_APPROVAL (not usable until a human approves it with one click). Send the
-  request body over STDIN so the secret never lands in the command line / process args:
+- When you need a credential you do NOT have — a password, a token, an API key only a human
+  can give you — ASK for it. Raise a CREDENTIAL escalation whose "metadata" names the credential
+  and its purpose, with NO value. A REQUESTED credential is staged in the vault under that name;
+  a human fills in the value on their side, and you are answered with a GRANT: the name to use
+  it by, through /keeper/execute. You will never be shown the value, and that is by design — do
+  not ask the human to paste it into chat, and do not look for it in files, logs or history.
+    curl -s -X POST http://localhost:9119/escalate \
+      -H "Content-Type: application/json" \
+      -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
+header = "Authorization: Bearer $CREWSHIP_AGENT_TOKEN"
+AUTH
+{"from":"{your-slug}","reason":"<what you need it for, for a reviewer>","type":"CREDENTIAL",
+ "metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"security_level\":3,\"purpose\":\"<the task, the system, why this credential>\",\"hosts\":[\"db.internal\"]}"}
+JSON
+  "name" is the environment-variable-shaped name you will use it by. "security_level" is the tier
+  you propose (1 low … 4 critical; the human can change it). "hosts" are the destinations you will
+  use it against — review information for the approver. The call blocks until a human answers
+  (up to 5 minutes). On approve the reply carries {"credential":{"name":"PG_PASSWORD",
+  "use":"keeper_execute", ...}} and NO value: use it exactly as a Keeper-guarded credential above.
+  If the human is slow the wait ends with a warning and the ask stays open for days — the grant
+  then appears in /secrets/{your-slug}/.env on a later run, so report that you asked and move on.
+- When you GENERATED a secret yourself (e.g. a password for a database you just set up) and need
+  the crew to keep it, PROPOSE it: the same escalation with "value" in the metadata. The value is
+  stored immediately in the vault as PENDING_APPROVAL (not usable until a human approves it with
+  one click). Send the request body over STDIN so the secret never lands in the command line /
+  process args:
     curl -s -X POST http://localhost:9119/escalate \
       -H "Content-Type: application/json" \
       -K /dev/fd/3 --data @- 3<<AUTH <<'JSON'
@@ -122,10 +143,8 @@ AUTH
 {"from":"{your-slug}","reason":"<what credential and why>","type":"CREDENTIAL",
  "metadata":"{\"name\":\"PG_PASSWORD\",\"type\":\"SECRET\",\"provider\":\"NONE\",\"value\":\"<the secret>\"}"}
 JSON
-  "type" is one of SECRET|API_KEY|CLI_TOKEN (default SECRET); "provider" defaults to NONE. The call
-  blocks until a human approves or rejects (up to 5 minutes): on approve the credential becomes
-  usable by the crew, on reject it is discarded. If you do NOT have the value yourself and need a
-  human to supply it, omit "metadata" and describe the need in "context" instead.
+  "type" is one of SECRET|API_KEY|CLI_TOKEN (default SECRET); "provider" defaults to NONE. On
+  approve the credential becomes usable by the crew, on reject it is discarded.
   Writing a local file does NOT register a credential — never report a file write as stored, and do
   not fabricate success.
 

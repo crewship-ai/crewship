@@ -248,7 +248,7 @@ func (h *QueryHandler) disposeStagedCredential(ctx context.Context, workspaceID,
 	res, err := h.db.ExecContext(ctx, `
 		UPDATE credentials
 		   SET status = 'REJECTED', deleted_at = ?, updated_at = ?
-		 WHERE id = ? AND workspace_id = ? AND status = 'PENDING_APPROVAL' AND deleted_at IS NULL`,
+		 WHERE id = ? AND workspace_id = ? AND status IN ('PENDING_APPROVAL', 'REQUESTED') AND deleted_at IS NULL`,
 		now, now, credentialID, workspaceID)
 	if err != nil {
 		h.logger.Error("dispose staged credential", "error", err,

@@ -234,6 +234,11 @@ type Credential struct {
 	// from PlainValue so the env-var pair X_USERNAME / X_PASSWORD can
 	// be emitted at mount time without re-parsing a JSON blob.
 	Username string `json:"username,omitempty"`
+	// HandleOnly (#2376): PlainValue is deliberately empty — the API tier
+	// never decrypted it — and every env/file/MCP delivery path already
+	// treats an empty value as "not delivered". Carried so a run can tell a
+	// withheld credential from a missing one in its own logs.
+	HandleOnly bool `json:"handle_only,omitempty"`
 	// LeaseExpiresAt is the delivering agent_credentials grant's credential-lease
 	// deadline in RFC3339 UTC, empty for a standing grant (#1373). Passed through
 	// to the sidecar boot payload so the crew's CredStore can refuse and then

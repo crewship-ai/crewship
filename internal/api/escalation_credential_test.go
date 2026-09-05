@@ -55,7 +55,8 @@ func TestParseCredentialProposal(t *testing.T) {
 	}{
 		{"full", `{"name":"DB","type":"API_KEY","provider":"GITHUB","value":"v"}`, true, "API_KEY", "GITHUB"},
 		{"defaults", `{"name":"DB","value":"v"}`, true, "SECRET", "NONE"},
-		{"missing value", `{"name":"DB","type":"SECRET"}`, false, "", ""},
+		// #2376: no value is an ASK — the agent wants a human to supply one.
+		{"missing value is an ask", `{"name":"DB","type":"SECRET"}`, true, "SECRET", "NONE"},
 		{"missing name", `{"value":"v"}`, false, "", ""},
 		{"not json", `PG_PASSWORD=v`, false, "", ""},
 		{"empty", ``, false, "", ""},
@@ -307,7 +308,7 @@ func TestApprovePendingCredential_Activates(t *testing.T) {
 	seedLinkedEscalation(t, h, "esc-app", wsID, crewID, agentID, credID)
 
 	rr := covEscResolve(h, userID, wsID, "esc-app", map[string]string{
-		"resolution": "Approved from inbox", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
@@ -338,7 +339,7 @@ func TestRejectPendingCredential_SoftDeletes(t *testing.T) {
 	seedLinkedEscalation(t, h, "esc-rej", wsID, crewID, agentID, credID)
 
 	rr := covEscResolve(h, userID, wsID, "esc-rej", map[string]string{
-		"resolution": "Rejected from inbox", "action": "reject",
+		"action": "reject",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
@@ -367,7 +368,7 @@ func TestResolveEscalation_ThroughRequireWorkspace(t *testing.T) {
 
 	am := NewAuthMiddleware(nil, nil, h.db, newTestLogger())
 	handler := am.RequireWorkspace(http.HandlerFunc(h.ResolveEscalation))
-	body := map[string]string{"action": "approve", "resolution": "Approved from inbox"}
+	body := map[string]string{"action": "approve"}
 
 	// 1) No workspace_id on the URL (the inbox bug) → 400 from the middleware.
 	reqNo := httptest.NewRequest("PATCH", "/api/v1/escalations/esc-mw/resolve", jsonBody(body))

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -96,7 +97,7 @@ func TestCovMisc_ResolveEscalation_RedirectSuccess(t *testing.T) {
 	}
 }
 
-func TestCovMisc_ResolveEscalation_CredentialEncrypts(t *testing.T) {
+func TestCovMisc_ResolveEscalation_CredentialStoresNoResolution(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	h, userID, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
@@ -108,30 +109,33 @@ func TestCovMisc_ResolveEscalation_CredentialEncrypts(t *testing.T) {
 		t.Fatalf("insert escalation: %v", err)
 	}
 
+	// #2376: the resolution column is never written for a CREDENTIAL
+	// escalation. Text is refused outright — the value goes through supply —
+	// and a decision without text stores NULL.
 	body := bytes.NewBufferString(`{"resolution":"s3cr3t-value","action":"approve"}`)
 	req := httptest.NewRequest("PATCH", "/", body)
 	req.SetPathValue("escalationId", "e-cred")
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.ResolveEscalation(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("resolution text on a CREDENTIAL escalation: status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"action":"reject"}`))
+	req.SetPathValue("escalationId", "e-cred")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr = httptest.NewRecorder()
+	h.ResolveEscalation(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
-
-	// The stored resolution must be encrypted, not the plaintext.
-	var stored string
+	var stored *string
 	if err := h.db.QueryRow(`SELECT resolution FROM escalations WHERE id = 'e-cred'`).Scan(&stored); err != nil {
 		t.Fatalf("read back: %v", err)
 	}
-	if stored == "s3cr3t-value" {
-		t.Error("credential resolution stored in plaintext; expected encrypted-at-rest")
-	}
-	dec, err := encryption.Decrypt(stored)
-	if err != nil {
-		t.Fatalf("decrypt: %v", err)
-	}
-	if dec != "s3cr3t-value" {
-		t.Errorf("decrypt = %q, want s3cr3t-value", dec)
+	if stored != nil {
+		t.Errorf("resolution = %q, want NULL", *stored)
 	}
 }
 
@@ -220,7 +224,7 @@ func TestCovMisc_WaitForEscalation_DBError(t *testing.T) {
 	}
 }
 
-func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
+func TestCovMisc_WaitForEscalation_CredentialRowNeverDecrypted(t *testing.T) {
 	setTestEncryptionKeyParallelSafe(t)
 	h, _, wsID, crewID, leadID, _ := newQueryHandler(t)
 	chatID := generateCUID()
@@ -228,6 +232,10 @@ func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
 		t.Fatalf("insert chat: %v", err)
 	}
 
+	// A row from before #2376, still holding a ciphertext. The wait path must
+	// neither decrypt nor forward it: the answer to a CREDENTIAL escalation is
+	// a handle, and this row links no credential, so it is an approval with
+	// nothing to hand over — and no `resolution` key at all.
 	enc, err := encryption.Encrypt("the-secret")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
@@ -248,8 +256,14 @@ func TestCovMisc_WaitForEscalation_CredentialDecrypt(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp["resolution"] != "the-secret" {
-		t.Errorf("resolution = %v, want decrypted plaintext", resp["resolution"])
+	if _, has := resp["resolution"]; has {
+		t.Errorf("a CREDENTIAL answer must carry no resolution key: %s", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "the-secret") {
+		t.Error("the stored ciphertext was decrypted and handed to the agent")
+	}
+	if resp["action"] != "approve" || resp["status"] != "RESOLVED" {
+		t.Errorf("decision missing from the answer: %s", rr.Body.String())
 	}
 }
 
