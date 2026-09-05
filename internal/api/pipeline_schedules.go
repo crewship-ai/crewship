@@ -566,8 +566,8 @@ func (h *PipelineHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request)
 		if user := UserFromContext(r.Context()); user != nil {
 			actorID = user.ID
 		}
-		inbox.ResolveBySource(r.Context(), h.db, h.logger,
-			inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), "dismissed", actorID)
+		inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+			inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), scheduleRoutineThreadKey(r.Context(), h, workspaceID, existing.TargetPipelineID), "dismissed", actorID)
 		h.broadcastInboxUpdated(workspaceID, "routine_trigger_dismissed")
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -624,8 +624,8 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 	if user := UserFromContext(r.Context()); user != nil {
 		actorID = user.ID
 	}
-	inbox.ResolveBySource(r.Context(), h.db, h.logger,
-		inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), "approved", actorID)
+	inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+		inbox.KindEscalation, routineTriggerActivationInboxSource(workspaceID, scheduleID), scheduleRoutineThreadKey(r.Context(), h, workspaceID, activated.TargetPipelineID), "approved", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_trigger_activated")
 	h.broadcastRoutinesChanged(workspaceID, "trigger_activated")
 	slug := ""

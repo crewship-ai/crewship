@@ -128,37 +128,49 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		contractContext["mission_id"] = missionID.String
 	}
 
+	// B10 (#2364) fulfils the promise this thread_key made when it shipped
+	// with B6: cross-run deduping by SUBJECT rather than by run. An issue
+	// that needs human input on run 1, gets a decision, then needs it
+	// again on run 3 is the SAME recurring condition ("this issue keeps
+	// needing a human") — one card, refreshed each time — not a new
+	// sibling per run. Falls back to the per-run key only when there is no
+	// stable issue/mission id to key on (a mention-dispatched run with no
+	// mission, e.g. a bare chat run) — a run-scoped thread is still better
+	// than none.
+	threadKey := "run:" + assignmentID
+	if missionID.Valid && missionID.String != "" {
+		threadKey = "issue:" + workspaceID + ":" + missionID.String
+	}
+
 	payload := map[string]any{
 		"attention_class": "input",
-		// One card per run, not per (issue, day): a run is a one-time
-		// event, so its thread_key is its own id — unlike a recurring
-		// routine condition (§12's "routine:daily-triage:2026-09-01"
-		// example), there is no daily recurrence to collapse onto one
-		// card. B10 owns cross-run deduping by SUBJECT (thread_key shared
-		// across several runs of the same routine); this is what a single
-		// run's own contract looks like before that layer exists.
-		"thread_key":  "run:" + assignmentID,
-		"who_can_act": whoCanAct,
+		"thread_key":      threadKey,
+		"who_can_act":     whoCanAct,
 		"actions": []map[string]any{
 			{"id": "take_over", "label": "Take over", "effect": "Opens the issue for you to continue", "irreversible": false},
 		},
 		"context": contractContext,
 	}
 
-	if err := inbox.Insert(ctx, h.db, h.logger, inbox.Item{
-		WorkspaceID:  workspaceID,
-		Kind:         inbox.KindRunNeedsHuman,
-		SourceID:     assignmentID,
-		TargetUserID: targetUserID,
-		TargetRole:   targetRole,
-		Title:        fmt.Sprintf("%s needs your input on %s", agentLabel, issueLabel),
-		BodyMD:       reason,
-		SenderType:   "agent",
-		SenderID:     targetSlug,
-		SenderName:   agentLabel,
-		Priority:     "high",
-		Blocking:     true,
-		Payload:      payload,
+	if err := inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
+		WorkspaceID:    workspaceID,
+		Kind:           inbox.KindRunNeedsHuman,
+		SourceID:       assignmentID,
+		TargetUserID:   targetUserID,
+		TargetRole:     targetRole,
+		Title:          fmt.Sprintf("%s needs your input on %s", agentLabel, issueLabel),
+		BodyMD:         reason,
+		SenderType:     "agent",
+		SenderID:       targetSlug,
+		SenderName:     agentLabel,
+		Priority:       "high",
+		Blocking:       true,
+		Payload:        payload,
+		ThreadKey:      threadKey,
+		AttentionClass: inbox.AttentionInput,
+		Actions: []inbox.Action{
+			{ID: "take_over", Label: "Take over", Effect: "Opens the issue for you to continue", Irreversible: false},
+		},
 	}); err != nil {
 		h.logger.Warn("create outcome inbox item", "error", err, "assignment_id", assignmentID)
 	}

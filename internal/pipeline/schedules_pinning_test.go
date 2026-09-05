@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS pipeline_versions (
     UNIQUE (pipeline_id, version),
     UNIQUE (pipeline_id, definition_hash)
 );
+
+CREATE TABLE IF NOT EXISTS inbox_item_reads (
+    inbox_item_id TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    PRIMARY KEY (inbox_item_id, user_id)
+);
+
 -- The kind CHECK mirrors the real schema (migration v168 / inbox.AllKinds)
 -- ON PURPOSE. Without it this rig silently accepted any string, and
 -- schedules_circuit_breaker_test.go passed green for a kind the production
@@ -83,6 +91,11 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     priority            TEXT NOT NULL,
     blocking            INTEGER NOT NULL DEFAULT 0,
     payload_json        TEXT NOT NULL DEFAULT '{}',
+    thread_key          TEXT,
+    attention_class     TEXT,
+    actions_json        TEXT NOT NULL DEFAULT '[]',
+    read_at             TEXT,
+    read_by_user_id     TEXT,
     resolved_at         TEXT,
     resolved_by_user_id TEXT,
     resolved_action     TEXT,

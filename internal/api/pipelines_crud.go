@@ -149,8 +149,8 @@ func (h *PipelineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if u := UserFromContext(r.Context()); u != nil {
 		actorID = u.ID
 	}
-	inbox.ResolveBySource(r.Context(), h.db, h.logger,
-		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "dismissed", actorID)
+	inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), routineThreadKey(workspaceID, slug), "dismissed", actorID)
 	inbox.ResolveByPipeline(r.Context(), h.db, h.logger, workspaceID, p.ID, "dismissed", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_deleted")
 	h.broadcastRoutinesChanged(workspaceID, "deleted")
@@ -891,8 +891,8 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		// risky save, resolve it now — otherwise a stale approval card lingers
 		// for a routine that is already live, and a later reject could re-disable
 		// a running routine. Mirrors the Approve path's inbox resolution.
-		inbox.ResolveBySource(r.Context(), h.db, h.logger,
-			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), "approved", user.ID)
+		inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+			inbox.KindEscalation, routineProposalInboxSource(workspaceID, saved.Slug), routineThreadKey(workspaceID, saved.Slug), "approved", user.ID)
 		h.broadcastInboxUpdated(workspaceID, "routine_governance_skipped")
 	}
 	// B8 (#2359): a draft trigger raises exactly one approval item, its

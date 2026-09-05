@@ -28,6 +28,20 @@ func routineProposalInboxSource(workspaceID, slug string) string {
 	return "routineprop:" + workspaceID + ":" + slug
 }
 
+// routineThreadKey is the §12 thread_key shared by EVERY inbox item that
+// asks a human to decide something about routine <slug> — the governance
+// risk review (this file) and the B8 trigger-activation review
+// (pipeline_trigger.go) both use it, so inbox.WriteThreaded collapses them
+// into one card when a single `routine save --draft` raises both (B10,
+// #2364 — the live-observed duplicate: "Routine proposed for review" +
+// "Routine trigger ready" for the same save). Scoped to workspace+slug, not
+// version: a routine's identity across versions is its slug, and the
+// version that changed is exactly the fact routine_version in the merged
+// payload answers.
+func routineThreadKey(workspaceID, slug string) string {
+	return "routine:" + workspaceID + ":" + slug
+}
+
 // classifyRoutineRisk decides whether a routine save must land as 'proposed'
 // (human review) or may go live as 'active'. Risky when the DSL declares any
 // http/egress step, any code-runtime step, any credentials_required, OR an
@@ -123,15 +137,20 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 		payload[k] = v
 	}
 
-	// Upsert, not Insert. The source id is the slug — deliberately
-	// stable, so a retried save does not pile up siblings — and
-	// Insert's INSERT OR IGNORE turned that stability into silence:
-	// once a routine had been through review the row existed forever,
-	// so every LATER proposal was dropped. The routine sat at
-	// 'proposed', unable to run, with nothing in anyone's inbox to
-	// approve it. Refreshing the row instead asks the question again,
-	// about the change actually on the table.
-	_ = inbox.Upsert(ctx, h.db, h.logger, inbox.Item{
+	// WriteThreaded, not Upsert: the source id is the slug — deliberately
+	// stable, so a retried save does not pile up siblings — and Insert's
+	// INSERT OR IGNORE turned that stability into silence: once a routine
+	// had been through review the row existed forever, so every LATER
+	// proposal was dropped. The routine sat at 'proposed', unable to run,
+	// with nothing in anyone's inbox to approve it. Refreshing the row
+	// instead asks the question again, about the change actually on the
+	// table.
+	//
+	// ThreadKey is routineThreadKey, shared with proposeTriggerActivationInbox
+	// (pipeline_trigger.go): when ONE save is both risky (this card) and
+	// carries a draft trigger (that card), WriteThreaded merges them into a
+	// single card rather than raising two (B10, #2364).
+	_ = inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindEscalation,
 		SourceID:    routineProposalInboxSource(workspaceID, saved.Slug),
@@ -139,11 +158,17 @@ func (h *PipelineHandler) proposeRoutineInbox(ctx context.Context, workspaceID s
 		Title:       "Routine proposed for review: " + saved.Slug,
 		BodyMD: "A routine was authored that needs approval before it can run (reasons: " +
 			strings.Join(reasons, ", ") + "). Approve it to activate the routine, or reject it.",
-		SenderType: "pipeline",
-		SenderName: senderName,
-		Priority:   "high",
-		Blocking:   true,
-		Payload:    payload,
+		SenderType:     "pipeline",
+		SenderName:     senderName,
+		Priority:       "high",
+		Blocking:       true,
+		Payload:        payload,
+		ThreadKey:      routineThreadKey(workspaceID, saved.Slug),
+		AttentionClass: inbox.AttentionDecision,
+		Actions: []inbox.Action{
+			{ID: "approve_routine", Label: "Approve", Effect: "Activates the routine", Irreversible: false},
+			{ID: "reject_routine", Label: "Reject", Effect: "Discards the proposed routine", Irreversible: true},
+		},
 	})
 	h.broadcastInboxUpdated(workspaceID, "routine_proposed")
 }
@@ -314,8 +339,8 @@ func (h *PipelineHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if user := UserFromContext(r.Context()); user != nil {
 		actorID = user.ID
 	}
-	inbox.ResolveBySource(r.Context(), h.db, h.logger,
-		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "approved", actorID)
+	inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), routineThreadKey(workspaceID, slug), "approved", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_approved")
 	h.broadcastRoutinesChanged(workspaceID, "approved")
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "status": "active"})
@@ -361,8 +386,8 @@ func (h *PipelineHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	if user := UserFromContext(r.Context()); user != nil {
 		actorID = user.ID
 	}
-	inbox.ResolveBySource(r.Context(), h.db, h.logger,
-		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), "rejected", actorID)
+	inbox.ResolveByThreadOrSource(r.Context(), h.db, h.logger, workspaceID,
+		inbox.KindEscalation, routineProposalInboxSource(workspaceID, slug), routineThreadKey(workspaceID, slug), "rejected", actorID)
 	h.broadcastInboxUpdated(workspaceID, "routine_rejected")
 	h.broadcastRoutinesChanged(workspaceID, "rejected")
 	writeJSON(w, http.StatusOK, map[string]string{"slug": slug, "status": "rejected"})

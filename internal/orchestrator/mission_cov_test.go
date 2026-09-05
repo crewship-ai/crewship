@@ -72,7 +72,12 @@ func covMissionDB(t *testing.T) *sql.DB {
 			target_user_id TEXT, target_role TEXT, title TEXT, body_md TEXT,
 			sender_type TEXT, sender_id TEXT, sender_name TEXT,
 			state TEXT, priority TEXT, blocking INTEGER, payload_json TEXT,
+			thread_key TEXT, attention_class TEXT, actions_json TEXT NOT NULL DEFAULT '[]',
+			read_at TEXT, read_by_user_id TEXT,
 			created_at TEXT, updated_at TEXT);
+		CREATE TABLE inbox_item_reads (inbox_item_id TEXT NOT NULL, user_id TEXT NOT NULL,
+			read_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+			PRIMARY KEY (inbox_item_id, user_id));
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("create cov schema: %v", err)

@@ -156,6 +156,25 @@ func routineTriggerActivationInboxSource(workspaceID, scheduleID string) string 
 	return "routinetrigger:" + workspaceID + ":" + scheduleID
 }
 
+// scheduleRoutineThreadKey resolves the same routineThreadKey
+// (pipeline_governance.go) a trigger-activation review needs to merge with
+// (or resolve via, when it merged) the routine's own governance card — it
+// only has the pipeline id at hand, so it looks the slug up. Empty
+// pipelineID or a lookup failure returns "" (WriteThreaded/
+// ResolveByThreadOrSource both treat an empty thread key as "no thread",
+// which degrades to the pre-B10 (kind, source_id)-only behaviour rather
+// than failing the call).
+func scheduleRoutineThreadKey(ctx context.Context, h *PipelineHandler, workspaceID, pipelineID string) string {
+	if pipelineID == "" || h == nil || h.store == nil {
+		return ""
+	}
+	p, err := h.store.GetByID(ctx, pipelineID)
+	if err != nil || p == nil {
+		return ""
+	}
+	return routineThreadKey(workspaceID, p.Slug)
+}
+
 // proposeTriggerActivationInbox raises the single MANAGER+ review item a
 // draft trigger needs (B8's accept line: "draft activation raises one
 // approval item with a receipt pinning the version"). The payload carries
@@ -190,7 +209,12 @@ func (h *PipelineHandler) proposeTriggerActivationInbox(ctx context.Context, wor
 		"timezone":        sched.Timezone,
 		"first_fire_at":   firstFire,
 	}
-	_ = inbox.Upsert(ctx, h.db, h.logger, inbox.Item{
+	// WriteThreaded, not Upsert: routineThreadKey(workspaceID, saved.Slug) is
+	// the SAME thread proposeRoutineInbox (pipeline_governance.go) uses, so
+	// when one save is both risky AND carries a draft trigger, this call
+	// merges into that card instead of raising a sibling — the fix for
+	// #2364's live-observed duplicate.
+	_ = inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
 		WorkspaceID: workspaceID,
 		Kind:        inbox.KindEscalation,
 		SourceID:    routineTriggerActivationInboxSource(workspaceID, sched.ID),
@@ -198,11 +222,17 @@ func (h *PipelineHandler) proposeTriggerActivationInbox(ctx context.Context, wor
 		Title:       "Routine trigger ready: " + saved.Slug,
 		BodyMD: fmt.Sprintf("Routine **%s** (version %d) is ready. First run would be %s. Activate the trigger?",
 			saved.Slug, headVersion, firstFire),
-		SenderType: "pipeline",
-		SenderName: senderName,
-		Priority:   "high",
-		Blocking:   true,
-		Payload:    payload,
+		SenderType:     "pipeline",
+		SenderName:     senderName,
+		Priority:       "high",
+		Blocking:       true,
+		Payload:        payload,
+		ThreadKey:      routineThreadKey(workspaceID, saved.Slug),
+		AttentionClass: inbox.AttentionDecision,
+		Actions: []inbox.Action{
+			{ID: "activate_trigger", Label: "Activate", Effect: fmt.Sprintf("Enables the trigger; first run %s", firstFire), Irreversible: false},
+			{ID: "dismiss_trigger", Label: "Dismiss", Effect: "Leaves the trigger disabled", Irreversible: false},
+		},
 	})
 	h.broadcastInboxUpdated(workspaceID, "routine_trigger_proposed")
 }
