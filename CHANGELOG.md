@@ -120,7 +120,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
-- **The issues board moves without a refresh, resyncs a dropped frame, and a parent waits for its children (#TBD).**
+- **The issues board moves without a refresh, resyncs a dropped frame, and a parent waits for its children (#2377).**
   `issue.session.state`, `issue.checkpoint.written` and `run.outcome` are
   now broadcast on the workspace channel (`internal/api/issue_session_realtime.go`)
   and registered on the client allowlist (`hooks/use-realtime.tsx`) —
