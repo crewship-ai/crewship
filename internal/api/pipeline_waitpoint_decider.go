@@ -44,12 +44,12 @@ func waitpointDeciderFromRequest(r *http.Request) pipeline.WaitpointDecider {
 	return pipeline.WaitpointDecider{}
 }
 
-// replyWaitpointDecideError maps a Decide error onto the wire and returns
-// false once it has written a response. A refused decider is 403 with
-// the reason in the body — the waitpoint is untouched and the attempt is
-// on the audit log; an already-decided or foreign-workspace token is 409,
-// unchanged from before; anything else is a 500.
-func replyWaitpointDecideError(w http.ResponseWriter, logger *slog.Logger, op, token string, err error) bool {
+// replyWaitpointDecideError maps a Decide error onto the wire. A refused
+// decider is 403 with the reason in the body — the waitpoint is untouched
+// and the attempt is on the audit log; an already-decided or
+// foreign-workspace token is 409, unchanged from before; anything else is
+// a 500.
+func replyWaitpointDecideError(w http.ResponseWriter, logger *slog.Logger, op, token string, err error) {
 	switch {
 	case errors.Is(err, pipeline.ErrDeciderNotAllowed):
 		writeJSON(w, http.StatusForbidden, map[string]any{
@@ -62,5 +62,4 @@ func replyWaitpointDecideError(w http.ResponseWriter, logger *slog.Logger, op, t
 		logger.Error(op, "error", err, "token", tokenFingerprint(token))
 		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
 	}
-	return false
 }

@@ -971,9 +971,8 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// approve/deny B's gated run.
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if err := wp.Decide(r.Context(), workspaceID, token, body.Approved, decider, payload); err != nil {
-		if !replyWaitpointDecideError(w, h.logger, "waitpoint complete", token, err) {
-			return
-		}
+		replyWaitpointDecideError(w, h.logger, "waitpoint complete", token, err)
+		return
 	}
 
 	// Async WAITING model: a run parked on this approval (status=waiting)
