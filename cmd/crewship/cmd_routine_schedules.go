@@ -50,8 +50,11 @@ type scheduleRow struct {
 	ConsecutiveFailures    int    `json:"consecutive_failures" yaml:"consecutive_failures"`
 	MaxConsecutiveFailures int    `json:"max_consecutive_failures" yaml:"max_consecutive_failures"`
 	DisabledReason         string `json:"disabled_reason,omitempty" yaml:"disabled_reason,omitempty"`
-	CreatedAt              string `json:"created_at" yaml:"created_at"`
-	UpdatedAt              string `json:"updated_at" yaml:"updated_at"`
+	// Activation is "draft" for a trigger still awaiting MANAGER activation
+	// (B8, #2359) — distinct from an operator/circuit-breaker disable.
+	Activation string `json:"activation,omitempty" yaml:"activation,omitempty"`
+	CreatedAt  string `json:"created_at" yaml:"created_at"`
+	UpdatedAt  string `json:"updated_at" yaml:"updated_at"`
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -75,6 +78,14 @@ func routineCell(slug string, pinnedVersion *int) string {
 func enabledCell(s scheduleRow) string {
 	if s.Enabled {
 		return "yes"
+	}
+	// A draft (B8, #2359) is a distinct reason from an operator disable or
+	// a tripped circuit breaker: it has never run and is waiting on a
+	// MANAGER, not "off". Checked first — a draft's DisabledReason is
+	// always empty, but naming the real reason matters more here than the
+	// order would otherwise suggest.
+	if s.Activation == "draft" {
+		return "no (awaiting activation)"
 	}
 	if s.DisabledReason != "" {
 		return fmt.Sprintf("no (%s)", s.DisabledReason)

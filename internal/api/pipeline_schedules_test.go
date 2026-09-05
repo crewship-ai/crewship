@@ -416,6 +416,49 @@ func TestPipelineSchedules_Update_ToggleEnabled(t *testing.T) {
 	}
 }
 
+// TestPipelineSchedules_Update_CannotEnableADraft is the code-review fix
+// for B8 (#2359): PATCH {"enabled":true} on a draft trigger — what an
+// OWNER/ADMIN's `routine schedules enable <id>` sends — must be refused,
+// not silently flip the schedule live behind the MANAGER-approval gate
+// atomic authoring raised for it.
+func TestPipelineSchedules_Update_CannotEnableADraft(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_draft", "draft-routine")
+	draft, err := pipeline.NewScheduleStore(db).Save(t.Context(), pipeline.SaveScheduleInput{
+		WorkspaceID:      wsID,
+		Name:             "draft",
+		TargetPipelineID: "pln_draft",
+		CronExpr:         "0 9 * * *",
+		Timezone:         "UTC",
+		Activation:       pipeline.TriggerActivationDraft,
+	})
+	if err != nil {
+		t.Fatalf("seed draft schedule: %v", err)
+	}
+	if draft.Enabled {
+		t.Fatalf("precondition: draft schedule must start disabled")
+	}
+
+	req := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-schedules/"+draft.ID,
+		strings.NewReader(`{"enabled":true}`)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("scheduleId", draft.ID)
+	rr := httptest.NewRecorder()
+	h.UpdateSchedule(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+
+	reloaded, err := pipeline.NewScheduleStore(db).GetByID(t.Context(), draft.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Enabled {
+		t.Fatalf("draft schedule was enabled through PATCH — the approval gate was bypassed")
+	}
+}
+
 func TestPipelineSchedules_Update_OtherWorkspaceSchedule_Returns404(t *testing.T) {
 	h, db, userID, wsID := scheduleHandlerRig(t)
 	otherWS := "ws_other"

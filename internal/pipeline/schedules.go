@@ -216,6 +216,7 @@ func NewScheduleStore(db *sql.DB) *ScheduleStore {
 type sqlExecQuerier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // Save creates or updates a schedule. Cron parse is delegated to
@@ -234,48 +235,85 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 // its version and this row together or not at all. Factored out so the
 // two paths validate and insert identically and can never diverge.
 func createSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput) (*Schedule, error) {
+	prepared, err := prepareScheduleWrite(in)
+	if err != nil {
+		return nil, err
+	}
+	return insertScheduleRow(ctx, x, generateScheduleID(), prepared)
+}
+
+// preparedSchedule is the validated, derived form of a SaveScheduleInput —
+// the parts createSchedule and upsertTriggerSchedule both need computed
+// identically (cron/timezone validation, next fire time, marshaled JSON
+// columns, the resolved enabled/activation pair) before they diverge on
+// whether to INSERT or UPDATE.
+type preparedSchedule struct {
+	in             SaveScheduleInput
+	nextRun        time.Time
+	inputsJSON     []byte
+	wakeInputsJSON []byte
+	maxFailures    int
+	enabled        bool
+}
+
+// ErrInvalidTrigger marks a validation failure in a schedule write —
+// as opposed to a storage/infra failure — so a caller several layers up
+// (the atomic routine-authoring HTTP handlers, B8 #2359) can tell "the
+// caller's cron/timezone/policy was bad" (422) apart from "the database
+// failed to insert/update the row" (500) with errors.Is instead of
+// pattern-matching err.Error(), which would misclassify a genuine outage
+// wrapped in the same enclosing "pipeline: save trigger" context as a
+// validation error. Every return in this function that rejects the INPUT
+// wraps this; insertScheduleRow/upsertTriggerSchedule's storage errors
+// deliberately do not.
+var ErrInvalidTrigger = errors.New("pipeline_schedules: invalid input")
+
+// prepareScheduleWrite validates in and computes everything a create or
+// create-or-update needs. Factored out of createSchedule so the atomic
+// routine-authoring path (upsertTriggerSchedule, B8 code-review fix —
+// re-saving a routine with a trigger must update its one schedule, not
+// insert a duplicate enabled row) validates identically rather than
+// re-implementing this block a third time.
+func prepareScheduleWrite(in SaveScheduleInput) (preparedSchedule, error) {
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" || in.CronExpr == "" {
-		return nil, errors.New("pipeline_schedules: workspace_id + target_pipeline_id + cron_expr required")
+		return preparedSchedule{}, fmt.Errorf("%w: workspace_id + target_pipeline_id + cron_expr required", ErrInvalidTrigger)
 	}
 	if in.Timezone == "" {
 		in.Timezone = "UTC"
 	}
-	loc, err := time.LoadLocation(in.Timezone)
+	// NextOccurrences owns the parser setup (its own doc comment says it
+	// exists specifically so callers don't re-implement this); Activate
+	// uses the same helper for the same reason.
+	occurrences, err := NextOccurrences(in.CronExpr, in.Timezone, 1, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid timezone %q: %w", in.Timezone, err)
+		return preparedSchedule{}, fmt.Errorf("%w: %w", ErrInvalidTrigger, err)
 	}
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	sched, err := parser.Parse(in.CronExpr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression %q: %w", in.CronExpr, err)
-	}
-	nextRun := sched.Next(time.Now().In(loc))
+	nextRun := occurrences[0]
 	if in.CatchupPolicy == "" {
 		in.CatchupPolicy = CatchupOnce
 	}
 	if !validCatchupPolicies[in.CatchupPolicy] {
-		return nil, fmt.Errorf("pipeline_schedules: invalid catchup_policy %q (must be %q, %q, or %q)",
-			in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
+		return preparedSchedule{}, fmt.Errorf("%w: invalid catchup_policy %q (must be %q, %q, or %q)",
+			ErrInvalidTrigger, in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
 	}
 	if in.Activation != "" && in.Activation != TriggerActivationDraft {
-		return nil, fmt.Errorf("pipeline_schedules: invalid activation %q (must be empty or %q)",
-			in.Activation, TriggerActivationDraft)
+		return preparedSchedule{}, fmt.Errorf("%w: invalid activation %q (must be empty or %q)",
+			ErrInvalidTrigger, in.Activation, TriggerActivationDraft)
 	}
 	inputsJSON, err := json.Marshal(in.Inputs)
 	if err != nil {
-		return nil, fmt.Errorf("marshal inputs: %w", err)
+		return preparedSchedule{}, fmt.Errorf("marshal inputs: %w", err)
 	}
 	if string(inputsJSON) == "null" {
 		inputsJSON = []byte("{}")
 	}
 	wakeInputsJSON, err := json.Marshal(in.WakeInputs)
 	if err != nil {
-		return nil, fmt.Errorf("marshal wake inputs: %w", err)
+		return preparedSchedule{}, fmt.Errorf("marshal wake inputs: %w", err)
 	}
 	if string(wakeInputsJSON) == "null" {
 		wakeInputsJSON = []byte("{}")
 	}
-	now := time.Now().UTC()
 	maxFailures := in.MaxConsecutiveFailures
 	if maxFailures <= 0 {
 		maxFailures = defaultMaxConsecutiveFailures
@@ -287,9 +325,18 @@ func createSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 	if in.Activation == TriggerActivationDraft {
 		enabled = false
 	}
+	return preparedSchedule{
+		in: in, nextRun: nextRun, inputsJSON: inputsJSON, wakeInputsJSON: wakeInputsJSON,
+		maxFailures: maxFailures, enabled: enabled,
+	}, nil
+}
 
-	id := generateScheduleID()
-	_, err = x.ExecContext(ctx, `
+// insertScheduleRow inserts a new row for a validated preparedSchedule and
+// reads it back through the same executor (so a caller inside a tx sees
+// its own uncommitted write).
+func insertScheduleRow(ctx context.Context, x sqlExecQuerier, id string, p preparedSchedule) (*Schedule, error) {
+	now := time.Now().UTC()
+	_, err := x.ExecContext(ctx, `
 INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
@@ -299,20 +346,81 @@ INSERT INTO pipeline_schedules (
     activation,
     created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.WorkspaceID, in.Name, in.TargetPipelineID,
-		nullInt(in.TargetPipelineVersion),
-		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(enabled),
-		tsformat.Format(nextRun),
-		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
-		in.CatchupPolicy,
-		maxFailures,
-		nullStr(in.Activation),
+		id, p.in.WorkspaceID, p.in.Name, p.in.TargetPipelineID,
+		nullInt(p.in.TargetPipelineVersion),
+		p.in.CronExpr, p.in.Timezone, string(p.inputsJSON), boolToInt(p.enabled),
+		tsformat.Format(p.nextRun),
+		nullStr(p.in.WakePipelineID), string(p.wakeInputsJSON), boolToInt(p.in.WakeFailClosed),
+		p.in.CatchupPolicy,
+		p.maxFailures,
+		nullStr(p.in.Activation),
 		tsformat.Format(now), tsformat.Format(now),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert schedule: %w", err)
 	}
 	return getScheduleByID(ctx, x, id)
+}
+
+// upsertTriggerSchedule is the atomic routine-authoring path's write
+// (Store.createTriggerTx, B8, #2359 code-review fix): it owns AT MOST ONE
+// schedule per (workspace, target pipeline). Re-saving a routine with a
+// trigger — which the routine-author skill instructs agents to do on
+// every save — must update that one row, not insert a second enabled
+// schedule that fires the routine twice per cadence. Scoped to this path
+// only: the general-purpose ScheduleStore.Save (POST /pipeline-schedules)
+// still lets a caller attach more than one schedule to a routine on
+// purpose, and is unaffected.
+//
+// The lookup + write happen through x (a *sql.Tx from the caller's atomic
+// save), so the whole thing commits or rolls back with the routine.
+func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput) (*Schedule, error) {
+	prepared, err := prepareScheduleWrite(in)
+	if err != nil {
+		return nil, err
+	}
+	var existingID string
+	err = x.QueryRowContext(ctx,
+		`SELECT id FROM pipeline_schedules
+		 WHERE workspace_id = ? AND target_pipeline_id = ? AND deleted_at IS NULL
+		 ORDER BY created_at ASC LIMIT 1`,
+		in.WorkspaceID, in.TargetPipelineID,
+	).Scan(&existingID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return insertScheduleRow(ctx, x, generateScheduleID(), prepared)
+	case err != nil:
+		return nil, fmt.Errorf("look up existing trigger schedule: %w", err)
+	}
+	now := time.Now().UTC()
+	if _, err := x.ExecContext(ctx, `
+UPDATE pipeline_schedules
+SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
+    next_run_at = ?, catchup_policy = ?,
+    max_consecutive_failures = COALESCE(?, max_consecutive_failures),
+    activation = ?, updated_at = ?
+WHERE id = ?`,
+		prepared.in.Name, prepared.in.CronExpr, prepared.in.Timezone, string(prepared.inputsJSON),
+		boolToInt(prepared.enabled), tsformat.Format(prepared.nextRun), prepared.in.CatchupPolicy,
+		nullIntIfPositive(prepared.in.MaxConsecutiveFailures),
+		nullStr(prepared.in.Activation), tsformat.Format(now),
+		existingID,
+	); err != nil {
+		return nil, fmt.Errorf("update existing trigger schedule: %w", err)
+	}
+	return getScheduleByID(ctx, x, existingID)
+}
+
+// nullIntIfPositive mirrors the update() CASE: a non-positive
+// MaxConsecutiveFailures means "the caller didn't ask to change it",
+// leaving the stored threshold (and any live circuit-breaker count)
+// untouched via COALESCE, rather than resetting it to the default on
+// every re-save.
+func nullIntIfPositive(n int) any {
+	if n > 0 {
+		return n
+	}
+	return nil
 }
 
 // update is the pre-existing edit path, unchanged in behaviour — split out
@@ -327,19 +435,27 @@ func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Sche
 	if in.Activation != "" {
 		return nil, errors.New("pipeline_schedules: activation is create-only; use ActivateSchedule to turn a draft on")
 	}
+	// A draft trigger's disabled state is a MANAGER-approval gate, not an
+	// ordinary "off" — the generic update path (and the `enable`/PATCH
+	// surfaces it backs) must not be able to flip it live behind that gate.
+	// Only Activate (which also resolves the approval item) may do that.
+	existingRow, gerr := s.GetByID(ctx, in.ID)
+	if gerr != nil {
+		return nil, fmt.Errorf("update schedule: load existing: %w", gerr)
+	}
+	if existingRow.Activation == TriggerActivationDraft && in.Enabled {
+		return nil, fmt.Errorf(
+			"pipeline_schedules: %q is awaiting activation — use ActivateSchedule (POST .../activate), not update, to enable it",
+			in.ID)
+	}
 	if in.Timezone == "" {
 		in.Timezone = "UTC"
 	}
-	loc, err := time.LoadLocation(in.Timezone)
+	occurrences, err := NextOccurrences(in.CronExpr, in.Timezone, 1, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid timezone %q: %w", in.Timezone, err)
+		return nil, err
 	}
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	sched, err := parser.Parse(in.CronExpr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression %q: %w", in.CronExpr, err)
-	}
-	nextRun := sched.Next(time.Now().In(loc))
+	nextRun := occurrences[0]
 	if in.CatchupPolicy == "" {
 		in.CatchupPolicy = CatchupOnce
 	}
@@ -389,11 +505,9 @@ func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Sche
 	// pending occurrence still fires. Any change to cron/timezone
 	// legitimately recomputes (the old bar no longer means anything).
 	nextRunToStore := nextRun
-	if existing, gerr := s.GetByID(ctx, in.ID); gerr == nil {
-		if existing.CronExpr == in.CronExpr && existing.Timezone == in.Timezone &&
-			existing.NextRunAt != nil && !existing.NextRunAt.After(time.Now()) {
-			nextRunToStore = *existing.NextRunAt
-		}
+	if existingRow.CronExpr == in.CronExpr && existingRow.Timezone == in.Timezone &&
+		existingRow.NextRunAt != nil && !existingRow.NextRunAt.After(time.Now()) {
+		nextRunToStore = *existingRow.NextRunAt
 	}
 	_, err = s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
@@ -501,23 +615,29 @@ func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, err
 	if existing.Activation != TriggerActivationDraft {
 		return nil, ErrScheduleNotDraft
 	}
-	loc, err := time.LoadLocation(existing.Timezone)
+	occurrences, err := NextOccurrences(existing.CronExpr, existing.Timezone, 1, time.Now())
 	if err != nil {
-		return nil, fmt.Errorf("invalid timezone %q: %w", existing.Timezone, err)
+		return nil, err
 	}
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	sched, err := parser.Parse(existing.CronExpr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cron expression %q: %w", existing.CronExpr, err)
-	}
-	nextRun := sched.Next(time.Now().In(loc))
+	nextRun := occurrences[0]
 	now := tsformat.Format(time.Now())
-	if _, err := s.db.ExecContext(ctx,
+	// The predicate — not just the earlier read — is what makes this
+	// atomic: two concurrent Activate calls both pass the GetByID check
+	// above before either writes, so without `AND activation = 'draft'`
+	// here (and the RowsAffected check below) both would report success.
+	// Whichever commits first flips the row; the second's UPDATE matches
+	// zero rows and correctly reports ErrScheduleNotDraft instead. Mirrors
+	// SoftDelete's guarded predicate + RowsAffected check in this same file.
+	res, err := s.db.ExecContext(ctx,
 		`UPDATE pipeline_schedules SET enabled = 1, activation = NULL, next_run_at = ?, updated_at = ?
-		 WHERE id = ? AND deleted_at IS NULL`,
-		tsformat.Format(nextRun), now, id,
-	); err != nil {
+		 WHERE id = ? AND deleted_at IS NULL AND activation = ?`,
+		tsformat.Format(nextRun), now, id, TriggerActivationDraft,
+	)
+	if err != nil {
 		return nil, fmt.Errorf("activate schedule: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrScheduleNotDraft
 	}
 	return s.GetByID(ctx, id)
 }

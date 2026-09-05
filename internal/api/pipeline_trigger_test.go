@@ -307,3 +307,45 @@ func TestPipelineHandler_ActivateSchedule_RequiresManager(t *testing.T) {
 		t.Fatalf("status=%d want 403; body=%s", actRR.Code, actRR.Body.String())
 	}
 }
+
+// TestPipelineSchedules_List_SurfacesActivation is the code-review fix for
+// B8 (#2359): GET .../pipeline-schedules must expose `activation` so an
+// operator (or the CLI's `schedules list`) can tell a draft awaiting
+// approval apart from an ordinary disabled schedule — before this fix,
+// scheduleResponse omitted the column entirely.
+func TestPipelineSchedules_List_SurfacesActivation(t *testing.T) {
+	h, _, wsID, crewID := triggerSaveRig(t)
+	body := internalSaveTriggerBody(t, h, wsID, crewID, "list-shows-draft",
+		`{"kind":"schedule","cron":"0 9 * * 1-5","timezone":"UTC"}`, "draft")
+	saveReq := httptest.NewRequest("POST", "/api/v1/internal/pipelines/save", bytes.NewBuffer(body))
+	saveRR := httptest.NewRecorder()
+	h.InternalSave(saveRR, saveReq)
+	if saveRR.Code != http.StatusCreated {
+		t.Fatalf("save status=%d want 201; body=%s", saveRR.Code, saveRR.Body.String())
+	}
+
+	listReq := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-schedules", nil),
+		"user_test_actor", wsID, "MEMBER")
+	listRR := httptest.NewRecorder()
+	h.ListSchedules(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list status=%d want 200; body=%s", listRR.Code, listRR.Body.String())
+	}
+	var rows []struct {
+		Activation string `json:"activation"`
+		Enabled    bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 schedule, got %d", len(rows))
+	}
+	if rows[0].Activation != "draft" {
+		t.Fatalf("expected the list response to surface activation=\"draft\", got %q", rows[0].Activation)
+	}
+	if rows[0].Enabled {
+		t.Fatalf("expected the draft schedule to still be disabled")
+	}
+}

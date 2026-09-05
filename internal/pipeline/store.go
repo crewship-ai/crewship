@@ -367,18 +367,24 @@ INSERT INTO pipelines (
 	return p, sched, err
 }
 
-// createTriggerTx creates the optional trigger accompanying a routine save
-// (B8, #2359) through tx — the same transaction as the routine + version
-// write above, so a failure here rolls back both. trigger == nil, or
-// trigger.Kind == TriggerKindManual (an explicit "no trigger, on purpose"),
-// is a no-op.
+// createTriggerTx creates or updates the optional trigger accompanying a
+// routine save (B8, #2359) through tx — the same transaction as the
+// routine + version write above, so a failure here rolls back both.
+// trigger == nil, or trigger.Kind == TriggerKindManual (an explicit "no
+// trigger, on purpose"), is a no-op.
+//
+// Uses upsertTriggerSchedule, not a plain insert: the routine-author skill
+// tells agents to send `trigger` on every save, so a re-save of the same
+// routine must update its ONE atomic-authoring-owned schedule rather than
+// insert another enabled row that would fire the routine twice per
+// cadence (code-review fix — the original version always inserted).
 func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, pipelineID string, trigger *TriggerInput) (*Schedule, error) {
 	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
 		return nil, nil
 	}
 	if trigger.Kind != TriggerKindSchedule {
-		return nil, fmt.Errorf("unsupported trigger kind %q (must be %q or %q)",
-			trigger.Kind, TriggerKindSchedule, TriggerKindManual)
+		return nil, fmt.Errorf("%w: unsupported trigger kind %q (must be %q or %q)",
+			ErrInvalidTrigger, trigger.Kind, TriggerKindSchedule, TriggerKindManual)
 	}
 	name := trigger.Name
 	if name == "" {
@@ -396,7 +402,7 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		MaxConsecutiveFailures: trigger.MaxConsecutiveFailures,
 		Activation:             trigger.Activation,
 	}
-	return createSchedule(ctx, tx, schedIn)
+	return upsertTriggerSchedule(ctx, tx, schedIn)
 }
 
 // saveVersionTx is the in-transaction variant of SaveVersion used by

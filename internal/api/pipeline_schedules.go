@@ -58,8 +58,15 @@ type scheduleResponse struct {
 	ConsecutiveFailures    int       `json:"consecutive_failures"`
 	MaxConsecutiveFailures int       `json:"max_consecutive_failures"`
 	DisabledReason         string    `json:"disabled_reason,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	// Activation is "draft" for a trigger atomic routine authoring created
+	// with activation="draft" and still awaiting a MANAGER's sign-off (B8,
+	// #2359) — distinct from an operator/circuit-breaker disable, and the
+	// one thing that tells an operator THIS `enabled: false` needs a
+	// `.../activate` call, not `schedules enable`. Omitted for every
+	// ordinary schedule.
+	Activation string    `json:"activation,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
@@ -104,6 +111,7 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		ConsecutiveFailures:    s.ConsecutiveFailures,
 		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
 		DisabledReason:         s.DisabledReason,
+		Activation:             s.Activation,
 		CreatedAt:              s.CreatedAt,
 		UpdatedAt:              s.UpdatedAt,
 	}

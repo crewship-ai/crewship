@@ -84,12 +84,21 @@ fields (nullable/empty telemetry fields are omitted when unset):
 `wake_pipeline_slug`, `wake_inputs`, `wake_fail_closed`, `wake_check_count`,
 `wake_fire_count`, `last_wake_at`, `last_wake_status`, `catchup_policy`,
 `last_missed_count`, `consecutive_failures`, `max_consecutive_failures`,
-`disabled_reason`, `created_at`, and `updated_at`.
+`disabled_reason`, `activation`, `created_at`, and `updated_at`.
 
 `last_status` can be `COMPLETED`, `FAILED`, `SKIPPED`, `WAITING`, or `DEDUPED`.
 Wake telemetry uses `WOKE`, `SKIPPED`, `ERROR`, or `HELD`. A circuit breaker
 disables the schedule after its threshold and sets `disabled_reason` to
 `circuit_breaker`; operator-disabled schedules have an empty reason.
+
+`activation` is `"draft"` for a trigger atomic routine authoring created
+with `activation="draft"` (see [Pipelines § Atomic trigger
+authoring](/api-reference/pipelines#atomic-trigger-authoring)) and still
+awaiting a MANAGER's sign-off, and omitted for every ordinary schedule —
+including one that is `enabled: false` for an operator disable or a tripped
+circuit breaker. Editing a draft through `PATCH` cannot set `enabled: true`
+(it answers `400`, naming the `.../activate` route instead); only
+`POST .../activate` may turn one on.
 
 ## Force-fire, activate, and delete
 

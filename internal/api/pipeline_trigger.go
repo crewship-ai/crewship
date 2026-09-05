@@ -134,15 +134,15 @@ type pipelineSaveResponse struct {
 
 // isTriggerValidationError reports whether err came from createTriggerTx's
 // validation (a bad cron expression, an unknown timezone, an invalid
-// catchup_policy, or an unsupported trigger.kind) rather than a genuine
-// storage failure — the store wraps these with the stable "pipeline: save
-// trigger" prefix (store.go) so callers can map them to 422 instead of 500
-// without pattern-matching the full error chain.
+// catchup_policy/activation, or an unsupported trigger.kind) rather than a
+// genuine storage failure. Both are wrapped by the SAME "pipeline: save
+// trigger" context in store.go, so this checks the inner sentinel
+// (pipeline.ErrInvalidTrigger) with errors.Is instead of pattern-matching
+// the combined message — a string check on the outer wrap alone would
+// misclassify a real DB/infra failure (e.g. "insert schedule: database is
+// locked") as a 422 validation error just because it shares that wrap.
 func isTriggerValidationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "pipeline: save trigger")
+	return errors.Is(err, pipeline.ErrInvalidTrigger)
 }
 
 // routineTriggerActivationInboxSource is the (kind, source_id) dedup key
