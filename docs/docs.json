@@ -96,6 +96,7 @@
                 "pages": [
                   "guides/routines",
                   "guides/routines-cookbook",
+                  "guides/demo-packs",
                   "guides/routines-migration",
                   "guides/notifications"
                 ]

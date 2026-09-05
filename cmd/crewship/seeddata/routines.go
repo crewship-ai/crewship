@@ -25,7 +25,11 @@ type RoutineDef struct {
 // gets a clean error rather than a silent wrong-agent execution.
 func agentSlugRef(slug string) string { return slug }
 
-// Routines is the seed list — the "recipe library" of a fresh workspace.
+// routineLibrary contains both the focused demo workflows and older generic
+// recipe examples. Only the workflows selected by curatedDemoRoutines are
+// seeded by default; model-regression scenarios live in EvalScenarios and are
+// opt-in from the CLI. Keeping the broader library here lets existing code and
+// docs reuse definitions without turning a fresh workspace into a fixture dump.
 //
 // THE RECIPE PHILOSOPHY (why these exist and how they're built):
 //
@@ -46,20 +50,20 @@ func agentSlugRef(slug string) string { return slug }
 // The recipes below span the determinism classes: pure extraction /
 // normalization, closed-set classification, validation / linting,
 // redaction, decision tables, structured review, faithful
-// summarization, and multi-step / orchestration. The 17 eval-* scenarios
-// in eval_scenarios.go are the matching regression harness.
+// summarization, and multi-step / orchestration. The eval-* scenarios in
+// eval_scenarios.go are an opt-in regression harness (`seed --with-evals`).
 //
-// Alongside the deterministic recipes, three routines exist for the
+// Alongside the deterministic recipes, four routines exist for the
 // live-workspace demo loop rather than determinism. None of them ship
 // with a cron schedule — the demo seed intentionally has zero scheduled
 // routines; wire one by hand (`crewship routine schedules create`) to
 // see the loop fire:
 //   - morning-briefing    — lead briefing (agent routine whose
 //     completion lands an inbox notification)
-//   - feed-watch-probe    — agentless token-zero wake gate (http +
+//   - feed-watch-probe    — agentless GitHub Status wake gate (http +
 //     transform + code:expr), suitable as a schedule's wake gate
-//   - feed-change-report  — the intended wake-gated target that only
-//     runs (and only spends tokens) when the probe fires
+//   - feed-change-report  — the GitHub incident brief that only runs
+//     (and only spends tokens) when the probe fires
 //   - page-watch          — the routine→page loop: writes both panels
 //     of the `watch` page as their declared producer. The seeder
 //     fires one run of it (seedPageProducerRoutines), which is the
@@ -72,7 +76,7 @@ func agentSlugRef(slug string) string { return slug }
 //   - estimated_cost_usd kept low so the cost cap never trips
 //   - Deterministic recipes pin complexity: fast (Haiku); graded ones
 //     add on_fail: escalate_tier so drift escalates instead of shipping
-var Routines = []RoutineDef{
+var routineLibrary = []RoutineDef{
 	// ───────────────────────────────────────────────────────────────
 	// 1. summarize-text — base demo (light generative)
 	// ───────────────────────────────────────────────────────────────
@@ -120,22 +124,22 @@ var Routines = []RoutineDef{
 	},
 
 	// ───────────────────────────────────────────────────────────────
-	// 2. fetch-and-extract — http → agent extraction → JSON (DAG)
+	// 2. website-content-audit — live website → structured audit (DAG)
 	// ───────────────────────────────────────────────────────────────
 	{
-		Slug:        "fetch-and-extract",
-		Name:        "Fetch URL and extract JSON",
-		Description: "Fetch a URL over HTTP, then extract a canonical JSON object from the body.",
+		Slug:        "website-content-audit",
+		Name:        "Audit a public web page",
+		Description: "Fetch a real public page and return a canonical content and navigation audit.",
 		CrewSlug:    "engineering",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
-			"name":               "fetch-and-extract",
-			"display_name":       "Fetch URL and extract JSON",
-			"description":        "Fetch a URL over HTTP, then extract a canonical JSON object from the body.",
+			"name":               "website-content-audit",
+			"display_name":       "Audit a public web page",
+			"description":        "Fetch a real public page and return a canonical content and navigation audit.",
 			"estimated_cost_usd": 0.002,
 			// Narrow allowlist on the seed routine so the demo doesn't
 			// double as an SSRF lab. Workspace admins broaden via the editor.
-			"egress_targets": []string{"httpbin.org"},
+			"egress_targets": []string{"crewship.ai"},
 			"credentials_required": []map[string]interface{}{
 				AnthropicCredentialRequirement(),
 			},
@@ -144,8 +148,8 @@ var Routines = []RoutineDef{
 					"name":        "url",
 					"type":        "string",
 					"required":    false,
-					"default":     "https://httpbin.org/json",
-					"description": "URL to fetch",
+					"default":     "https://crewship.ai",
+					"description": "Public HTML page to audit (host must be declared in egress_targets)",
 				},
 			},
 			"outputs": []map[string]interface{}{
@@ -158,7 +162,7 @@ var Routines = []RoutineDef{
 					"http": map[string]interface{}{
 						"method":             "GET",
 						"url":                "{{ inputs.url }}",
-						"max_response_bytes": 200000,
+						"max_response_bytes": 750000,
 						"success_codes":      []int{200},
 					},
 					"timeout_seconds": 30,
@@ -169,7 +173,7 @@ var Routines = []RoutineDef{
 					"agent_slug": agentSlugRef("sam"),
 					"complexity": "fast",
 					"needs":      []string{"fetch"},
-					"prompt":     "Extract the key/value fields from the JSON body below into a single flat JSON object with string values, keys sorted alphabetically. Output ONLY the JSON object, no prose.\n\n{{ steps.fetch.output }}",
+					"prompt":     "Audit the HTML below. Output ONLY one JSON object with exactly these keys: title (string), meta_description (string), h1 (array of strings in document order), h2 (array of strings in document order), navigation (array of objects with label and href), calls_to_action (array of objects with label and href). Include only text and links present in the source; use an empty string or array when absent. No prose and no code fences.\n\n{{ steps.fetch.output }}",
 					"validation": map[string]interface{}{
 						"must_contain":     []string{"{", "}"},
 						"must_not_contain": []string{"API_KEY=", "Bearer "},
@@ -867,34 +871,34 @@ var Routines = []RoutineDef{
 	// ───────────────────────────────────────────────────────────────
 	{
 		Slug:        "feed-watch-probe",
-		Name:        "Feed watch probe (agentless)",
-		Description: "Token-zero wake gate: fetch a JSON feed, count its items deterministically, emit true only when the count drifts from baseline.",
+		Name:        "GitHub incident probe (agentless)",
+		Description: "Token-zero wake gate: check GitHub's public status feed and wake only when an unresolved incident exists.",
 		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "feed-watch-probe",
-			"display_name":       "Feed watch probe (agentless)",
-			"description":        "Token-zero wake gate: fetch a JSON feed, count its items deterministically, emit true only when the count drifts from baseline.",
+			"display_name":       "GitHub incident probe (agentless)",
+			"description":        "Token-zero wake gate: check GitHub's public status feed and wake only when an unresolved incident exists.",
 			"estimated_cost_usd": 0.0,
 			"agentless":          true,
-			// Narrow allowlist, same rationale as fetch-and-extract:
+			// Narrow allowlist, same rationale as website-content-audit:
 			// the seed probe watches a stable public endpoint; swap url
 			// (and broaden egress) to watch your own status page/feed.
-			"egress_targets": []string{"httpbin.org"},
+			"egress_targets": []string{"www.githubstatus.com"},
 			"inputs": []map[string]interface{}{
 				{
 					"name":        "url",
 					"type":        "string",
 					"required":    false,
-					"default":     "https://httpbin.org/json",
-					"description": "JSON feed to watch",
+					"default":     "https://www.githubstatus.com/api/v2/incidents/unresolved.json",
+					"description": "GitHub Status unresolved-incidents endpoint",
 				},
 				{
 					"name":        "expected_items",
 					"type":        "number",
 					"required":    false,
-					"default":     2.0,
-					"description": "Baseline item count — the probe fires when the feed drifts from this",
+					"default":     0.0,
+					"description": "Expected unresolved incident count — normally zero",
 				},
 			},
 			"outputs": []map[string]interface{}{
@@ -920,7 +924,7 @@ var Routines = []RoutineDef{
 					"needs": []string{"fetch"},
 					"transform": map[string]interface{}{
 						"input":      "{{ steps.fetch.output }}",
-						"expression": ".slideshow.slides",
+						"expression": ".incidents",
 					},
 				},
 				{
@@ -959,16 +963,16 @@ var Routines = []RoutineDef{
 	// ───────────────────────────────────────────────────────────────
 	{
 		Slug:        "feed-change-report",
-		Name:        "Feed change report",
-		Description: "Wake-gated by the feed-watch probe: re-fetch the changed feed and brief the crew on what's in it now.",
+		Name:        "GitHub incident brief",
+		Description: "Wake-gated by the incident probe: re-fetch GitHub Status and brief Ops only when an incident exists.",
 		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "feed-change-report",
-			"display_name":       "Feed change report",
-			"description":        "Wake-gated by the feed-watch probe: re-fetch the changed feed and brief the crew on what's in it now.",
+			"display_name":       "GitHub incident brief",
+			"description":        "Wake-gated by the incident probe: re-fetch GitHub Status and brief Ops only when an incident exists.",
 			"estimated_cost_usd": 0.003,
-			"egress_targets":     []string{"httpbin.org"},
+			"egress_targets":     []string{"www.githubstatus.com"},
 			"credentials_required": []map[string]interface{}{
 				AnthropicCredentialRequirement(),
 			},
@@ -977,8 +981,8 @@ var Routines = []RoutineDef{
 					"name":        "url",
 					"type":        "string",
 					"required":    false,
-					"default":     "https://httpbin.org/json",
-					"description": "The watched feed (keep in sync with feed-watch-probe's url)",
+					"default":     "https://www.githubstatus.com/api/v2/incidents/unresolved.json",
+					"description": "The watched GitHub Status feed (keep in sync with feed-watch-probe)",
 				},
 			},
 			"outputs": []map[string]interface{}{
@@ -1002,7 +1006,7 @@ var Routines = []RoutineDef{
 					"agent_slug": agentSlugRef("riley"),
 					"complexity": "fast",
 					"needs":      []string{"fetch"},
-					"prompt":     "The feed we monitor changed since its last baseline. Current JSON payload:\n\n{{ steps.fetch.output }}\n\nWrite a concise change report for the crew: at most 3 bullets describing what the feed contains now and anything that looks new or unusual, then a single 'Suggested action:' line. Plain markdown, under 120 words.",
+					"prompt":     "GitHub Status reports one or more unresolved incidents. Using only the JSON below, write an incident brief with: severity, affected components, current incident state, latest provider update, release-workflow impact, and one safe next action. Clearly say when a field is absent. Plain markdown, at most 140 words; do not claim Crewship itself is down.\n\n{{ steps.fetch.output }}",
 					"validation": map[string]interface{}{
 						"min_length":       40,
 						"must_not_contain": []string{"API_KEY=", "Bearer "},
@@ -1034,21 +1038,21 @@ var Routines = []RoutineDef{
 	// ───────────────────────────────────────────────────────────────
 	{
 		Slug:        "approval-gate-demo",
-		Name:        "Approval gate demo",
-		Description: "Draft an action, pause for human approval, then emit the final go-ahead.",
+		Name:        "Production change approval",
+		Description: "Draft a reversible production change, pause for human approval, then record the authorized next step.",
 		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "approval-gate-demo",
-			"display_name":       "Approval gate demo",
-			"description":        "Draft an action, pause for human approval, then emit the final go-ahead.",
+			"display_name":       "Production change approval",
+			"description":        "Draft a reversible production change, pause for human approval, then record the authorized next step.",
 			"estimated_cost_usd": 0.001,
 			"egress_targets":     []string{},
 			"credentials_required": []map[string]interface{}{
 				AnthropicCredentialRequirement(),
 			},
 			"inputs": []map[string]interface{}{
-				{"name": "action", "type": "string", "required": false, "default": "Restart the auth-svc pods in production"},
+				{"name": "action", "type": "string", "required": false, "default": "Pause the Crewship release while GitHub reports an unresolved incident"},
 			},
 			"outputs": []map[string]interface{}{
 				{"name": "result", "type": "string"},
@@ -1214,24 +1218,23 @@ var Routines = []RoutineDef{
 	// ───────────────────────────────────────────────────────────────
 	{
 		Slug:        "page-watch",
-		Name:        "Page watch",
-		Description: "Write both panels of the Watch page — the routine→page loop, so a seeded workspace has a page filled by its own declared producer rather than by the seeder.",
+		Name:        "Publish release readiness",
+		Description: "Publish the current release gate and operator note to the routine-owned Release Readiness page.",
 		CrewSlug:    "ops",
 		Definition: map[string]interface{}{
 			"dsl_version":        "1.0",
 			"name":               "page-watch",
-			"display_name":       "Page watch",
-			"description":        "Write both panels of the Watch page — the routine→page loop, so a seeded workspace has a page filled by its own declared producer rather than by the seeder.",
+			"display_name":       "Publish release readiness",
+			"description":        "Publish the current release gate and operator note to the routine-owned Release Readiness page.",
 			"estimated_cost_usd": 0.0,
 			"egress_targets":     []string{},
 			"inputs": []map[string]interface{}{
 				{
-					"name":     "note",
-					"type":     "string",
-					"required": false,
-					"default":  "Nobody has complained yet.",
-					"description": "One line the narrative panel repeats back — the knob a demo can turn " +
-						"without editing the DSL. Plain text: narrative.v1 refuses a URL anywhere in its prose.",
+					"name":        "note",
+					"type":        "string",
+					"required":    false,
+					"default":     "Start the website rebuild and acceptance issues before requesting a release decision.",
+					"description": "Operator note shown on the readiness page. Plain text only: narrative.v1 refuses URLs in prose.",
 				},
 			},
 			"outputs": []map[string]interface{}{},
@@ -1246,14 +1249,14 @@ var Routines = []RoutineDef{
 						"data": map[string]interface{}{
 							"items": []map[string]interface{}{
 								{
-									"name":  "page and routine",
+									"name":  "website implementation",
 									"state": "ok",
-									"label": "both created by the seed",
+									"label": "lead delegation issue is ready to start",
 								},
 								{
-									"name":  "producer",
-									"state": "ok",
-									"label": "routine/page-watch — this run wrote it",
+									"name":  "quality gate",
+									"state": "warning",
+									"label": "acceptance evidence and GO or NO-GO verdict pending",
 								},
 								{
 									// Honest rather than green: the seed ships zero
@@ -1261,9 +1264,9 @@ var Routines = []RoutineDef{
 									// header), so nothing refreshes this page on its
 									// own. A reader who sees the panel go stale in
 									// six hours has already been told why.
-									"name":  "schedule",
+									"name":  "production release",
 									"state": "warning",
-									"label": "none — run the routine by hand to refresh this page",
+									"label": "not authorized — approval gate remains in control",
 								},
 							},
 						},
@@ -1282,21 +1285,20 @@ var Routines = []RoutineDef{
 						"page":  "watch",
 						"panel": "entry",
 						"data": map[string]interface{}{
-							"verdict": "No human wrote this page",
+							"verdict": "Release work is staged; no deployment is authorized",
 							"blocks": []map[string]interface{}{
 								{
 									"kind": "paragraph",
-									"text": "Both panels declare producer routine/page-watch. The page's owner cannot push to them — " +
-										"only the declared producer is admitted — so everything you are reading was written by a run " +
-										"of this routine, through the dispatcher, not by the seed.",
+									"text": "This page is the shared release checkpoint. It reports whether implementation evidence, " +
+										"quality review, and human authorization are present; it does not deploy anything.",
 								},
 								{
 									"kind": "list",
-									"text": "Run it again with: crewship routine run page-watch",
+									"text": "Refresh it with: crewship routine run page-watch --inputs '{\"note\":\"your current release note\"}'",
 								},
 								{
 									"kind": "list",
-									"text": "The seed creates no schedule on purpose, so this page does not refresh itself and goes stale after six hours.",
+									"text": "A production action belongs in approval-gate-demo; a release-blocking ambiguity belongs in a DECISION escalation.",
 								},
 								{
 									"kind": "paragraph",
@@ -1309,6 +1311,54 @@ var Routines = []RoutineDef{
 			},
 		},
 	},
+}
+
+// Routines is the focused catalogue shown in a normal demo workspace. The
+// older transformation recipes remain in routineLibrary as source examples,
+// while model regression coverage is available through `seed --with-evals`.
+// A fresh product demo should read like an operating team, not a test fixture.
+var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), packRoutines...))
+
+func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
+	wanted := map[string]bool{
+		"website-content-audit": true, // live Crewship website content audit
+		"incident-timeline":     true, // incident evidence normalisation
+		"classify-ticket":       true, // support intake with a closed taxonomy
+		"morning-briefing":      true, // lead-generated workspace briefing
+		"pr-review-structured":  true, // QA review with a semantic grader
+		"feed-watch-probe":      true, // token-zero GitHub Status wake gate
+		"feed-change-report":    true, // incident brief only after the gate wakes
+		"workspace-digest":      true, // token-zero workspace activity digest
+		"approval-gate-demo":    true, // production change plan + human decision
+		"cost-spike-probe":      true, // budget wake gate
+		"page-watch":            true, // routine-produced operational page
+		// Deterministic recipes the test harness, the walkthrough and the
+		// CLI docs address by slug (test-determinism.sh, walkthrough.sh,
+		// docs/cli/routine.mdx) — a fresh seed must keep answering them.
+		"extract-contacts": true,
+		"normalize-dates":  true,
+		"summarize-text":   true,
+		// Demo packs (packs.go): a real source, a deterministic core, a
+		// verifiable report.
+		"ci-probe":           true, // token-zero wake gate over GitHub Actions
+		"ci-nightly-triage":  true, // agent triage only after the gate wakes
+		"docs-drift-audit":   true, // deterministic scan + agent judgement
+		"site-replica-audit": true, // acceptance of the crew's site replica
+	}
+
+	out := make([]RoutineDef, 0, len(wanted))
+	for _, routine := range library {
+		if wanted[routine.Slug] {
+			out = append(out, routine)
+			delete(wanted, routine.Slug)
+		}
+	}
+	if len(wanted) != 0 {
+		for slug := range wanted {
+			panic("seeddata: curated routine missing from library: " + slug)
+		}
+	}
+	return out
 }
 
 // WorkspaceDigestDefinition is the DSL for the "workspace-digest" seed
@@ -1378,15 +1428,15 @@ var WorkspaceDigestDefinition = map[string]interface{}{
 // than inlined into every Definition literal so the recipes stay readable
 // and the canonicalisation policy lives in one place.
 var canonicalJSONRecipes = map[string]string{
-	"extract-contacts":     "extract",
-	"incident-timeline":    "extract",
-	"classify-ticket":      "classify",
-	"normalize-dates":      "normalize",
-	"json-schema-validate": "validate",
-	"invoice-extract":      "extract",
-	"routing-decision":     "route",
-	"diff-risk-score":      "score",
-	"fetch-and-extract":    "extract",
+	"extract-contacts":      "extract",
+	"incident-timeline":     "extract",
+	"classify-ticket":       "classify",
+	"normalize-dates":       "normalize",
+	"json-schema-validate":  "validate",
+	"invoice-extract":       "extract",
+	"routing-decision":      "route",
+	"diff-risk-score":       "score",
+	"website-content-audit": "extract",
 }
 
 // init appends a final `@json` transform step to every deterministic

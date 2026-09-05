@@ -6,7 +6,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       timeout_seconds: 3600
       memory_enabled: true
@@ -50,7 +50,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       timeout_seconds: 3600
       memory_enabled: true
@@ -85,7 +85,7 @@ agents:
       agent_role: LEAD
       cli_adapter: CLAUDE_CODE
       llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
+      llm_model: claude-sonnet-5
       tool_profile: FULL
       timeout_seconds: 3600
       memory_enabled: true
@@ -108,6 +108,30 @@ agents:
       timeout_seconds: 2400
       memory_enabled: true
       prompt_slug: riley
+    - name: Taylor
+      slug: taylor
+      crew_slug: engineering
+      role_title: Analyst
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: taylor
+    - name: Jamie
+      slug: jamie
+      crew_slug: engineering
+      role_title: Test Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm_provider: ANTHROPIC
+      llm_model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      prompt_slug: jamie
     # Opt-in local-model demo agent (CREWSHIP_SEED_OLLAMA=1). Runs the OpenCode
     # CLI against a LOCAL Ollama model — no cloud API key required. Needs the
     # local-ai crew (bakes opencode-ai) + an ENDPOINT_URL credential pointing at

@@ -44,6 +44,7 @@ func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
+	seedCmd.Flags().Bool("with-evals", false, "Also seed model-regression routines (kept out of the normal product demo)")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
 	seedCmd.Flags().Int("smoke-timeout", 60, "Per-agent timeout (seconds) for smoke test")
@@ -144,6 +145,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
+	withEvals, _ := cmd.Flags().GetBool("with-evals")
 	password, _ := cmd.Flags().GetString("password")
 	smokeTest, _ := cmd.Flags().GetBool("smoke-test")
 	smokeTimeout, _ := cmd.Flags().GetInt("smoke-timeout")
@@ -232,6 +234,18 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Crew connection seeding hit an error (continuing): %v\n", err)
 	}
 
+	// ── Phase 2c: Demo pack files ──
+	// BEFORE provisioning is triggered: the host can write a crew's shared
+	// tree only until the container entrypoint chowns it to the agent UID,
+	// after which a write needs a RUNNING container — and a fresh seed has
+	// none. Non-fatal; `seed verify` compares what landed against the embed.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedPackFiles(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "Pack file delivery hit an error (continuing): %v\n", err)
+	}
+
 	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
 	// Without provisioning, `crewship run <agent>` fails with "Crew has
 	// devcontainer configuration but no provisioned image". In default
@@ -289,6 +303,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := seedCredentials(ctx, client, agentIDs); err != nil {
 		return err
 	}
+	// Crew-scoped pack credentials go between the real credentials and the
+	// demo vault: the vault's inert bindings consult packBoundSlots.
+	if err := seedPackCredentials(ctx, client, crewIDs); err != nil {
+		fmt.Fprintf(os.Stderr, "  ! Pack credentials: %v\n", err)
+	}
 	// Demo vault: one credential of every shape, all inert. Non-fatal — a
 	// workspace without the demo tour is still a working workspace, and a
 	// failed demo credential is not worth aborting a seed over.
@@ -314,7 +333,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedRoutines(ctx, client, crewIDs); err != nil {
+	if err := seedRoutines(ctx, client, crewIDs, withEvals); err != nil {
 		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
 	}
 

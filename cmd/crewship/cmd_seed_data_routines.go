@@ -26,7 +26,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]string) error {
+func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]string, includeEvals bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -46,6 +46,11 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	starterStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Routine", seeddata.Routines)
 	if err != nil {
 		return err
+	}
+
+	if !includeEvals {
+		fmt.Fprintln(os.Stderr, "Skipping eval scenarios (pass --with-evals to install the regression catalogue).")
+		return nil
 	}
 
 	// Eval scenarios are seeded as a separate batch so their failure

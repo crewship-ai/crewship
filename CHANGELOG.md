@@ -9,6 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.
+- **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
+
 <!--
   Backfill (#2086). The twenty-four entries between this marker and the next
   one chronicle eighteen PRs that merged with no changelog trace anywhere —

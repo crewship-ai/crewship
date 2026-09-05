@@ -283,15 +283,13 @@ crewship export crew <slug> [flags]
 
 ## What's NOT modelled in v1 (intentional)
 
-- **Routines / schedules** — separate `kind: Routine` planned, will
-  reference crew slug.
-- **Integrations (Slack/Linear/etc.)** — separate `kind: Integration`
-  planned; MCP servers ARE modelled.
-- **Eval scenarios** — separate `kind: EvalScenario` planned.
+- **Eval scenarios** — regression fixtures remain a CLI concern rather than
+  desired workspace state.
 - **Workspace members / invitations** — out of scope; these are
   per-user identity, not part of a shareable bundle.
-- **Pipeline definitions** — pipelines already have their own
-  import endpoint; manifest may grow `pipelines:` later.
+
+Routines, schedules, webhooks, integrations, issues, projects, labels, and
+Pages are modelled as their own `kind:` documents; see `full-complete.yaml`.
 
 A future `apiVersion: crewship/v2` will retain compatibility with v1
 manifests; the server accepts every past version it has ever shipped.
@@ -306,3 +304,6 @@ See `examples/manifests/`:
 - `triage.crew.yaml` — single crew with inline skills
 - `full-team.workspace.yaml` — workspace bundle with two crews
   sharing creds and a workspace-level skill
+- `release-operations.workspace.yaml` — coherent production-style demo with
+  lead delegation, a worker-to-human escalation, real public web/status
+  sources, approval waitpoint, issues, routines, and a Page

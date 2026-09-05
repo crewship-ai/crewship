@@ -114,7 +114,7 @@ pages:
         actions:
           - id: recheck
             kind: call
-            label: Run the feed probe
+            label: Check GitHub incidents
             routine: feed-watch-probe
 
         # Opts THIS ONE panel into a published link. Nothing is published yet —
@@ -276,50 +276,46 @@ pages:
   # it declares a script producer, and mixing the two kinds on one page is
   # itself the lesson: authority is decided per panel, not per page.
   - slug: from-a-container
-    name: From a container
+    name: Incident Snapshot
     description: >-
-      The only page an agent fills from inside a crew container, through the
-      sidecar. The panel below stays empty until riley pushes — which is correct,
-      not broken.
+      An Ops-owned incident board. Riley publishes the current assessment from
+      the crew container; the empty report means no agent has reported yet.
     owner: crew/ops
     panels:
       - id: how
         schema: narrative.v1
-        title: How data gets here
+        title: Incident reporting contract
         icon: container
         owner: crew/ops
         producer: script/explain.sh
         sla: 168h
         span: 12
         demo:
-          verdict: A sidecar on localhost, and no token inside the agent
+          verdict: Evidence first, then an agent-owned incident assessment
           blocks:
             - kind: paragraph
               text: >-
-                An agent inside a container has no CLI token, and no crewship binary
-                either — the sandbox image ships curl, jq and git and nothing else. It
-                publishes by calling its own sidecar on loopback, and the sidecar
-                attaches the identity from the token it holds, not the agent.
+                Riley collects read-only evidence from the public GitHub Status API,
+                records the raw response under /crew/shared/ops, and publishes only a
+                concise operational assessment here.
             - kind: list
               text: >-
-                PUT to localhost:9119/pages/from-a-container/report, the body is the
-                payload, and the token rides on file descriptor 3 so it never appears
-                in the process table.
+                The report must distinguish provider facts from Crewship impact. A
+                GitHub incident does not prove Crewship is unavailable; it may only
+                block source, CI, or release workflows.
             - kind: list
               text: >-
-                The panel beside this one declares producer agent/riley. Had it
-                declared a script, this door would refuse it — the producer kind and
-                the door are independent, but the server admits only the principal the
-                panel names.
+                Any recommendation to pause a release or change production requires a
+                human decision escalation. The page reports the recommendation; it
+                never performs the change.
             - kind: paragraph
               text: >-
-                This panel declares a script instead, so the seed filled it. Two
-                producer kinds on one page is deliberate: authority is decided per
-                panel, never per page.
+                The report panel is owned by Ops and declares producer agent/riley, so
+                another agent or a human cannot impersonate its evidence trail.
 
       - id: report
         schema: status.v1
-        title: What the agent reports
+        title: Current incident assessment
         icon: cpu
         owner: crew/ops
         producer: agent/riley
@@ -337,16 +333,15 @@ pages:
   # principal, the declaration is only a label. So the seed fills the page and
   # whatever token a human later mints takes over.
   - slug: from-outside
-    name: From outside
+    name: Release Pipeline
     description: >-
-      Filled by a system outside this workspace, with one POST to a token bound to
-      a single panel. No routine, no agent, no CLI — mint the token with
-      `crewship page webhook create`.
+      CI publishes build, test, and deployment state through a panel-scoped
+      webhook. Crewship displays the evidence without holding a CI credential.
     owner: crew/ops
     panels:
       - id: build
         schema: status.v1
-        title: Last build
+        title: Release candidate
         icon: deploy
         owner: crew/engineering
         producer: webhook/ci
@@ -357,7 +352,7 @@ pages:
             # Quoted: an unquoted `#` after a space starts a YAML comment, so
             # this arrived as plain "build" and the demo lost the one detail
             # that made it read like a real build.
-            - name: "build #412"
+            - name: "release candidate #412"
               state: ok
               label: passed in 2 m 14 s
             - name: tests
@@ -369,14 +364,14 @@ pages:
 
       - id: how-the-token-works
         schema: narrative.v1
-        title: How data gets here
+        title: CI publishing contract
         icon: network
         owner: crew/ops
         producer: script/explain.sh
         sla: 168h
         span: 12
         demo:
-          verdict: One token, one panel
+          verdict: CI may update this panel and nothing else
           blocks:
             - kind: paragraph
               text: >-
@@ -414,15 +409,15 @@ pages:
   # set up, which says the feature is broken when what happened is that nobody
   # wired a schedule.
   - slug: watch
-    name: Watch
-    description: A page neither a human nor the seed wrote — the routine page-watch put it here when it ran.
+    name: Release Readiness
+    description: A routine-owned release snapshot combining the current gate state and operator note.
     # Also ops, though here it buys only spec editing: these panels are
     # routine-produced, and no amount of page ownership lets a human push to one.
     owner: crew/ops
     panels:
       - id: wiring
         schema: status.v1
-        title: How this page is wired
+        title: Release gate
         icon: calendar
         owner: crew/ops
         producer: routine/page-watch
@@ -431,9 +426,80 @@ pages:
 
       - id: entry
         schema: narrative.v1
-        title: What the watch wrote
+        title: Readiness note
         icon: alert
         owner: crew/ops
         producer: routine/page-watch
         sla: 6h
+        span: 12
+
+  # ── Demo pack pages (seeddata/packs.go) ─────────────────────────────────
+  # One page per pack, every panel produced by the pack's report routine.
+  # No `demo` payloads: these panels are ROUTINE-produced, so the only honest
+  # way for them to hold data is the routine running — which the seeder
+  # triggers once (seedPageProducerRoutines) when the pack is runnable.
+  - slug: ci-watch
+    name: CI watch
+    description: Are the scheduled GitHub Actions workflows green, red, or silently not running?
+    owner: crew/ops
+    panels:
+      - id: status
+        schema: status.v1
+        title: Scheduled workflows
+        icon: clock
+        owner: crew/ops
+        producer: routine/ci-nightly-triage
+        sla: 30h
+        span: 12
+      - id: summary
+        schema: narrative.v1
+        title: Last triage
+        icon: alert
+        owner: crew/ops
+        producer: routine/ci-nightly-triage
+        sla: 30h
+        span: 12
+
+  - slug: docs-drift
+    name: Docs drift
+    description: Documentation against code, both directions — phantoms the code does not have, gaps the docs never mention.
+    owner: crew/quality
+    panels:
+      - id: status
+        schema: status.v1
+        title: Last scan
+        icon: calendar
+        owner: crew/quality
+        producer: routine/docs-drift-audit
+        sla: 170h
+        span: 12
+      - id: summary
+        schema: narrative.v1
+        title: What the audit found
+        icon: alert
+        owner: crew/quality
+        producer: routine/docs-drift-audit
+        sla: 170h
+        span: 12
+
+  - slug: site-replica
+    name: Site replica
+    description: The engineering crew's copy of a public home page, and whether it meets the mechanical bar.
+    owner: crew/engineering
+    panels:
+      - id: acceptance
+        schema: status.v1
+        title: Acceptance checks
+        icon: deploy
+        owner: crew/engineering
+        producer: routine/site-replica-audit
+        sla: 48h
+        span: 12
+      - id: verdict
+        schema: narrative.v1
+        title: Verdict
+        icon: alert
+        owner: crew/engineering
+        producer: routine/site-replica-audit
+        sla: 48h
         span: 12

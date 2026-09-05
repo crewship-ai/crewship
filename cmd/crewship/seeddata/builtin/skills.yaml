@@ -160,3 +160,265 @@ skills:
         - Don't access /etc/shadow or other sensitive files
         - Stick to standard Linux inspection commands
         - If /proc is not available, use alternative commands and note the limitation
+    # ── Demo pack skills (seeddata/packs.go) ─────────────────────────────
+    - name: CI Triage
+      slug: ci-triage
+      display_name: Nightly CI triage
+      category: DEVOPS
+      description: How to read a red or stale scheduled workflow — which commands, in what order, how to find the suspect commit and why a workflow stopped running. Read-only.
+      icon: search-check
+      content: |-
+        # Nightly CI triage
+
+        ## When to use
+        After the probe step, for every entry with status `RED` or `STALE`.
+        Regression-versus-flaky classification is the skill `known-flaky` —
+        this skill is about gathering the evidence.
+
+        ## The line you do not cross
+        You are a **reader and a messenger**. Never:
+        - re-run a workflow (`gh run rerun`) — it destroys the evidence,
+        - change anything in the repository, open an issue, comment on a PR,
+        - close or relabel somebody else's work.
+
+        When an intervention seems needed, **write it into the report as a
+        recommendation**. The person reading it in the morning decides.
+
+        ## RED — procedure
+        1. **Take only the failed jobs' logs**, not the whole run:
+           `gh run view <run_id> --repo <owner/name> --log-failed`
+           The full log is usually tens of MB and does not help the decision.
+        2. **Find the first real cause, not the last line.** Go tests: look for
+           the first `--- FAIL:` and `panic:`. The last lines are a summary.
+        3. **Classify** with the skill `known-flaky`: `REGRESSION` / `FLAKY` /
+           `INFRA` / `UNCLEAR`.
+        4. **For a REGRESSION find the suspect commit.** Take the time of the
+           last green and the first red run and list what landed in between:
+           `gh api "repos/<owner/name>/actions/workflows/<wf_id>/runs?event=schedule&per_page=20" --jq '.workflow_runs[] | {id, conclusion, created_at, head_sha}'`
+           `gh api "repos/<owner/name>/commits?since=<green>&until=<red>" --jq '.[] | {sha: .sha[0:8], msg: .commit.message | split("\n")[0], who: .commit.author.name}'`
+           Write it as a **suspicion with a reason** ("touches the package the
+           test fails in"), not as a verdict. If 15 commits landed and none
+           touches that package, say so — it is more useful than a forced culprit.
+        5. **If the log cannot be downloaded** (a 403 from the network policy,
+           a missing scope), say so in the report and classify `UNCLEAR`. A
+           guess dressed as a finding is worse than an admitted gap.
+
+        ## STALE — procedure
+        This is not a test that failed. This is a workflow that **did not run
+        at all**, which is the worse failure because it never turns red. Find
+        the concrete cause:
+        1. **Is the workflow disabled?**
+           `gh api repos/<owner/name>/actions/workflows --jq '.workflows[] | {name, state, path}'`
+           `state: disabled_inactivity` = GitHub switched it off after 60 days
+           without repository activity. `disabled_manually` = a person did.
+        2. **Does it still have a cron?** Open the workflow file (`path` from the
+           previous step) and check `on.schedule.cron` exists with the expected
+           value. A cron changed or dropped in a YAML refactor is the most
+           common silent cause.
+        3. **Is parsing failing?** Broken YAML never triggers and no run is created:
+           `gh api repos/<owner/name>/actions/workflows/<wf_id>/runs?per_page=1`
+           Empty result + existing file = suspect the syntax.
+        4. **Was it renamed?** The probe pairs runs by `name:`. A renamed
+           workflow looks like "no run in history" even though runs exist under
+           the new name. Check this explicitly before reporting a failure — it
+           is a false alarm worth telling apart.
+
+        ## Report format
+        The report is the body of a notification read by a person with no
+        context yet. Regressions first, so they are visible without scrolling.
+        A link to the run on every item, so one click verifies it. Leave empty
+        sections out; a three-line report beats a template full of "nothing".
+
+        ## Guardrails
+        - **Never report a regression without concrete evidence from the log.**
+          Without `--- FAIL` / `panic` / an error message it is `UNCLEAR`.
+        - **Do not invent a commit.** If the suspect cannot be determined, say so.
+        - **Do not adjust the numbers in the final COUNTS line** — they must
+          match the list above. They are how a reader decides whether to open
+          the report at all.
+    - name: Known Flaky
+      slug: known-flaky
+      display_name: Known flaky signatures
+      category: DEVOPS
+      description: Decide whether a red CI run is a real regression or a known flaky — a list of concrete signatures and the rules for when flaky is NOT an excuse. Without it every flaky is reported as a regression and the watch stops being trusted.
+      icon: alert-triangle
+      content: |-
+        # Known flaky signatures
+
+        ## When to use
+        For EVERY red run, before you call it a regression. Not for `STALE` —
+        there the question is not a test but a workflow that never ran.
+
+        ## Why this has its own list
+        A watch that reports flaky as regression stops being read after three
+        nights. A watch that hides a regression under "that is flaky" is worse
+        than none. The difference has to rest on concrete signatures, not on
+        an impression.
+
+        ## Known signatures
+
+        ### `TestPeerMemoryEngineFor_ConcurrentFirstAccessConverges`
+        - **Signature:** fails in `internal/memory`, reports an inconsistent cache
+          state after a concurrent first access. Turns PRs red that never touch memory.
+        - **Cause:** a real TOCTOU race in the cache, not a test defect.
+        - **Verdict:** `FLAKY`, but **always name it** — it is a real bug, just
+          not the one being looked for. When it appears, mention it is a known race.
+
+        ### `WARNING: DATA RACE` in a package unrelated to the diff
+        - **Signature:** the race detector shouts in a package the change did not touch.
+        - **Telling apart:** a log **without** `WARNING: DATA RACE` in an
+          unrelated package is signature #1597, i.e. flaky. A log **with** the
+          race warning is a real finding and must be reported as `REGRESSION`,
+          even if the package is unrelated to the diff.
+        - **Verdict:** by the presence of that line, not by the package name.
+
+        ### A check that ended `skipped` or `neutral`
+        - **Signature:** the job is green but never ran.
+        - **Verdict:** not a success. If another step depended on it, report
+          `INFRA` — green without a run is a silent hole, not evidence.
+
+        ### Runner timeout without a single failed test
+        - **Signature:** `timed_out`, no `--- FAIL` in the log, the last lines are
+          in the middle of normal work.
+        - **Verdict:** `INFRA`. State how long the run lasted before it was cut.
+
+        ## When flaky is NOT an excuse
+        - **The same test two nights in a row** → it stops being flaky, report
+          `REGRESSION`. Flaky does not fail deterministically.
+        - **A failure in a different test of the same package** → no longer a
+          known signature, a new finding. Do not hand it the old label because
+          of the package.
+        - **A signature not in this list** → `UNCLEAR`, never `FLAKY`. Write what
+          you saw in the log and what is missing to decide. Rather unclear than
+          reassuring.
+
+        ## Maintaining the list
+        When you confirm a new repeated signature, **propose it** in the closing
+        section of the report (test name, symptom, how to recognise it). Do not
+        edit this skill yourself — it is reviewed like any other change.
+    - name: Docs Drift
+      slug: docs-drift
+      display_name: Judging docs-drift candidates
+      category: WRITING
+      description: Decide whether a candidate from the deterministic scan is a real documentation-versus-code discrepancy or a false alarm. Holds the typical false alarms in both directions and the bar a confirmed finding must clear.
+      icon: file-search
+      content: |-
+        # Judging docs-drift candidates
+
+        ## When to use
+        For every candidate from the scan. Not for writing the fix — this pack
+        does not edit documentation, it reports.
+
+        ## What the scan can and cannot do
+        The scan compares **YAML/JSON tags in Go structs** against
+        **identifiers in backticks and YAML blocks** in the documentation. It
+        is deliberately dumb and reports candidates in both directions:
+
+        - **PHANTOM** — in the documentation, not in the code.
+        - **GAP** — in the code, not in the documentation.
+
+        A high candidate count **is not** a high defect count. On a wide pair
+        (a whole package against one page) most candidates are noise. Your job
+        is to turn that ratio around.
+
+        ## Typical false alarms — PHANTOM
+
+        | Looks like | Actually | How to check |
+        |---|---|---|
+        | `agent_run`, `call_pipeline` | an **enum value**, not a key | is it the value after `type:`? then there is no field to document |
+        | `services_json`, `config_hash` | a **database column** or a wire field between server and client | grep `internal/database` / `internal/api` |
+        | `crew_slug` | a key of **another** kind than the page describes | grep across `internal/manifest/kinds` |
+        | `skipped_too_young` | a field in a **command's output**, not in configuration | is it inside a JSON output example? |
+
+        Before you call anything a phantom, **check the whole repository**, not
+        just the listed package: `grep -rn '"key"' internal/ cmd/`. The scan
+        only sees what it was given.
+
+        ## Typical false alarms — GAP
+        - An **internal field** a manifest author never writes (state, ID, timestamp).
+        - A field documented **on another page** — `docs/manifest/workspace.md`
+          tends to be more current than `docs/configuration/manifest-schema.mdx`.
+          If the field is described elsewhere it is not a gap; at most a note
+          about duplicated pages.
+        - **A field reserved for later** — if the code comments it as reserved
+          and unwired, the documentation need not mention it.
+
+        ## The bar for a confirmed finding
+        A finding must have **all three**. Without them it is an impression:
+        1. **A path and a line** — in the documentation, in the code, or both.
+        2. **What exactly** the documentation claims or omits. Not "`files` is
+           missing", but "the crew field reference does not list `files`, so a
+           reader has no way to learn that files can be delivered declaratively".
+        3. **Why it hurts the reader** — what they do wrong when they believe it.
+           This is the most important part and the one most often missing. An
+           undocumented field nobody needs is a note; an undocumented field whose
+           absence makes people hand-work around a feature they already have is a defect.
+
+        ## Extra weight
+        Two categories weigh more than the rest:
+        - **The documentation promises behaviour the code does not have.** Worse
+          than silence — the reader builds on a claim that does not hold and
+          finds out at runtime.
+        - **A security claim with no backing in the code.** A sentence about an
+          allowlist, a validation or a restriction that the code does not
+          enforce is the most serious drift, because somebody picks their level
+          of trust from it. A finding of this kind is a decision for a human —
+          escalate it, do not word it alone.
+
+        ## Guardrails
+        - **Fix nothing.** No commit, PR, issue or page edit. The report is the
+          output; the decision is human.
+        - **Do not reject in bulk.** Every rejection gets a one-sentence reason.
+          "Noise" is not a reason — it is how a real finding gets lost.
+        - **Always admit truncation.** When a pair carries `truncated`, say so in
+          the report. A report that looks complete and is not is worse than none.
+        - **When unsure, put it in Rejected with the reason "uncertain: …".**
+          An inflated confirmed list kills trust in the whole audit.
+    - name: Site Replica
+      slug: site-replica
+      display_name: Replicating a public page as a crew
+      category: CODING
+      description: How the engineering crew hands a page copy across analyst, data, build and test through its shared volume — the file contract each role writes and reads, and the bar the deterministic acceptance check enforces.
+      icon: globe
+      content: |-
+        # Replicating a public page as a crew
+
+        ## When to use
+        When the lead is asked to copy a public web page (for example
+        "copy seznam.cz") and the work is split across the crew.
+
+        ## The contract: one directory, four files
+        Everything lives under `/crew/shared/site-replica/`. The volume is
+        shared inside the crew only — do not expect another crew to see it.
+
+        | Role | Writes | Reads |
+        |---|---|---|
+        | Analyst (Taylor) | `source.html`, `content-map.json`, `content-map.md` | the live page |
+        | Data (Sam) | `extract.py`, `data.json`, tests, README | `source.html` |
+        | Frontend (Robin) | `index.html`, `build-notes.md` | `content-map.json`, `data.json` |
+        | Test (Jamie) | `acceptance-report.md` | everything above |
+        | Lead (Alex) | `acceptance.md` (GO / NO-GO) | Jamie's report |
+
+        `content-map.json` MUST have a top-level `"sections"` array of the
+        visible section names — the acceptance check measures coverage
+        against exactly that list. Keep names as they appear on the page.
+
+        ## The bar (what `replica_check.py` enforces)
+        - `index.html` exists, is under 2 MiB, starts with `<!doctype html>`.
+        - A `<title>`, a `<meta name="viewport">`, exactly one `<h1>`.
+        - **Self-contained**: no `<script>`, no `src`/`href` to another host
+          (relative paths and `data:` URLs are fine).
+        - At least 70 % of the inventoried sections present by name.
+
+        Run it yourself before handing over:
+        `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+        Exit code is 0 either way; read `ok` and the `checks` list.
+
+        ## Guardrails
+        - Fetch only the page you were given, with a timeout, and keep the raw
+          response as evidence. Report a redirect or a block; do not invent content.
+        - Do not copy logos, illustrations or proprietary assets. Text and
+          layout are the replica; brand assets are not.
+        - This is a training replica — say so visibly in the page.
+        - The test engineer reports; the owner fixes. If the input you need is
+          missing, say so and stop.

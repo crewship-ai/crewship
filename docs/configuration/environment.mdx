@@ -398,8 +398,10 @@ These variables are used by the `./dev.sh seed` command:
 | Variable | Description |
 |----------|-------------|
 | `SEED_ANTHROPIC_API_KEY` | Anthropic API key or OAuth token for demo agents |
+| `SEED_GITHUB_TOKEN` | GitHub token (read-only: `actions:read` + repository read) for the demo packs that read `crewship-ai/crewship` — the nightly CI watch and the docs-drift audit. Seeded as a workspace `GH_TOKEN` for every agent and as a crew-scoped credential on each pack crew; without it those packs are seeded but `crewship seed verify` reports them as skipped |
 | `SEED_GOOGLE_EMAIL` | Google email for seed Google credential |
 | `SEED_GOOGLE_PASSWORD` | Google password for seed Google credential |
+| `CREWSHIP_SEED_VERIFY_GITHUB_API` | Base URL `crewship seed verify` reads GitHub from for its independent check of the CI probe (default `https://api.github.com`); the acceptance tests point it at a stub |
 
 ## Container Runtime
 

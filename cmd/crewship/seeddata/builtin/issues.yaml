@@ -1,307 +1,298 @@
+# Real work for a freshly seeded Crewship workspace.
+#
+# Three demo packs (seeddata/packs.go), one crew each. Every issue reads a real
+# public source, names its evidence and its output path, and stays inside its
+# crew — /crew/shared is a per-crew volume, so a hand-off through files only
+# works between agents of the same crew. Each pack exercises one thing the
+# product is for: the CI watch a silent failure, the docs audit a judgement
+# over deterministic candidates with a human decision at the boundary, the
+# site replica a lead delegating across four specialists.
 issues:
-    - crew_slug: engineering
-      assignee: alex
-      title: Coordinate the Harborlight launch page — delegate copy and build
-      description: |-
-        We're shipping a launch page for Harborlight, the crew's demo product
-        (a status dashboard for self-hosted services).
+  # ── ci-watch (ops) ─────────────────────────────────────────────────────
+  - crew_slug: ops
+    assignee: morgan
+    title: Bring the nightly CI watch live and hand me the first real report
+    description: |-
+      The ops crew now owns the nightly CI watch for crewship-ai/crewship. Get
+      it to a first real report and check it yourself before anyone schedules
+      it.
 
-        Plan the work, then delegate two subtasks to your crew:
-        1. Delegate to Sam: write the launch copy — a headline, three feature
-           bullets, and a short FAQ. Save it to /crew/shared/harborlight/copy.md.
-        2. Delegate to Robin: build a single-file landing page at
-           /crew/shared/harborlight/index.html with clean semantic HTML/CSS and
-           placeholder sections for the copy.
+      Delegate to Riley: run the probe as it runs in the routine —
+      `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
+      (GH_TOKEN is in the environment) — save the JSON to
+      /crew/shared/ci-watch/probe.json, then triage every RED or STALE entry
+      with the skills ci-triage and known-flaky and write
+      /crew/shared/ci-watch/report.md ending with the COUNTS line.
 
-        When both subtasks come back, review the results, merge Sam's copy into
-        Robin's page, and post a short summary of what shipped. Everything stays
-        inside the crew workspace — no external services needed.
-      priority: high
-      project: Launch Prep
-      target_state: TODO
-    - crew_slug: engineering
-      assignee: sam
-      title: Rewrite the Harborlight README so a newcomer can follow it
-      description: |-
-        Our README grew by accretion and buries the lede. Rewrite it for clarity
-        and save the result to /crew/shared/harborlight/README.md.
+      When Riley returns, reconcile: regressions + flaky + infra + unclear
+      must equal the probe's `red`, and stale must equal its `stale`. Write
+      /crew/shared/ci-watch/handover.md with the reconciliation, what you
+      would schedule (`ci-nightly-triage` behind the `ci-probe` wake gate, one
+      cron, Europe/Prague) and what you would not, and any flaky signature
+      Riley proposes adding to the known-flaky skill. Do not create the
+      schedule yourself.
+    priority: high
+    project: CI Watch
+    labels: [Delegation, Wake gate, Real source]
+    target_state: TODO
+    comment: >-
+      Demo path: start this issue to watch a LEAD create an assignment,
+      wait for the result, and reconcile it against the deterministic probe.
 
-        Raw source to refactor (keep the facts, cut the filler):
-        ---
-        harborlight is a thing for watching your self hosted stuff, it does
-        dashboards. install: clone the repo then maybe docker compose up but you
-        might need to set PORT first (default 8321) and HL_DB_PATH if you want
-        sqlite somewhere else. there is also HL_POLL_SECONDS (default 30). auth
-        is basic auth, set HL_USER/HL_PASS or it runs open which is bad. probes:
-        http probe checks a url returns 200, tcp probe checks a port, disk probe
-        warns at 90%. alerts go to a webhook you set with HL_WEBHOOK_URL.
-        troubleshooting: if the dashboard is blank check the db path is
-        writable, if probes never fire check HL_POLL_SECONDS isnt 0.
-        ---
-        Structure it as: What it is / Quick start / Configuration (a table) /
-        Probes / Troubleshooting. Finish with a two-line summary of what you
-        changed and why.
-      priority: medium
-      project: Launch Prep
-    - crew_slug: ops
-      assignee: riley
-      title: Research and draft a competitive teardown of self-hosted agent runtimes
-      description: |-
-        Write a one-page competitive teardown at
-        /crew/shared/research/agent-runtimes-teardown.md.
+  - crew_slug: ops
+    assignee: riley
+    title: Run the CI probe against crewship-ai/crewship and reconcile it with GitHub
+    description: |-
+      Run `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
+      and save the output to /crew/shared/ci-watch/probe.json.
 
-        Compare at least three self-hosted approaches to running AI agents
-        (agent frameworks, workflow orchestrators, DIY cron + scripts) on:
-        deployment model, agent persistence between tasks, scheduling and
-        automation, memory, and multi-agent coordination.
+      Then build the same picture independently with `gh api`: list the
+      active workflows, and for each one the latest run with
+      `event=schedule` on main. Write /crew/shared/ci-watch/reconciliation.md
+      with one row per workflow — probe status, your status, and whether they
+      agree. Explain every disagreement (a run that finished between the two
+      reads is a valid explanation; "probably fine" is not). Keep the raw
+      `gh api` responses as evidence. Read only; never re-run a workflow.
+    priority: medium
+    project: CI Watch
+    labels: [Real source]
 
-        Use web research if the container has internet access (curl works). If
-        a source is unreachable, work from what you already know and clearly
-        mark those rows as unverified — do not fabricate citations.
+  - crew_slug: ops
+    assignee: riley
+    title: Explain why a scheduled workflow went stale
+    description: |-
+      Take every entry with status STALE from /crew/shared/ci-watch/probe.json
+      (run the probe first if the file is missing). For each one find the
+      concrete cause, following the skill ci-triage: is the workflow disabled
+      (`gh api repos/crewship-ai/crewship/actions/workflows` — look at
+      `state`), did its cron change or disappear, is the YAML broken, or was
+      it renamed so the probe pairs runs under the old name?
 
-        Close with a comparison table and a three-sentence "so what" about
-        where a crew-based runtime stands out.
-      priority: high
-      project: Research
-      target_state: TODO
-    - crew_slug: ops
-      assignee: morgan
-      title: Draft the Harborlight incident response runbook
-      description: |-
-        Write /crew/shared/runbooks/incident-response.md for operating
-        Harborlight in production:
-        - Severity ladder (SEV1–SEV3) with one concrete example each
-        - First-15-minutes checklist
-        - Escalation and comms rules: who gets woken, what gets posted where,
-          at what cadence
-        - Rollback criteria
-        - A short postmortem template
+      Write /crew/shared/ci-watch/stale-<workflow-slug>.md per workflow with
+      the evidence you checked, the cause, and the one-line recommendation for
+      a human. "It did not run" is not a cause. If there is no stale entry
+      tonight, write /crew/shared/ci-watch/stale-none.md saying what you
+      checked and when.
+    priority: high
+    project: CI Watch
+    labels: [Silent failure, Real source]
+    target_state: TODO
 
-        Keep it under two pages and checklist-heavy — it has to be usable at
-        3 a.m.
-      priority: high
-      project: Reliability
-      target_state: TODO
-    - crew_slug: engineering
-      assignee: sam
-      title: Create a directory tree with sample files
-      description: |-
-        Create the following directory structure under /tmp/demo-project/:
-          /tmp/demo-project/
-            README.md        (with project name and date)
-            src/
-              main.py        (simple hello world)
-              utils.py       (a helper function)
-            tests/
-              test_main.py   (a basic test)
-            data/
-              config.json    (sample config with 3 keys)
+  # ── docs-drift (quality) ───────────────────────────────────────────────
+  - crew_slug: quality
+    assignee: jordan
+    title: Run the docs-drift audit on main and turn it into a fix list
+    description: |-
+      Run the scan as the routine runs it:
+      `GH_TOKEN` is in the environment; `REPO=crewship-ai/crewship BRANCH=main
+      bash /crew/shared/scripts/docs_audit.sh > /crew/shared/docs-drift/scan.json`.
+      The repository is then checked out under /crew/shared/work/crewship.
 
-        Verify all files exist and list the tree.
-      priority: high
-      project: File Operations
-    - crew_slug: engineering
-      assignee: robin
-      title: Generate a CSV report with random data
-      description: |-
-        Create a Python script that generates a CSV file with 50 rows of sample data.
-        Columns: id, name, email, score (random 0-100), status (active/inactive).
-        Save the script as /tmp/generate-data.py and run it.
-        Output CSV should be at /tmp/sample-data.csv.
-        Print the first 5 rows and a summary (total rows, average score).
-      priority: medium
-      project: File Operations
-    - crew_slug: quality
-      assignee: casey
-      title: Write a log parser that extracts errors
-      description: |-
-        Create a bash script /tmp/log-parser.sh that:
-        1. Generates a sample log file /tmp/app.log with 100 lines (mix of INFO, WARN, ERROR)
-        2. Extracts all ERROR lines into /tmp/errors.txt
-        3. Counts occurrences of each log level
-        4. Prints a summary: total lines, errors, warnings, info
+      Delegate to Casey the fact-check of every candidate against the real
+      files (skill docs-drift). When Casey returns, write
+      /crew/shared/docs-drift/fix-list.md: one line per confirmed finding —
+      docs path:line, code path:line, the one-sentence fix — grouped by page,
+      followed by the rejected candidates with their reasons, and ending with
+      the line `COUNTS: candidates=<n> confirmed=<n> rejected=<n>
+      truncated=<n>`. The numbers must match Casey's report and the scan's
+      `total_candidates`. Change nothing in the repository.
+    priority: high
+    project: Docs Drift
+    labels: [Delegation, Real source]
+    target_state: TODO
+    comment: >-
+      Demo path: a LEAD hands deterministic candidates to a worker for
+      judgement and reconciles the counts before publishing.
 
-        Run the script and verify the output.
-      priority: medium
-      project: File Operations
-    - crew_slug: ops
-      assignee: riley
-      title: Fetch and parse the Hacker News front page
-      description: |-
-        Use curl to download https://news.ycombinator.com/ (HTML).
-        Parse the response to extract the top 10 story titles.
-        Save to /tmp/hackernews-top10.txt with format:
-          1. Story title here
-          2. Another story
-          ...
+  - crew_slug: quality
+    assignee: casey
+    title: Fact-check every docs-drift candidate against the file and line it cites
+    description: |-
+      Read /crew/shared/docs-drift/scan.json (if it is missing, run
+      `REPO=crewship-ai/crewship BRANCH=main bash
+      /crew/shared/scripts/docs_audit.sh` first) and the checkout under
+      /crew/shared/work/crewship.
 
-        Note: Use grep/sed/awk for parsing, no external libraries needed.
-      priority: high
-      project: Web Scraping
-    - crew_slug: ops
-      assignee: riley
-      title: Fetch current weather data from wttr.in
-      description: |-
-        Use curl to fetch weather for Prague from wttr.in:
-          curl -s "wttr.in/Prague?format=j1"
+      For every candidate decide CONFIRMED or REJECTED with the skill
+      docs-drift: open the documentation line and grep the code beyond the
+      listed package before calling anything a phantom. Write
+      /crew/shared/docs-drift/review.md with, per confirmed finding, the docs
+      path:line, the code path:line, what the page claims or omits, and why it
+      hurts a reader; per rejected candidate, one sentence.
 
-        Parse the JSON response and extract:
-        - Current temperature
-        - Weather description
-        - Wind speed
-        - Humidity
+      If a confirmed finding is a SECURITY claim — the documentation promises
+      an allowlist, a validation or a restriction the code does not enforce —
+      do not decide alone how to word it: call the sidecar /escalate endpoint
+      with type DECISION, the exact sentence, the code evidence, your
+      recommended wording and a deadline, and continue with the rest while
+      the decision is pending. End the report with the COUNTS line.
+    priority: high
+    project: Docs Drift
+    labels: [Escalation, Real source]
+    target_state: TODO
+    comment: >-
+      Demo path: a worker hits a risk boundary and produces a real
+      human-decision escalation in the Inbox instead of choosing silently.
 
-        Save a human-readable summary to /tmp/weather-prague.txt
-      priority: medium
-      project: Web Scraping
-    - crew_slug: ops
-      assignee: morgan
-      title: Download and analyze a public JSON API
-      description: |-
-        Fetch a list of users from https://jsonplaceholder.typicode.com/users
-        Parse the JSON and create a report /tmp/users-report.txt with:
-        - Total number of users
-        - List of all usernames and cities
-        - Users grouped by company name
+  - crew_slug: quality
+    assignee: casey
+    title: Narrow the widest docs-drift pair so its report becomes readable
+    description: |-
+      The pair docs/manifest/routine.md ↔ internal/pipeline/types.go yields
+      the most candidates because types.go holds the whole DSL and the page
+      only part of it. Using /crew/shared/docs-drift/scan.json and the
+      checkout under /crew/shared/work/crewship, propose a narrower `pkg`
+      list (files, or a smaller set of structs) that keeps the fields the page
+      documents and drops the wire-only ones.
 
-        Use curl + python3 or jq for parsing.
-      priority: low
-      project: Web Scraping
-    - crew_slug: engineering
-      assignee: robin
-      title: Build a single-file interactive changelog page
-      description: |-
-        Create /crew/shared/harborlight/changelog.html — one self-contained
-        HTML file (inline CSS + JS, no external assets) that renders this
-        changelog data with a version filter:
+      Write /crew/shared/docs-drift/narrowing-proposal.md with the proposed
+      map entry, the candidate count before and after (run docs_drift.py
+      directly with `--doc` and `--pkg` to measure), and which dropped
+      candidates were real findings, if any. Do not edit
+      /crew/shared/config/docs_map.json — the map is reviewed like code.
+    priority: medium
+    project: Docs Drift
+    labels: [Acceptance]
 
-        [{"version":"0.3.0","date":"2026-06-24","changes":["disk probe","webhook alerts"]},
-         {"version":"0.2.1","date":"2026-06-10","changes":["fix: tcp probe timeout"]},
-         {"version":"0.2.0","date":"2026-05-28","changes":["tcp probes","basic auth"]}]
+  # ── site-replica (engineering) ─────────────────────────────────────────
+  - crew_slug: engineering
+    assignee: alex
+    title: Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test
+    description: |-
+      Produce a self-contained, accessible static replica of the
+      https://www.seznam.cz home page under /crew/shared/site-replica/. This
+      is a training replica for the team, not a deployment and not a
+      pixel-perfect copy.
 
-        Keep it clean and readable: system font stack, sensible spacing, one
-        subtle accent color. No network access needed — verify by checking the
-        file is well-formed HTML.
-      priority: medium
-      project: Launch Prep
-    - crew_slug: engineering
-      assignee: robin
-      title: Create a bash system info collector
-      description: |-
-        Write /tmp/sysinfo.sh that collects and saves to /tmp/sysinfo.txt:
-        - Hostname and OS info (uname -a)
-        - Current date and uptime
-        - Disk usage (df -h)
-        - Memory usage (free -m or /proc/meminfo)
-        - Running processes count
-        - Network interfaces and IPs
-        - Environment variables count
+      Coordinate the crew, one hand-off at a time:
+      1. Delegate to Taylor: fetch the live page and write
+         /crew/shared/site-replica/content-map.json (with a top-level
+         "sections" array of the visible section names, plus navigation and
+         metadata) and content-map.md.
+      2. Delegate to Sam: from the saved source, build
+         /crew/shared/site-replica/data.json — the structured model of
+         sections, headings, link counts and images — with a small
+         deterministic extraction script and its tests.
+      3. Delegate to Robin: build /crew/shared/site-replica/index.html from
+         the content map and data.json — semantic HTML, local CSS only, no
+         scripts, no external assets, one h1, a viewport meta tag.
+      4. Delegate to Jamie: run
+         `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+         and write the acceptance report.
 
-        Make it executable and run it.
-      priority: medium
-      project: Script Factory
-    - crew_slug: quality
-      assignee: casey
-      title: Write and run a simple test suite in bash
-      description: |-
-        Create /tmp/test-suite.sh — a minimal test framework in bash.
-        Define at least 5 test cases:
-        1. Test that /tmp exists and is writable
-        2. Test that curl is available
-        3. Test that python3 is available
-        4. Test that DNS resolution works (nslookup google.com)
-        5. Test that /etc/hostname is readable
+      When all four return, read Jamie's report, write
+      /crew/shared/site-replica/acceptance.md with GO or NO-GO and the open
+      items with an owner each. Do not mark GO while any check fails.
+    priority: high
+    project: Site Replica
+    labels: [Delegation, Real source, Acceptance]
+    target_state: TODO
+    comment: >-
+      Demo path: say "copy seznam.cz" to Alex, or start this issue, and watch
+      one crew hand work across four specialists through its shared volume.
 
-        Output format: [PASS] or [FAIL] for each test, with a summary at the end.
-        Run the test suite and save results to /tmp/test-results.txt
-      priority: medium
-      project: Script Factory
-    - crew_slug: quality
-      assignee: casey
-      title: Triage raw beta feedback into a prioritized fix list
-      description: |-
-        Beta feedback dump below. Turn it into /crew/shared/quality/beta-triage.md:
-        a markdown table with columns theme | severity (P0–P3) | affected area |
-        suggested owner (Sam = backend, Robin = frontend, Riley = platform),
-        followed by a "Top 3 to fix before launch" section with one-line
-        justifications.
+  - crew_slug: engineering
+    assignee: taylor
+    title: Map the seznam.cz home page — sections, navigation and metadata
+    description: |-
+      Fetch https://www.seznam.cz with curl (follow redirects, 20-second
+      timeout, a plain User-Agent) and save the raw response to
+      /crew/shared/site-replica/source.html together with the final URL and
+      HTTP status.
 
-        Feedback:
-        - "dashboard goes blank after ~a day, have to restart the container"
-        - "love the http probes, wish alerts had a quiet-hours setting"
-        - "setup took 5 minutes, docs were fine"
-        - "basic auth popup on every page load in Safari is annoying"
-        - "disk probe fired at 90% but the box died at 92%, threshold should be configurable"
-        - "webhook alert JSON has no timestamp field??"
-        - "CPU usage creeps up over a week"
-        - "would pay for a hosted version"
-      priority: high
-      project: Launch Prep
-    - crew_slug: ops
-      assignee: casey
-      title: Map container resource limits and environment
-      description: |-
-        Collect container environment info and save to /tmp/container-info.txt:
-        - CPU count (nproc)
-        - Memory total and available (/proc/meminfo)
-        - Disk space (df -h /)
-        - Container ID (hostname or /proc/1/cgroup)
-        - User ID and groups (id)
-        - Network interfaces (ip addr or ifconfig)
-        - Mounted filesystems (mount)
-        - Key environment variables (HOME, PATH, USER)
-      priority: low
-      project: System Info
+      Write /crew/shared/site-replica/content-map.json with: url, fetched_at,
+      title, meta description, a "sections" array of the visible section
+      names in document order, and a "navigation" array of {label, href}.
+      Write the same as prose in content-map.md. Report blocked or redirected
+      URLs instead of inventing content, and make no request outside
+      www.seznam.cz.
+    priority: high
+    project: Site Replica
+    labels: [Real source]
+    target_state: TODO
+
+  - crew_slug: engineering
+    assignee: sam
+    title: Extract the seznam.cz home page into a structured data model
+    description: |-
+      Read /crew/shared/site-replica/source.html (ask Taylor's issue to run
+      first if it is missing) and write
+      /crew/shared/site-replica/extract.py using only the Python standard
+      library. It must produce data.json: sections with their headings, the
+      number of links and images per section, and the navigation entries.
+
+      Run it twice and prove both outputs are byte-identical. Handle a missing
+      or malformed file with a non-zero exit and a useful stderr message. Add
+      unittest coverage that runs without network access and a short README
+      with the exact commands.
+    priority: medium
+    project: Site Replica
+    labels: [Acceptance]
+
+  - crew_slug: engineering
+    assignee: robin
+    title: Build the static replica from the content map
+    description: |-
+      Build /crew/shared/site-replica/index.html from content-map.json and
+      data.json as one self-contained file: semantic HTML, local CSS in a
+      <style> element, no <script>, no external fonts, images or trackers,
+      exactly one h1, a <meta name="viewport"> tag, a visible note that this
+      is a training replica, and every section from the content map present
+      by name. Do not copy logos or illustrations; use accessible text or CSS
+      shapes.
+
+      Before you finish, run
+      `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+      and fix what it reports. Record the checks you made at 390 px and
+      1440 px in /crew/shared/site-replica/build-notes.md.
+    priority: high
+    project: Site Replica
+    labels: [Acceptance]
+    target_state: TODO
+
+  - crew_slug: engineering
+    assignee: jamie
+    title: Run the replica acceptance checks and report PASS or FAIL
+    description: |-
+      Run `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
+      and write /crew/shared/site-replica/acceptance-report.md: the exact
+      command, the JSON output, one line per check with PASS or FAIL and the
+      detail, and a single-line verdict at the end.
+
+      If index.html does not exist, the verdict is NOT BUILT — report it and
+      stop; do not build it yourself. If content-map.json is missing, say
+      that coverage could not be measured. Do not modify the replica.
+    priority: medium
+    project: Site Replica
+    labels: [Acceptance]
+
 labels:
-    - name: Network
-      color: '#3B82F6'
-    - name: Filesystem
-      color: '#22C55E'
-    - name: Scripting
-      color: '#A855F7'
-    - name: Data
-      color: '#F97316'
-    - name: Monitoring
-      color: '#EAB308'
-    - name: Web
-      color: '#06B6D4'
-    - name: Automation
-      color: '#EC4899'
-    - name: Quick
-      color: '#6B7280'
+  - name: Wake gate
+    color: '#3B82F6'
+  - name: Silent failure
+    color: '#EF4444'
+  - name: Delegation
+    color: '#8B5CF6'
+  - name: Escalation
+    color: '#F97316'
+  - name: Real source
+    color: '#EAB308'
+  - name: Acceptance
+    color: '#22C55E'
+
 projects:
-    - name: Launch Prep
-      color: '#EC4899'
-      icon: rocket
-      status: in_progress
-      priority: high
-    - name: Research
-      color: '#8B5CF6'
-      icon: search
-      status: in_progress
-      priority: medium
-    - name: Reliability
-      color: '#EF4444'
-      icon: activity
-      status: in_progress
-      priority: high
-    - name: File Operations
-      color: '#22C55E'
-      icon: file-text
-      status: in_progress
-      priority: high
-    - name: Web Scraping
-      color: '#06B6D4'
-      icon: globe
-      status: in_progress
-      priority: medium
-    - name: Script Factory
-      color: '#A855F7'
-      icon: terminal
-      status: in_progress
-      priority: medium
-    - name: System Info
-      color: '#F97316'
-      icon: cpu
-      status: planned
-      priority: low
+  - name: CI Watch
+    color: '#EF4444'
+    icon: activity
+    status: in_progress
+    priority: high
+  - name: Docs Drift
+    color: '#8B5CF6'
+    icon: file-search
+    status: in_progress
+    priority: high
+  - name: Site Replica
+    color: '#06B6D4'
+    icon: globe
+    status: in_progress
+    priority: high

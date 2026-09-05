@@ -587,7 +587,10 @@ jobs:
           # crew, i.e. three retries could eat 45 minutes on their own).
           for attempt in 1 2 3; do
             echo "--- seed attempt $attempt ---"
-            if ./crewship seed --skip-issues --with-memory \
+            # --with-evals: the eval-* regression routines are opt-in since
+            # the demo packs landed, and test-orchestration.sh drives
+            # eval-extract-emails through `crewship eval scenarios`.
+            if ./crewship seed --skip-issues --with-memory --with-evals \
                  --wait-provision --provision-timeout 420 \
                  --server "$CREWSHIP_SERVER"; then
               exit 0

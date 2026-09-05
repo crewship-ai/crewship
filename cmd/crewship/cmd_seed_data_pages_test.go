@@ -228,7 +228,14 @@ func TestSeedPages_EveryRoutineProducedPanelIsWrittenByItsRoutine(t *testing.T) 
 			}
 			written[tgt] = true
 
-			raw, err := json.Marshal(args["data"])
+			// A demo-pack routine templates its payload from the probe's
+			// output (`{{ steps.red_state.output }}`), which only exists at
+			// run time. The static check substitutes each templated leaf with
+			// a value the schema admits — the first enum value for a `state`,
+			// a plain string elsewhere — so the STRUCTURE is still pinned here
+			// while the runtime value is pinned by the script's own unit tests
+			// and by `crewship seed verify` reading the panel back.
+			raw, err := json.Marshal(sampleTemplatedLeaves(args["data"], ""))
 			if err != nil {
 				t.Errorf("routine %s, %s/%s: data is not JSON-encodable: %v",
 					routine.Slug, pageSlug, panelID, err)
@@ -661,5 +668,43 @@ func decodeAuthored(t *testing.T, page, panel, field string, from any, into any)
 	}
 	if err := yaml.Unmarshal(raw, into); err != nil {
 		t.Errorf("%s/%s: %s is not the shape the parser expects: %v", page, panel, field, err)
+	}
+}
+
+// sampleTemplatedLeaves returns a copy of v in which every string leaf that
+// carries a `{{ … }}` template is replaced by a schema-neutral sample: "ok"
+// under a key named state (the enum every status.v1 item carries), a plain
+// sentence elsewhere. Literal leaves are left alone, so a misspelled literal
+// enum is still caught.
+func sampleTemplatedLeaves(v interface{}, key string) interface{} {
+	switch t := v.(type) {
+	case string:
+		if !strings.Contains(t, "{{") {
+			return t
+		}
+		if key == "state" {
+			return "ok"
+		}
+		return "sample value rendered at run time"
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = sampleTemplatedLeaves(val, k)
+		}
+		return out
+	case []map[string]interface{}:
+		out := make([]interface{}, 0, len(t))
+		for _, item := range t {
+			out = append(out, sampleTemplatedLeaves(item, key))
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(t))
+		for _, item := range t {
+			out = append(out, sampleTemplatedLeaves(item, key))
+		}
+		return out
+	default:
+		return v
 	}
 }

@@ -1,0 +1,145 @@
+---
+title: "Demo packs"
+description: "The three real, repeatable use cases a fresh workspace ships with — what each one watches, what it costs, and how to prove it is right."
+icon: "package"
+stability: experimental
+tag: Experimental
+---
+
+# Demo packs
+
+`crewship seed` populates a fresh workspace with three **packs**. A pack is
+one real use case, run by one crew, that reads a real public source and can
+be run again tomorrow — and checked. Each follows the same shape, which is
+the shape most repeated work has once you look at it: **a cheap probe that
+costs nothing, an expensive judgement only when there is something to judge,
+a human decision before anything irreversible.**
+
+| Pack | Crew | Reads | Probe (tokens) | Report (agent) |
+| --- | --- | --- | --- | --- |
+| **Nightly CI watch** `ci-watch` | ops | the scheduled GitHub Actions workflows of `crewship-ai/crewship` | `ci-probe` — none | `ci-nightly-triage` — Morgan on `claude-sonnet-5` |
+| **Docs drift** `docs-drift` | quality | the repository's documentation and code, at `main` | — (the scan is the first step of the report) | `docs-drift-audit` — Jordan on `claude-sonnet-5` |
+| **Site replica** `site-replica` | engineering | the home page of `www.seznam.cz` | — | `site-replica-audit` — none; the build is issue-driven |
+
+Every pack ships four things to its crew: the **scripts** (under
+`/crew/shared/scripts`, with their own unit tests that `go test` runs), the
+**routines**, a **Page** the report routine writes, and the **issues** that
+walk a person through it. One crew per pack, deliberately: `/crew/shared` is
+a per-crew volume, so a hand-off through files only works inside a crew.
+
+## Nightly CI watch
+
+Scheduled workflows fail differently from PR checks: nothing blocks, nobody
+is paged, and the red sits there. Worse is the failure that is not red at
+all — a cron dropped in a YAML refactor, a workflow GitHub disabled after
+sixty idle days. No green appears and no red either.
+
+`ci-probe` is agentless. It reads the Actions API, classifies every scheduled
+workflow as **RED**, **STALE** (no run for 48 hours), RUNNING or OK, and
+returns `wake`. Scheduled as the wake gate of `ci-nightly-triage`, it costs
+nothing on a green night:
+
+```bash
+crewship routine schedules create --slug ci-nightly-triage \
+  --name "ci-nightly-watch" --cron "0 9 * * *" --timezone "Europe/Prague" \
+  --wake-slug ci-probe
+```
+
+When it wakes, Morgan downloads the failed jobs' logs, classifies each red
+run as REGRESSION / FLAKY / INFRA / UNCLEAR by the `ci-triage` and
+`known-flaky` skills, finds the concrete cause of each stale workflow, and
+posts one inbox notification whose last line is
+`COUNTS: regressions=… flaky=… infra=… stale=… unclear=…`. Those numbers
+must agree with the probe's, and `crewship seed verify` checks that they do.
+
+The Page `ci-watch` shows the probe's verdict per failure class and the
+coverage line; the full triage with links is the notification.
+
+## Docs drift
+
+`docs_drift.py` compares the YAML/JSON tags of Go structs with the
+identifiers in backticks and YAML blocks of a documentation page, in both
+directions: a **phantom** is a key the page describes and the code does not
+have; a **gap** is a field the code has and the page never mentions. The
+pairs are curated in `config/docs_map.json` on the quality crew's shared
+volume — keep them narrow, a whole package against one page is unreadable.
+
+Candidates are not findings. Jordan reads the real files from the checkout
+under `/crew/shared/work`, confirms or rejects every candidate with a path
+and a line, admits any truncation, and ends with
+`COUNTS: candidates=… confirmed=… rejected=… truncated=…`. `verify`
+reconciles the candidate count with the scan and, given a local checkout,
+checks that every cited path exists at the scanned commit.
+
+Casey's issue carries the human boundary: a confirmed finding that is a
+**security claim** — an allowlist or validation the docs promise and the
+code does not enforce — is escalated as a DECISION, not worded alone.
+
+## Site replica
+
+Say "copy seznam.cz" to Alex, or start the lead issue. Alex delegates inside
+the crew, one hand-off at a time: Taylor inventories the live page into
+`content-map.json` (its `sections` array is the contract), Sam extracts the
+structured `data.json` with a small tested script, Robin builds a
+self-contained `index.html` — no scripts, no external assets, one `h1`, a
+viewport tag — and Jamie runs the acceptance check and reports PASS, FAIL or
+NOT BUILT. Alex writes GO or NO-GO.
+
+`replica_check.py` is the mechanical bar: it exists, it is a document, it is
+self-contained, it covers at least 70 % of the inventoried sections. Whether
+it *looks* right stays with the person who opens the file from the crew's
+files. `site-replica-audit` publishes the verdict to the Page and the inbox;
+until somebody builds the replica it reports NOT BUILT, and `verify` counts
+that as skipped rather than green.
+
+## Credentials
+
+The packs that read GitHub need a token. Put a **read-only** one
+(`actions:read` and repository read; the packs never write) in `.env.local`
+next to the Anthropic key:
+
+```bash
+SEED_ANTHROPIC_API_KEY=sk-ant-…
+SEED_GITHUB_TOKEN=github_pat_…
+```
+
+The seed then creates the workspace `GH_TOKEN` every agent already knew, and
+additionally a **crew-scoped** `CLI_TOKEN` on each pack crew, bound to that
+crew's `GH_TOKEN` slot. Crew scope is not decoration: a routine's
+`{{ secrets.CLI_TOKEN }}` is resolved by type, preferring the author crew's
+own credential and otherwise the newest — and the demo vault's inert GitHub
+accounts are created after the real one. Without the crew scope the newest
+inert token would win and every GitHub call would fail quietly.
+
+Without `SEED_GITHUB_TOKEN` the packs are still seeded — crew, scripts,
+routines, Page, issues — and reported as **skipped** by `verify`, never as
+green.
+
+A re-seed over an existing workspace refreshes the stored value from the
+variable, so a rotated token lands on the next `crewship seed` rather than
+leaving last month's token in place under the same name.
+
+## Verifying
+
+```bash
+crewship seed verify                      # every pack
+crewship seed verify --pack ci-watch      # one pack
+crewship seed verify --skip-report        # files and probes only, no tokens
+crewship seed verify --format json --strict
+```
+
+See [`crewship seed`](/cli/seed#crewship-seed-verify) for the row-by-row
+contract. In short: scripts byte-identical to the seed, the probe against an
+independent read of the source, the agent's counts against the probe, no
+secret in the report, the notification in the inbox, the panels written by
+that run.
+
+## Where the packs came from
+
+The three packs are the demo-sized versions of the templates kept in the
+private `crewship-manifests` catalogue, whose market research found the same
+two shapes of pain in every segment it looked at: **clocks nobody watches**
+(a deadline running from a moment nobody recorded) and **meters nobody
+watches** (something stops, and silence looks like calm). A wake gate is not
+an optimisation there; it is the condition under which anybody lets an agent
+run at all.

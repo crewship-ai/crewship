@@ -117,7 +117,7 @@ func TestSeedRoutineSlice_TransportErrorCountsFailed(t *testing.T) {
 
 func TestSeedRoutines_RequiresWorkspaceID(t *testing.T) {
 	client := cli.NewClient("http://127.0.0.1:0", "tok", "")
-	err := seedRoutines(context.Background(), client, map[string]string{})
+	err := seedRoutines(context.Background(), client, map[string]string{}, true)
 	if err == nil || !strings.Contains(err.Error(), "workspace_id not set") {
 		t.Errorf("expected workspace guard, got %v", err)
 	}
@@ -140,7 +140,7 @@ func TestSeedRoutines_SeedsBothBatches(t *testing.T) {
 	}
 
 	stderr, err := captureStderrCov(t, func() error {
-		return seedRoutines(context.Background(), client, crewIDs)
+		return seedRoutines(context.Background(), client, crewIDs, true)
 	})
 	if err != nil {
 		t.Fatalf("seedRoutines: %v", err)
@@ -151,6 +151,31 @@ func TestSeedRoutines_SeedsBothBatches(t *testing.T) {
 	wantCalls := len(seeddata.Routines) + len(seeddata.EvalScenarios)
 	if got := len(s.CallsFor("POST", covPipelineSavePath)); got != wantCalls {
 		t.Errorf("save calls = %d, want %d", got, wantCalls)
+	}
+}
+
+func TestSeedRoutines_DefaultSkipsEvalFixtures(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnPost(covPipelineSavePath, clitest.JSONResponse(201, map[string]string{"id": "p1"}))
+	client := cli.NewClient(s.URL(), "tok", covWorkspaceIDCli10)
+
+	crewIDs := map[string]string{}
+	for _, routine := range seeddata.Routines {
+		crewIDs[routine.CrewSlug] = covCrewIDCli10
+	}
+
+	stderr, err := captureStderrCov(t, func() error {
+		return seedRoutines(context.Background(), client, crewIDs, false)
+	})
+	if err != nil {
+		t.Fatalf("seedRoutines: %v", err)
+	}
+	if !strings.Contains(stderr, "Skipping eval scenarios") {
+		t.Errorf("missing opt-in guidance: %q", stderr)
+	}
+	if got := len(s.CallsFor("POST", covPipelineSavePath)); got != len(seeddata.Routines) {
+		t.Errorf("save calls = %d, want only %d curated routines", got, len(seeddata.Routines))
 	}
 }
 

@@ -1,0 +1,261 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Real-world demo: crews prepare a public-site refresh while a token-zero
+# probe watches GitHub, a human gate protects a release decision, issues drive
+# delegation and escalation, and a routine publishes to a Page.
+#
+#   crewship apply --file release-operations.workspace.yaml --from-env --dry-run
+#   crewship apply --file release-operations.workspace.yaml --from-env
+
+apiVersion: crewship/v1
+kind: Workspace
+metadata:
+  name: Release Operations Demo
+  slug: release-operations-demo
+  description: Website delivery, quality gates, and dependency incident response.
+  preferred_language: en
+  version: 1.0.0
+spec:
+  credentials:
+    - env: ANTHROPIC_API_KEY
+      provider: ANTHROPIC
+      type: API_KEY
+      label: Anthropic API key
+  crews:
+    - slug: release-demo-engineering
+      name: Release Engineering
+      description: Audits and rebuilds the public website.
+      icon: terminal
+      color: blue
+      devcontainer:
+        image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+        network_mode: restricted
+        allowed_domains: [crewship.ai, docs.crewship.ai]
+      agents:
+        - slug: release-demo-alex
+          name: Alex
+          role_title: Engineering Lead
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+          tool_profile: FULL
+          memory_enabled: true
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            Coordinate delivery. Delegate content analysis to Sam and UI work
+            to Robin, wait for evidence, review the integrated result, and ask
+            a human only when access or a real product decision blocks progress.
+        - slug: release-demo-sam
+          name: Sam
+          role_title: Content and Backend Engineer
+          agent_role: AGENT
+          cli_adapter: CLAUDE_CODE
+          llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+          tool_profile: CODING
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            Inspect real source material, preserve evidence, and produce
+            deterministic structured output. Never invent unavailable content.
+        - slug: release-demo-robin
+          name: Robin
+          role_title: Frontend Engineer
+          agent_role: AGENT
+          cli_adapter: CLAUDE_CODE
+          llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+          tool_profile: CODING
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            Build accessible, responsive interfaces with semantic HTML and
+            local assets. Verify keyboard use and mobile and desktop layouts.
+    - slug: release-demo-ops
+      name: Release Reliability
+      description: Watches external release dependencies and controls changes.
+      icon: server
+      color: red
+      devcontainer:
+        image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+        network_mode: restricted
+        allowed_domains: [www.githubstatus.com]
+      agents:
+        - slug: release-demo-morgan
+          name: Morgan
+          role_title: Incident Commander
+          agent_role: LEAD
+          cli_adapter: CLAUDE_CODE
+          llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+          tool_profile: FULL
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            Lead with severity and evidence. Never turn a provider incident
+            into a production claim without proof. Require human approval for
+            release pauses and production changes.
+        - slug: release-demo-riley
+          name: Riley
+          role_title: Platform Engineer
+          agent_role: AGENT
+          cli_adapter: CLAUDE_CODE
+          llm: { provider: ANTHROPIC, model: claude-haiku-4-5 }
+          tool_profile: CODING
+          env_refs: [ANTHROPIC_API_KEY]
+          prompt: |
+            Collect reproducible read-only evidence. If evidence is missing or
+            a risky decision is required, use a DECISION escalation instead of
+            silently guessing or changing production.
+
+---
+apiVersion: crewship/v1
+kind: Routine
+metadata:
+  name: Publish GitHub dependency status
+  slug: release-demo-github-status
+  labels: { crew: release-demo-ops }
+spec:
+  dsl_version: "1.0"
+  description: Read GitHub's public status API and publish the observed state to the control room.
+  estimated_cost_usd: 0
+  egress_targets: [www.githubstatus.com]
+  inputs:
+    - name: url
+      type: string
+      required: false
+      default: https://www.githubstatus.com/api/v2/status.json
+  steps:
+    - id: fetch
+      type: http
+      http:
+        method: GET
+        url: "{{ inputs.url }}"
+        headers: { User-Agent: Crewship-Release-Demo/1.0 }
+        max_response_bytes: 20000
+        success_codes: [200]
+      timeout_seconds: 20
+    - id: description
+      type: transform
+      needs: [fetch]
+      transform:
+        input: "{{ steps.fetch.output }}"
+        expression: .status.description
+    - id: publish
+      type: crewship
+      action: page.write
+      needs: [description]
+      args:
+        page: release-demo-control-room
+        panel: github-status
+        data:
+          verdict: GitHub dependency status
+          blocks:
+            - kind: paragraph
+              text: "Provider observation: {{ steps.description.output }}"
+            - kind: list
+              text: A provider incident may block source, CI, or release workflows; it does not prove Crewship is unavailable.
+
+---
+apiVersion: crewship/v1
+kind: Routine
+metadata:
+  name: Release pause approval
+  slug: release-demo-pause-approval
+  labels: { crew: release-demo-ops }
+spec:
+  dsl_version: "1.0"
+  description: Draft a release-pause plan and wait for an explicit human decision.
+  estimated_cost_usd: 0.01
+  credentials_required:
+    - { type: API_KEY, scope: any }
+  inputs:
+    - name: evidence
+      type: string
+      required: false
+      default: GitHub reports an unresolved incident affecting a release dependency.
+  steps:
+    - id: plan
+      type: agent_run
+      agent_slug: release-demo-morgan
+      complexity: fast
+      prompt: |
+        Draft a reversible release-pause plan grounded only in this evidence:
+        {{ inputs.evidence }}
+        Include impact, owner, review time, resume criteria, and rollback.
+      validation:
+        min_length: 80
+        must_not_contain: ["API_KEY=", "Bearer "]
+    - id: approval
+      type: wait
+      needs: [plan]
+      wait:
+        kind: approval
+        approval_title: Approve release pause
+        approval_prompt: "{{ steps.plan.output }}"
+      timeout_seconds: 86400
+    - id: record
+      type: notify
+      needs: [approval]
+      notify:
+        to: workspace
+        title: Release pause decision recorded
+        category: routines.completed
+        body: The release-pause plan was explicitly approved. Review the run before taking action.
+
+---
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  name: Release Control Room
+  slug: release-demo-control-room
+  description: Live dependency evidence and CI state for a release decision.
+spec:
+  panels:
+    - id: github-status
+      schema: narrative.v1
+      title: GitHub dependency
+      icon: network
+      owner: crew/release-demo-ops
+      producer: routine/release-demo-github-status
+      sla: 2h
+      span: 8
+    - id: release-candidate
+      schema: status.v1
+      title: Release candidate
+      icon: deploy
+      owner: crew/release-demo-engineering
+      producer: webhook/ci
+      sla: 2h
+      span: 4
+
+---
+apiVersion: crewship/v1
+kind: Issue
+metadata:
+  name: Rebuild the Crewship home page with delegated specialists
+  slug: release-demo-site-rebuild
+spec:
+  crew_slug: release-demo-engineering
+  title: Rebuild the Crewship home page with delegated specialists
+  description: |
+    Use https://crewship.ai as the source for a safe training replica.
+    Delegate the content inventory to Sam and the accessible implementation to
+    Robin. Wait for both results, integrate them under /crew/shared/site, and
+    record mobile, desktop, and keyboard verification. Do not deploy it.
+  priority: high
+  status: todo
+  assignee_slug: release-demo-alex
+
+---
+apiVersion: crewship/v1
+kind: Issue
+metadata:
+  name: Decide whether a GitHub incident should pause the release
+  slug: release-demo-dependency-decision
+spec:
+  crew_slug: release-demo-ops
+  title: Decide whether a GitHub incident should pause the release
+  description: |
+    Run release-demo-github-status and preserve its run as evidence. If GitHub
+    reports an unresolved incident, assess release impact and use a DECISION
+    escalation with a recommendation and deadline. A provider incident alone
+    is not authority to pause the release or change production.
+  priority: high
+  status: todo
+  assignee_slug: release-demo-riley
+  routine_slug: release-demo-github-status

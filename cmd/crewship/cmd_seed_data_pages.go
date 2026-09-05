@@ -129,6 +129,15 @@ func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID stri
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// A demo pack whose requirement is unmet (no SEED_GITHUB_TOKEN, say)
+		// is still fired: a failed run record is a better artefact than a
+		// panel that never says why it is empty, and it is the same rule a
+		// failed push follows below. The line says what the record will say.
+		if p, ok := seeddata.PackForRoutine(slug); ok {
+			if runnable, reason := packRunnable(p); !runnable {
+				fmt.Fprintf(os.Stderr, "  routine %s: %s — the run will fail until it is (pack %s)\n", slug, reason, p.Slug)
+			}
+		}
 		if err := seedRunRoutine(client, wsID, slug); err != nil {
 			// Same rule as a failed push: report and carry on. A demo missing
 			// one page beats a seed that aborted after creating half a
@@ -192,12 +201,18 @@ func seedPanelProducer(panel seeddata.PagePanelDef) (pages.ProducerKind, string)
 }
 
 // seedRunRoutine triggers one run through the same endpoint the UI's Run button
-// uses. An empty body is deliberate: every input on a seeded routine carries a
+// uses. No inputs, deliberately: every input on a seeded routine carries a
 // default, and passing none is what a demoer pressing Run would send.
+//
+// The run is PARKED (delay_seconds) rather than started inline: the inline
+// path holds the run inside this HTTP request, and the CLI client's timeout
+// would cancel the server's work mid-step — fatal for a producer with an
+// agent step that takes minutes. The dispatcher picks a parked run up
+// outside any request.
 func seedRunRoutine(client *cli.Client, wsID, slug string) error {
 	resp, err := client.Post(
 		fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", wsID, slug),
-		map[string]any{})
+		map[string]any{"delay_seconds": 1})
 	if err != nil {
 		return err
 	}

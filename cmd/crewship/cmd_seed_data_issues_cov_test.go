@@ -133,10 +133,10 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 	if patched == 0 {
 		t.Error("expected at least one PATCH (transition or assignment)")
 	}
-	// The hardcoded relation defs reference 4 catalogue titles; with every
+	// The hardcoded relation defs reference 7 catalogue title pairs; with every
 	// issue created they all resolve.
-	if relations != 4 {
-		t.Errorf("relation POSTs = %d, want 4", relations)
+	if relations != 7 {
+		t.Errorf("relation POSTs = %d, want 7", relations)
 	}
 
 	// Spot-check an assignment body shape on one PATCH.

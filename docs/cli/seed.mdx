@@ -1,6 +1,6 @@
 ---
 title: "Seed"
-description: "Provision a complete demo workspace — crews, agents, credentials, integrations, routines, and sample issues — through the REST API."
+description: "Provision a coherent release-operations demo — crews, agents, credentials, routines, Pages, and executable issues — through the REST API."
 icon: "leaf"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,9 @@ tag: Experimental
 
 # crewship seed
 
-Replaces the old `prisma/seed.ts` script. Creates a full demo environment — admin user, workspace, four connected crews, agents with system prompts, credentials, integrations, routines, schedules, and sample issues — entirely through the REST API so business logic (validation, encryption, audit logging) is exercised end-to-end.
+Replaces the old `prisma/seed.ts` script. Creates a demo environment — admin user, workspace, connected crews, agents with system prompts, credentials, integrations, routines, Pages, and executable issues — entirely through the REST API so business logic (validation, encryption, audit logging) is exercised end-to-end.
+
+The content is organised as three **demo packs** ([guide](/guides/demo-packs)), each a real, repeatable use case run by one crew: the **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (a token-zero probe as the wake gate, agent triage only when something is red or silently stale), the **docs-drift audit** of that repository's documentation against its code, and the **site replica** in which a lead delegates the copy of `www.seznam.cz` across four specialists. Every pack ships its deterministic scripts to the crew's shared volume, its routines, its Page, and the issues that walk a person through it — and every one of them can be run again and checked with [`crewship seed verify`](#crewship-seed-verify). Synthetic model-regression routines stay out of the product demo (`--with-evals`).
 
 ```bash
 crewship seed [flags]
@@ -23,6 +25,7 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
 | `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
+| `--with-evals` | `false` | Also install the synthetic model-regression routine catalogue. Intended for eval development, not the normal product demo. |
 | `--password <pw>` | `password123` | Admin password used by bootstrap. The default is the dev convention `password123` — override in any non-local environment. |
 | `--smoke-test` | `false` | After seeding, send a test prompt to each agent to verify end-to-end execution. Implies `--wait-provision`. |
 | `--smoke-timeout <s>` | `60` | Per-agent timeout (seconds) for the smoke test. |
@@ -110,6 +113,49 @@ crewship seed --test-backup
 
 Implies `--wait-provision`. Picks the first provisioned crew (preferring `research` because its container is small and dependency-light), runs a backup/restore round-trip via the admin self-test endpoint, and fails the command if the canary doesn't verify. Use as a CI guard for the backup pipeline.
 
+## crewship seed verify
+
+Runs every demo pack end to end against the live workspace and checks the
+agents' output against the deterministic probes. This is the acceptance
+test for the seed: a pack is only worth shipping if it can be run again
+tomorrow and be shown to be right.
+
+```bash
+crewship seed verify [flags]
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--pack <slug>` | all packs | Verify only these packs (repeatable): `ci-watch`, `docs-drift`, `site-replica`. |
+| `--timeout <duration>` | `30m` | Maximum wait per routine run. |
+| `--strict` | `false` | Treat a skipped pack as a failure — for a scheduled run that must not quietly pass. |
+| `--skip-report` | `false` | Check files and probes only; do not run the agent report routines (no tokens spent). |
+| `--repo-dir <path>` | current directory if it is a git checkout | Local checkout used to fact-check the paths the docs-drift review cites, at the commit the scan read. |
+
+For each pack it reports one row per step:
+
+| Step | What passes |
+| --- | --- |
+| `crew` | The pack's crew exists. |
+| `files` | Every delivered script is byte-identical to the one in the binary. A crew running an older script is a failure, not a warning — the apply path reports success even when a runtime-owned file could not be overwritten. |
+| `env` | The pack's requirement (`SEED_GITHUB_TOKEN`) is present. Otherwise the pack is **SKIP** with the reason and nothing runs. |
+| `probe` | The token-zero probe ran and its verdict matches an independent read of the same source — for the CI watch, GitHub's Actions API queried from the machine running `verify`, not from the container. |
+| `report` | The agent's report ends with a `COUNTS:` line whose numbers reconcile with the probe (regressions + flaky + infra + unclear = red runs; stale = stale), contains nothing that looks like a token, and — for the site replica — the acceptance check passed. A replica nobody has built yet is a **SKIP**. |
+| `fact-check` | (docs-drift) every `path:line` a confirmed finding cites exists at the scanned commit in the local checkout; **SKIP** without one. |
+| `inbox` | The routine's notification landed after the verification started. |
+| `page` | Every panel of the pack's Page carries this run's id. |
+
+Exit status is 1 when any check fails; with `--strict`, when any is skipped
+too. `--format json` prints the rows and the totals for a script to read.
+
+```bash
+crewship seed verify --pack ci-watch --timeout 20m
+crewship seed verify --format json --strict
+```
+
+The probe comparison is only as independent as its token: `verify` reads
+GitHub with `SEED_GITHUB_TOKEN` (or `GH_TOKEN`) from its own environment.
+
 ## Seed phases (in order)
 
 | Phase | What it does | Failure mode |
@@ -119,15 +165,18 @@ Implies `--wait-provision`. Picks the first provisioned crew (preferring `resear
 | 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | **Fatal if none land**; individual failures are logged and the rest of the fixture continues |
 | 2. Crews + members | Creates four crews and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
+| 2c. Demo pack files | Delivers each pack's scripts and config to its crew's shared volume (`shared/scripts/…`, `shared/config/…`) — before provisioning, while the host can still write the tree | Non-fatal; `seed verify` compares the delivered bytes with the seed |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
 | 3. Agents | Inserts agents with system prompts, then a follow-up `PATCH` for the columns `POST /api/v1/agents` does not model — suggested questions and ask forms (see below) | Fatal |
 | 3b. Agent memory (if `--with-memory`) | Pre-seeds each agent's memory tiers | Non-fatal (logs and continues) |
 | 4–5. Skills + assignments | Workspace skills + per-agent skill bindings | Fatal |
 | 6–7. Credentials + assignments | Demo API keys + per-agent credential bindings | Fatal |
+| 7b. Pack credentials | With `SEED_GITHUB_TOKEN`: a crew-scoped GitHub `CLI_TOKEN` per GitHub-backed pack, bound to that crew's `GH_TOKEN` slot — crew scope is what makes `{{ secrets.CLI_TOKEN }}` in the pack's routines resolve to the real token rather than the newest inert demo account | Non-fatal; without the variable nothing is created and the pack is reported as skipped |
 | 8–9. Integrations + bindings | MCP servers, GitHub/Slack stubs | Fatal |
 | 9b. Routines | Starter routine library + eval scenarios (deterministic recipes, a morning briefing, an agentless feed-watch probe and its wake-gated change report) | Non-fatal |
 | 9b. Schedules | Demo crons so `/activity` has data on first load — including a wake-gated feed watch whose agentless probe runs token-zero every 15 minutes | Non-fatal |
-| 10. Issues | Sample issues, projects, labels (unless `--skip-issues`) | Fatal |
+| 10. Issues | Pack issues with their projects and labels (unless `--skip-issues`) | Fatal |
+| 10c. Pages | Page specs, demo payloads, then one run of every routine a panel names as producer — fired even when a pack's requirement is unmet, so the failed run record says why the panel is empty | Fatal on spec, non-fatal per run |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready | Fatal in sync mode, deferred otherwise |
 | 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |
 | 11. Summary | Prints `Seed complete: N crews, M agents` | — |
