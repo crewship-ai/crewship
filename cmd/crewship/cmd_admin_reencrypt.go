@@ -21,8 +21,8 @@ var adminReencryptCmd = &cobra.Command{
 	Use:   "reencrypt",
 	Short: "Re-encrypt all stored secrets to the current master key version (admin)",
 	Long: `Re-encrypt every stored secret envelope (credentials, OAuth tokens,
-webhook secrets, Composio keys, PKCE verifiers, credential escalations)
-to the server's CURRENT encryption key version.
+webhook secrets, Composio keys, PKCE verifiers) to the server's CURRENT
+encryption key version.
 
 This is step 3 of a master-key rotation:
 
