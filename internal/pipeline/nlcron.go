@@ -146,11 +146,11 @@ func parseTimeOfDay(s string) (int, int, error) {
 	}
 	return hour, minute, nil
 }
+
 // MaxNextOccurrences bounds how many future fire times NextOccurrences will
 // compute in one call, whatever the caller asks for. Previews want five;
 // nothing legitimate wants more than a year of daily fires.
 const MaxNextOccurrences = 366
-
 
 // NextOccurrences computes the next n fire times for a cron expression in
 // the given IANA timezone, starting strictly after `from`. Shared by the
