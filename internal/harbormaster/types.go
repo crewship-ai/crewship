@@ -116,6 +116,15 @@ type Request struct {
 	// — and therefore never serialized: a client that read it would be
 	// reading a value the database does not have.
 	TimeoutSecs int `json:"-"`
+	// RoutineVersion is §9.8's one addition to the decision-receipt columns
+	// (PRD-ISSUES-AND-ROUTINES-2026, work package B10, #2364): "was it the
+	// SAME version that then ran?" Zero means this approval has nothing to
+	// do with a routine's authored definition — most approvals_queue rows
+	// (a credential use, a hire) — and is persisted as SQL NULL, not 0, so
+	// it never reads as "version zero of a real routine". Set only by a
+	// caller that resolved a concrete pipeline_versions.version, e.g.
+	// internal/api/internal_routines.go's autonomy-gated schedule creation.
+	RoutineVersion int `json:"routine_version,omitempty"`
 }
 
 // Decision is what Gate returns to the caller. Pending=true means the

@@ -239,6 +239,12 @@ type autonomyHold struct {
 	BodyMD       string
 	Reason       string
 	RequestedBy  string
+	// RoutineVersion is §9.8's decision-receipt addition (B10, #2364):
+	// stamped onto the approvals_queue row when this hold concerns a
+	// routine's authored definition (today: internal_routines.go's
+	// autonomy-gated schedule creation). Zero for every other target
+	// (agent/crew/credential holds) — see nullableRoutineVersion.
+	RoutineVersion int
 }
 
 // Targets understood by applyAutonomyGateDecisionTx. The string lands in the
@@ -289,15 +295,16 @@ func writeAutonomyHold(
 		"policy_decision": string(d.Decision),
 	}
 	approvalID, err := harbormaster.Enqueue(ctx, db, j, harbormaster.Request{
-		WorkspaceID: h.WorkspaceID,
-		CrewID:      h.CrewID,
-		AgentID:     h.AgentID,
-		MissionID:   h.MissionID,
-		RequestedBy: requestedBy,
-		Kind:        harbormaster.KindAutonomyGate,
-		Reason:      h.Reason,
-		Payload:     payload,
-		TimeoutSecs: autonomyHoldTimeoutSecs,
+		WorkspaceID:    h.WorkspaceID,
+		CrewID:         h.CrewID,
+		AgentID:        h.AgentID,
+		MissionID:      h.MissionID,
+		RequestedBy:    requestedBy,
+		Kind:           harbormaster.KindAutonomyGate,
+		Reason:         h.Reason,
+		Payload:        payload,
+		TimeoutSecs:    autonomyHoldTimeoutSecs,
+		RoutineVersion: h.RoutineVersion,
 	})
 	if err != nil {
 		return "", fmt.Errorf("autonomy hold: enqueue approval: %w", err)

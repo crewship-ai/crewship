@@ -38,11 +38,22 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     priority            TEXT NOT NULL,
     blocking            INTEGER NOT NULL DEFAULT 0,
     payload_json        TEXT NOT NULL DEFAULT '{}',
+    thread_key          TEXT,
+    attention_class     TEXT,
+    actions_json        TEXT NOT NULL DEFAULT '[]',
+    read_at             TEXT,
+    read_by_user_id     TEXT,
     resolved_at         TEXT,
     resolved_by_user_id TEXT,
     resolved_action     TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
+);
+CREATE TABLE IF NOT EXISTS inbox_item_reads (
+    inbox_item_id TEXT NOT NULL,
+    user_id       TEXT NOT NULL,
+    read_at       TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    PRIMARY KEY (inbox_item_id, user_id)
 );`); err != nil {
 		t.Fatalf("trust gate schema: %v", err)
 	}

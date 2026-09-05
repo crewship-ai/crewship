@@ -35,7 +35,8 @@ CREATE TABLE approvals_queue (
     decided_at TEXT,
     decision_comment TEXT,
     timeout_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    routine_version INTEGER
 );
 CREATE INDEX idx_approvals_status ON approvals_queue(status, timeout_at);
 CREATE INDEX idx_approvals_ws ON approvals_queue(workspace_id, created_at DESC);

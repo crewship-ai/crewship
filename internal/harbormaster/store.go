@@ -62,12 +62,12 @@ func List(ctx context.Context, db *sql.DB, workspaceID string, statusFilter Stat
 	)
 	if statusFilter == "" {
 		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
-				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at
+				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at, routine_version
 			FROM approvals_queue WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 		args = []any{workspaceID, limit, offset}
 	} else {
 		q = `SELECT id, workspace_id, crew_id, agent_id, mission_id, requested_by, kind, reason,
-				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at
+				payload, status, decided_by, decided_at, decision_comment, timeout_at, created_at, routine_version
 			FROM approvals_queue WHERE workspace_id = ? AND status = ?
 			ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 		args = []any{workspaceID, string(statusFilter), limit, offset}
@@ -123,12 +123,12 @@ func getTx(ctx context.Context, db DBTX, workspaceID, id string) (*Request, erro
 		// sweepers that need cross-workspace visibility.
 		row = db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id,
 				requested_by, kind, reason, payload, status, decided_by, decided_at,
-				decision_comment, timeout_at, created_at
+				decision_comment, timeout_at, created_at, routine_version
 			FROM approvals_queue WHERE id = ?`, id)
 	} else {
 		row = db.QueryRowContext(ctx, `SELECT id, workspace_id, crew_id, agent_id, mission_id,
 				requested_by, kind, reason, payload, status, decided_by, decided_at,
-				decision_comment, timeout_at, created_at
+				decision_comment, timeout_at, created_at, routine_version
 			FROM approvals_queue WHERE workspace_id = ? AND id = ?`, workspaceID, id)
 	}
 	req, err := scanRequest(row)
@@ -153,6 +153,7 @@ func scanRequest(r rowScanner) (Request, error) {
 		req                                                            Request
 		crew, agent, mission, decidedBy, decidedAt, comment, timeoutAt sql.NullString
 		payloadStr, kindStr, statusStr, createdAt                      string
+		routineVersion                                                 sql.NullInt64
 	)
 	if err := r.Scan(
 		&req.ID,
@@ -170,8 +171,12 @@ func scanRequest(r rowScanner) (Request, error) {
 		&comment,
 		&timeoutAt,
 		&createdAt,
+		&routineVersion,
 	); err != nil {
 		return Request{}, err
+	}
+	if routineVersion.Valid {
+		req.RoutineVersion = int(routineVersion.Int64)
 	}
 	req.CrewID = crew.String
 	req.AgentID = agent.String
@@ -230,6 +235,18 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableRoutineVersion is nullable's int counterpart for
+// Request.RoutineVersion (§9.8, B10, #2364): zero means "not a routine
+// decision", persisted as SQL NULL rather than the number 0, which is a
+// legitimate version-adjacent-looking value a reader must never mistake for
+// "version zero of a real routine".
+func nullableRoutineVersion(v int) any {
+	if v <= 0 {
+		return nil
+	}
+	return v
 }
 
 // newRequestID returns a short collision-resistant identifier for a queue

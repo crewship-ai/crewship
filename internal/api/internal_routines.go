@@ -27,6 +27,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -71,6 +72,42 @@ type RoutineInternalAdapter struct {
 // public router already instantiated).
 func NewRoutineInternalAdapter(pipes *PipelineHandler) *RoutineInternalAdapter {
 	return &RoutineInternalAdapter{pipes: pipes}
+}
+
+// scheduleRoutineVersion resolves the pipeline_versions.version an
+// autonomy-held schedule was created against — §9.8's routine_version
+// receipt (B10, #2364): "was it the same version that then ran?" The
+// schedule pins a version at creation (target_pipeline_version, NULL =
+// HEAD, matching pipelines.head_version — see migrate_consts_v83), so this
+// reads whichever of the two is authoritative. Best-effort: 0 (persisted as
+// NULL, see nullableRoutineVersion) on any lookup failure — an autonomy
+// hold that cannot name its routine's version still gets raised; it simply
+// answers the "which version" question with nothing rather than failing
+// the whole creation.
+func (h *RoutineInternalAdapter) scheduleRoutineVersion(ctx context.Context, scheduleID string) int {
+	if h.pipes == nil || h.pipes.db == nil || scheduleID == "" {
+		return 0
+	}
+	var (
+		pipelineID    string
+		pinnedVersion sql.NullInt64
+		headVersion   sql.NullInt64
+	)
+	err := h.pipes.db.QueryRowContext(ctx, `
+		SELECT s.target_pipeline_id, s.target_pipeline_version, p.head_version
+		  FROM pipeline_schedules s
+		  JOIN pipelines p ON p.id = s.target_pipeline_id
+		 WHERE s.id = ?`, scheduleID).Scan(&pipelineID, &pinnedVersion, &headVersion)
+	if err != nil {
+		return 0
+	}
+	if pinnedVersion.Valid {
+		return int(pinnedVersion.Int64)
+	}
+	if headVersion.Valid {
+		return int(headVersion.Int64)
+	}
+	return 0
 }
 
 // SetAutonomyGate wires the shared per-crew autonomy resolver and the
@@ -216,7 +253,8 @@ func (h *RoutineInternalAdapter) CreateSchedule(w http.ResponseWriter, r *http.R
 					"An agent in a `%s` crew created the cron schedule **%s**.\n\n"+
 						"It is created **disabled** and will not fire until approved.",
 					gate.Level, name),
-				Reason: "agent created routine schedule " + name,
+				Reason:         "agent created routine schedule " + name,
+				RoutineVersion: h.scheduleRoutineVersion(r.Context(), scheduleID),
 			})
 		if herr != nil {
 			h.pipes.logger.Error("internal create schedule: autonomy hold failed — compensating delete",

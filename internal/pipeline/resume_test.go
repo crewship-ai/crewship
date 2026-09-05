@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS pipeline_waitpoints (
     decided_by_user_id TEXT,
     timeout_at         TEXT NOT NULL,
     created_at         TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    decided_at         TEXT
+    decided_at         TEXT,
+    routine_version    INTEGER
 );`); err != nil {
 		t.Fatalf("resume schema: %v", err)
 	}
