@@ -104,11 +104,21 @@ const (
 // going to answer at all inside the 5s budget.
 const hardStopSignalTimeout = 1 * time.Second
 
+// hardStopProbeTimeout bounds one tmuxPanePIDs (list-panes) attempt — a
+// pure read, tried up to twice (one retry on a transient failure) BEFORE
+// the TERM/KILL sequence below, so it is deliberately shorter than
+// hardStopSignalTimeout: a full-length timeout on a read attempted twice
+// would eat into the 5s budget the signal sequence itself needs.
+const hardStopProbeTimeout = 300 * time.Millisecond
+
 // hardStopGrace is how long, after each signal, hardStopOne waits for the
 // exec to actually stop running before escalating. TERM then (if needed)
 // KILL, each with its own send + grace: worst case
-// 2×(hardStopSignalTimeout+hardStopGrace) ≈ 4s, inside the PRD's 5s bound
-// with margin for the DB/journal writes around it.
+// 2×hardStopProbeTimeout (list-panes, plus one retry) +
+// 2×(hardStopSignalTimeout+hardStopGrace) (kill-session/TERM-wait,
+// kill-KILL/wait) ≈ 0.6s + 4s = 4.6s, inside the PRD's 5s bound — tighter
+// than before tmuxPanePIDs existed, but still with margin for the
+// DB/journal writes around it.
 const hardStopGrace = 1 * time.Second
 
 // hardStopPollInterval is how often hardStopOne re-checks ExecInspect while
@@ -163,7 +173,13 @@ func (h *IssueHandler) hardStopRunningTarget(ctx context.Context, wsID string, t
 	}
 	agentSlug, err := h.assignmentAgentSlug(ctx, t.ID)
 	if err != nil {
+		// A real DB error here (busy/locked, connection dropped) is not
+		// "the assignee isn't an agent" — record it honestly as ERROR
+		// rather than UNSUPPORTED, which would misattribute a transient
+		// failure to a configuration gap.
 		h.logger.Warn("hard stop: resolve agent slug", "error", err, "assignment_id", t.ID)
+		h.recordHardStopResult(ctx, wsID, t.ID, containerID, execID, "", hardStopError)
+		return
 	}
 	h.hardStopOne(ctx, wsID, t.ID, containerID, execID, agentSlug)
 }
@@ -273,14 +289,44 @@ func (h *IssueHandler) hardStopOne(ctx context.Context, wsID, assignmentID, cont
 
 // killTmuxSession is the container-visible-identity TERM-then-KILL
 // sequence, factored out of hardStopOne so it can be read (and tested) as
-// one linear decision: end the session, wait, escalate, wait, give up.
+// one linear decision: confirm the session exists, end it, wait, escalate,
+// wait, give up.
 //
 // Pane pids are captured BEFORE kill-session runs: tmux discards a
 // session's own bookkeeping — list-panes included — the moment
 // kill-session succeeds, so escalation would have nothing left to query if
-// it waited until after.
+// it waited until after. That same pre-check doubles as proof the session
+// exists at all: not every RUNNING exec has one (setupTmuxExec's
+// stdin-delivery bypass for oversized prompts, or a container without tmux
+// installed, both fall back to a bare exec — internal/orchestrator/
+// orchestrator_run.go's buildExecCommand) — sending kill-session and
+// burning a full grace period against a session that provably does not
+// exist would waste most of the 5s budget for a foregone ERROR.
 func (h *IssueHandler) killTmuxSession(ctx context.Context, containerID, execID, session string) string {
-	panePIDs := h.tmuxPanePIDs(ctx, containerID, session)
+	panePIDs, sessionFound, err := h.tmuxPanePIDs(ctx, containerID, session)
+	if err != nil {
+		// One retry: a single list-panes exec timing out under daemon load
+		// should not be treated the same as a confirmed-absent session, nor
+		// permanently disable escalation for this run.
+		panePIDs, sessionFound, err = h.tmuxPanePIDs(ctx, containerID, session)
+	}
+	if err == nil && !sessionFound {
+		// Confirmed absent, not merely unresolved — this run was never
+		// tmux-wrapped, or its session ended between the Tier 1 stamp and
+		// here. Recheck the exec directly to report which.
+		if running, _, inspectErr := h.container.ExecInspect(ctx, execID); inspectErr == nil && !running {
+			return hardStopAlreadyExited
+		}
+		h.logger.Warn("hard stop: no tmux session for a running exec, cannot signal by session name", "session", session)
+		return hardStopNotFound
+	}
+	if err != nil {
+		// Still unresolved after the retry — proceed on a best-effort basis
+		// (kill-session may still reach it) rather than giving up outright,
+		// but this is exactly the "unknown" case sessionFound's doc warns
+		// about: not a confirmed absence.
+		h.logger.Warn("hard stop: could not confirm tmux session before kill-session", "error", err, "session", session)
+	}
 
 	if !h.runShortExec(ctx, containerID, provider.TmuxKillSessionCmd(session)) {
 		return hardStopError
@@ -308,29 +354,46 @@ func (h *IssueHandler) killTmuxSession(ctx context.Context, containerID, execID,
 // tmuxPanePIDs lists session's pane pids by running
 // provider.TmuxListPanePIDsCmd as a new exec into containerID — container-
 // local pids, read from INSIDE the container the run lives in, never a
-// host pid. A failure here (exec error, unreadable output, no panes) yields
-// nil; killTmuxSession still attempts kill-session itself and simply has
-// nothing to escalate to if that alone does not end the run.
-func (h *IssueHandler) tmuxPanePIDs(ctx context.Context, containerID, session string) []int {
-	sigCtx, cancel := context.WithTimeout(ctx, hardStopSignalTimeout)
+// host pid.
+//
+// Three-way return distinguishes "confirmed absent" from "unknown", which
+// killTmuxSession's callers must not conflate: err != nil means the exec
+// itself could not be run or timed out (hardStopProbeTimeout is
+// deliberately short — see its doc) — the session's existence is UNKNOWN,
+// not disproven. err == nil, sessionFound == false means the exec ran to
+// completion and tmux reported a non-zero exit (list-panes' own
+// "can't find session" error, in practice) — the session is CONFIRMED
+// absent. err == nil, sessionFound == true means pids holds every pane pid
+// tmux reported for a session that positively exists.
+func (h *IssueHandler) tmuxPanePIDs(ctx context.Context, containerID, session string) (pids []int, sessionFound bool, err error) {
+	// One shared deadline for the whole attempt (create + drain + wait for
+	// exit), not one hardStopProbeTimeout per call — otherwise a single
+	// attempt could cost up to 2×hardStopProbeTimeout and the retry above
+	// would blow past the budget hardStopGrace's doc computes.
+	probeCtx, cancel := context.WithTimeout(ctx, hardStopProbeTimeout)
 	defer cancel()
-	res, err := h.container.Exec(sigCtx, provider.ExecConfig{
+	res, execErr := h.container.Exec(probeCtx, provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         provider.TmuxListPanePIDsCmd(session),
 	})
-	if err != nil {
-		h.logger.Warn("hard stop: list tmux panes failed", "error", err, "session", session)
-		return nil
+	if execErr != nil {
+		return nil, false, fmt.Errorf("list tmux panes: %w", execErr)
 	}
 	out, _ := io.ReadAll(res.Reader)
 	_ = res.Reader.Close()
-	var pids []int
+	code, waitErr := provider.WaitExecExit(probeCtx, h.container, res.ExecID, hardStopProbeTimeout)
+	if waitErr != nil {
+		return nil, false, fmt.Errorf("list tmux panes: %w", waitErr)
+	}
+	if code != 0 {
+		return nil, false, nil
+	}
 	for _, field := range strings.Fields(string(out)) {
 		if pid, err := strconv.Atoi(field); err == nil && pid > 0 {
 			pids = append(pids, pid)
 		}
 	}
-	return pids
+	return pids, true, nil
 }
 
 // runShortExec runs cmd as a brand-new exec into containerID — never a

@@ -440,8 +440,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}&
   its own tmux session ended — `tmux kill-session -t agent-{slug}`, run as
   a brand-new exec into the *same* container the run lives in — escalating
   to a direct `kill -KILL` on that session's own pane process group if the
-  run hasn't exited within a short grace period. Every agent run owns a
-  tmux session named for its own agent slug (the same session a web
+  run hasn't exited within a short grace period. Most agent runs own a
+  tmux session named for their own agent slug (the same session a web
   terminal attaches to), a **container-visible identity**: ending it ends
   exactly that agent's process tree. This never runs a container-level
   kill and never signals by OS pid: the crew's container is shared by
@@ -450,16 +450,20 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}&
   it — [#2365](https://github.com/crewship-ai/crewship/issues/2365) found
   exactly that bug in the pre-fix mechanism, live on dev1. A sibling
   agent's own session is a different name and is never touched, by
-  construction. Bounded to a few seconds. What was signalled and the
-  result (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`,
-  `NOT_FOUND`, `UNSUPPORTED`, or `ERROR`) is written to
-  `assignments.hard_stop_result` (and `hard_stop_at`) and to an
-  `assignment.hard_stopped` journal entry — independent of, and in
-  addition to, the Tier 1 `CANCELLED` terminal write, which always lands
-  regardless of what the signal achieved. `UNSUPPORTED` means there is no
-  container-visible identity to signal by (no container configured, or the
-  assignee is not an agent); the run is still `CANCELLED` by Tier 1 either
-  way.
+  construction. A run whose exec bypassed tmux entirely (an oversized
+  prompt delivered via stdin, or a container without tmux installed) has
+  no session to end; Tier 2 confirms that first (listing the session's
+  pane pids before touching it) and reports `NOT_FOUND` immediately rather
+  than sending a signal that would reach nothing. Bounded to a few
+  seconds. What was signalled and the result (`TERMINATED_TERM`,
+  `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`, `UNSUPPORTED`, or
+  `ERROR`) is written to `assignments.hard_stop_result` (and
+  `hard_stop_at`) and to an `assignment.hard_stopped` journal entry —
+  independent of, and in addition to, the Tier 1 `CANCELLED` terminal
+  write, which always lands regardless of what the signal achieved.
+  `UNSUPPORTED` means there is no container-visible identity to signal by
+  at all (no container configured, or the assignee is not an agent); the
+  run is still `CANCELLED` by Tier 1 either way.
 
   An [`@mention`](/guides/issue-mentions) can dispatch a run on an issue
   that was never started (`BACKLOG`/`TODO`) — that run is attributed to

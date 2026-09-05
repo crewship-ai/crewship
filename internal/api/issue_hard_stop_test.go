@@ -227,6 +227,66 @@ func TestIssue_Stop_Hard_TerminatesTargetNotSibling(t *testing.T) {
 	}
 }
 
+// TestIssue_Stop_Hard_NoTmuxSession_ReportsNotFoundQuickly covers a RUNNING
+// exec that was never tmux-wrapped at all -- setupTmuxExec's stdin-delivery
+// bypass for an oversized prompt, or a container without tmux installed,
+// both fall back to a bare exec (internal/orchestrator/orchestrator_run.go's
+// buildExecCommand). Tier 2 must not send kill-session and burn a full
+// grace period against a session that provably does not exist: the
+// pre-kill-session list-panes probe already proves that, so this must come
+// back fast with an honest NOT_FOUND, not ERROR after ~4s.
+func TestIssue_Stop_Hard_NoTmuxSession_ReportsNotFoundQuickly(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	fp := providertest.NewFakeProvider()
+	h.SetContainer(fp)
+	const containerID = "crew-shared-container"
+
+	// Plain HoldCmd, deliberately NOT registered under any tmux session --
+	// the fake's stand-in for the bare (non-tmux) exec path.
+	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: containerID, Cmd: providertest.HoldCmd})
+	if err != nil {
+		t.Fatalf("start exec: %v", err)
+	}
+	t.Cleanup(fp.Unblock)
+
+	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-50", "IN_PROGRESS")
+	seedRunningAssignmentWithExec(t, h.db, "a-no-session", wsID, missionID, leadID, workerID, containerID, execRes.ExecID)
+
+	req := httptest.NewRequest("POST", "/?hard=true", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-50")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	h.Stop(rr, req)
+	elapsed := time.Since(start)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	// The whole point of the pre-kill-session probe: confirm absence and
+	// give up immediately, rather than sending kill-session anyway and
+	// waiting out hardStopGrace (1s) for a session that was never there.
+	if elapsed >= 2*time.Second {
+		t.Errorf("hard stop with no tmux session took %s, want well under the full TERM/KILL grace budget", elapsed)
+	}
+
+	var hardResult string
+	if err := h.db.QueryRow(`SELECT COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-no-session'`).Scan(&hardResult); err != nil {
+		t.Fatalf("query a-no-session: %v", err)
+	}
+	if hardResult != hardStopNotFound {
+		t.Errorf("hard_stop_result = %q, want %q -- a confirmed-absent tmux session must be reported honestly, not ERROR", hardResult, hardStopNotFound)
+	}
+
+	// The exec itself was never touched -- nothing here could have reached
+	// it, and nothing should have tried.
+	if running, _, err := fp.ExecInspect(context.Background(), execRes.ExecID); err != nil || !running {
+		t.Errorf("exec was signalled despite having no tmux session: running=%v err=%v", running, err)
+	}
+}
+
 // TestIssue_Stop_Hard_UnsupportedProviderStillCancels proves the B6/Tier-1
 // ordering guarantee: a provider that cannot resolve a pid (no container
 // wired at all, here) must not prevent the Tier 1 stamp — the run still
