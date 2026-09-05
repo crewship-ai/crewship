@@ -300,11 +300,24 @@ func (c *Client) trySend(data []byte) (sent bool) {
 	}
 }
 
-// agentBusyEventType is the chat-event name for a busy rejection (the chat
+// AgentBusyEventType is the chat-event name for a busy rejection (the chat
 // already has a live agent run — ErrAgentBusy). Rendered by the frontend's
 // agent_busy case, which reuses the error-bubble path and settles the
 // sender's composer state; delivered sender-only, never broadcast.
-const agentBusyEventType = "agent_busy"
+//
+// Exported because the CLI is the second client that has to recognise this
+// frame: the busy branch below deliberately emits no terminal frame, so a
+// client that does not know this name waits forever for a `done` that is
+// never coming. `crewship run` and `crewship ask` did exactly that until
+// #2416. Every Go reader — three CLI event loops and their tests — now
+// names this constant rather than repeating the literal, so the string
+// cannot drift out from under one of them without breaking the build.
+//
+// The frontend still carries its own copy (hooks/use-chat.ts, in the
+// ChatEventType union and the switch that routes it to the error bubble);
+// nothing ties the two languages together, so a rename here means editing
+// that file too.
+const AgentBusyEventType = "agent_busy"
 
 // agentBusyNotice is the user-facing text of the sender-only busy rejection.
 const agentBusyNotice = "The agent is busy with another run right now. Please wait for it to finish."
@@ -569,7 +582,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 					Type:    "chat_event",
 					Channel: channel,
 					Payload: ChatEvent{
-						Type:     agentBusyEventType,
+						Type:     AgentBusyEventType,
 						Content:  agentBusyNotice,
 						Metadata: map[string]any{"chat_id": payload.ChatID},
 					},

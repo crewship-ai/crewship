@@ -7,9 +7,12 @@ package main
 // loop; callers keep their own presentation/error mapping.
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
 // chatEventSource is the subset of *cli.WSClient the collector reads from —
@@ -19,16 +22,25 @@ type chatEventSource interface {
 }
 
 // collectResult is the terminal state of one agent conversation stream.
-// Exactly one of the four terminal causes is set: GotDone (clean finish),
+// Exactly one of the five terminal causes is set: GotDone (clean finish),
 // StreamErr (agent emitted an "error" event; sanitized on capture),
-// ReadErr (socket-level failure), or TimedOut (no terminal event within
-// the deadline). Text holds everything accumulated up to that point.
+// ReadErr (socket-level failure), TimedOut (no terminal event within the
+// deadline), or Busy (the send bounced off the per-agent run lock and
+// nothing ran). Text holds everything accumulated up to that point.
 type collectResult struct {
 	Text      string
 	StreamErr string
 	GotDone   bool
 	ReadErr   error
 	TimedOut  bool
+	// Busy is set when the server bounced the send off the per-agent run
+	// lock (#2269): the agent already had a live run, this message was
+	// never persisted and nothing ran. Distinct from StreamErr because the
+	// remedy is different — a busy bounce is "retry when the agent frees
+	// up", not "the agent failed" — and distinct from TimedOut because the
+	// answer arrived immediately. BusyNotice carries the server's wording.
+	Busy       bool
+	BusyNotice string
 }
 
 // collectAgentStream drains chat events from an already-subscribed source
@@ -104,6 +116,30 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				res.GotDone = true
 				res.Text = string(fullText)
 				return res
+			case wsproto.AgentBusyEventType:
+				// A busy bounce is terminal FOR THIS SEND and the server
+				// deliberately sends no `done` after it (internal/ws/
+				// client.go: a terminal frame here would travel the shared
+				// session channel and finalize the winning sender's live
+				// turn). Returning is therefore not an optimisation — with
+				// timeout 0, which is what `crewship run --no-stream`
+				// passes, not returning means blocking forever. Verified on
+				// dev3 2026-09-05: two concurrent runs against one agent sat
+				// silent for 200 s and exited only on the caller's timeout.
+				res.Busy = true
+				res.BusyNotice = sanitizeTerminal(event.Content)
+				res.Text = string(fullText)
+				return res
+			default:
+				// Unknown event type. Silence here is exactly how the
+				// agent_busy hang survived — a frame arrived, nothing
+				// matched it, and the loop went back to waiting for a
+				// terminal event the server had already decided not to
+				// send. Under -v, name what came in.
+				if flagVerbose {
+					fmt.Fprintf(os.Stderr, "%s[unhandled event]%s type=%q\n",
+						cli.Gray, cli.Reset, event.Type)
+				}
 			}
 		}
 	}

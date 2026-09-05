@@ -511,6 +511,11 @@ func askAgentText(client *cli.Client, agentID, prompt string, maxTurns int, time
 		return "", fmt.Errorf("agent did not finish within %s (stalled container?) — raise --agent-timeout or check the agent", timeout)
 	case res.ReadErr != nil:
 		return "", fmt.Errorf("agent stream closed early: %w", res.ReadErr)
+	case res.Busy:
+		// Bounced off the per-agent run lock (#2269): nothing ran, so this
+		// is not an agent error and the iterate step should say so — the
+		// remedy is to retry once the agent's live run finishes.
+		return "", fmt.Errorf("agent busy: %s", res.BusyNotice)
 	case res.StreamErr != "":
 		return "", fmt.Errorf("agent error: %s", res.StreamErr)
 	}
