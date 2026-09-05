@@ -177,7 +177,7 @@ event, plus two more on a status transition:
 
 | Key | Value |
 |---|---|
-| `action` | What happened, from a closed set: `status_changed`, `priority_changed`, `review_approved`, `review_changes_requested`, `parent_changed`, `relation_added`, `description_changed`, `attachment_added`, `attachment_removed`, `code_link_added`, `code_link_removed`, `task_completed`, `task_failed`. This is the key to write predicates against. |
+| `action` | What happened, from a closed set: `status_changed`, `priority_changed`, `review_approved`, `review_changes_requested`, `parent_changed`, `relation_added`, `description_changed`, `attachment_added`, `attachment_removed`, `code_link_added`, `code_link_removed`, `task_completed`, `task_failed`, `inbox_acted`. This is the key to write predicates against. |
 | `details` | Human-readable prose, e.g. `"BACKLOG → TODO"`. For display and for `{{ event.payload.details }}` — **not** for matching: it is a sentence and would break the day someone rewords it. |
 | `from` | The status before the change. Only on `action=status_changed`. |
 | `to` | The status after it. Only on `action=status_changed`. |

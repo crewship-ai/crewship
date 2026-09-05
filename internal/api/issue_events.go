@@ -105,6 +105,13 @@ const (
 	// enumeration is new, the strings are not.
 	actionCodeLinkAdded   issueAction = "code_link_added"
 	actionCodeLinkRemoved issueAction = "code_link_removed"
+
+	// actionInboxActed is the receipt a person leaves when they act on a
+	// run_needs_human inbox card (B15, #2389): who, which action, which
+	// card, the session's agent_version, and for an answer the delivery
+	// and run it produced. Details carry the sentence; the payload the
+	// fields.
+	actionInboxActed issueAction = "inbox_acted"
 )
 
 // knownIssueActions is the enumeration as data, so a test can assert that
@@ -129,6 +136,7 @@ var knownIssueActions = []issueAction{
 	actionAttachmentRemoved,
 	actionCodeLinkAdded,
 	actionCodeLinkRemoved,
+	actionInboxActed,
 }
 
 // issueEvent is one auditable thing that happened to one issue.

@@ -171,9 +171,9 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		Payload:        payload,
 		ThreadKey:      threadKey,
 		AttentionClass: inbox.AttentionInput,
-		Actions: []inbox.Action{
-			{ID: "take_over", Label: "Take over", Effect: "Opens the issue for you to continue", Irreversible: false},
-		},
+		// The kind's closed vocabulary; Act (inbox_act.go, B15) performs
+		// them.
+		Actions: runNeedsHumanActions,
 	}); err != nil {
 		h.logger.Warn("create outcome inbox item", "error", err, "assignment_id", assignmentID)
 	}

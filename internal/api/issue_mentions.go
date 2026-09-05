@@ -447,6 +447,45 @@ func (m mentionRecorder) deliverAndDispatch(
 // and hand that agent a copy of this workspace's comment. The ids are already
 // constrained to `[A-Za-z0-9_-]{1,64}` by the parser, so they are safe to
 // place in the IN list as bound parameters — which they are anyway.
+// deliverToAgent is record() for ONE named agent with no @-parsing: the
+// caller already knows which session the input belongs to (B15's answer on
+// a run_needs_human card — §10.5 "the exact session that asked"). It logs
+// the same `mentioned` event, creates the same delivery and goes through the
+// same dispatch door, so the exactly-once and one-turn rules apply
+// unchanged. Returns the dispatch state, the run it produced (empty when
+// queued/refused/failed), the delivery id, and the failure detail.
+func (m mentionRecorder) deliverToAgent(ctx context.Context, mc mentionContext, agentID string) (state, assignmentID, deliveryID, detail string) {
+	resolved, err := m.resolveMentionedAgents(ctx, mc.WorkspaceID, []string{agentID})
+	if err != nil {
+		m.logf("resolve answer target", mc, err)
+		return mentionDispatchFailed, "", "", err.Error()
+	}
+	if len(resolved) == 0 {
+		return mentionDispatchFailed, "", "", "agent " + agentID + " not found in workspace"
+	}
+	mention := resolved[0]
+
+	deliveriesEnabled, ffErr := featureflags.IsEnabled(ctx, m.db, mc.WorkspaceID, issueDeliveriesFlagKey)
+	if ffErr != nil {
+		m.logf("check issue_deliveries flag", mc, ffErr)
+	}
+	eventID, written := m.events.logEvent(ctx, issueEvent{
+		MissionID: mc.MissionID, ActorType: mc.AuthorType, ActorID: mc.AuthorID,
+		Action: actionMentioned, Details: mention.AgentID,
+	})
+	state, assignmentID, detail = m.deliverAndDispatch(ctx, mc, mention, eventID, written.Seq, deliveriesEnabled)
+	if err := m.persist(ctx, mc, mention, eventID, state, assignmentID, detail); err != nil {
+		m.logf("persist answer delivery", mc, err)
+	}
+	m.notifyMentionUndelivered(ctx, mc, mention, state, detail)
+	if eventID != "" {
+		_ = m.db.QueryRowContext(ctx,
+			`SELECT id FROM mission_comment_mentions WHERE event_id = ? AND agent_id = ?`,
+			eventID, mention.AgentID).Scan(&deliveryID)
+	}
+	return state, assignmentID, deliveryID, detail
+}
+
 func (m mentionRecorder) resolveMentionedAgents(ctx context.Context, workspaceID string, ids []string) ([]resolvedMention, error) {
 	if len(ids) == 0 || workspaceID == "" {
 		return nil, nil

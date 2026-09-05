@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -515,6 +517,91 @@ Examples:
 	},
 }
 
+// inboxActCmd — POST /api/v1/inbox/{id}/act (B15, #2389): perform one of a
+// run_needs_human card's actions. `answer` is the one that resumes the run:
+// the input becomes a comment on the issue and is delivered to the agent's
+// session as its next delivery; the run continues from its checkpoint.
+var inboxActCmd = &cobra.Command{
+	Use:   "act <id> <answer|take_over|dismiss>",
+	Short: "Act on a NEEDS_HUMAN card: answer the agent (resumes the run), take over, or dismiss",
+	Long: `Act on a run_needs_human inbox card — the card a run raises when it
+reports outcome NEEDS_HUMAN (blocked on a decision, input or credential).
+
+  answer     --input is required. Your text is posted as a comment on the
+             issue and delivered to the SAME agent session that asked; the
+             run resumes from its checkpoint with your answer as the next
+             delivery. One delivery, one run.
+  take_over  You continue the work yourself. The agent's session goes idle.
+  dismiss    No further work now. The agent's session goes idle.
+
+Every action writes a receipt on the issue's event log (inbox_acted: who,
+which action, the session's agent_version, and for answer the delivery
+and run it produced) and resolves the card in place — the same thread,
+no new card. Acting twice is refused (409).
+
+Only run_needs_human cards accept actions here. Waitpoints and
+escalations are decided through their own commands ('crewship routine
+waitpoints approve', 'crewship escalation resolve').
+
+Examples:
+  crewship inbox act <id> answer --input "Use the staging bucket, not prod"
+  crewship inbox act <id> take_over
+  crewship inbox act <id> dismiss`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		input, _ := cmd.Flags().GetString("input")
+		client := newAPIClient()
+		path := "/api/v1/inbox/" + url.PathEscape(args[0]) + "/act?workspace_id=" +
+			url.QueryEscape(cli.ResolveWorkspace(flagWorkspace, cliCfg))
+		resp, err := client.Post(path, map[string]string{"action": args[1], "input": input})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			ID      string `json:"id"`
+			State   string `json:"state"`
+			Action  string `json:"action"`
+			Receipt struct {
+				DeliveryID    string `json:"delivery_id"`
+				RunID         string `json:"run_id"`
+				DispatchState string `json:"dispatch_state"`
+				Seq           int    `json:"seq"`
+				AgentVersion  *int64 `json:"agent_version"`
+			} `json:"receipt"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		if cli.ResolveFormat(flagFormat, cliCfg) == "json" {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(out)
+		}
+		switch out.Action {
+		case "answer":
+			run := out.Receipt.RunID
+			if run == "" {
+				run = "(queued behind the live run)"
+			}
+			cli.PrintSuccess(fmt.Sprintf("Answered %s → delivered to the agent's session (%s), run %s; receipt seq %d",
+				out.ID, out.Receipt.DispatchState, run, out.Receipt.Seq))
+		default:
+			cli.PrintSuccess(fmt.Sprintf("%s on %s → card resolved, session idle; receipt seq %d", out.Action, out.ID, out.Receipt.Seq))
+		}
+		return nil
+	},
+}
+
 // patchInboxState issues a PATCH to /api/v1/inbox/{id} with the new
 // state + optional resolved_action. Shared by all three transition
 // subcommands so the request shape stays in one place.
@@ -777,6 +864,8 @@ func init() {
 	inboxCmd.AddCommand(inboxUnreadCmd)
 	inboxCmd.AddCommand(inboxGetCmd)
 	inboxCmd.AddCommand(inboxResolveCmd)
+	inboxActCmd.Flags().String("input", "", "the answer to deliver to the agent (required for answer)")
+	inboxCmd.AddCommand(inboxActCmd)
 	inboxCmd.AddCommand(inboxArchiveCmd)
 	inboxCmd.AddCommand(inboxCountCmd)
 	inboxCmd.AddCommand(inboxBulkCmd)

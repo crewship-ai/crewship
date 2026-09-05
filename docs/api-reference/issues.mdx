@@ -667,7 +667,7 @@ Returns the activity log for an issue (status changes, assignments, reviews). Li
 ]
 ```
 
-**Activity Actions:** `created`, `status_changed`, `assignee_changed`, `priority_changed`, `description_changed`, `parent_changed`, `relation_added`, `code_link_added`, `code_link_removed`, `review_approved`, `review_changes_requested`, `task_completed`, `task_failed`
+**Activity Actions:** `created`, `status_changed`, `assignee_changed`, `priority_changed`, `description_changed`, `parent_changed`, `relation_added`, `code_link_added`, `code_link_removed`, `review_approved`, `review_changes_requested`, `task_completed`, `task_failed`, `inbox_acted` (a person acted on the issue's NEEDS_HUMAN inbox card — the receipt names the action, the card, the session's `agent_version` and, for an answer, the delivery and run it produced; see [Acting on a card](/api-reference/inbox#acting-on-a-card))
 
 `description_changed` records that the description was rewritten, never the
 text itself — `details` carries only lengths (`description updated (128 → 342
