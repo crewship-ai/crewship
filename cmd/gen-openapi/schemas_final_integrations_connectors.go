@@ -35,11 +35,17 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"owner_user_id": str(), "categories": array(str()), "min_priority": str(), "secret": str(),
 	})
 	participant := object(map[string]any{"user_id": str(), "email": str(), "full_name": str(), "role": str(), "joined_at": str()})
+	inboxAction := object(map[string]any{
+		"id": str(), "label": str(), "effect": str(), "irreversible": boolean(),
+	}, "id", "label")
 	inboxItem := object(map[string]any{
 		"id": str(), "workspace_id": str(), "kind": str(), "source_id": str(), "target_user_id": str(), "source_missing": map[string]any{"type": "boolean"}, "target_role": str(),
 		"title": str(), "body_md": str(), "sender_type": str(), "sender_id": str(), "sender_name": str(),
 		"avatar_seed": str(), "avatar_style": str(), "avatar_url": str(), "state": str(), "priority": str(), "blocking": boolean(),
-		"payload": anyObject(), "read_at": str(), "resolved_at": str(), "resolved_by_user_id": str(), "resolved_action": str(),
+		"payload": anyObject(),
+		// §12 attention contract (B10, #2364) — see internal/inbox.WriteThreaded.
+		"thread_key": str(), "attention_class": str(), "actions": array(inboxAction),
+		"read_at": str(), "resolved_at": str(), "resolved_by_user_id": str(), "resolved_action": str(),
 		"created_at": str(), "updated_at": str(), "second_approver_required": boolean(), "second_approver_by_workspace": boolean(),
 		"second_approver_by_tier": boolean(), "security_level_label": str(), "evidence": anyObject(),
 	},

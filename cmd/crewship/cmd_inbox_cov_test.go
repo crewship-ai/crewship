@@ -589,3 +589,84 @@ func TestInboxList_Offset_IsForwardedVerbatim(t *testing.T) {
 		t.Errorf("offset not forwarded: %q", seen[0])
 	}
 }
+
+// TestInboxListRunE_JSON_CarriesAttentionContract pins B10's (#2364)
+// promise that the CLI is a full mirror of the API: thread_key/
+// attention_class/actions must round-trip through `--format json`, not
+// just render in the web UI. Before this test the CLI's response struct
+// silently dropped all three (the struct names every JSON field it
+// forwards; a field absent there never reaches --format json even though
+// the server sent it).
+func TestInboxListRunE_JSON_CarriesAttentionContract(t *testing.T) {
+	stub := covSetupCli5(t)
+	flagFormat = "json"
+	stub.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{
+		"rows": []map[string]any{
+			{
+				"id": "inb_thread_1", "kind": "escalation", "title": "Routine proposed for review",
+				"state": "unread", "priority": "high", "created_at": "2026-09-05T09:00:00Z",
+				"thread_key": "routine:ws1:daily-triage", "attention_class": "decision",
+				"actions": []map[string]any{
+					{"id": "approve_routine", "label": "Approve", "effect": "Activates the routine", "irreversible": false},
+					{"id": "reject_routine", "label": "Reject", "irreversible": true},
+				},
+			},
+		},
+		"count": 1, "unread_count": 1,
+	}))
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = inboxListCmd.RunE(inboxListCmd, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var rows []map[string]any
+	if jsonErr := json.Unmarshal([]byte(out), &rows); jsonErr != nil {
+		t.Fatalf("output is not a JSON array: %v\n%s", jsonErr, out)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v", rows)
+	}
+	if rows[0]["thread_key"] != "routine:ws1:daily-triage" {
+		t.Errorf("thread_key dropped: %v", rows[0])
+	}
+	if rows[0]["attention_class"] != "decision" {
+		t.Errorf("attention_class dropped: %v", rows[0])
+	}
+	actions, ok := rows[0]["actions"].([]any)
+	if !ok || len(actions) != 2 {
+		t.Fatalf("actions dropped or wrong shape: %v", rows[0]["actions"])
+	}
+	first, _ := actions[0].(map[string]any)
+	if first["id"] != "approve_routine" || first["label"] != "Approve" {
+		t.Errorf("first action mangled: %v", first)
+	}
+}
+
+// TestInboxGetRunE_JSON_CarriesAttentionContract is the detail-endpoint
+// twin of the list test above.
+func TestInboxGetRunE_JSON_CarriesAttentionContract(t *testing.T) {
+	stub := covSetupCli5(t)
+	flagFormat = "json"
+	stub.OnGet("/api/v1/inbox/inb_thread_1", clitest.JSONResponse(200, map[string]any{
+		"id": "inb_thread_1", "kind": "escalation", "title": "Routine proposed for review",
+		"state": "unread", "priority": "high", "created_at": "2026-09-05T09:00:00Z",
+		"thread_key": "routine:ws1:daily-triage", "attention_class": "decision",
+		"actions": []map[string]any{
+			{"id": "approve_routine", "label": "Approve"},
+		},
+	}))
+
+	var err error
+	out := covCaptureStdoutCli5(t, func() { err = inboxGetCmd.RunE(inboxGetCmd, []string{"inb_thread_1"}) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	var item map[string]any
+	if jsonErr := json.Unmarshal([]byte(out), &item); jsonErr != nil {
+		t.Fatalf("output is not a JSON object: %v\n%s", jsonErr, out)
+	}
+	if item["thread_key"] != "routine:ws1:daily-triage" || item["attention_class"] != "decision" {
+		t.Errorf("attention contract dropped: %v", item)
+	}
+}
