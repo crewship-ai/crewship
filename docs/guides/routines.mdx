@@ -1398,7 +1398,59 @@ List responses (and `crewship routine list`) carry `status`; filter the queue wi
 crewship routine list --status proposed
 ```
 
+### Draft trigger activation — a second, independent approval
+
+The maker-checker gate above is about the routine's **definition**: is this
+DSL safe to run at all. Atomic trigger authoring (below) adds a second,
+orthogonal question that applies even to a routine that is `active` and not
+risky: is this trigger safe to fire **unattended**, right now. Saving with
+`"activation": "draft"` (`--draft` on the CLI) answers "not yet" — the
+trigger is created disabled and one `escalation` inbox item asks a
+MANAGER+ to turn it on. A routine's `status` and its trigger's activation
+state can disagree: a safe, `active` routine can still have a trigger sitting
+in draft, and a `proposed` routine's trigger — created disabled either way,
+since nothing runs before the routine itself is approved — waits on both.
+Activate with `crewship routine schedules activate <schedule_id>` (see
+[Triggers](#triggers) below), which resolves that one inbox item.
+
 ## Triggers
+
+### Atomic authoring — routine, version, and trigger together
+
+`crewship routine schedules create` (below) is the general-purpose way to
+attach, edit, or replace a trigger on an existing routine. `crewship routine
+save --cron ...` (and an agent's `save_routine` tool call with a `trigger`
+block) is the other path: it creates the routine, its first version, AND the
+schedule **in one transaction** — either all three exist afterward, or none
+do. This closes the gap where a routine authored by an agent could be saved
+with no way to make it fire on its own; the trigger is no longer an optional
+second step an authoring agent can forget.
+
+```bash
+crewship routine save --name daily-report --definition daily-report.json \
+    --author-crew crew_marketing --cron "0 9 * * 1-5" --timezone "Europe/Prague"
+```
+
+Every save with a trigger reports **when it first runs** — this is the
+sentence the routine-author skill's final message to the user states too:
+
+```
+Saved routine daily-report (id=..., hash=...)
+Trigger: schedule 0 9 * * 1-5 — first run 2026-09-08T07:00:00+02:00
+Invoke with: crewship routine run daily-report
+```
+
+Add `--draft` (or `"activation": "draft"` in the agent tool call) to create
+the trigger disabled and raise one approval item instead of firing on that
+schedule — see [Draft trigger activation](#draft-trigger-activation-a-second-independent-approval)
+above. A routine authored with no trigger and no explicit
+`--trigger-manual` (`{"kind": "manual"}` for an agent) is flagged on the
+routine page as a gap, not a silent success — say so on purpose if the
+routine really is meant to run only on demand.
+
+A bad `--cron` or unknown `--timezone` rolls the **entire save** back: the
+routine and its version are not persisted either, exactly as if the whole
+call had failed.
 
 ### Cron schedules
 

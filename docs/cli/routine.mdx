@@ -142,6 +142,24 @@ crewship routine save \
 | `--author-agent` | | Agent slug or id the routine **acts as**. Must belong to `--author-crew`. Required when the DSL has a `crewship` step using `issue.comment` |
 | `--sample-inputs` | | JSON inputs the test_run uses |
 | `--change-summary` | | One-line note stored on the version row (shown by `routine versions` and the versions UI) |
+| `--cron` | | Cron expression for a schedule trigger, created in the SAME transaction as the routine (e.g. `"0 9 * * 1-5"`) |
+| `--timezone` | | IANA timezone the `--cron` expression is evaluated in (default `UTC`) |
+| `--catchup-policy` | | `skip`\|`once`\|`all` — what happens to occurrences missed while the schedule was off (default `once`) |
+| `--max-consecutive-failures` | | Circuit-breaker trip threshold for the schedule (default `5`) |
+| `--trigger-manual` | | Explicitly declare the routine has no trigger, instead of just omitting one |
+| `--draft` | | Create the trigger disabled and raise one approval item instead of activating it immediately. Requires `--cron` |
+
+<Note>
+  Atomic authoring (B8): passing `--cron` creates the routine, its version,
+  and the schedule together — a bad cron expression or timezone rolls the
+  whole save back, not just the trigger. The save output names the first
+  fire time: `Trigger: schedule 0 9 * * 1-5 — first run 2026-09-08T07:00:00Z`.
+  With `--draft`, the trigger is created DISABLED and the output instead
+  shows `Trigger: schedule ... — DISABLED, awaiting MANAGER approval` plus
+  the exact `crewship routine schedules activate <id>` command to turn it on
+  — that command is also how the one approval item this raises gets
+  resolved. `--cron` and `--trigger-manual` are mutually exclusive.
+</Note>
 
 <Note>
   `--author-agent` is not a credit line. Every `crewship` step in the routine
@@ -1379,6 +1397,22 @@ acknowledgement contains the schedule `id` and `enabled: true`.
 
 Force-fire ad-hoc (out-of-cycle invocation for testing). Honours the schedule's version pin — it executes exactly what the next cron tick would, and answers `409` if the pinned version no longer exists.
 
+### `schedules activate <id>`
+
+Turn on a draft trigger created by atomic routine authoring (`routine save
+--cron ... --draft`, or an agent's `save_routine` call with `"activation":
+"draft"`). Enables the schedule, recomputes `next_run_at` from the current
+time, and resolves the one approval item the draft raised as approved. This
+is the one decision that item asks for.
+
+```bash
+crewship routine schedules activate psched_abc123
+```
+
+The command takes exactly one schedule ID and has no command-specific flags.
+Fails with a conflict if the schedule was never created as a draft, or was
+already activated.
+
 ### `schedules delete <id>`
 
 ```bash
@@ -1391,8 +1425,8 @@ crewship routine schedules delete sch_abc123 --yes
 
 Every `schedules` subcommand honours the global `-f/--format`
 (`table|json|yaml|ndjson`). `list` and `create` emit the full API row;
-`now`, `update`, `enable`, `disable`, and `delete` emit an acknowledgement
-carrying the schedule `id` plus the verb that was applied:
+`now`, `update`, `enable`, `disable`, `activate`, and `delete` emit an
+acknowledgement carrying the schedule `id` plus the verb that was applied:
 
 ```bash
 $ crewship routine schedules now psched_abc --format json

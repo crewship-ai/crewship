@@ -20,6 +20,7 @@ API Problem Details shape with an `error` message.
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `200` and a schedule object |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `204 No Content` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | `create` | `200` and a run result |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate` | `create` | `200` and a schedule object |
 
 Workspace membership failures are `401` or `403`. An unwired schedule store or
 runner is `503`; unexpected persistence failures are `500`.
@@ -90,7 +91,7 @@ Wake telemetry uses `WOKE`, `SKIPPED`, `ERROR`, or `HELD`. A circuit breaker
 disables the schedule after its threshold and sets `disabled_reason` to
 `circuit_breaker`; operator-disabled schedules have an empty reason.
 
-## Force-fire and delete
+## Force-fire, activate, and delete
 
 `POST .../pipeline-schedules/{scheduleId}/run` takes an empty JSON body and
 executes the stored inputs immediately without advancing the cron cadence. It
@@ -99,9 +100,19 @@ It returns `404` for a missing/foreign schedule or target, `409` when a pinned
 version no longer exists, and `429` with `Retry-After: 5` when the pipeline's
 concurrency key is already running.
 
+`POST .../pipeline-schedules/{scheduleId}/activate` takes an empty JSON body
+and turns on a trigger atomic routine authoring created with
+`"activation": "draft"` (see [Pipelines § Atomic trigger authoring](/api-reference/pipelines#atomic-trigger-authoring)):
+`enabled` becomes `true`, `next_run_at` is recomputed from the current time,
+and the trigger's approval item in the workspace inbox is resolved as
+approved. Request auth is `create`, the same threshold as an ordinary
+schedule create. A schedule that was never created as a draft, or was already
+activated, answers `409`; a missing or foreign schedule is `404`.
+
 `DELETE` is a soft delete: the row is retained, future cron ticks stop, and an
 already-running invocation is not cancelled. The successful response is empty
-(`204`). A missing or foreign schedule is `404`.
+(`204`). A missing or foreign schedule is `404`. Deleting a schedule still
+awaiting activation also resolves its approval item (as dismissed).
 
 ## Related
 
