@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Cpu, MemoryStick, Network, HardDrive } from "lucide-react"
+import { Cpu, MemoryStick, Network } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useBatchedPrepend } from "@/hooks/use-batched-prepend"
@@ -31,8 +31,9 @@ interface Series {
   cpu: (number | null)[]
   mem: (number | null)[]
   net: (number | null)[]
-  disk: (number | null)[]
-  latest: { cpu: number | null; mem: number | null; net: number | null; disk: number | null }
+  latest: { cpu: number | null; mem: number | null; net: number | null }
+  /** Number of container.metrics entries observed in the 30-minute window. */
+  sampleCount: number
   /** Number of crews observed in the window (only meaningful when mode=aggregate). */
   crewCount: number
 }
@@ -40,7 +41,7 @@ interface Series {
 const POINTS = 60
 
 /**
- * Always-visible resources strip — 4 horizontal cells (CPU / MEM / NET / DISK)
+ * Always-visible resources strip — 3 horizontal cells (CPU / MEM / NET)
  * with mini sparklines + latest value. Sourced from `container.metrics`
  * journal entries, last 30 minutes. The strip self-fetches its data so
  * the parent /journal timeline can hide metrics from its event log
@@ -63,7 +64,7 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
     [crewId, since],
   )
 
-  const { entries, prependLive } = useJournalList({
+  const { entries, loading, error, prependLive } = useJournalList({
     workspaceId,
     params,
     enabled: !!workspaceId,
@@ -91,8 +92,24 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
 
   const s = useMemo<Series>(() => extract(entries, mode), [entries, mode])
 
+  if (s.sampleCount === 0) {
+    const message = loading
+      ? "Loading container metrics…"
+      : error
+        ? "Container metrics are unavailable."
+        : "No container metrics reported in the last 30 minutes."
+    return (
+      <div
+        role="status"
+        className="border-b border-border/50 bg-card/40 px-3 py-4 text-center text-xs text-muted-foreground"
+      >
+        {message}
+      </div>
+    )
+  }
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 border-b border-border/50 bg-card/40 relative">
+    <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-border/50 bg-card/40 relative">
       {mode === "aggregate" && s.crewCount > 0 && (
         <div className="absolute top-1 right-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70 pointer-events-none">
           ∑ {s.crewCount} crews
@@ -123,15 +140,6 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
         color="#34d399"
         latest={s.latest.net}
         format={fmtBytesRate}
-      />
-      <Cell
-        label="DISK"
-        Icon={HardDrive}
-        values={s.disk}
-        max={mode === "aggregate" ? undefined : 100}
-        color="#fb923c"
-        latest={s.latest.disk}
-        format={(v) => `${v.toFixed(0)}%`}
       />
     </div>
   )
@@ -375,7 +383,6 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
     mem: number | null
     netCum: number | null
     net: number | null
-    disk: number | null
   }
   const points: Point[] = []
   for (const e of entries) {
@@ -396,7 +403,6 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
       mem: memValue,
       netCum,
       net: null,
-      disk: null,
     })
   }
   points.sort((a, b) => a.ts - b.ts)
@@ -434,7 +440,6 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
   const cpu: (number | null)[] = []
   const mem: (number | null)[] = []
   const net: (number | null)[] = []
-  const disk: (number | null)[] = []
   for (let i = 0; i < POINTS; i++) {
     const t = start + i * step
     while (pi < points.length && points[pi].ts <= t) {
@@ -442,48 +447,44 @@ function extract(entries: JournalEntry[], mode: "single" | "aggregate"): Series 
       pi++
     }
     if (latestByCrew.size === 0) {
-      cpu.push(null); mem.push(null); net.push(null); disk.push(null)
+      cpu.push(null); mem.push(null); net.push(null)
       continue
     }
-    let sCpu = 0, sMem = 0, sNet = 0, sDisk = 0
-    let nCpu = 0, nMem = 0, nNet = 0, nDisk = 0
+    let sCpu = 0, sMem = 0, sNet = 0
+    let nCpu = 0, nMem = 0, nNet = 0
     for (const p of latestByCrew.values()) {
       if (p.cpu !== null) { sCpu += p.cpu; nCpu++ }
       if (p.mem !== null) { sMem += p.mem; nMem++ }
       if (p.net !== null) { sNet += p.net; nNet++ }
-      if (p.disk !== null) { sDisk += p.disk; nDisk++ }
     }
     cpu.push(nCpu > 0 ? sCpu : null)
     mem.push(nMem > 0 ? sMem : null)
     net.push(nNet > 0 ? sNet : null)
-    disk.push(nDisk > 0 ? sDisk : null)
   }
 
   // Latest aggregate across all crews seen at the very end.
-  let lCpu = 0, lMem = 0, lNet = 0, lDisk = 0
-  let nL = 0
+  let lCpu = 0, lMem = 0, lNet = 0
+  let nCpu = 0, nMem = 0, nNet = 0
   for (const p of latestByCrew.values()) {
-    lCpu += p.cpu ?? 0
-    lMem += p.mem ?? 0
-    lNet += p.net ?? 0
-    lDisk += p.disk ?? 0
-    nL++
+    if (p.cpu !== null) { lCpu += p.cpu; nCpu++ }
+    if (p.mem !== null) { lMem += p.mem; nMem++ }
+    if (p.net !== null) { lNet += p.net; nNet++ }
   }
 
   return {
-    cpu, mem, net, disk,
+    cpu, mem, net,
     latest: {
-      cpu: nL > 0 ? lCpu : null,
-      mem: nL > 0 ? lMem : null,
-      net: nL > 0 ? lNet : null,
-      disk: nL > 0 ? lDisk : null,
+      cpu: nCpu > 0 ? lCpu : null,
+      mem: nMem > 0 ? lMem : null,
+      net: nNet > 0 ? lNet : null,
     },
+    sampleCount: points.length,
     crewCount: latestByCrew.size,
   }
 }
 
-function downsamplePerPoint(points: Array<{ ts: number; cpu: number | null; mem: number | null; net: number | null; disk: number | null }>): Series {
-  const sample = (k: "cpu" | "mem" | "net" | "disk") => {
+function downsamplePerPoint(points: Array<{ ts: number; cpu: number | null; mem: number | null; net: number | null }>): Series {
+  const sample = (k: "cpu" | "mem" | "net") => {
     if (points.length === 0) return Array<number | null>(POINTS).fill(null)
     if (points.length <= POINTS) return points.map((p) => p[k])
     const out: (number | null)[] = []
@@ -496,13 +497,12 @@ function downsamplePerPoint(points: Array<{ ts: number; cpu: number | null; mem:
     cpu: sample("cpu"),
     mem: sample("mem"),
     net: sample("net"),
-    disk: sample("disk"),
     latest: {
       cpu: last?.cpu ?? null,
       mem: last?.mem ?? null,
       net: last?.net ?? null,
-      disk: last?.disk ?? null,
     },
+    sampleCount: points.length,
     crewCount: 0,
   }
 }

@@ -2,12 +2,23 @@ package server
 
 import (
 	"context"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 func newMetricsCollector(t *testing.T) (*StatsCollector, *captureEmitter) {
 	t.Helper()
@@ -30,6 +41,10 @@ func TestMaybeEmitJournalMetrics_FirstEmitAlways(t *testing.T) {
 	}
 	if em.entries[0].Type != journal.EntryContainerMetrics {
 		t.Errorf("expected container.metrics, got %s", em.entries[0].Type)
+	}
+	wantPayloadKeys := []string{"cpu_pct", "net_rx", "net_tx", "pids", "ram_mb", "ram_pct"}
+	if got := sortedMapKeys(em.entries[0].Payload); !reflect.DeepEqual(got, wantPayloadKeys) {
+		t.Errorf("payload keys = %v, want %v", got, wantPayloadKeys)
 	}
 }
 
