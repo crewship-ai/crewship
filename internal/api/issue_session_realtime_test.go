@@ -109,7 +109,7 @@ func TestBroadcast_IssueSessionState_OnSettle(t *testing.T) {
 	f.assign.hub = hub
 	seedSession(t, f, "sess_rt_2", "active")
 	seedSessionAssignment(t, f, "asg_rt_2", "sess_rt_2", "RUNNING")
-	if _, err := f.db.Exec(`UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, "asg_rt_2", "sess_rt_2"); err != nil {
+	if _, err := f.db.ExecContext(context.Background(), `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, "asg_rt_2", "sess_rt_2"); err != nil {
 		t.Fatalf("seed active_run_id: %v", err)
 	}
 
@@ -165,7 +165,7 @@ func TestBroadcast_RunOutcome(t *testing.T) {
 	if err := ensureMissionChat(context.Background(), f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
 		t.Fatalf("ensureMissionChat: %v", err)
 	}
-	if _, err := f.db.Exec(`
+	if _, err := f.db.ExecContext(context.Background(), `
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id, session_id)
 		VALUES (?, ?, ?, ?, ?, 'test task', 'RUNNING', 1, datetime('now'), ?, NULL)`,
 		"asg_rt_outcome", f.wsID, f.missionID, f.target, f.target, f.missionID); err != nil {
@@ -203,7 +203,7 @@ func TestBroadcast_RunOutcome_NoMissionID_NoBroadcast(t *testing.T) {
 	if err := ensureMissionChat(context.Background(), f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
 		t.Fatalf("ensureMissionChat: %v", err)
 	}
-	if _, err := f.db.Exec(`
+	if _, err := f.db.ExecContext(context.Background(), `
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id, session_id)
 		VALUES (?, ?, ?, ?, ?, 'test task', 'RUNNING', 1, datetime('now'), NULL, NULL)`,
 		"asg_rt_no_mission", f.wsID, f.missionID, f.target, f.target); err != nil {
