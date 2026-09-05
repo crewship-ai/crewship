@@ -52,7 +52,7 @@ var missionStartCmd = &cobra.Command{
 
 // waitForMission polls a mission's status (via client.PollMission, the
 // same helper `crewship wait` and `crewship pipeline run --wait` build
-// on) until it reaches COMPLETED or FAILED, ctx is cancelled, or timeout
+// on) until it reaches DONE or FAILED, ctx is cancelled, or timeout
 // elapses. Mirrors waitForPipelineRun's shape/output conventions
 // (cmd_pipeline.go) so --wait behaves consistently across commands.
 func waitForMission(cmd *cobra.Command, client *cli.Client, crewID, missionID, displayID string, timeout time.Duration) error {

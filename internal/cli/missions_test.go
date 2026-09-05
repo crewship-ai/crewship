@@ -15,7 +15,9 @@ func TestMissionDetail_IsTerminal(t *testing.T) {
 		status string
 		want   bool
 	}{
-		{"completed uppercase", "COMPLETED", true},
+		{"done uppercase", "DONE", true},
+		{"done lowercase", "done", true},
+		{"completed uppercase (legacy, B13 #2370)", "COMPLETED", true},
 		{"failed uppercase", "FAILED", true},
 		{"completed lowercase", "completed", true},
 		{"in progress not terminal", "IN_PROGRESS", false},
@@ -75,7 +77,7 @@ func TestPollMission_TerminatesOnTerminalStatus(t *testing.T) {
 		hits++
 		status := "IN_PROGRESS"
 		if hits >= 3 {
-			status = "COMPLETED"
+			status = "DONE"
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(MissionDetail{ID: "m_x", Status: status})
@@ -89,11 +91,35 @@ func TestPollMission_TerminatesOnTerminalStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PollMission: %v", err)
 	}
-	if detail.Status != "COMPLETED" {
+	if detail.Status != "DONE" {
 		t.Fatalf("status=%s", detail.Status)
 	}
 	if hits < 3 {
 		t.Fatalf("expected >=3 polls, got %d", hits)
+	}
+}
+
+// TestPollMission_TerminatesOnLegacyCompletedStatus is the B13 (#2370)
+// read-compatibility pin: a server that predates this change (or has not
+// yet run the backfill migration) can still report the retired COMPLETED
+// word, and this CLI build must still stop polling rather than hang until
+// its timeout. See MissionDetail.IsTerminal.
+func TestPollMission_TerminatesOnLegacyCompletedStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(MissionDetail{ID: "m_legacy", Status: "COMPLETED"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "tok", "ws")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	detail, err := c.PollMission(ctx, "crew1", "m_legacy", 5*time.Millisecond, nil)
+	if err != nil {
+		t.Fatalf("PollMission: %v", err)
+	}
+	if detail.Status != "COMPLETED" {
+		t.Fatalf("status=%s", detail.Status)
 	}
 }
 

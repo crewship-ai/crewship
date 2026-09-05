@@ -21,9 +21,14 @@ type MissionDetail struct {
 // IsTerminal reports whether the mission has reached a terminal status
 // (the MissionEngine DAG loop is no longer running). Mirrors
 // RunDetail.IsTerminal's contract for PollMission.
+//
+// DONE is the word a server on B13 (#2370) or later writes for an
+// approved-out-of-review mission; COMPLETED is kept here too so this CLI
+// still terminates its poll loop against an older, not-yet-upgraded
+// server (PRD-ISSUES-AND-ROUTINES-2026 §3.1's read-compatibility note).
 func (m *MissionDetail) IsTerminal() bool {
 	switch strings.ToUpper(m.Status) {
-	case "COMPLETED", "FAILED":
+	case "DONE", "COMPLETED", "FAILED":
 		return true
 	}
 	return false
