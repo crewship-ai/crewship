@@ -139,7 +139,17 @@ func DeriveOutcome(status, reported string) (outcome string, defaultedReason str
 	case "FAILED":
 		return OutcomeFailed, ""
 	default:
-		if v, ok := NormalizeOutcome(reported); ok {
+		v, ok := NormalizeOutcome(reported)
+		// CANCELLED is deliberately excluded from what a clean completion
+		// may self-report (caught in review): it is the one outcome that
+		// means "the SERVER stopped this run" (Tier 1, or superseded), a
+		// fact the model itself cannot know or assert. Without this, an
+		// agent writing "outcome: CANCELLED" on a run nobody asked to stop
+		// would be trusted verbatim, contradicting the cancellation-
+		// precedence rule the switch above enforces for the technical
+		// status and silently rerouting a real completion through the
+		// wrong lane.
+		if ok && v != OutcomeCancelled {
 			return v, ""
 		}
 		return OutcomeFailed, ReasonNoOutcomeReported

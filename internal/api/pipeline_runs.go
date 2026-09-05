@@ -574,7 +574,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 		       r.triggered_via, r.triggered_by_id,
 		       r.invoking_crew_id, r.invoking_agent_id, r.invoking_user_id,
 		       r.error_message, r.failed_at_step,
-		       m.identifier
+		       m.identifier, r.outcome
 		FROM pipeline_runs r
 		LEFT JOIN pipelines p ON r.pipeline_id = p.id
 		                     AND p.workspace_id = r.workspace_id
@@ -607,6 +607,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			invokingCrewID, invokingAgentID, invokingUserID       sql.NullString
 			errorMessage, failedAtStep                            sql.NullString
 			issueIdentifier                                       sql.NullString
+			outcome                                               sql.NullString
 		)
 		if err := rows.Scan(
 			&id, &pipelineID, &pipelineSlug, &pipelineName,
@@ -616,7 +617,7 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			&triggeredVia, &triggeredByID,
 			&invokingCrewID, &invokingAgentID, &invokingUserID,
 			&errorMessage, &failedAtStep,
-			&issueIdentifier,
+			&issueIdentifier, &outcome,
 		); err != nil {
 			h.logger.Warn("scan pipeline run", "error", err)
 			continue
@@ -641,6 +642,9 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 			"error_message":     errorMessage.String,
 			"failed_at_step":    failedAtStep.String,
 			"issue_identifier":  issueIdentifier.String,
+			// outcome (§9.6, work package B6, #2349) — empty for a
+			// non-terminal run or one that predates the column.
+			"outcome": outcome.String,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{

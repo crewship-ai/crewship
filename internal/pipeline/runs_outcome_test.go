@@ -256,3 +256,44 @@ func TestMarkTerminal_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithActionCont
 		t.Errorf("body_md = %q, want it to carry the checkpoint's blockers", bodyMD)
 	}
 }
+
+// A second MarkTerminal call on an already-terminal row must not overwrite
+// its outcome — a duplicate or competing terminalization landing after a
+// NEEDS_HUMAN inbox item already exists must not silently change the row to
+// something else, leaving the two disagreeing. Caught by code review.
+func TestMarkTerminal_SecondCallOnTerminalRow_DoesNotOverwriteOutcome(t *testing.T) {
+	store, db := openRunsTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	if err := store.Insert(ctx, &RunRecord{ID: "run_terminal_twice", WorkspaceID: "ws_runs", PipelineID: "pln_a", PipelineSlug: "demo"}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	needsHumanOutput := "---CHECKPOINT---\ndone: x\nblockers: waiting on approval\nnext_step: y\nconfidence: high\noutcome: NEEDS_HUMAN\n---END CHECKPOINT---\n"
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_terminal_twice", Status: RunStatusCompleted, Output: needsHumanOutput}); err != nil {
+		t.Fatalf("first MarkTerminal: %v", err)
+	}
+	got, err := store.Get(ctx, "run_terminal_twice")
+	if err != nil {
+		t.Fatalf("get after first call: %v", err)
+	}
+	if got.Outcome != orchestrator.OutcomeNeedsHuman {
+		t.Fatalf("outcome after first call = %q, want NEEDS_HUMAN", got.Outcome)
+	}
+
+	// A second, later call — a duplicate driver, a race — reports something
+	// else entirely. It must be a no-op: the row already terminalized.
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_terminal_twice", Status: RunStatusFailed, ErrorMessage: "late duplicate call"}); err != nil {
+		t.Fatalf("second MarkTerminal: %v", err)
+	}
+	got, err = store.Get(ctx, "run_terminal_twice")
+	if err != nil {
+		t.Fatalf("get after second call: %v", err)
+	}
+	if got.Status != RunStatusCompleted {
+		t.Errorf("status after second call = %q, want it unchanged at completed", got.Status)
+	}
+	if got.Outcome != orchestrator.OutcomeNeedsHuman {
+		t.Errorf("outcome after second call = %q, want it unchanged at NEEDS_HUMAN — a later call must not overwrite an already-terminal row", got.Outcome)
+	}
+}

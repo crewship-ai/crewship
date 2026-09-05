@@ -1267,14 +1267,18 @@ func (h *AssignmentHandler) finishAssignment(
 	// active_run_id (see that function's CAS guard).
 	settleSessionForAssignment(ctx, h.db, assignmentID, outcome)
 
-	// §12/§9.6 (work package B6, #2349): NEEDS_HUMAN is the only outcome
-	// that reaches the inbox (§12's hard rule: "NO_CHANGE and SUCCEEDED
-	// never create an item" — extended here to every other non-blocking
-	// outcome). Exactly one item per run: createOutcomeInboxItem keys the
-	// row's id on assignmentID and inserts (never upserts), so a retried
-	// call — the sweeper re-finishing a row, a duplicate terminal write
-	// losing the CAS above and never reaching here — cannot double it.
-	if outcome == orchestrator.OutcomeNeedsHuman {
+	// §12/§9.6 (work package B6, #2349): the ROUTING TABLE decides whether
+	// this outcome reaches the inbox — not a literal `== NEEDS_HUMAN`
+	// comparison here, so a future change to outcomeRoutes (orchestrator/
+	// outcome.go) can't update session routing while leaving this call
+	// site on a stale copy of the same decision (caught in review).
+	// CreatesInboxItem is true only for NEEDS_HUMAN today (§12's hard
+	// rule: "NO_CHANGE and SUCCEEDED never create an item"). Exactly one
+	// item per run: createOutcomeInboxItem keys the row's id on
+	// assignmentID and inserts (never upserts), so a retried call — the
+	// sweeper re-finishing a row, a duplicate terminal write losing the
+	// CAS above and never reaching here — cannot double it.
+	if orchestrator.RouteForOutcome(outcome).CreatesInboxItem {
 		h.createOutcomeInboxItem(ctx, assignmentID, workspaceID, targetSlug, result)
 	}
 

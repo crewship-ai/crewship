@@ -141,7 +141,7 @@ func TestDeriveOutcome_CancelledAndFailedAreNeverOverridden(t *testing.T) {
 func TestDeriveOutcome_CompletedTrustsAValidReport(t *testing.T) {
 	for _, v := range AllOutcomes {
 		if v == OutcomeCancelled {
-			continue // not a value an agent would self-report on a clean completion
+			continue // rejected on purpose — see the dedicated test below
 		}
 		outcome, reason := DeriveOutcome("COMPLETED", v)
 		if outcome != v {
@@ -150,6 +150,21 @@ func TestDeriveOutcome_CompletedTrustsAValidReport(t *testing.T) {
 		if reason != "" {
 			t.Errorf("DeriveOutcome(COMPLETED, %q) reason = %q, want empty", v, reason)
 		}
+	}
+}
+
+// A clean completion self-reporting CANCELLED must NOT be trusted: only the
+// technical status (Tier 1 stop, or superseded) may produce that outcome —
+// a model has no way to know whether the server actually cancelled it, and
+// trusting the claim would let a real completion silently reroute through
+// the CANCELLED lane. Caught by code review.
+func TestDeriveOutcome_CompletedSelfReportingCancelled_IsRejected(t *testing.T) {
+	outcome, reason := DeriveOutcome("COMPLETED", OutcomeCancelled)
+	if outcome != OutcomeFailed {
+		t.Errorf("DeriveOutcome(COMPLETED, CANCELLED) = %q, want %q (self-reported CANCELLED is not trusted)", outcome, OutcomeFailed)
+	}
+	if reason != ReasonNoOutcomeReported {
+		t.Errorf("DeriveOutcome(COMPLETED, CANCELLED) reason = %q, want %q", reason, ReasonNoOutcomeReported)
 	}
 }
 

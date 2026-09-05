@@ -553,19 +553,33 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	if in.Status == RunStatusFailed {
 		fp = ErrorFingerprint(in.FailedAtStep, in.ErrorMessage)
 	}
-	_, err := s.db.ExecContext(ctx, `
+	// CAS on "not already terminal" — the same shape finishAssignment's own
+	// terminal write uses for assignments (assignments_run.go). Before B6
+	// this table had no consumer for which a second, later terminal write
+	// mattered; now that a NEEDS_HUMAN outcome creates an inbox item keyed
+	// on this row's outcome, a duplicate/competing terminalization
+	// overwriting outcome after that item exists would leave the two
+	// disagreeing. A zero-row result means another call already won —
+	// treated as a no-op, not an error, exactly like finishAssignment's own
+	// lost-CAS branch.
+	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_runs
 SET status = ?, output = ?, error_message = ?, failed_at_step = ?,
     error_fingerprint = ?,
     cost_usd = ?, duration_ms = ?, ended_at = ?,
     outcome = ?,
     updated_at = datetime('now','subsec')
-WHERE id = ?`,
+WHERE id = ? AND status NOT IN ('completed','failed','cancelled','interrupted','dry_run')`,
 		string(in.Status), nullableStr(in.Output), nullableStr(in.ErrorMessage), nullableStr(in.FailedAtStep),
 		fp,
 		in.CostUSD, in.DurationMs, formatRFC3339(in.EndedAt), outcome, in.RunID)
 	if err != nil {
 		return err
+	}
+	if n, raErr := res.RowsAffected(); raErr != nil {
+		return raErr
+	} else if n == 0 {
+		return nil
 	}
 	// Fan out to outbound notification channels once the terminal state
 	// is durably committed. Only completed/failed notify — cancelled and

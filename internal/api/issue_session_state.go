@@ -165,44 +165,79 @@ func (h *AssignmentHandler) ReconcileExpiredEphemeralSessions(ctx context.Contex
 // scheduler, per F48) means that gap self-heals within one tick interval
 // regardless of why the original write was missed.
 //
-// Resolved through outcome when the terminal row has one (§9.6, work
-// package B6, #2349) — the identical orchestrator.RouteForOutcome
-// settleSessionForAssignment uses, so NEEDS_HUMAN lands here on
-// 'awaiting_input' too, not just 'idle'/'error'. Falls back to the
-// FAILED -> 'error', everything else -> 'idle' mapping by status alone for
-// a row with no outcome (NULL: it predates this migration, or was written
-// by a path other than finishAssignment) — the same fallback DeriveOutcome
-// itself uses, so a session's resting state does not depend on whether the
-// direct write or this reconciliation was what actually landed it. A
-// session already 'idle'/'error'/'awaiting_input'/'closed'/'stale' is
-// untouched (its active_run_id, if any, is stale bookkeeping only, not a
-// live-state discrepancy this function needs to fix).
+// Resolved through orchestrator.RouteForOutcome — the SAME Go function
+// settleSessionForAssignment uses (§9.6, work package B6, #2349) — rather
+// than a second, hand-written copy of the outcome-to-state mapping: a
+// SELECT gathers the candidate (session, status, outcome) rows and this
+// function decides each one's next state in Go via sessionStateForTerminalRun
+// below, so a future change to the routing table cannot update one call
+// site and silently leave the other on a stale mapping (caught in review).
+// A row with no outcome (NULL: it predates this migration, or was written
+// by a path other than finishAssignment) falls back to the FAILED->'error',
+// everything else->'idle' mapping by status alone — the same fallback
+// DeriveOutcome itself uses. A session already
+// 'idle'/'error'/'awaiting_input'/'closed'/'stale' is untouched (its
+// active_run_id, if any, is stale bookkeeping only, not a live-state
+// discrepancy this function needs to fix).
 func (h *AssignmentHandler) ReconcileStaleActiveSessions(ctx context.Context) (int, error) {
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT s.id, a.status, COALESCE(a.outcome, '')
+		  FROM issue_agent_sessions s
+		  JOIN assignments a ON a.id = s.active_run_id
+		 WHERE s.state = 'active'
+		   AND s.active_run_id IS NOT NULL
+		   AND a.status IN ('COMPLETED','FAILED','CANCELLED')`)
+	if err != nil {
+		return 0, err
+	}
+	type candidate struct{ sessionID, status, outcome string }
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.sessionID, &c.status, &c.outcome); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	rows.Close()
+
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(ctx, `
-		UPDATE issue_agent_sessions
-		   SET state = CASE
-		                  WHEN (SELECT a.outcome FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id) = 'NEEDS_HUMAN'
-		                  THEN 'awaiting_input'
-		                  WHEN COALESCE(
-		                         (SELECT a.outcome FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id),
-		                         (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id)
-		                       ) = 'FAILED'
-		                  THEN 'error' ELSE 'idle'
-		                END,
-		       active_run_id = NULL,
-		       updated_at = ?
-		 WHERE state = 'active'
-		   AND active_run_id IS NOT NULL
-		   AND (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id)
-		       IN ('COMPLETED','FAILED','CANCELLED')`,
-		now)
-	if err != nil {
-		return 0, err
+	n := 0
+	for _, c := range candidates {
+		state := sessionStateForTerminalRun(c.outcome, c.status)
+		res, err := h.db.ExecContext(ctx, `
+			UPDATE issue_agent_sessions
+			   SET state = ?, active_run_id = NULL, updated_at = ?
+			 WHERE id = ? AND state = 'active' AND active_run_id IS NOT NULL`,
+			state, now, c.sessionID)
+		if err != nil {
+			return n, err
+		}
+		if affected, raErr := res.RowsAffected(); raErr != nil {
+			return n, raErr
+		} else if affected > 0 {
+			n++
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
+	return n, nil
+}
+
+// sessionStateForTerminalRun resolves the issue_agent_sessions state a
+// terminal assignment settles its session to — orchestrator.RouteForOutcome
+// when the row has a recorded outcome, or the FAILED->'error'/else->'idle'
+// fallback by status alone for a row with none (same fallback DeriveOutcome
+// itself uses). Shared by ReconcileStaleActiveSessions so the mapping lives
+// in exactly one Go function, not duplicated as a hand-written SQL CASE.
+func sessionStateForTerminalRun(outcome, status string) string {
+	if outcome != "" {
+		return orchestrator.RouteForOutcome(outcome).SessionState
 	}
-	return int(n), nil
+	if status == "FAILED" {
+		return "error"
+	}
+	return "idle"
 }

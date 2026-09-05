@@ -14,6 +14,25 @@
 --
 -- The kind list here must stay in sync with internal/inbox.AllKinds —
 -- TestInboxKindsMatchSchema (internal/database) fails CI if it drifts.
+--
+-- inbox_item_reads.inbox_item_id REFERENCES inbox_items(id) ON DELETE
+-- CASCADE (20260902071500, added AFTER every prior inbox_items rebuild —
+-- none of them had this dependent yet, which is why this migration is the
+-- first one where the pattern above is unsafe as written). This runs as a
+-- plain .sql file, wrapped in the migration runner's own transaction with
+-- foreign_keys=ON throughout — file migrations have no fnNoTx escape hatch
+-- (that is a Go-only option; see migrate.go's migration.fnNoTx doc comment)
+-- to toggle the pragma around the rebuild, and PRAGMA foreign_keys=OFF is a
+-- no-op inside an open transaction regardless. DROP TABLE inbox_items
+-- therefore cascades against every inbox_item_reads row that references it
+-- — verified directly (Python's sqlite3, and a scaled reproduction of this
+-- exact schema): the cascade fires against the DROPPED table object even
+-- though the "same" ids reappear moments later under the renamed table, so
+-- doing nothing here would silently erase every read marker on upgrade.
+-- Save the rows to a TEMP table before the drop and restore them after the
+-- rename — inbox_item_reads itself is never dropped or rebuilt, so its rows
+-- reinsert cleanly once inbox_items exists again with the same ids.
+CREATE TEMP TABLE _inbox_item_reads_preserved AS SELECT * FROM inbox_item_reads;
 
 CREATE TABLE inbox_items_new (
     id                  TEXT PRIMARY KEY,
@@ -66,3 +85,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_items_kind_source
 CREATE INDEX IF NOT EXISTS idx_inbox_items_subject_ws
     ON inbox_items (data_subject_id, workspace_id)
     WHERE data_subject_id IS NOT NULL;
+
+-- Restore the read markers the rebuild's cascade removed, now that
+-- inbox_items exists again with the same ids.
+INSERT INTO inbox_item_reads (inbox_item_id, user_id, read_at)
+    SELECT inbox_item_id, user_id, read_at FROM _inbox_item_reads_preserved;
+DROP TABLE _inbox_item_reads_preserved;
