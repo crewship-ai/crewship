@@ -330,6 +330,12 @@ INSERT INTO pipeline_waitpoints (
 			// every consumer (inbox, CLI, notification channels) reads
 			// the same value instead of each inventing its own default.
 			"risk_level": riskLevel,
+			// §12 action contract, B14 (#2388): a waitpoint is answered by
+			// a person with MANAGER+ (the approve route's roleCreate), never
+			// by an agent — the resolve door (Decide) refuses an agent
+			// actor whatever route it arrives on. Stated on the card so the
+			// audience is readable without knowing the route's RBAC.
+			"who_can_act": []string{"role:MANAGER"},
 		},
 	})
 	// Pre-create the listener channel so a fast CompleteApproval

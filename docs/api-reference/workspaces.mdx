@@ -1282,7 +1282,9 @@ Returns up to 200 pending waitpoints across the workspace, newest first.
 POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve
 ```
 
-Completes a pending approval. Decider identity is taken from the JWT user context.
+Completes a pending approval. Decider identity is taken from the request's auth context, never from the body.
+
+**Who can decide.** A waitpoint is a question for a person. The resolve door accepts a decision from a workspace member with MANAGER+ (session or CLI token — the inbox, the routine page, `crewship routine waitpoints approve`) and from the holder of the token itself on the [public callback](#complete-a-waitpoint-by-token-public-callback). It refuses an **agent** — a crew-bound `X-Internal-Token`, a sidecar tool, a peer agent posting "GO" — and a request with no principal at all, with `403` and `"reason": "waitpoint_decider_not_allowed"`. The waitpoint is left pending and the attempt is recorded in the audit log under the action `waitpoint.decision_refused` (`crewship audit --action waitpoint.decision_refused`), naming the actor and the run. No agent-facing route reaches this door today (internal tokens get `401` from the authed route before it), but the door checks the actor's kind regardless, so wiring one later cannot become a way for an agent to satisfy a waitpoint. The inbox card carries the same audience as `who_can_act: ["role:MANAGER"]`.
 
 **Request body:**
 
@@ -1307,6 +1309,7 @@ Completes a pending approval. Decider identity is taken from the JWT user contex
 | Status | Condition |
 |---|---|
 | `400` | Missing `token` or invalid body |
+| `403` | The decider is not a person: an agent's internal token, or no principal at all. The waitpoint is untouched and the attempt is on the audit log as `waitpoint.decision_refused`. |
 | `409` | Waitpoint already decided or expired |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
 
@@ -1327,7 +1330,9 @@ POST /api/v1/waitpoint-tokens/{token}
 
 The **public** sibling of the approve endpoint (`trigger.dev` `wait.forToken` parity). An external system holding a waitpoint token completes the wait via an HTTP callback — **no workspace JWT required**: the high-entropy `token` in the path is the auth surface, the same model as the [public webhook dispatch endpoint](/api-reference/webhooks). This lets a human-in-the-loop or external-task wait be resolved by a third party (approval service, CI job, vendor webhook) rather than only through the inbox. The token and its `callback_url` are surfaced on the pending-waitpoints listing (`internal/api/router_pipelines.go:127-131`).
 
-**Auth:** none — the path token is the credential. The completion is attributed to the sentinel decider `external-callback` (not a user id) so audit queries can distinguish callback completions from inbox approvals (`internal/api/pipeline_waitpoint_callback.go:61-64`).
+**Auth:** none — the path token is the credential. The completion is attributed to the sentinel decider `external-callback` (not a user id) so audit queries can distinguish callback completions from inbox approvals (`internal/api/pipeline_waitpoint_callback.go`).
+
+This is not an agent door. The token travels only to person-facing surfaces — the inbox card, the pending-waitpoints listing, the CLI — and is never handed to an agent, so the only way an agent could reach this route is a person choosing to give the token away. The resolve door behind it is the same one the authed endpoint uses and refuses an agent actor by kind.
 
 **Request body:** optional. A bare `POST` with no body means "the external task finished, continue the run".
 

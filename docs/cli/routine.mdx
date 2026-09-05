@@ -1604,6 +1604,8 @@ crewship routine waitpoints reject  wpt_abc123 --comment "needs revision"
 
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
 
+The decision is attributed to the person whose CLI token made it. An agent cannot decide a waitpoint — an attempt with an agent's internal token is refused (`401` before the route, `403` from the resolve door), the waitpoint stays pending, and the attempt is listed by `crewship audit --action waitpoint.decision_refused`.
+
 ---
 
 ## `crewship routine trust`

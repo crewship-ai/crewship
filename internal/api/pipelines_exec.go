@@ -948,27 +948,21 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	// We accept either the SQLWaitpointStore concrete type or any
-	// other implementation that satisfies the interface. The
-	// CompleteApproval call is a method on the SQL store, but the
-	// interface only exposes WaitFor + CreateApproval — so we type-
-	// assert here. Production wiring always uses the SQL store.
-	type approver interface {
-		CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error
-	}
-	wp, ok := h.waitpoints.(approver)
+	// other implementation that satisfies the interface. Decide is a
+	// method on the SQL store, but the WaitpointStore interface only
+	// exposes WaitFor + CreateApproval — so we type-assert here.
+	// Production wiring always uses the SQL store.
+	wp, ok := h.waitpoints.(waitpointDecideDoor)
 	if !ok {
 		replyError(w, http.StatusServiceUnavailable, "waitpoint store does not support completion")
 		return
 	}
-	// Decider identity from the JWT user context — same path the
-	// rest of the routine handlers use. Empty string when the
-	// request didn't go through authedMw (test paths without auth);
-	// the waitpoint row's decided_by_user_id ends up NULL in that
-	// case, which is fine for downstream audit queries.
-	deciderID := ""
-	if user := UserFromContext(r.Context()); user != nil {
-		deciderID = user.ID
-	}
+	// The decider is derived from the request's auth context, never from
+	// the body (B14, #2388): a person via session or CLI token is a user
+	// decider; an agent's crew-bound internal token would be an agent
+	// decider, which the door refuses; a request with no principal at
+	// all is refused too. See waitpointDeciderFromRequest.
+	decider := waitpointDeciderFromRequest(r)
 	payload := body.Comment
 	// Workspace isolation (#1415): resolve the token strictly within the
 	// caller's own workspace — mirrors SignalRun's rec.WorkspaceID check
@@ -976,15 +970,10 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// who learns/guesses a pending waitpoint token from workspace B could
 	// approve/deny B's gated run.
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if err := wp.CompleteApproval(r.Context(), workspaceID, token, body.Approved, deciderID, payload); err != nil {
-		// pipeline.ErrAlreadyDecided → 409
-		if err.Error() == "waitpoint: already decided or expired" {
-			replyError(w, http.StatusConflict, err.Error())
+	if err := wp.Decide(r.Context(), workspaceID, token, body.Approved, decider, payload); err != nil {
+		if !replyWaitpointDecideError(w, h.logger, "waitpoint complete", token, err) {
 			return
 		}
-		h.logger.Error("waitpoint complete", "error", err, "token", tokenFingerprint(token))
-		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
-		return
 	}
 
 	// Async WAITING model: a run parked on this approval (status=waiting)

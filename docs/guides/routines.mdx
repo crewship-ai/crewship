@@ -1905,6 +1905,8 @@ you didn't just start.
 
 The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
 
+**Only a person decides.** A waitpoint is answered by a workspace member with MANAGER+, or by whoever holds the token on the public callback. An agent cannot satisfy one: a peer agent saying "GO" — through its sidecar token, a comment, or any agent-facing route — is refused by the resolve door before the row is touched, the waitpoint stays pending for you, and the attempt is recorded in the audit log as `waitpoint.decision_refused` with the actor named. The inbox card states the audience as `who_can_act: ["role:MANAGER"]`.
+
 ## Durability and restart recovery
 
 Run state is persisted to the `pipeline_runs` table at every step boundary: when a step starts, `current_step_id` is stamped; when it completes, the full step-outputs map and accumulated cost are flushed. A hard kill (crash, OOM, `kill -9`) therefore loses at most the step that was in flight.
