@@ -1,19 +1,25 @@
 package api
 
 // Coverage for PRD-ISSUES-AND-ROUTINES-2026 work package B7 ("Hard
-// termination (Tier 2)", #2356):
+// termination (Tier 2)", #2356) and its B7b namespace fix (#2365):
 //
 //   - Persisting ExecResult.ExecID (and the container it ran in) onto the
 //     assignment row the moment an exec starts (orchestrator.AgentRunRequest.
 //     OnExecStarted, wired in assignments_run.go).
-//   - Stop's ?hard=true path: resolve that exec's pid via
-//     provider.ExecPIDProvider and signal it (TERM, then KILL after a grace
-//     period) with a brand-new exec into the SAME container — never a
-//     container-level operation.
-//   - Golden scenario 5b (§18): two agents in one crew, stop one — the
-//     sibling's exec is provably untouched, because the crew's container is
-//     shared and a hard stop must never reach past the one resolved pid.
-
+//   - Stop's ?hard=true path: end the run's own tmux session
+//     (orchestrator.TmuxSessionName(agentSlug)) — a container-visible
+//     identity — with a brand-new exec into the SAME container, escalating
+//     to a process-group KILL on the session's own pane pids after a grace
+//     period. #2365: the pre-fix path resolved execID to a pid via
+//     provider.ExecPIDProvider and signalled THAT — but that pid is in the
+//     HOST pid namespace (dockerd's ExecInspect), so a same-container `kill`
+//     never finds it. providertest's FakeProvider models that namespace
+//     split (ExecPID's hostPID is never a valid target for an in-container
+//     kill), so these tests fail red against the pre-fix mechanism and pass
+//     against the session-based one.
+//   - Golden scenario 5b (§18): two DIFFERENT agents in one crew (different
+//     tmux session names), stop one — the sibling's exec is provably
+//     untouched, because a hard stop only ever names its OWN run's session.
 import (
 	"context"
 	"database/sql"
@@ -23,9 +29,30 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/providertest"
 )
+
+// seedSecondWorkerAgent adds a second, distinctly-slugged agent to the crew
+// newTestIssueHandler already seeded ("worker") — needed because Tier 2 now
+// signals by tmux session name (orchestrator.TmuxSessionName(agentSlug)):
+// two assignments for the SAME agent slug would collide on one session name,
+// which cannot happen for two genuinely live runs in production (setupTmuxExec
+// kills any prior session of that name before starting a new one). The §18
+// scenario 5b sibling must therefore be a different agent, exactly like two
+// real agents sharing a crew container each own a differently-named session.
+func seedSecondWorkerAgent(t *testing.T, db *sql.DB, wsID, crewID string) string {
+	t.Helper()
+	id := "agent-worker2"
+	if _, err := db.ExecContext(context.Background(),
+		`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status, cli_adapter, temperature, timeout_seconds, tool_profile, memory_enabled)
+		 VALUES (?, ?, ?, 'Worker2', 'worker2', 'AGENT', 'IDLE', 'CLAUDE_CODE', 0.7, 1800, 'CODING', 0)`,
+		id, wsID, crewID); err != nil {
+		t.Fatalf("insert second worker agent: %v", err)
+	}
+	return id
+}
 
 // recordingHardStopEmitter captures every journal.Entry Emit received, so a
 // test can assert the exact hard-stop record (result, pid, exec/container
@@ -76,15 +103,22 @@ func TestIssue_Stop_Hard_TerminatesTargetNotSibling(t *testing.T) {
 	h.SetContainer(fp)
 	const sharedContainerID = "crew-shared-container"
 
-	// Two agents in one crew (§18 scenario 5b): two separate execs into the
-	// SAME container, modelling two agents that happen to share a crew
-	// container. Each "hold" exec ignores context cancellation and only
-	// stops when signalled by pid — see providertest.HoldCmd's doc.
-	targetExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldCmd})
+	// Two DIFFERENT agents in one crew (§18 scenario 5b) — a hard stop
+	// signals by tmux session name, and every agent run owns a session
+	// named for its OWN slug, so the sibling here must be a distinct agent
+	// (see seedSecondWorkerAgent's doc), not just a second exec. Each
+	// "hold" exec, registered under its agent's own session, ignores
+	// context cancellation and only stops when signalled by that session
+	// name (or a process-group kill on its own pane pid) — see
+	// providertest.HoldSessionCmd's doc.
+	worker2ID := seedSecondWorkerAgent(t, h.db, wsID, crewID)
+	targetSession := orchestrator.TmuxSessionName("worker")
+	siblingSession := orchestrator.TmuxSessionName("worker2")
+	targetExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldSessionCmd(targetSession)})
 	if err != nil {
 		t.Fatalf("start target exec: %v", err)
 	}
-	siblingExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldCmd})
+	siblingExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldSessionCmd(siblingSession)})
 	if err != nil {
 		t.Fatalf("start sibling exec: %v", err)
 	}
@@ -96,7 +130,7 @@ func TestIssue_Stop_Hard_TerminatesTargetNotSibling(t *testing.T) {
 	siblingMissionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-11", "IN_PROGRESS")
 
 	seedRunningAssignmentWithExec(t, h.db, "a-target", wsID, targetMissionID, leadID, workerID, sharedContainerID, targetExec.ExecID)
-	seedRunningAssignmentWithExec(t, h.db, "a-sibling", wsID, siblingMissionID, leadID, workerID, sharedContainerID, siblingExec.ExecID)
+	seedRunningAssignmentWithExec(t, h.db, "a-sibling", wsID, siblingMissionID, leadID, worker2ID, sharedContainerID, siblingExec.ExecID)
 
 	// Sanity: both execs are actually running before Stop touches anything.
 	if running, _, err := fp.ExecInspect(context.Background(), targetExec.ExecID); err != nil || !running {
@@ -291,7 +325,10 @@ func TestIssue_Stop_Hard_RunningWithoutExecYet_CatchesLateExecStart(t *testing.T
 	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-41", "IN_PROGRESS")
 	seedRunningAssignmentWithExec(t, h.db, "a-late-exec", wsID, missionID, leadID, workerID, "", "")
 
-	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: "late-container", Cmd: providertest.HoldCmd})
+	// workerID's slug is "worker" (newTestIssueHandler) — register the hold
+	// exec under that agent's own tmux session name so the production
+	// session-based signal (not a bare pid) actually reaches it.
+	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: "late-container", Cmd: providertest.HoldSessionCmd(orchestrator.TmuxSessionName("worker"))})
 	if err != nil {
 		t.Fatalf("start exec: %v", err)
 	}
