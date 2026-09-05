@@ -133,7 +133,7 @@ whoever owns nela cannot resolve it — someone else has to
 
 The same answer rides the JSON as `second_approver_required` / `second_approver_by_workspace` / `second_approver_by_tier` / `security_level_label`, the fields the crew escalations list carries. It is computed **when you read the row**, not when the escalation was raised: the workspace toggle and the credential's tier both change afterwards. Absent means the server said nothing, not that a single approver will do — see [Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
 
-`resolve` is the inbox-side only — it does **not** call the source endpoint. To actually approve a waitpoint through to the executor, use `crewship approvals approve <id>`. To resolve an escalation lifecycle, use `crewship escalation resolve <id>`. The inbox row tracks the decision; the source endpoint enacts it.
+`resolve` is the inbox-side only — it does **not** call the source endpoint. To actually approve a waitpoint through to the executor, use `crewship routine waitpoints approve <token>` (`crewship approvals approve` is a different queue — approval requests, `apr_…` ids — and does not decide waitpoints). To resolve an escalation lifecycle, use `crewship escalation resolve <id>`. The inbox row tracks the decision; the source endpoint enacts it.
 
 ### Bulk operations
 
@@ -178,6 +178,7 @@ The inbox is *human-attention-scoped*: it holds the things somebody has to look 
 
 ## See also
 
-- [`crewship approvals`](/cli/approvals) — waitpoint approve/deny lifecycle (the source side of `resolve --action approved`).
+- [`crewship routine waitpoints`](/cli/routine#crewship-routine-waitpoints) — approve/reject the waitpoint itself (the source side of `resolve --action approved`).
+- [`crewship approvals`](/cli/approvals) — the approval-request queue, a different item kind with its own `apr_…` ids.
 - [`crewship notifychannel`](/cli/notifychannel) — where inbox items are delivered outward (email, webhook, chat, push).
 - [Inbox API](/api-reference/inbox) — `GET /api/v1/inbox`.
