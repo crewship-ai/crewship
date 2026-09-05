@@ -269,6 +269,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate status transition
+	var forcedPastChildren []string
 	if req.Status != nil {
 		newStatus := *req.Status
 		if !h.validateStatusTransition(currentStatus, newStatus) {
@@ -276,6 +277,27 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 				"Invalid status transition from "+currentStatus+" to "+newStatus)
 			return
 		}
+
+		// §10.4 terminal-children rule (fixes F10, work package B11,
+		// #2368): DONE/REVIEW is refused while a sub-issue or mission_task
+		// is still live, unless the caller passes ?force=true — in which
+		// case the transition proceeds and the blockers are named on the
+		// status_changed event below (the "receipt").
+		if newStatus != currentStatus && isTerminalIssueTarget(newStatus) {
+			blockers, bErr := openChildBlockers(r.Context(), h.db, missionID)
+			if bErr != nil {
+				internalError(w, r, h.logger, "check open children for terminal transition", bErr)
+				return
+			}
+			if len(blockers) > 0 {
+				if r.URL.Query().Get("force") != "true" {
+					writeProblem(w, r, http.StatusConflict, blockersMessage(blockers))
+					return
+				}
+				forcedPastChildren = blockers
+			}
+		}
+
 		ub.Set("status", newStatus)
 
 		if newStatus == "DONE" || newStatus == "CANCELLED" || newStatus == "DUPLICATE" {
@@ -330,11 +352,19 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Status != nil {
 		// The prose AND the fields. Details is what a human reads; from/to
 		// are what a matcher can predicate on.
+		details := fmt.Sprintf("%s → %s", currentStatus, *req.Status)
+		if len(forcedPastChildren) > 0 {
+			// The receipt (§10.4): named in the same audited/hash-chained
+			// row as the transition itself, not a side channel that could
+			// drift from it.
+			details = fmt.Sprintf("%s (forced past %d open child item(s))", details, len(forcedPastChildren))
+		}
 		evs = append(evs, issueEvent{
 			MissionID: missionID, ActorType: actorType, ActorID: actorID,
 			Action:  actionStatusChanged,
-			Details: fmt.Sprintf("%s → %s", currentStatus, *req.Status),
+			Details: details,
 			From:    currentStatus, To: *req.Status,
+			ForcedPast: forcedPastChildren,
 		})
 	}
 	if req.AssigneeID != nil {
