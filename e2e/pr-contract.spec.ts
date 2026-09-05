@@ -86,4 +86,120 @@ test("PR browser contract subset", async ({ page }) => {
       `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceID)}`,
     )
   })
+
+  // #2398 — a run_needs_human card is acted on from /inbox.
+  //
+  // The card is written only when a run reports outcome NEEDS_HUMAN, which
+  // needs a provider-backed agent this gate does not have (see the header of
+  // playwright.pr.config.ts). So the inbox API is mocked at the browser: the
+  // list serves one seeded card, the act door records what the page sent and
+  // answers with B15's receipt shape. What this proves is the web side of
+  // the contract — the card renders its actions[], Answer requires text, the
+  // POST carries {action, input}, and the card flips to resolved with the
+  // receipt without a reload. What it does NOT prove is the server: that the
+  // answer reaches the session and that `inbox_acted` lands on the issue's
+  // event log is covered by B15's Go + CLI acceptance tests (#2399,
+  // internal/api/inbox_act.go and cmd/crewship inbox act), not here — a real
+  // card needs a NEEDS_HUMAN run behind a provider this PR gate does not
+  // have. A follow-up issue tracks a supported e2e fixture that could seed
+  // one without a live agent run; until then this step is route-mocked.
+  await test.step("inbox: act on a seeded run_needs_human card (route-mocked)", async () => {
+    const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
+    const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
+    expect(workspaceID).toBeTruthy()
+
+    const cardID = "ibx_e2e_needs_human_1"
+    const now = new Date().toISOString()
+    const card = {
+      id: cardID,
+      workspace_id: workspaceID,
+      kind: "run_needs_human",
+      source_id: "asg_e2e_1",
+      title: "Casey needs your input on ENG-7",
+      body_md: "Which bucket should the export go to — staging or prod?",
+      sender_type: "agent",
+      sender_name: "Casey",
+      state: "unread",
+      priority: "high",
+      blocking: true,
+      attention_class: "input",
+      thread_key: `issue:${workspaceID}:m_e2e_1`,
+      actions: [
+        { id: "answer", label: "Answer", effect: "Delivers your input to the agent's session and resumes the run from its checkpoint", irreversible: false },
+        { id: "take_over", label: "Take over", effect: "Opens the issue for you to continue; the agent's session goes idle", irreversible: false },
+        { id: "dismiss", label: "Dismiss", effect: "No further work now; the agent's session goes idle", irreversible: false },
+      ],
+      payload: { who_can_act: ["role:MANAGER"], context: { issue: "ENG-7", run: "asg_e2e_1" } },
+      created_at: now,
+      updated_at: now,
+    }
+    const receipt = {
+      action: "answer",
+      acted_by: "usr_e2e",
+      acted_at: now,
+      inbox_item_id: cardID,
+      session_id: "ses_e2e_1",
+      agent_version: 3,
+      source_run_id: "asg_e2e_1",
+      comment_id: "cmt_e2e_1",
+      delivery_id: "mcm_e2e_1",
+      run_id: "asg_e2e_2",
+      dispatch_state: "dispatched",
+      event_id: "act_e2e_1",
+      seq: 14,
+    }
+    // Stateful on purpose: once acted, any refetch the page makes must see
+    // the resolved card, the way the real server would answer.
+    let acted = false
+    const actBodies: unknown[] = []
+    const resolvedCard = { ...card, state: "resolved", resolved_action: "answer", resolved_at: now, payload: { ...card.payload, receipt } }
+
+    await page.route("**/api/v1/inbox?*", async (route) => {
+      const rows = acted ? [] : [card]
+      await route.fulfill({ json: { rows, count: rows.length, unread_count: acted ? 0 : 1, has_more: false } })
+    })
+    await page.route("**/api/v1/inbox/count?*", async (route) => {
+      await route.fulfill({ json: { unread_count: acted ? 0 : 1 } })
+    })
+    await page.route(`**/api/v1/inbox/${cardID}?*`, async (route) => {
+      if (route.request().method() === "PATCH") {
+        await route.fulfill({ json: { id: cardID, state: "read" } })
+        return
+      }
+      await route.fulfill({ json: acted ? resolvedCard : card })
+    })
+    await page.route(`**/api/v1/inbox/${cardID}/act?*`, async (route) => {
+      actBodies.push(route.request().postDataJSON())
+      acted = true
+      await route.fulfill({ json: { id: cardID, state: "resolved", action: "answer", receipt } })
+    })
+
+    await page.goto(`/inbox?item=${cardID}`)
+    await expect(page.getByTestId(`row-${cardID}`)).toBeVisible()
+    const pane = page.getByTestId("reading-pane")
+    await expect(pane.getByText("Casey needs your input on ENG-7")).toBeVisible()
+    // The §12 badge, and the three actions the card carries.
+    await expect(pane.getByTestId("attention-badge")).toHaveText("Input needed")
+    await expect(pane.getByRole("button", { name: "Take over" })).toBeVisible()
+    await expect(pane.getByRole("button", { name: "Dismiss" })).toBeVisible()
+
+    await pane.getByRole("button", { name: "Answer" }).click()
+    const send = pane.getByRole("button", { name: "Send" })
+    await expect(send).toBeDisabled()
+    await pane.getByRole("textbox", { name: "Your answer" }).fill("Use the staging bucket, not prod.")
+    await expect(send).toBeEnabled()
+    await send.click()
+
+    // Resolved in place, with the receipt — no navigation, no reload.
+    const rec = pane.getByTestId("act-receipt")
+    await expect(rec).toBeVisible()
+    await expect(rec).toContainText("asg_e2e_2")
+    await expect(rec).toContainText("event #14")
+    await expect(pane.getByRole("button", { name: "Send" })).toHaveCount(0)
+    await expect(pane.getByText(/^Resolved /)).toBeVisible()
+    expect(page.url()).toContain("/inbox")
+    expect(actBodies).toEqual([{ action: "answer", input: "Use the staging bucket, not prod." }])
+
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+  })
 })

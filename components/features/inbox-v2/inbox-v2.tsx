@@ -361,6 +361,10 @@ export function InboxV2() {
           onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
           onInboxMarkUnread={async (item) => markUnread(inboxEntry(item))}
           onInboxRefresh={async (item, action) => sourceRefresh(inboxEntry(item), action)}
+          // The §12 act door (#2398). The hook flips the loaded "all" list to
+          // resolved in place and the card renders its receipt, so the pane
+          // reflects the action without a page-level resolve/confirm flow.
+          onInboxAct={async (item, action, input) => all.actOnInboxItem(item.id, action, input)}
           onApprovalDecide={approvalDecide}
           onArchiveGroup={archiveGroup}
           lookup={lookup}

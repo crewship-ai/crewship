@@ -26,7 +26,7 @@ Items get written through to `inbox_items` the moment their source signal fires.
 | `schedule_missed` | A cron schedule was overdue and dropped or deferred occurrences per its `catchup_policy` | **Run now** — fires the schedule out of cycle (`POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/run`, the same call as `crewship routine schedules now`) — or Dismiss. |
 | `schedule_circuit_breaker_tripped` | A schedule auto-disabled itself after N consecutive failures, to stop the spam and the cost bleed | **Re-enable schedule** — `PATCH /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}` with `{"enabled": true}`, the same call as `crewship routine schedules enable`. OWNER/ADMIN only. |
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role. Also carries **"your agent replied"** chat notifications: when an assistant reply lands in a session you aren't currently viewing, one per-user item appears with a scrubbed preview (repeated replies refresh it in place instead of stacking). See [Chat & Sessions](/guides/chat-sessions#your-agent-replied-notifications). | One-click jump to the linked issue or the **Open chat** deep link, or Dismiss. Opening the chat (or `crewship chat read`) clears it automatically. |
-| `run_needs_human` | A run's [outcome](/api-reference/issues#outcome) (work package B6, #2349) resolved to `NEEDS_HUMAN` — an issue-session assignment or a routine run reported it is blocked on a decision, missing input, or a credential. Exactly one item per run, carrying a §12 action contract (`attention_class`, `thread_key`, `actions`, `who_can_act`, `context`) in `payload_json`. Addressed at the issue's owner when it has one, `MANAGER` otherwise. | **Take over** (issue runs) / **Review run** (routine runs) — opens the source; there is no separate resolve endpoint, so Archive clears the card once you've acted. |
+| `run_needs_human` | A run's [outcome](/api-reference/issues#outcome) (work package B6, #2349) resolved to `NEEDS_HUMAN` — an issue-session assignment or a routine run reported it is blocked on a decision, missing input, or a credential. Exactly one item per run, carrying a §12 action contract (`attention_class`, `thread_key`, `actions` as typed fields; `who_can_act` and `context` in `payload_json`). Addressed at the issue's owner when it has one, `MANAGER` otherwise. | **Answer** / **Take over** / **Dismiss** — the card's own `actions[]`, performed server-side through `POST /api/v1/inbox/{id}/act` (`crewship inbox act`). See [Acting on a NEEDS_HUMAN card](#acting-on-a-needs_human-card). |
 
 ## The attention contract
 
@@ -41,6 +41,20 @@ The write-through helper every attention-contract producer shares is `internal/i
 <Note>
 Not every kind has adopted the contract yet — `thread_key`/`attention_class`/`actions` are additive columns, empty for a row no producer has migrated onto them. `GET /api/v1/inbox` and `GET /api/v1/inbox/{id}` return whatever is set; an empty `actions[]` means "read the kind-specific action row" (the table above), same as before B10.
 </Note>
+
+In the web inbox, `attention_class` is the small badge beside a card's title and on its row — **Decision**, **Input needed**, **Review** or **Repair** — so an ask for input and an ask for a verdict read differently before either is opened. A row without the contract carries no badge.
+
+### Acting on a NEEDS_HUMAN card
+
+A `run_needs_human` card renders its `actions[]` as buttons in the detail pane, where a waitpoint shows Approve / Deny. Each one calls `POST /api/v1/inbox/{id}/act` — the same door as [`crewship inbox act`](/cli/inbox#inbox-act) — and the card resolves **in place**:
+
+- **Answer** opens a text box. Send posts your text as a comment on the issue, authored by you, and delivers it to the **same agent session** that asked; the run resumes from its checkpoint with your answer as its next delivery (queued behind the current run if the session is mid-run). Send stays disabled until there is text.
+- **Take over** — you continue the work yourself. The agent's session goes idle.
+- **Dismiss** — no further work now. Same session transition.
+
+An action the server marks `irreversible` asks for confirmation first; none of the three does today. After a successful action the card flips to resolved without a reload and shows the receipt where the buttons were — the run the answer resumed, its position on the issue's event log (`event #<seq>`, the same `inbox_acted` row `GET .../events` lists) and the agent version that answered. The receipt is read back from the card's `payload.receipt` whenever the resolved card is opened from History.
+
+Two `409`s are not failures from your side: **already acted on** (someone closed the card first — the pane refreshes to show their decision) and **could not be delivered** (your answer is on the issue as a comment, but the agent's session cannot take it — a held agent, an unconnected crew; the card stays open with the server's reason so you can retry once that is fixed). Only `run_needs_human` cards have server-side actions; a waitpoint or an escalation is still decided through its own endpoint.
 
 ### Receipts that name the version
 

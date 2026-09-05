@@ -263,6 +263,26 @@ export function decisionMetaFor(item: InboxItem): DecisionMeta | null {
 }
 
 /**
+ * The §12 attention class as a badge (B10, #2378; rendered since #2398).
+ *
+ * Names WHAT KIND OF ASK the row is, independent of `kind` (which names the
+ * producer). Only the four values the server writes; anything else — an
+ * empty column on a kind that has not adopted the contract, or a value a
+ * newer server invents — renders nothing rather than a guess.
+ */
+export function attentionBadge(
+  item: InboxItem,
+): { label: string; tone: "warn" | "blue" | "purple" | "destructive" } | null {
+  switch (item.attention_class) {
+    case "decision": return { label: "Decision", tone: "warn" }
+    case "input": return { label: "Input needed", tone: "blue" }
+    case "review": return { label: "Review", tone: "purple" }
+    case "repair": return { label: "Repair", tone: "destructive" }
+  }
+  return null
+}
+
+/**
  * The author-declared blast radius of an approval, or null when the item
  * carries none.
  *
