@@ -220,6 +220,7 @@ POST /api/v1/hooks roleManage
 POST /api/v1/hooks/{id}/disable roleManage
 POST /api/v1/hooks/{id}/enable roleManage
 POST /api/v1/inbox/bulk roleSelf
+POST /api/v1/inbox/{id}/act roleSelf
 POST /api/v1/integrations roleManage
 POST /api/v1/integrations/composio/accounts/{accountId}/refresh roleManage
 POST /api/v1/integrations/composio/accounts/{accountId}/revoke roleManage
