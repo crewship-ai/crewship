@@ -1376,6 +1376,28 @@ crewship routine schedules now "$id" --format json
 
 Pass any subset of `--cron / --timezone / --name / --enabled / --inputs / --catchup / --pin-version / --unpin / --max-failures / --wake-slug / --wake-inputs / --no-wake / --fail-closed` to update. `--max-failures` is the positive consecutive-failure threshold at which the schedule auto-disables; omitting it keeps the existing threshold. An existing version pin survives updates that don't mention it; `--pin-version N` re-pins, `--unpin` removes the pin so fires track head again. Likewise the wake gate is preserved unless touched: `--wake-slug` sets/replaces the probe, `--wake-inputs` replaces its inputs, and `--no-wake` removes the gate so the schedule fires on every tick again (`--no-wake` and `--wake-slug`/`--wake-inputs`/`--fail-closed` are mutually exclusive). The fail-closed policy is preserved unless mentioned: `--fail-closed` holds the run on a probe failure, `--fail-closed=false` restores fail-open. `--catchup` sets `skip`, `once`, or `all`; omitting it preserves the current policy.
 
+### `schedules preview`
+
+Show the next fire times for a cron expression and timezone — stateless, so
+it works for a schedule that has not been saved yet (the reliability
+editor's live preview and this command call the same server endpoint,
+`GET .../pipeline-schedules/preview`).
+
+```bash
+crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague --count 5
+```
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--cron` | ✓ | Five-field cron expression to preview. |
+| `--timezone` | | IANA timezone (default `UTC`). |
+| `--count` | | How many fire times to show (default `5`, capped at `20`). |
+
+The computation uses real IANA tzdata, so it reflects DST transitions
+exactly: a spring-forward day with no valid local time for the cron's
+minute/hour is skipped, and a fall-back day's ambiguous local time can
+appear twice, one hour apart in UTC.
+
 ### `schedules enable <id>` / `schedules disable <id>`
 
 Toggle without altering the cron expression.
@@ -1468,7 +1490,7 @@ crewship routine webhooks create \
 ```
 
 <Warning>
-**Stripe-style secret reveal:** the signing secret is shown ONCE in the response. Save it now or rotate via delete+recreate.
+**Stripe-style secret reveal:** the signing secret is shown ONCE in the response. Save it now, or rotate it later with `routine webhooks update <id> --rotate-secret` (the URL survives; only delete+recreate changes the URL).
 </Warning>
 
 | Flag | Required | Description |
@@ -1480,6 +1502,32 @@ crewship routine webhooks create \
 | `--inputs-template` | | JSON template merged with the request body |
 | `--base-url` | | Override the public base URL printed |
 | `--pin-version` | | Pin every fire to this immutable routine version instead of head. A fire whose pinned version no longer exists answers `409` — never a silent head run. |
+
+### `webhooks update <id>`
+
+Edit a webhook in place (F21) — before this command existed, changing
+anything meant delete + recreate, which mints a new token and therefore a
+new public URL, breaking every sender already configured against the old
+one. `update` never touches the token.
+
+```bash
+crewship routine webhooks update wh_abc123 \
+    --name "github-pr-reviews-v2" \
+    --rate-limit 120 \
+    --inputs-template '{"source":"github"}'
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name` | New webhook name. |
+| `--rate-limit` | New max fires per minute. |
+| `--inputs-template` | Replace the JSON template merged with the request body. |
+| `--enabled` / `--enabled=false` | Set enabled state — presence required, same convention as `schedules update`. |
+| `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
+
+At least one flag is required. `--format json` on an ordinary edit (no
+`--rotate-secret`) never includes a `signing_secret` — only a rotating call
+does, exactly once, in that response.
 
 ### `webhooks url <id>`
 

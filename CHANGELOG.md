@@ -120,6 +120,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **The reliability editor — every §13.2 field settable, a DST-safe fire
+  preview, webhook edit in place (#TBD, closes #2362).** Almost every
+  schedule field the backend already carried (cron/timezone, catch-up
+  policy, the wake gate, the circuit-breaker threshold, the version pin,
+  enable/disable) had no UI door — the create form offered name, cron,
+  timezone and inputs only, and PATCH already accepted the rest (F18). A new
+  reliability editor dialog exposes all of it, wired to the existing PATCH
+  `/pipeline-schedules/{id}`. Two gaps that genuinely had no door: (1) a
+  next-five-fire-times preview, computed server-side by a new stateless
+  endpoint (`GET /pipeline-schedules/preview?cron_expr=&timezone=&count=`,
+  `crewship routine schedules preview`) built on the existing
+  `pipeline.NextOccurrences` helper — proven against real IANA tzdata across
+  both `Europe/Prague` DST transitions (spring: the nonexistent local hour
+  is skipped entirely; autumn: the ambiguous hour fires twice, exactly one
+  hour apart in UTC); (2) webhook editing (F21) — `PATCH
+  /pipeline-webhooks/{id}` changes name, target, inputs_template, enabled
+  and rate limit in place, with signing-secret rotation as one explicit,
+  opt-in field (`rotate_secret`) and the token/public URL **never** rotated
+  by this endpoint under any input (`crewship routine webhooks update`).
+  Concurrency (`concurrency_key`/`max_concurrent`) is a routine-wide DSL
+  field, not per-schedule, so the reliability editor shows it read-only with
+  a pointer to the routine's own Editor tab rather than adding a control
+  that would silently change every trigger of that routine at once.
+
 - **Atomic routine authoring — routine, version and trigger commit together (#2367).**
   `save_routine` (and the user/CLI/internal save endpoints) now accept an
   optional `trigger` block; `pipeline.Store.SaveWithTrigger` creates the

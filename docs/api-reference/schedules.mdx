@@ -16,6 +16,7 @@ API Problem Details shape with an `error` message.
 | Method | Path | Authorization | Success |
 |---|---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | member | `200` and a JSON array |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/preview` | member | `200` and a fire-time preview |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules` | `create` or `routine.create` capability | `201` and a schedule object |
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `200` and a schedule object |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` | `204 No Content` |
@@ -24,6 +25,47 @@ API Problem Details shape with an `error` message.
 
 Workspace membership failures are `401` or `403`. An unwired schedule store or
 runner is `503`; unexpected persistence failures are `500`.
+
+## Preview fire times
+
+`GET .../pipeline-schedules/preview` (B9, #2362) computes upcoming fire times
+for a cron expression and timezone WITHOUT requiring a saved schedule — the
+reliability editor calls it on every keystroke while a cron/timezone pair is
+still being drafted, and it is what backs `crewship routine schedules
+preview`.
+
+Query parameters:
+
+| Parameter | Required | Contract |
+|---|---|---|
+| `cron_expr` | yes | Five-field cron expression. |
+| `timezone` | no | IANA timezone; defaults to `UTC`. |
+| `count` | no | How many fire times to return; defaults to `5`, capped at `20`. |
+
+```
+GET /api/v1/workspaces/{workspaceId}/pipeline-schedules/preview?cron_expr=30+2+*+*+*&timezone=Europe%2FPrague&count=5
+```
+
+```json
+{
+  "cron_expr": "30 2 * * *",
+  "timezone": "Europe/Prague",
+  "occurrences": [
+    "2026-03-27T02:30:00+01:00",
+    "2026-03-28T02:30:00+01:00",
+    "2026-03-30T02:30:00+02:00",
+    "2026-03-31T02:30:00+02:00",
+    "2026-04-01T02:30:00+02:00"
+  ]
+}
+```
+
+The computation uses real IANA tzdata, so it reflects DST transitions exactly
+as the scheduler will: a spring-forward gap (as above, 2026-03-29 has no
+02:30 in `Europe/Prague` and is skipped) and a fall-back fold (an ambiguous
+local time occurs twice, one hour apart in UTC) are both real answers, not
+approximations. An invalid `cron_expr` or `timezone`, or a missing
+`cron_expr`, returns `400`.
 
 ## Create and update
 

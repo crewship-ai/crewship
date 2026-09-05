@@ -127,9 +127,47 @@ breaker counters, and wake telemetry. A circuit-breaker disable sets
 |---|---|---|---|---|---|
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | No body | JSON array of webhook objects | `200`, `500`, `503` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | `create` (MANAGER+) | JSON webhook configuration; target pipeline and event settings are required | Created webhook including its dispatch token | `201`, `400`, `403`, `500`, `503` |
+| PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | `manage` (OWNER/ADMIN) | Partial JSON update (see below) | Updated webhook object | `200`, `400`, `403`, `404`, `500`, `503` |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | `manage` (OWNER/ADMIN) | No body | Empty response | `204`, `400`, `403`, `404`, `500`, `503` |
 | POST | `/api/v1/webhooks/{token}` | Token in path; no session required | JSON payload (non-JSON is accepted as raw input); optional HMAC headers when configured | Accepted dispatch with `run_id`/status | `202`, `401`, `404`, `409`, `429`, `500`, `503` |
 
 The public dispatch token is the authentication mechanism. When a signing
 secret is configured, the request must also carry a valid HMAC signature.
 Dispatch is asynchronous and returns `202`; an inactive routine returns `409`.
+
+### Editing a webhook in place (F21)
+
+Before `PATCH` existed, changing anything about a webhook meant delete +
+recreate — which mints a new token and therefore a new public URL, breaking
+every sender already configured against the old one. `PATCH` edits in place
+instead; every field is optional and an absent field keeps its existing
+value, the same convention `PATCH .../pipeline-schedules/{scheduleId}` uses:
+
+```json
+{
+  "name": "renamed webhook",
+  "rate_limit_per_min": 120,
+  "inputs_template": {"source": "github"},
+  "enabled": true
+}
+```
+
+| Field | Type | Contract |
+|---|---|---|
+| `name` | string | Display name. |
+| `target_pipeline_slug` / `target_pipeline_id` | string | Retarget the webhook to a different routine. |
+| `target_pipeline_version` | integer or `null` | Version pin; omission keeps the existing pin, explicit `null` clears it. |
+| `inputs_template` | object | Merged with the request body to form routine inputs; omission keeps the existing template. |
+| `enabled` | boolean | Omission keeps the current value. |
+| `rate_limit_per_min` | integer | Max fires per minute; omission keeps the current limit. |
+| `rotate_secret` | boolean | **The one explicit, opt-in exception.** `true` mints a fresh HMAC signing secret and returns it once in the response body (`signing_secret`), exactly like the create response. Omitted or `false` preserves the existing secret. |
+
+The **token — and therefore the public URL — never changes through this
+endpoint, under any field combination**, `rotate_secret` included. Rotating
+the URL still requires delete + recreate; that is the one thing this
+endpoint deliberately does not do. `signing_secret` is present in the
+response only when `rotate_secret: true` was sent; an ordinary edit returns
+`signing_secret_set: true` with no secret value, matching the list/get
+show-once contract.
+
+CLI: `crewship routine webhooks update <webhook_id> [--name ...] [--rate-limit N] [--inputs-template '{"...":"..."}'] [--enabled[=false]] [--rotate-secret]`.
