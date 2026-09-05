@@ -178,14 +178,19 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
 
 ## Known limits in 1.0
 
-- **Stop is cooperative, not instant.** Stop cancels every step that has not
-  started and marks the issue `CANCELLED`; a step whose agent is already
-  executing finishes that execution first and is then recorded as
-  `CANCELLED` regardless of what it reports. There is no container kill.
-  Stop also reaches a run an `@mention` dispatched on an issue that was
-  never started (`BACKLOG`/`TODO`) — the run is stamped the same way, but
-  the issue's own status is left unchanged rather than moved to
-  `CANCELLED`. The full contract is in the
+- **Plain Stop is cooperative, not instant — a hard variant exists now.**
+  Stop cancels every step that has not started and marks the issue
+  `CANCELLED`; by default, a step whose agent is already executing
+  finishes that execution first and is then recorded as `CANCELLED`
+  regardless of what it reports. Passing `hard=true` (`crewship issue stop
+  --hard`) additionally resolves that step's live process and signals it
+  directly — `SIGTERM`, then `SIGKILL` after a short grace period — from a
+  new exec into its own container, never a container-level kill, so a
+  sibling agent sharing the same crew container is unaffected. Stop also
+  reaches a run an `@mention` dispatched on an issue that was never
+  started (`BACKLOG`/`TODO`) — the run is stamped (and, with `hard=true`,
+  signalled) the same way, but the issue's own status is left unchanged
+  rather than moved to `CANCELLED`. The full contract is in the
   [issues API reference](/api-reference/issues).
 - **Two words for "finished".** Issues move to `DONE`; the engine records a
   mission as `COMPLETED`. Both appear in the same status column and every
