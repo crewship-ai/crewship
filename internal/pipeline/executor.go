@@ -1019,6 +1019,12 @@ type RunInput struct {
 	// the projection accurately reflects the trigger.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
+	// DueAt is the cron occurrence this run is being fired FOR — set by the
+	// scheduler (fireSingleOccurrence) and by nothing else, so the
+	// persisted run can answer "how late did this fire" (§19.3 scheduled
+	// fire punctuality). nil on every other trigger: a run that was asked
+	// for has no due time. Stamped verbatim on RunRecord.DueAt.
+	DueAt *time.Time
 	// Tags are workspace-scoped labels attached to the run for
 	// filtering/grouping (trigger.dev parity). Persisted to run_tags.
 	Tags []string
@@ -2447,6 +2453,7 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		InputsJSON:      string(inputsRaw),
 		TriggeredVia:    in.TriggeredVia,
 		TriggeredByID:   in.TriggeredByID,
+		DueAt:           in.DueAt,
 		MetadataJSON:    in.MetadataJSON,
 		IsReplay:        in.IsReplay,
 		ReplayOf:        in.ReplayOf,

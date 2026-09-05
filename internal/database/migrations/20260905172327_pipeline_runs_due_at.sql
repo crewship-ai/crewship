@@ -1,0 +1,21 @@
+-- When a scheduled run was DUE, as distinct from when it started.
+--
+-- A cron schedule fires when its next_run_at has passed and the scheduler's
+-- 30 s poll notices (F24). Until now the run carried only started_at — the
+-- moment the executor took the occurrence — and the occurrence's own
+-- timestamp survived only inside the idempotency key, as a SHA-256 of
+-- (schedule id, occurrence). So "how late did this fire" was not a question
+-- the schema could answer, and the §19.3 row "scheduled fire punctuality,
+-- p95 < 60 s of due time" (PRD-ISSUES-AND-ROUTINES-2026) had no series.
+--
+-- due_at is that occurrence timestamp, stamped by the schedule fire path and
+-- nothing else: NULL on manual, webhook, automation and call_pipeline runs,
+-- which have no due time — they were asked for, not scheduled. A catch-up
+-- fire after downtime keeps its original due_at, so the delta it reports is
+-- the honest one (it WAS that late), not a delta reset to the restart.
+--
+-- Existing rows stay NULL: their occurrence timestamps are unrecoverable and
+-- guessing one from started_at would be the very fabrication the punctuality
+-- series exists to rule out.
+
+ALTER TABLE pipeline_runs ADD COLUMN due_at TEXT;

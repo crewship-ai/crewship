@@ -164,6 +164,16 @@ crewshipd_session_runs_checkpointed_total / crewshipd_session_runs_finished_tota
 | --- | --- | --- | --- |
 | `crewshipd_assignment_outcomes` | gauge | `outcome` (`no_change`, `succeeded`, `work_created`, `partial`, `needs_human`, `failed`, `cancelled`, `other`) | Terminal assignments by outcome contract result (§9.6). The `needs_human` share is the direct "how often does a human have to look" signal. |
 | `crewshipd_outcome_routing_violations` | gauge | — | Runs whose outcome was **not** `NEEDS_HUMAN` but which raised a `run_needs_human` inbox item anyway. Target `0` — the §9.6 routing table says this must never happen; a nonzero value means the outcome contract and the inbox disagree. |
+| `crewshipd_successful_runs_total` | gauge | — | Runs — `assignments` (agent runs) and `pipeline_runs` (routine runs) together — whose outcome is `SUCCEEDED` or `NO_CHANGE`. The denominator of "inbox items per successful run". |
+| `crewshipd_inbox_items_on_successful_runs` | gauge | — | Inbox items of **any** kind whose `source_id` is one of those runs. §12 says a `SUCCEEDED` / `NO_CHANGE` run never creates an item — of any kind, not merely `run_needs_human` — so this is the numerator and, on its own, a violation count. |
+| `crewshipd_inbox_items_per_successful_run` | gauge | — | The ratio of the two — answers "inbox items per successful run" (§19.3, target **0**). **Absent** until at least one successful run exists: a `0/0` has no honest value, and this format cannot mark a series "not applicable" other than by leaving it out. The two counts above are always present, so a dashboard can watch the denominator grow before the ratio appears. |
+
+#### Scheduling — "did the routine fire when it was due"
+
+| Metric | Type | Labels | Description |
+| --- | --- | --- | --- |
+| `crewshipd_schedule_fire_punctuality_seconds` | gauge | `quantile` (`0.5`, `0.95`) | Seconds from a scheduled run's due occurrence to the run starting, over the most recent 500 scheduled runs — answers "scheduled fire punctuality" (§19.3, target p95 under 60 s; the scheduler polls every 30 s, so ~30 s is the floor, F24). The due occurrence is `pipeline_runs.due_at`: the schedule's `next_run_at` at the moment the scheduler took it, stamped on the run by the schedule fire path only. Runs recorded before that column existed, and every manual, webhook, automation or `call_pipeline` run (which have no due time), are not samples. A catch-up fire after downtime keeps its original occurrence and so reports the delta it really had — the window is bounded, so a restart's backlog ages out as normal fires land. |
+| `crewshipd_schedule_fire_punctuality_sample_count` | gauge | — | Scheduled runs backing the above, in the current window |
 
 ## Freshness and cost
 

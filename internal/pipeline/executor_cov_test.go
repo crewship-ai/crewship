@@ -725,6 +725,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     chain_depth         INTEGER NOT NULL DEFAULT 0,
     chain_origin        TEXT,
     outcome             TEXT,
+    due_at              TEXT,
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );

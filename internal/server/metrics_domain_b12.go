@@ -15,7 +15,9 @@ package server
 // punctuality, the routine/webhook SLOs) belong to B8/B9's own scheduling
 // substrate, not to the mention/delivery/session tables B1/B2/B4/B5/B6
 // shipped, and forcing them in here would mean inventing a join these
-// tables cannot honestly support.
+// tables cannot honestly support. Two of those rows — scheduled fire
+// punctuality and inbox items per successful run — landed later as B16
+// (metrics_domain_b16.go, #2396), once pipeline_runs.due_at existed.
 //
 // Every series is computed, never asserted:
 //   - a latency/size percentile is emitted only when at least one real
