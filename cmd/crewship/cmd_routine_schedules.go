@@ -11,7 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -412,6 +414,72 @@ var routineSchedulesCreateCmd = &cobra.Command{
 	},
 }
 
+// schedulePreviewResult is `routine schedules preview`'s machine payload —
+// mirrors the server's GET .../pipeline-schedules/preview response
+// (internal/api/pipeline_schedules.go PreviewSchedule).
+type schedulePreviewResult struct {
+	CronExpr    string   `json:"cron_expr" yaml:"cron_expr"`
+	Timezone    string   `json:"timezone" yaml:"timezone"`
+	Occurrences []string `json:"occurrences" yaml:"occurrences"`
+}
+
+var routineSchedulesPreviewCmd = &cobra.Command{
+	Use:   "preview",
+	Short: "Show the next fire times for a cron expression (B9, §13.2 \"When\")",
+	Long: `Compute the next fire times for a cron expression in a timezone,
+using the server's own cron parser and real IANA tzdata — the same
+computation the reliability editor's live preview uses. Stateless: this
+does not require a saved schedule, so it works equally well for a
+schedule that is still being drafted.
+
+Example, checked across a DST boundary:
+
+  crewship routine schedules preview --cron "30 2 * * *" --timezone Europe/Prague --count 5`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		cronExpr, _ := cmd.Flags().GetString("cron")
+		timezone, _ := cmd.Flags().GetString("timezone")
+		count, _ := cmd.Flags().GetInt("count")
+		if cronExpr == "" {
+			return fmt.Errorf("--cron is required")
+		}
+		if timezone == "" {
+			timezone = "UTC"
+		}
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		ws := client.GetWorkspaceID()
+		q := url.Values{}
+		q.Set("cron_expr", cronExpr)
+		q.Set("timezone", timezone)
+		if count > 0 {
+			q.Set("count", strconv.Itoa(count))
+		}
+		resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipeline-schedules/preview?%s", ws, q.Encode()))
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out schedulePreviewResult
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return fmt.Errorf("decode preview response: %w", err)
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Printf("Next %d fire times for %q (%s):\n", len(out.Occurrences), out.CronExpr, out.Timezone)
+			for _, o := range out.Occurrences {
+				fmt.Printf("  - %s\n", formatTimestamp(o))
+			}
+		})
+	},
+}
+
 var routineSchedulesUpdateCmd = &cobra.Command{
 	Use:   "update <schedule_id>",
 	Short: "Update an existing schedule (cron expr, timezone, enabled state, inputs)",
@@ -792,8 +860,13 @@ func init() {
 
 	routineSchedulesDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
+	routineSchedulesPreviewCmd.Flags().String("cron", "", "5-field cron expression to preview (REQUIRED)")
+	routineSchedulesPreviewCmd.Flags().String("timezone", "", "IANA timezone (default: UTC)")
+	routineSchedulesPreviewCmd.Flags().Int("count", 5, "how many fire times to show (default 5, capped at 20)")
+
 	routineSchedulesCmd.AddCommand(routineSchedulesListCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesCreateCmd)
+	routineSchedulesCmd.AddCommand(routineSchedulesPreviewCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesUpdateCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesEnableCmd)
 	routineSchedulesCmd.AddCommand(routineSchedulesDisableCmd)

@@ -103,6 +103,7 @@ func yamlParityTypes() []any {
 		// cmd_routine_webhooks.go
 		WebhookRow{},
 		webhookCreateResult{},
+		webhookUpdateResult{},
 		webhookURLResult{},
 		// Payloads this change turned from "panics under -f yaml" into
 		// "renders under -f yaml". Exporting the embedded type fixed the
