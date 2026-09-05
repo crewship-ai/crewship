@@ -215,7 +215,7 @@
             "group": "Manifest Reference",
             "icon": "file-code",
             "pages": [
-              "manifest/README",
+              "manifest/overview",
               "manifest/workspace",
               "manifest/crew",
               "manifest/agent",

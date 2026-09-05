@@ -31,7 +31,7 @@ var titleLine = regexp.MustCompile(`(?m)^title:\s*["']?([^"'\n]+)`)
 var descriptionLine = regexp.MustCompile(`(?m)^description:\s*["']?([^"'\n]+)`)
 var stabilityLine = regexp.MustCompile(`(?m)^stability:\s*["']?([^"'\s]+)`)
 var tagLine = regexp.MustCompile(`(?m)^tag:\s*["']?([^"'\n]+)`)
-var llmsLink = regexp.MustCompile(`(?m)^- \[[^]]+\]\([^)]*\)`)
+var llmsLink = regexp.MustCompile(`(?m)^- \[[^]]+\]\(([^)]*)\)`)
 
 var stabilityVocabulary = map[string]bool{
 	"stable":       true,
@@ -252,7 +252,7 @@ func main() {
 		fail(err)
 	}
 
-	served, err := checkServed(*baseURL, len(declared))
+	served, err := checkServed(*baseURL, declared)
 	if err != nil {
 		fail(err)
 	}
@@ -278,7 +278,7 @@ func main() {
 //
 // Run it on a schedule instead, where "the deployed index is behind the repo"
 // is real drift worth someone's attention rather than an artefact of timing.
-func checkServed(baseURL string, declared int) (int, error) {
+func checkServed(baseURL string, declared []string) (int, error) {
 	if strings.TrimSpace(baseURL) == "" {
 		return -1, nil
 	}
@@ -291,11 +291,62 @@ func checkServed(baseURL string, declared int) (int, error) {
 	if _, err := fetch(baseURL + "/llms-full.txt"); err != nil {
 		return 0, err
 	}
-	served := len(llmsLink.FindAllString(llms, -1))
-	if served < declared {
-		return served, fmt.Errorf("llms.txt lists %d pages, docs.json declares %d — the deployed index is behind this checkout", served, declared)
+	links := llmsLink.FindAllStringSubmatch(llms, -1)
+	served := len(links)
+	if served >= len(declared) {
+		return served, nil
 	}
-	return served, nil
+	// Naming the pages is the whole point. A bare count is true and
+	// unactionable: the scheduled run said "306 vs 307" for days while the
+	// one page it meant — manifest/README, a basename Mintlify does not
+	// publish — sat unnoticed, because finding it meant diffing the two sets
+	// by hand. A count tells you drift exists; only the ids tell you whether
+	// it is a page that will never publish or one Mintlify has yet to build.
+	have := make(map[string]bool, len(links))
+	for _, m := range links {
+		have[servedPageID(m[1])] = true
+	}
+	var missing []string
+	for _, id := range declared {
+		if !have[strings.TrimPrefix(id, "/")] {
+			missing = append(missing, id)
+		}
+	}
+	detail := ""
+	if len(missing) > 0 {
+		shown := missing
+		if len(shown) > missingPagesShown {
+			shown = shown[:missingPagesShown]
+		}
+		detail = fmt.Sprintf("\n  not in the deployed index: %s", strings.Join(shown, ", "))
+		if len(missing) > len(shown) {
+			detail += fmt.Sprintf(" (+%d more)", len(missing)-len(shown))
+		}
+	}
+	return served, fmt.Errorf("llms.txt lists %d pages, docs.json declares %d — the deployed index is behind this checkout%s",
+		served, len(declared), detail)
+}
+
+// missingPagesShown caps the id list so a wholesale outage (the index served
+// empty) reports a readable line instead of three hundred ids.
+const missingPagesShown = 10
+
+// servedPageID reduces a deployed llms.txt link to the page id docs.json
+// declares: scheme and host off, the .md suffix Mintlify appends off, no
+// leading slash. Both shapes appear in the wild — the live site publishes
+// absolute ".md" URLs, older indexes published extensionless ones.
+func servedPageID(link string) string {
+	id := link
+	if i := strings.Index(id, "://"); i >= 0 {
+		if j := strings.Index(id[i+3:], "/"); j >= 0 {
+			id = id[i+3+j:]
+		} else {
+			id = ""
+		}
+	}
+	id = strings.TrimPrefix(id, "/")
+	id, _, _ = strings.Cut(id, "#")
+	return strings.TrimSuffix(id, ".md")
 }
 
 // navigationPages returns every page id docs.json declares.
