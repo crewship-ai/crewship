@@ -154,7 +154,8 @@ always present, because a count of zero is a real, computed answer.
 | `crewshipd_session_runs_checkpointed_total` | gauge | — | Finished session runs with at least one checkpoint whose body parsed (`Parsed=true`) — the checkpoint-compliance numerator. Divide the two in your dashboard/alert query rather than here: a pre-divided ratio has no honest value while the denominator is 0, and this endpoint has no way to mark a series "not applicable" instead of `0`. |
 
 ```promql
-crewshipd_session_runs_checkpointed_total / crewshipd_session_runs_finished_total > 0.95
+# Alerts when compliance DROPS BELOW the §19.3 target (>95%) — not above it.
+crewshipd_session_runs_checkpointed_total / crewshipd_session_runs_finished_total < 0.95
 ```
 
 #### Human comprehension — "how often does a run need a human, and does routing hold"
