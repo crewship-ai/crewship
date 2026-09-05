@@ -228,3 +228,104 @@ func TestIssue_Stop_Hard_UnsupportedProviderStillCancels(t *testing.T) {
 		t.Errorf("hard_stop_result = %q, want %q", hardResult, hardStopUnsupported)
 	}
 }
+
+// TestIssue_Stop_Hard_RunningWithoutExecYet_RecordsPendingExec covers the
+// race window between assignments_run.go's RUNNING stamp (before ANY
+// provisioning) and OnExecStarted (after EnsureProvisioned /
+// buildCrewRuntimeConfig / GetOrCreateContainerCfg, which can take real
+// wall-clock time on a cold container): a hard stop landing in that window
+// must not silently do nothing. If the exec never shows up, it is recorded
+// explicitly (PENDING_EXEC) rather than dropped — Tier 1's stamp still
+// applies regardless.
+func TestIssue_Stop_Hard_RunningWithoutExecYet_RecordsPendingExec(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	fp := providertest.NewFakeProvider()
+	h.SetContainer(fp)
+
+	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-40", "IN_PROGRESS")
+	// RUNNING, but exec_id/exec_container_id are still empty — exactly the
+	// row shape between the RUNNING stamp and OnExecStarted firing.
+	seedRunningAssignmentWithExec(t, h.db, "a-pending-exec", wsID, missionID, leadID, workerID, "", "")
+
+	req := httptest.NewRequest("POST", "/?hard=true", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-40")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+
+	start := time.Now()
+	h.Stop(rr, req)
+	elapsed := time.Since(start)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	// awaitExecID must actually wait out hardStopExecAppearTimeout rather
+	// than giving up instantly — otherwise this test cannot tell "waited
+	// and gave up" apart from "never looked".
+	if elapsed < hardStopExecAppearTimeout {
+		t.Errorf("hard stop returned in %s, want it to wait at least hardStopExecAppearTimeout (%s) before giving up", elapsed, hardStopExecAppearTimeout)
+	}
+
+	var cancelAt, hardResult string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,''), COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-pending-exec'`).
+		Scan(&cancelAt, &hardResult); err != nil {
+		t.Fatalf("query a-pending-exec: %v", err)
+	}
+	if cancelAt == "" {
+		t.Errorf("cancel_requested_at not stamped (Tier 1 must fire regardless of the exec having started yet)")
+	}
+	if hardResult != hardStopPendingExec {
+		t.Errorf("hard_stop_result = %q, want %q — a RUNNING target with no exec yet must be recorded, never silently skipped", hardResult, hardStopPendingExec)
+	}
+}
+
+// TestIssue_Stop_Hard_RunningWithoutExecYet_CatchesLateExecStart is the
+// positive case of the same race: the exec starts (and gets persisted)
+// WHILE the hard stop is already waiting, and it still gets signalled.
+func TestIssue_Stop_Hard_RunningWithoutExecYet_CatchesLateExecStart(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	fp := providertest.NewFakeProvider()
+	h.SetContainer(fp)
+
+	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-41", "IN_PROGRESS")
+	seedRunningAssignmentWithExec(t, h.db, "a-late-exec", wsID, missionID, leadID, workerID, "", "")
+
+	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: "late-container", Cmd: providertest.HoldCmd})
+	if err != nil {
+		t.Fatalf("start exec: %v", err)
+	}
+
+	// Simulate OnExecStarted landing shortly after Stop begins waiting —
+	// well inside hardStopExecAppearTimeout, well after Stop's Tier 1
+	// snapshot was already taken.
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		if _, err := h.db.Exec(`UPDATE assignments SET exec_id = ?, exec_container_id = ? WHERE id = 'a-late-exec'`,
+			execRes.ExecID, "late-container"); err != nil {
+			t.Errorf("late exec_id write: %v", err)
+		}
+	}()
+
+	req := httptest.NewRequest("POST", "/?hard=true", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-41")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if running, _, err := fp.ExecInspect(context.Background(), execRes.ExecID); err != nil || running {
+		t.Errorf("exec that started mid-wait was not signalled: running=%v err=%v", running, err)
+	}
+	var hardResult string
+	if err := h.db.QueryRow(`SELECT COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-late-exec'`).Scan(&hardResult); err != nil {
+		t.Fatalf("query a-late-exec: %v", err)
+	}
+	if hardResult != hardStopTerminatedTerm && hardResult != hardStopTerminatedKill {
+		t.Errorf("hard_stop_result = %q, want TERMINATED_TERM or TERMINATED_KILL — an exec that starts mid-wait must still be caught", hardResult)
+	}
+}

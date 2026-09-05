@@ -81,6 +81,19 @@ const (
 	hardStopUnsupported    = "UNSUPPORTED"
 	hardStopNotFound       = "NOT_FOUND"
 	hardStopError          = "ERROR"
+	// hardStopPendingExec covers the race window assignments_run.go's
+	// RUNNING stamp opens: that stamp lands BEFORE EnsureProvisioned /
+	// buildCrewRuntimeConfig / GetOrCreateContainerCfg run (which can take
+	// real wall-clock time on a cold container) and well before the heavy
+	// exec that OnExecStarted reports. A hard stop landing in that window
+	// sees the row as RUNNING with no exec_id yet. awaitExecID re-reads the
+	// row for up to hardStopExecAppearTimeout to catch the common case (the
+	// exec starts within that window); this is what gets recorded when it
+	// still hasn't by the deadline — the row is left explicitly explained
+	// rather than silently unactioned. Tier 1's cancel_requested_at is
+	// unaffected either way: the run still ends CANCELLED once it reports
+	// back (finishAssignment).
+	hardStopPendingExec = "PENDING_EXEC"
 )
 
 // hardStopSignalTimeout bounds one "send a signal" exec — it should return
@@ -96,8 +109,16 @@ const hardStopSignalTimeout = 1 * time.Second
 const hardStopGrace = 1 * time.Second
 
 // hardStopPollInterval is how often hardStopOne re-checks ExecInspect while
-// waiting out a grace period.
+// waiting out a grace period, and how often awaitExecID re-reads a
+// not-yet-started target's row.
 const hardStopPollInterval = 100 * time.Millisecond
+
+// hardStopExecAppearTimeout bounds awaitExecID: how long a hard stop
+// against a RUNNING-but-not-yet-executing target waits for exec_id to
+// appear before giving up and recording hardStopPendingExec. Separate from
+// (and on top of) the TERM/KILL budget above — this covers a different
+// window, before any exec exists to signal at all.
+const hardStopExecAppearTimeout = 2 * time.Second
 
 // hardStopTargets runs Tier 2 hard termination (§10.3, B7) against every
 // RUNNING row Stop's Tier 1 stamp just reached, one goroutine per target so
@@ -108,21 +129,67 @@ const hardStopPollInterval = 100 * time.Millisecond
 func (h *IssueHandler) hardStopTargets(ctx context.Context, wsID, ident string, targets []cancelTarget) {
 	var wg sync.WaitGroup
 	for _, t := range targets {
-		// A row that never reached RUNNING has no exec to signal — Tier 1
-		// alone already keeps it from ever starting one. Signalling it
-		// would just manufacture a NOT_FOUND entry for a run nobody
-		// expected a hard stop to touch.
-		if t.Status != "RUNNING" || !t.ExecID.Valid || t.ExecID.String == "" || !t.ExecContID.Valid || t.ExecContID.String == "" {
+		// A row that never reached RUNNING has no exec to signal, ever —
+		// Tier 1 alone already keeps it from starting one. A RUNNING row
+		// WITHOUT an exec_id yet is different: it may simply not have
+		// reached its exec yet (see hardStopPendingExec's doc), so it still
+		// goes through hardStopRunningTarget rather than being skipped
+		// here.
+		if t.Status != "RUNNING" {
 			continue
 		}
 		wg.Add(1)
 		go func(t cancelTarget) {
 			defer wg.Done()
-			h.hardStopOne(ctx, wsID, t.ID, t.ExecContID.String, t.ExecID.String)
+			h.hardStopRunningTarget(ctx, wsID, t)
 		}(t)
 	}
 	wg.Wait()
 	h.logger.Info("issue stop: hard-stop pass complete", "identifier", ident, "targets", len(targets))
+}
+
+// hardStopRunningTarget resolves a RUNNING target's exec (waiting briefly
+// if it hasn't started yet — see awaitExecID) and, once it has one, hands
+// off to hardStopOne. A target whose exec never appears in time is recorded
+// explicitly (hardStopPendingExec) rather than silently skipped.
+func (h *IssueHandler) hardStopRunningTarget(ctx context.Context, wsID string, t cancelTarget) {
+	containerID, execID, ok := h.awaitExecID(ctx, t)
+	if !ok {
+		h.recordHardStopResult(ctx, wsID, t.ID, "", "", 0, hardStopPendingExec)
+		return
+	}
+	h.hardStopOne(ctx, wsID, t.ID, containerID, execID)
+}
+
+// awaitExecID returns t's exec_id/exec_container_id, re-reading the row
+// (every hardStopPollInterval, up to hardStopExecAppearTimeout) when the
+// RETURNING snapshot Stop's Tier 1 stamp captured did not have them yet —
+// the assignments_run.go RUNNING stamp lands before provisioning, and
+// OnExecStarted (which persists these) fires only once the heavy exec
+// actually starts. ok=false means nothing appeared before the deadline.
+func (h *IssueHandler) awaitExecID(ctx context.Context, t cancelTarget) (containerID, execID string, ok bool) {
+	if t.ExecID.Valid && t.ExecID.String != "" && t.ExecContID.Valid && t.ExecContID.String != "" {
+		return t.ExecContID.String, t.ExecID.String, true
+	}
+	deadline := time.Now().Add(hardStopExecAppearTimeout)
+	for {
+		var execIDNS, contIDNS sql.NullString
+		if err := h.db.QueryRowContext(ctx,
+			`SELECT exec_id, exec_container_id FROM assignments WHERE id = ?`, t.ID,
+		).Scan(&execIDNS, &contIDNS); err != nil {
+			h.logger.Warn("hard stop: re-read assignment for exec id", "error", err, "assignment_id", t.ID)
+		} else if execIDNS.Valid && execIDNS.String != "" && contIDNS.Valid && contIDNS.String != "" {
+			return contIDNS.String, execIDNS.String, true
+		}
+		if !time.Now().Before(deadline) {
+			return "", "", false
+		}
+		select {
+		case <-ctx.Done():
+			return "", "", false
+		case <-time.After(hardStopPollInterval):
+		}
+	}
 }
 
 // hardStopOne resolves execID's pid and signals it, escalating from TERM to

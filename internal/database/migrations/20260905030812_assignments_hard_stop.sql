@@ -43,5 +43,5 @@ ALTER TABLE assignments ADD COLUMN hard_stop_at TEXT;
 ALTER TABLE assignments ADD COLUMN hard_stop_result TEXT
     CHECK (hard_stop_result IS NULL OR hard_stop_result IN (
         'TERMINATED_TERM', 'TERMINATED_KILL', 'ALREADY_EXITED',
-        'UNSUPPORTED', 'NOT_FOUND', 'ERROR'
+        'UNSUPPORTED', 'NOT_FOUND', 'ERROR', 'PENDING_EXEC'
     ));
