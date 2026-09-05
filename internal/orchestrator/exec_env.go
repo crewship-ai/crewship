@@ -395,6 +395,15 @@ func collectMCPEnvRefs(configs ...string) map[string]bool {
 // from a script step with a plain curl. Not a bypass of the fence; they never
 // met it. Any new code path that execs into a crew container must append this.
 //
+// Appending it is only half the job, and #1473 did only that half. These
+// variables name a proxy; something has to have STARTED one.
+// The agent path does that in ensureSidecar, which needs an *AgentRunRequest —
+// so script steps, which have a crew and no agent, carried the proxy env to a
+// port nothing was bound to and died on "Couldn't connect to 127.0.0.1 port
+// 9119" on any crew no agent run had warmed. A new path that appends this must
+// also call Orchestrator.EnsureCrewSidecar (sidecar_ensure.go) — the crew-level
+// door onto the same start/reuse/restart sequence — before it execs.
+//
 // Both cases are set deliberately: Go reads the upper-case pair, most CLIs
 // (curl, wget) read the lower-case one, and a script step is exactly where a
 // bare curl runs.

@@ -533,6 +533,22 @@ inherits the crew container's global network policy (only `http` steps honor
 `egress_targets`). Keep network-touching logic in `http` steps, or scope the
 crew's `allowed_domains`.
 
+**How that policy is enforced.** A script step's outbound HTTP goes through the
+crew's `crewship-sidecar` proxy (`127.0.0.1:9119` inside the container), which
+is where `network_mode` / `allowed_domains` are applied. The step's environment
+carries `HTTP_PROXY` / `HTTPS_PROXY` (both cases) pointing at it, and a proxy
+variable set in `script.env` is **ignored** — a step cannot reconfigure the
+fence that constrains it. The proxy is started as part of running the step, so a
+script step works on a cold crew that has never run an agent.
+
+That proxy is started with the crew's network policy and **nothing else**: no
+provider credentials, no MCP gateway. Credential delivery is defined per agent,
+and a script step has no agent. So a script authenticates with what its own
+`script.env` and `{{ secrets.* }}` put in its environment — it does not inherit
+an agent's API keys, and the sidecar injects none on its behalf. (When an agent
+run happens in the same crew, that thin proxy is replaced with the agent's full
+one.)
+
 ## Approval gates (`type: wait`, kind `approval`)
 
 A `wait` step with `kind: approval` pauses the run for a human decision. The run

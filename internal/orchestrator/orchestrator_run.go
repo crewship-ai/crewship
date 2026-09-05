@@ -1225,39 +1225,32 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			o.failRun(ctx, *req, runID, "error")
 			return nil, fmt.Errorf("unknown network mode: %s", req.NetworkMode)
 		}
-		// Check if sidecar already running in this container (shared crew container).
-		// Multiple agents in the same crew share one container — only the first starts the sidecar.
-		// Also verify the running sidecar's network mode matches the desired mode;
-		// if it differs (e.g. after a policy change), we must restart the sidecar.
-		//
-		// #1220: the whole check→decide→pkill→start sequence below runs under a
-		// per-container lock. Without it, two execs dispatching at nearly the
-		// same moment both sample the same health state, both decide to
-		// (re)start, and both pkill + startSidecar — one killing the other's
-		// freshly started sidecar, or double-starting it. The explicit unlock
-		// after the start block releases on the happy path BEFORE the heavy
-		// agent exec; the deferred call covers the error returns (idempotent).
-		unlockSidecar := o.lockSidecarLifecycle(req.ContainerID)
-		defer unlockSidecar()
-		needStart := true
-		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
-			if health.Stale {
-				// #1008: the running sidecar is an OLD bind-mounted binary from
-				// before the last redeploy. It keeps serving stale memory/egress
-				// behaviour with no other signal — surface it on a durable,
-				// operator-watchable channel (#1160), not just stdout.
-				o.emitStaleSidecarSignal(ctx, *req, health.SidecarHash)
-			}
-			if !sidecarNeedsRestart(health, desiredMode, desiredDomains, configFingerprint) {
-				// #1160: restricted mode used to restart UNCONDITIONALLY here
-				// ("the domain allowlist may differ between agents, so we
-				// always restart to pick up the latest set") — with multiple
-				// agents sharing one crew container, that made every OTHER
-				// agent's exec a guaranteed kill+relaunch of an otherwise-
-				// healthy sidecar. sidecarNeedsRestart only says yes when the
-				// mode or the allowlist itself actually changed.
-				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", shortID(req.ContainerID))
-				needStart = false
+		// Settle the sidecar: reuse a healthy one, restart it when the network
+		// policy or credential set changed, start one when there is none.
+		// Multiple agents in the same crew share one container — only the first
+		// starts the sidecar. The whole sequence (and the #1220 lifecycle lock
+		// that serializes it) lives in settleSidecar, which the crew-level
+		// EnsureCrewSidecar also drives: routine `script` steps exec into this
+		// same container carrying the same proxy env, and two implementations of
+		// "make sure the sidecar is up" is exactly how these paths drift apart.
+		if _, err := o.settleSidecar(ctx, sidecarSettleSpec{
+			containerID:        req.ContainerID,
+			logID:              req.AgentID,
+			desiredMode:        desiredMode,
+			desiredDomains:     desiredDomains,
+			networkPolicy:      networkPolicy,
+			configFingerprint:  configFingerprint,
+			restartFingerprint: configFingerprint,
+			creds:              req.Credentials,
+			memoryCfg:          memoryCfg,
+			ipcCfg:             ipcCfg,
+			routeAuth:          routeAuth,
+			members:            sidecarMembers,
+			mcpServers:         req.MCPServers,
+			onStale: func(runningHash string) {
+				o.emitStaleSidecarSignal(ctx, *req, runningHash)
+			},
+			onReuse: func() {
 				// The reused sidecar serves THIS agent's memory tier via the
 				// per-agent MCP path (CRE-137) — make sure the tier's dirs
 				// exist with the shared 1001:1002 perms even though
@@ -1269,57 +1262,12 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 					prepMemoryDirs(ctx, o.container, req.ContainerID,
 						memoryPrepPaths(memoryCfg, nil), o.logger)
 				}
-			} else {
-				o.logger.Warn("sidecar runtime configuration changed, restarting",
-					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
-				// Kill the existing sidecar and WAIT for it to actually exit
-				// before startSidecar launches a replacement (#1160): pkill
-				// only sends the signal and returns immediately, so without
-				// this wait a concurrent exec's checkSidecar could sample the
-				// container mid-restart — momentarily seeing the dying old
-				// process (or a not-yet-bound new one) and misreporting
-				// staleness or network-mode drift on a container that was
-				// never actually stale. Bounded to ~2s; falls through to
-				// startSidecar regardless (best-effort, matches the existing
-				// `|| true` fail-open style below).
-				//
-				// The pattern is anchored with `^` — this whole command runs
-				// as `sh -c "<script>"`, and that wrapping shell's OWN
-				// /proc/<pid>/cmdline contains the literal substring
-				// "crewship-sidecar" (it's part of the script text passed to
-				// -c). An UNANCHORED `pkill -f crewship-sidecar` matches that
-				// substring anywhere in a process's command line — including
-				// its own parent shell — so it self-SIGTERMs before ever
-				// reaching the wait loop (verified live: exit code 143, i.e.
-				// killed by signal, with zero loop iterations run). The real
-				// sidecar is launched as the bare command `crewship-sidecar
-				// --addr 127.0.0.1:9119` (exec_sidecar.go's startSidecar), so
-				// its cmdline STARTS WITH the pattern; the wrapping shell's
-				// never does (it starts with "sh"). `^` excludes exactly the
-				// self-match case while still catching the real target.
-				_ = o.execPreflight(ctx, provider.ExecConfig{
-					ContainerID: req.ContainerID,
-					Cmd: []string{"sh", "-c",
-						`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
-					User: "0:0",
-					// Killing the stale sidecar to reset the network policy
-					// legitimately needs root; #1158 opt-in (see ExecConfig).
-					// Failing this closed would leave the stale egress policy in
-					// place — a worse security outcome than the root exec.
-					AllowPrivileged: true,
-				})
-			}
+			},
+		}); err != nil {
+			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
+			o.failRun(ctx, *req, runID, "error")
+			return nil, fmt.Errorf("start sidecar: %w", err)
 		}
-		if needStart {
-			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, routeAuth, sidecarMembers, networkPolicy, req.MCPServers, configFingerprint, o.logger); err != nil {
-				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
-				o.failRun(ctx, *req, runID, "error")
-				return nil, fmt.Errorf("start sidecar: %w", err)
-			}
-		}
-		// Sidecar settled (reused or freshly started) — release the #1220
-		// lock now so it never spans the long-lived agent exec below.
-		unlockSidecar()
 		credCount := 0
 		for _, c := range req.Credentials {
 			if credTypeToProvider(c) != "" {

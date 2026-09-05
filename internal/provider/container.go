@@ -29,9 +29,19 @@ type CrewConfig struct {
 	// Passed through for orchestrator/sidecar layer; not consumed by providers directly yet.
 	NetworkMode    string   // "free" (default) or "restricted"
 	AllowedDomains []string // domains allowed when NetworkMode is "restricted"
-	TTLHours       int      // auto-stop after idle period; 0 = no TTL
-	Image          string   // custom runtime image; empty = provider default
-	CachedImage    string   // provisioned Docker image tag; empty = use Image or default
+	// AllowPrivateEndpoints is the crew's opt-in (crews.allow_private_endpoints,
+	// #961) to reach RFC1918/loopback destinations through the sidecar's
+	// dial-time SSRF guard; link-local and cloud-metadata stay blocked
+	// regardless, and the instance ceiling still ANDs over it. Carried here, on
+	// the config that starts the container, so an agent-less exec path — today
+	// routine `script` steps, via Orchestrator.EnsureCrewSidecar — can hand the
+	// sidecar the SAME egress policy an agent run would. Leaving it out would
+	// have silently narrowed the fence for exactly those steps, breaking a
+	// crew's own LAN endpoint with no way to tell why.
+	AllowPrivateEndpoints bool
+	TTLHours              int    // auto-stop after idle period; 0 = no TTL
+	Image                 string // custom runtime image; empty = provider default
+	CachedImage           string // provisioned Docker image tag; empty = use Image or default
 	// ContainerEnv is extra env vars from devcontainer.json containerEnv.
 	// CREWSHIP_* keys are reserved for platform-managed vars and silently
 	// skipped. Providers merge these into the container's Env at create time.
