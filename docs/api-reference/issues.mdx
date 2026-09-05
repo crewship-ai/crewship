@@ -690,6 +690,10 @@ GET /api/v1/crews/{crewId}/issues/{identifier}/events?workspace_id={workspaceId}
 
 Exists for one reason: the realtime allowlist (`hooks/use-realtime.tsx`) only guards which event TYPES a client accepts — it says nothing about whether every frame of an accepted type actually arrived. The server's WebSocket hub sends non-blocking and silently drops a frame when a client's send buffer is full. `issue.delivery.acked` (work package B2) is the one realtime type today whose payload carries a `seq`; a client that notices its next `seq` isn't exactly one more than the last calls this endpoint with `after_seq` set to the last `seq` it has confirmed, and gets back everything in between — instead of staying stale until someone reloads the tab.
 
+<Warning>
+One call is not guaranteed to return the whole gap: a response is capped at 500 rows regardless of how large the range between `after_seq` and the mission's current `seq` is. A caller that needs everything must keep requesting with `after_seq` set to the last row's own `seq` (not the response's `latest_seq`) until the returned `events` is empty or a returned row's `seq` reaches `latest_seq`. `crewship issue events` and the board's client-side gap resync (`hooks/use-issue-event-gap-resync.ts`) both page this way; treating the first page as the whole answer silently drops everything past row 500.
+</Warning>
+
 | Query param | Type | Description |
 |---|---|---|
 | `after_seq` | integer | Only return events with `seq` greater than this. Omitted or `0` returns the full history. Must be a non-negative integer. |
@@ -726,6 +730,13 @@ Exists for one reason: the realtime allowlist (`hooks/use-realtime.tsx`) only gu
 | `latest_seq` | integer | The issue's current high-water mark — lets a caller with an empty `events` array tell "caught up" from "server has never heard of this issue". |
 
 `payload_json` carries the same `action`/`from`/`to` shape the journal entry gets, plus `forced`/`open_children` on a status change that bypassed [the terminal-children rule](#update-issue) with `?force=true` — the receipt naming which children were still open. It is `null` on a row from before this column existed.
+
+**Auth:** any authenticated workspace member (`read`).
+
+| Status | Condition |
+|---|---|
+| `400` | `after_seq` is not a non-negative integer |
+| `404` | Issue not found in the supplied crew + workspace |
 
 ---
 

@@ -28,6 +28,11 @@ type issueEventsStub struct {
 	eventsCalls []string
 	eventsQuery []url.Values
 	eventsBody  string
+	// byAfterSeq, when non-nil, serves a DIFFERENT body per after_seq
+	// value on the query string — the pagination test below needs the
+	// stub to behave like a real multi-page server, not a single fixed
+	// response every call returns identically.
+	byAfterSeq map[string]string
 }
 
 func (s *issueEventsStub) start(t *testing.T) *httptest.Server {
@@ -52,6 +57,9 @@ func (s *issueEventsStub) start(t *testing.T) *httptest.Server {
 			s.eventsCalls = append(s.eventsCalls, r.URL.Path)
 			s.eventsQuery = append(s.eventsQuery, r.URL.Query())
 			body := s.eventsBody
+			if s.byAfterSeq != nil {
+				body = s.byAfterSeq[r.URL.Query().Get("after_seq")]
+			}
 			s.mu.Unlock()
 			_, _ = w.Write([]byte(body))
 		default:
@@ -132,6 +140,13 @@ func TestAcceptance_IssueEvents_ListsInSeqOrder(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
+
+	// Ordering matters here specifically — this endpoint's whole reason to
+	// exist over `issue activity` is that it is seq-ordered, not just that
+	// it contains the same rows.
+	if i, j := strings.Index(out, "Jamie Lee"), strings.Index(out, "Backend Dev"); i == -1 || j == -1 || i > j {
+		t.Errorf("output does not show seq 1 (Jamie Lee) before seq 2 (Backend Dev):\n%s", out)
+	}
 }
 
 func TestAcceptance_IssueEvents_AfterSeqFlag(t *testing.T) {
@@ -174,5 +189,35 @@ func TestAcceptance_IssueEvents_EmptyList(t *testing.T) {
 	}
 	if !strings.Contains(out, `"events": []`) {
 		t.Errorf("output = %q, want an empty events array", out)
+	}
+}
+
+// TestAcceptance_IssueEvents_PagesPastTheServerCap — code review on #2377:
+// the one-shot version stopped after the FIRST page and silently dropped
+// everything past the server's 500-row cap. This drives the real binary
+// against a stub server that answers with THREE pages (mirroring a history
+// longer than one page) and asserts the CLI followed all of them rather
+// than reporting only the first.
+func TestAcceptance_IssueEvents_PagesPastTheServerCap(t *testing.T) {
+	stub := &issueEventsStub{byAfterSeq: map[string]string{
+		"":  `{"events":[{"id":"a1","mission_id":"iss_1","seq":1,"actor_type":"user","actor_id":"u1","actor_name":"Page One","action":"created","created_at":"2026-09-04T09:00:00Z"}],"after_seq":0,"latest_seq":3}`,
+		"1": `{"events":[{"id":"a2","mission_id":"iss_1","seq":2,"actor_type":"user","actor_id":"u1","actor_name":"Page Two","action":"status_changed","created_at":"2026-09-04T09:01:00Z"}],"after_seq":1,"latest_seq":3}`,
+		"2": `{"events":[{"id":"a3","mission_id":"iss_1","seq":3,"actor_type":"user","actor_id":"u1","actor_name":"Page Three","action":"status_changed","created_at":"2026-09-04T09:02:00Z"}],"after_seq":2,"latest_seq":3}`,
+	}}
+	srv := stub.start(t)
+
+	out, err := runIssueEventsCLI(t, srv.URL, "issue", "events", "BE-42", "--format", "json")
+	if err != nil {
+		t.Fatalf("issue events: %v\noutput: %s", err, out)
+	}
+
+	calls := stub.calls(t)
+	if len(calls) != 3 {
+		t.Fatalf("events calls = %d, want 3 (one per page): %v", len(calls), calls)
+	}
+	for _, want := range []string{"Page One", "Page Two", "Page Three", `"seq": 3`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q (page not followed):\n%s", want, out)
+		}
 	}
 }

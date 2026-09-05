@@ -306,7 +306,7 @@ crewship issue activity BE-42 --format json | jq '.[] | select(.action=="status_
 
 ## `crewship issue events`
 
-The same `mission_activity` rows as `activity`, but ordered by `seq` (the B1 event log's monotonic per-issue cursor) instead of `created_at`, and NOT capped at 50 — this is the endpoint the board's client-side gap detector calls to resync after a WebSocket frame is dropped under load (F43, work package B11, #2368). Hits `GET /api/v1/crews/{crewId}/issues/{ident}/events?after_seq=`.
+The same `mission_activity` rows as `activity`, but ordered by `seq` (the B1 event log's monotonic per-issue cursor) instead of `created_at`, and NOT capped at 50 — this is the endpoint the board's client-side gap detector calls to resync after a WebSocket frame is dropped under load (F43, work package B11, #2368). Hits `GET /api/v1/crews/{crewId}/issues/{ident}/events?after_seq=`. The server caps a single response at 500 rows; the CLI (like the client-side gap detector) follows `after_seq` pages automatically until it has everything up to the issue's current `latest_seq`, so `--format json`'s `events` array is always the full requested range, never just the first page.
 
 ```bash
 crewship issue events BE-42                    # full history, seq order
