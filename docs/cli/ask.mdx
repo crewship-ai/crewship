@@ -164,6 +164,7 @@ Saved to `~/.crewship/cli-config.yaml`. Unset by passing an empty string or dele
 - **`no default agent set. Use --agent <slug>, --agents <list>, or run 'crewship config set default-agent <slug>'`** — non-TTY mode (CI, piped stdin) and no agent specified.
 - **`prompt is required (positional, --prompt, stdin pipe, or --with-* flag)`** — the assembled prompt was empty.
 - **`no agents available in this workspace`** — the picker fired but `GET /api/v1/agents` came back empty.
+- **`agent busy: <message>`** — that agent already had a live run, so the send was rejected and nothing ran. In a fan-out it fails only that agent's slot; the others still answer.
 
 ## See also
 
