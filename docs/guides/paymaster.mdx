@@ -241,7 +241,7 @@ Zero is the honest value for ollama/local (genuinely free) and for unknown-provi
 
 ## Pricing — current rates
 
-The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model is a one-line change. Prices are USD per 1,000,000 tokens and were verified against provider docs on 2026-04-30.
+The canonical rate card lives in `internal/paymaster/pricing.go`. Adding a model is a one-line change. Prices are USD per 1,000,000 tokens and were verified against provider docs on 2026-09-05 (#2390).
 
 It is no longer the only rate source: an **embedded models.dev snapshot** (`internal/modelcatalog`, 8 providers) sits underneath it and prices models the table has never heard of. The table stays authoritative — see [The five-step lookup](#the-five-step-lookup) — and `crewship model price --provider <p> --model <m>` reports which source answered for any pair.
 
@@ -249,18 +249,23 @@ It is no longer the only rate source: an **embedded models.dev snapshot** (`inte
 | Provider / Model | Input | Output | Cached input | Cache write |
 |---|---|---|---|---|
 | **Anthropic** | | | | |
+| `claude-fable-5` | 10.00 | 50.00 | 1.00 | 12.50 |
+| `claude-opus-4-8` | 5.00 | 25.00 | 0.50 | 6.25 |
 | `claude-opus-4-7` | 5.00 | 25.00 | 0.50 | 6.25 |
+| `claude-sonnet-5` | 3.00 | 15.00 | 0.30 | 3.75 |
 | `claude-sonnet-4-6` | 3.00 | 15.00 | 0.30 | 3.75 |
 | `claude-haiku-4-5` | 1.00 | 5.00 | 0.10 | 1.25 |
 | **OpenAI** | | | | |
-| `gpt-5.5` (alias `gpt-5`) | 4.00 | 24.00 | 0.40 | 4.00 |
+| `gpt-5.5` | 10.00 | 45.00 | 1.00 | 10.00 |
 | `gpt-5.4-mini` (alias `gpt-5-mini`) | 0.75 | 4.50 | 0.075 | 0.75 |
-| `gpt-5.4-nano` (alias `gpt-5-nano`) | 0.10 | 0.40 | 0.01 | 0.10 |
+| `gpt-5.4-nano` | 0.20 | 1.25 | 0.02 | 0.20 |
 | `o3-pro` | 20.00 | 80.00 | 5.00 | 20.00 |
+| `gpt-5` (legacy pin) | 4.00 | 24.00 | 0.40 | 4.00 |
+| `gpt-5-nano` (legacy pin) | 0.10 | 0.40 | 0.01 | 0.10 |
 | **Google** | | | | |
 | `gemini-2.5-pro` | 2.50 | 15.00 | 0.625 | 2.50 |
-| `gemini-2.5-flash` | 0.10 | 0.40 | 0.025 | 0.10 |
-| `gemini-2.5-flash-lite` | 0.05 | 0.20 | 0.0125 | 0.05 |
+| `gemini-2.5-flash` | 0.30 | 2.50 | 0.03 | 0.30 |
+| `gemini-2.5-flash-lite` | 0.10 | 0.40 | 0.01 | 0.10 |
 | **xAI** | | | | |
 | `grok-4.20` | 2.00 | 6.00 | 2.00 | 2.00 |
 | `grok-4.1-fast` | 0.20 | 0.50 | 0.20 | 0.20 |
@@ -271,6 +276,8 @@ It is no longer the only rate source: an **embedded models.dev snapshot** (`inte
 | `codestral-2508` | 0.30 | 0.90 | 0.30 | 0.30 |
 | **Local** | | | | |
 | `ollama/*`, `local/*` | 0 | 0 | 0 | 0 |
+
+`gpt-5.5` is priced at its >272K-input tier (double input and cache, 1.5× output) on purpose: `Estimate` does not know the context length, so the row over-bills a short call rather than under-bill a long one. The `gpt-5` and `gpt-5-nano` pins keep the rates older configs were written against; they are not aliases of the current tiers.
 </Accordion>
 
 <Note>
