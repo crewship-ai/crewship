@@ -115,6 +115,10 @@ Without `SEED_GITHUB_TOKEN` the packs are still seeded — crew, scripts,
 routines, Page, issues — and reported as **skipped** by `verify`, never as
 green.
 
+A re-seed over an existing workspace refreshes the stored value from the
+variable, so a rotated token lands on the next `crewship seed` rather than
+leaving last month's token in place under the same name.
+
 ## Verifying
 
 ```bash

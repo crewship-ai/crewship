@@ -49,9 +49,6 @@ type PackDef struct {
 	// still seeded — crew, scripts, routines, page, issues — but
 	// `seed verify` reports it as skipped with the reason, never as green.
 	RequiresEnv []string
-	// Sources are the real, public things the pack reads. Listed so the
-	// showcase tests and the docs can say what the demo actually touches.
-	Sources []string
 }
 
 // PackFile is one file delivered to the pack crew's shared volume.
@@ -83,7 +80,6 @@ var Packs = []PackDef{
 		ReportSlug:  "ci-nightly-triage",
 		PageSlug:    "ci-watch",
 		RequiresEnv: []string{"SEED_GITHUB_TOKEN"},
-		Sources:     []string{"https://api.github.com/repos/crewship-ai/crewship/actions"},
 	},
 	{
 		Slug: "docs-drift",
@@ -101,7 +97,6 @@ var Packs = []PackDef{
 		ReportSlug:  "docs-drift-audit",
 		PageSlug:    "docs-drift",
 		RequiresEnv: []string{"SEED_GITHUB_TOKEN"},
-		Sources:     []string{"https://github.com/crewship-ai/crewship"},
 	},
 	{
 		Slug: "site-replica",
@@ -117,7 +112,6 @@ var Packs = []PackDef{
 		ReportSlug:  "site-replica-audit",
 		PageSlug:    "site-replica",
 		RequiresEnv: nil,
-		Sources:     []string{"https://www.seznam.cz"},
 	},
 }
 
@@ -138,20 +132,6 @@ func PackFileContent(src string) ([]byte, error) {
 		return nil, fmt.Errorf("seeddata: pack file %s: %w", src, err)
 	}
 	return b, nil
-}
-
-// PackRoutineSlugs lists every routine slug the packs seed, probes first.
-func PackRoutineSlugs() []string {
-	var out []string
-	for _, p := range Packs {
-		if p.ProbeSlug != "" {
-			out = append(out, p.ProbeSlug)
-		}
-		if p.ReportSlug != "" {
-			out = append(out, p.ReportSlug)
-		}
-	}
-	return out
 }
 
 // PackForRoutine returns the pack that owns a routine slug, if any.

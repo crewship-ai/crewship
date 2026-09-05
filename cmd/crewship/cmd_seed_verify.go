@@ -194,9 +194,6 @@ type packVerifier struct {
 	crewIDs map[string]string
 	checks  []verifyCheck
 	started time.Time
-	// probe holds the last probe JSON seen (from the probe run, or the
-	// report run's own probe step), for the COUNTS reconciliation.
-	probe map[string]any
 }
 
 func (v *packVerifier) add(step, result, detail string) {
@@ -314,7 +311,6 @@ func (v *packVerifier) verifyProbe(ctx context.Context) bool {
 		v.add("probe", verifyFail, "step 'probe' output is not JSON: "+truncateForSmoke(probeJSON, 120))
 		return false
 	}
-	v.probe = probe
 	if msg, _ := probe["error"].(string); msg != "" {
 		v.add("probe", verifyFail, "probe reported an error: "+msg)
 		return false
@@ -331,14 +327,21 @@ func (v *packVerifier) verifyProbe(ctx context.Context) bool {
 
 func (v *packVerifier) verifyCIProbe(ctx context.Context, run *cli.PipelineRunDetail, probe map[string]any) bool {
 	red, stale := intField(probe, "red"), intField(probe, "stale")
+	// The same inputs the run used, so the independent read applies the
+	// same threshold — a run started with max_stale_hours=24 must not be
+	// judged against 48.
 	repo := "crewship-ai/crewship"
+	maxStale := 48 * time.Hour
 	if inputs := run.Inputs; inputs != nil {
 		if r, _ := inputs["repo"].(string); r != "" {
 			repo = r
 		}
+		if h := intField(inputs, "max_stale_hours"); h > 0 {
+			maxStale = time.Duration(h) * time.Hour
+		}
 	}
 	token := firstNonEmpty(os.Getenv(packGitHubEnv), os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
-	truth, err := githubScheduledTruth(ctx, repo, token, 48*time.Hour, v.opts.now())
+	truth, err := githubScheduledTruth(ctx, repo, token, maxStale, v.opts.now())
 	if err != nil {
 		v.add("probe", verifyFail, fmt.Sprintf("probe red=%d stale=%d, but the independent GitHub read failed: %v", red, stale, err))
 		return false
@@ -346,7 +349,7 @@ func (v *packVerifier) verifyCIProbe(ctx context.Context, run *cli.PipelineRunDe
 	if truth.red != red || truth.stale != stale {
 		// A run can finish between the two reads. One more read before
 		// calling it a disagreement.
-		truth2, err2 := githubScheduledTruth(ctx, repo, token, 48*time.Hour, v.opts.now())
+		truth2, err2 := githubScheduledTruth(ctx, repo, token, maxStale, v.opts.now())
 		if err2 == nil && truth2.red == red && truth2.stale == stale {
 			truth = truth2
 		}

@@ -495,14 +495,27 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 }
 
 func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string, error) {
-	// Check if credential already exists first
+	return seedScopedCredential(client, cred, "")
+}
+
+// seedScopedCredential creates a credential at WORKSPACE scope, or at CREW
+// scope when crewID is set. An existing credential of the same name is
+// reused by id — and, when the definition carries a value, that value is
+// pushed to it, so a rotated SEED_* variable lands on a re-seed instead of
+// being silently discarded in favour of whatever was stored last time.
+func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewID string) (string, error) {
 	existingID, err := resolveByName(client, "/api/v1/credentials", cred.Name)
 	if err == nil && existingID != "" {
 		fmt.Fprintf(os.Stderr, "  = Credential exists: %s\n", cred.Name)
+		if cred.Value != "" && !strings.HasPrefix(cred.Value, "demo-placeholder-") {
+			if uerr := updateCredentialValue(client, existingID, cred.Value); uerr != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s: value not refreshed: %v\n", cred.Name, uerr)
+			}
+		}
 		return existingID, nil
 	}
 
-	body := map[string]string{
+	body := map[string]interface{}{
 		"name":        cred.Name,
 		"description": cred.Description,
 		"type":        cred.Type,
@@ -510,12 +523,19 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 		"value":       cred.Value,
 		"scope":       "WORKSPACE",
 	}
+	if crewID != "" {
+		body["scope"] = "CREW"
+		body["crew_id"] = crewID
+	}
 	resp, err := client.Post("/api/v1/credentials", body)
 	if err != nil {
 		return "", err
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusConflict {
-		resp.Body.Close()
+		// Someone created it between the pre-check and the POST: resolve
+		// again, and let a second miss surface as resolveByName's own
+		// "not found" rather than a wrapped guess.
 		return resolveByName(client, "/api/v1/credentials", cred.Name)
 	}
 	if err := cli.CheckError(resp); err != nil {
@@ -529,6 +549,16 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 	}
 	fmt.Fprintf(os.Stderr, "  + Credential: %s (%s)\n", cred.Name, cred.Type)
 	return created.ID, nil
+}
+
+// updateCredentialValue pushes a new value to an existing credential.
+func updateCredentialValue(client *cli.Client, id, value string) error {
+	resp, err := client.Patch("/api/v1/credentials/"+id, map[string]string{"value": value})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return cli.CheckError(resp)
 }
 
 // ════════════════════════════════════════════════════════════════════════════

@@ -52,11 +52,33 @@ MAP="$MAP" WORK="$WORK" DRIFT="$DRIFT" SHA="$SHA" REPO="$REPO" \
 MAX_CANDIDATES="${MAX_CANDIDATES:-25}" python3 <<'PY'
 import json, os, subprocess, sys
 
-doc_map = json.load(open(os.environ["MAP"], encoding="utf-8"))
+
+def fail(message):
+    # Same contract as the shell `fail` above: a scan that cannot run says
+    # so in JSON and exits ZERO — a non-zero exit would fail the routine step
+    # and leave the status panel silently stale.
+    print(json.dumps({"error": message, "pairs": 0, "total_candidates": 0, "results": [],
+                      "panel": {"state": "critical", "label": f"scan failed: {message}"}},
+                     ensure_ascii=False))
+    sys.exit(0)
+
+
+try:
+    with open(os.environ["MAP"], encoding="utf-8") as f:
+        doc_map = json.load(f)
+except (OSError, ValueError) as e:
+    fail(f"docs map is not valid JSON: {e}")
+if not isinstance(doc_map, dict) or not isinstance(doc_map.get("pairs"), list):
+    fail("docs map has no \"pairs\" list")
 work, drift = os.environ["WORK"], os.environ["DRIFT"]
 results = []
 
-for pair in doc_map.get("pairs", []):
+for i, pair in enumerate(doc_map["pairs"]):
+    if not isinstance(pair, dict) or not pair.get("doc") or not isinstance(pair.get("pkg"), list) or not pair["pkg"]:
+        results.append({"doc": str((pair or {}).get("doc", f"pairs[{i}]")) if isinstance(pair, dict) else f"pairs[{i}]",
+                        "error": "map entry needs a \"doc\" and a non-empty \"pkg\" list",
+                        "phantoms": [], "gaps": [], "drift": 0})
+        continue
     doc = os.path.join(work, pair["doc"])
     if not os.path.exists(doc):
         results.append({"doc": pair["doc"], "error": "page does not exist in the repository",

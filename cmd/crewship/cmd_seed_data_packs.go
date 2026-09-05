@@ -114,7 +114,7 @@ func seedPackCredentials(ctx context.Context, client *cli.Client, crewIDs map[st
 			continue
 		}
 		name := packCredentialName(p)
-		credID, err := seedOneCrewCredential(client, seeddata.CredentialDef{
+		credID, err := seedScopedCredential(client, seeddata.CredentialDef{
 			Name:        name,
 			Description: fmt.Sprintf("GitHub token (read-only) for the %s demo pack — scoped to crew %s so its routines resolve this one", p.Name, p.CrewSlug),
 			Type:        "CLI_TOKEN",
@@ -148,44 +148,6 @@ func seedPackCredentials(ctx context.Context, client *cli.Client, crewIDs map[st
 		fmt.Fprintf(os.Stderr, "  + pack %s: %s → GH_TOKEN (crew %s)\n", p.Slug, name, p.CrewSlug)
 	}
 	return nil
-}
-
-// seedOneCrewCredential creates a CREW-scoped credential, resolving an
-// existing one by name so a re-seed is idempotent.
-func seedOneCrewCredential(client *cli.Client, def seeddata.CredentialDef, crewID string) (string, error) {
-	if existing, err := resolveByName(client, "/api/v1/credentials", def.Name); err == nil && existing != "" {
-		fmt.Fprintf(os.Stderr, "  = Credential exists: %s\n", def.Name)
-		return existing, nil
-	}
-	resp, err := client.Post("/api/v1/credentials", map[string]interface{}{
-		"name":        def.Name,
-		"description": def.Description,
-		"value":       def.Value,
-		"type":        def.Type,
-		"provider":    def.Provider,
-		"scope":       "CREW",
-		"crew_id":     crewID,
-	})
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusConflict {
-		if existing, rerr := resolveByName(client, "/api/v1/credentials", def.Name); rerr == nil && existing != "" {
-			return existing, nil
-		}
-		return "", fmt.Errorf("%s: conflict but existing record could not be resolved", def.Name)
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return "", err
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := cli.ReadJSON(resp, &created); err != nil {
-		return "", err
-	}
-	return created.ID, nil
 }
 
 // packRequires reports whether a pack lists env among its requirements.

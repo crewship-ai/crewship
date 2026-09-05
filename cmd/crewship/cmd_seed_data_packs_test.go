@@ -195,3 +195,47 @@ func TestPackRunnable(t *testing.T) {
 		}
 	}
 }
+
+// A re-seed with a rotated SEED_GITHUB_TOKEN must push the new value to the
+// existing credential — reusing the row by name and keeping the old value
+// would leave every GitHub call failing under a name that looks current.
+func TestSeedPackCredentials_ReseedRefreshesTheStoredValue(t *testing.T) {
+	t.Setenv("SEED_GITHUB_TOKEN", "ghp_rotated_token_00000000000000000000")
+	s := clitest.NewStubServer()
+	defer s.Close()
+	s.OnGet("/api/v1/credentials", clitest.JSONResponse(200, []map[string]any{
+		{"id": "cred-old", "name": "github-ci-watch"}, {"id": "cred-old-q", "name": "github-docs-drift"},
+	}))
+	var patched []string
+	s.OnPatch("/api/v1/credentials/cred-old", func(_ *http.Request, body []byte) (int, []byte, string) {
+		patched = append(patched, string(body))
+		return 200, []byte(`{}`), "application/json"
+	})
+	s.OnPatch("/api/v1/credentials/cred-old-q", func(_ *http.Request, body []byte) (int, []byte, string) {
+		patched = append(patched, string(body))
+		return 200, []byte(`{}`), "application/json"
+	})
+	s.OnPost("/api/v1/credentials/bindings", clitest.JSONResponse(409, map[string]string{"error": "already bound"}))
+	posts := 0
+	s.OnPost("/api/v1/credentials", func(_ *http.Request, _ []byte) (int, []byte, string) {
+		posts++
+		return 201, []byte(`{"id":"unexpected"}`), "application/json"
+	})
+	for k := range packBoundSlots {
+		delete(packBoundSlots, k)
+	}
+	if err := seedPackCredentials(context.Background(), covStubClient(s), packCrewIDs()); err != nil {
+		t.Fatalf("seedPackCredentials: %v", err)
+	}
+	if posts != 0 {
+		t.Errorf("created %d credentials, want 0 — the existing rows must be reused", posts)
+	}
+	if len(patched) != 2 {
+		t.Fatalf("PATCHed %d credentials, want 2: %v", len(patched), patched)
+	}
+	for _, body := range patched {
+		if !strings.Contains(body, "ghp_rotated_token_00000000000000000000") {
+			t.Errorf("PATCH body does not carry the rotated value: %s", body)
+		}
+	}
+}

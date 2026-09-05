@@ -198,6 +198,45 @@ class TestAuditWrapper(unittest.TestCase):
         self.assertIn("1 of 2", out["panel"]["label"])
         self.assertEqual(out["results"][0]["doc"], "docs/page.mdx")
 
+    def _audit(self, map_text):
+        audit = os.path.join(HERE, "..", "scripts", "docs_audit.sh")
+        with tempfile.TemporaryDirectory() as d:
+            repo = os.path.join(d, "repo")
+            os.makedirs(os.path.join(repo, "docs"))
+            with open(os.path.join(repo, "docs", "page.mdx"), "w", encoding="utf-8") as f:
+                f.write("`network_mode`\n")
+            shared = os.path.join(d, "shared")
+            os.makedirs(os.path.join(shared, "scripts"))
+            os.makedirs(os.path.join(shared, "config"))
+            with open(os.path.join(shared, "config", "docs_map.json"), "w", encoding="utf-8") as f:
+                f.write(map_text)
+            os.symlink(os.path.abspath(SCRIPT), os.path.join(shared, "scripts", "docs_drift.py"))
+            env = dict(os.environ, SHARED_ROOT=shared, LOCAL_REPO=repo, REPO="x/y")
+            r = subprocess.run(["bash", audit], capture_output=True, text=True, env=env)
+        return r
+
+    def test_malformed_map_is_json_error_with_exit_zero(self):
+        """A curated map is edited by hand; a typo must not fail the routine
+        step — it must say so in the output the panel reads."""
+        r = self._audit("{bad json")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertIn("not valid JSON", out["error"])
+        self.assertEqual(out["panel"]["state"], "critical")
+
+    def test_pair_without_pkg_is_reported_not_crashed(self):
+        r = self._audit(json.dumps({"pairs": [{"doc": "docs/page.mdx"}, {"doc": "docs/page.mdx", "pkg": []}]}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["pairs"], 2)
+        self.assertTrue(all("pkg" in v["error"] for v in out["results"]), out)
+        self.assertEqual(out["panel"]["state"], "critical")
+
+    def test_map_without_pairs_list_is_an_error(self):
+        r = self._audit(json.dumps({"dvojice": []}))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pairs", json.loads(r.stdout)["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
