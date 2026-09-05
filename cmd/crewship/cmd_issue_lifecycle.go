@@ -229,10 +229,14 @@ var issueUpdateCmd = &cobra.Command{
 		}
 
 		identifier := derefStr(issue.Identifier, issue.ID)
-		resp, err := client.Patch(
-			fmt.Sprintf("/api/v1/crews/%s/issues/%s", issue.CrewID, url.PathEscape(identifier)),
-			body,
-		)
+		path := fmt.Sprintf("/api/v1/crews/%s/issues/%s", issue.CrewID, url.PathEscape(identifier))
+		if force, _ := flags.GetBool("force"); force {
+			// §10.4: a parent cannot reach DONE/REVIEW while a child is live;
+			// the server's 409 says "Retry with ?force=true", and this is that
+			// door — the override is recorded as a receipt naming the caller.
+			path += "?force=true"
+		}
+		resp, err := client.Patch(path, body)
 		if err != nil {
 			return err
 		}

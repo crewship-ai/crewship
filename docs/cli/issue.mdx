@@ -145,6 +145,7 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--estimate` | `int` | `0` | Effort estimate (story points or hours, depending on workspace). |
 | `--sort-order` | `float64` | `0` | Manual sort order within a list (lower = top). |
 | `--routine-id` | `string` | | Bind to a routine (pipeline ID). |
+| `--force` | `bool` | | Move a parent to DONE/REVIEW even though a sub-issue or plan task is still open; the server writes a receipt naming who forced it and which children were open (the terminal-children rule) |
 
 ---
 
