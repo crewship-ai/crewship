@@ -310,9 +310,11 @@ crewship issue runs BE-42 --limit 20 --offset 20
 | `--limit` | `int` | `100` | Runs per page (the server caps it at 500). |
 | `--offset` | `int` | `0` | Skip this many runs; the footer names the next page. |
 
-**Output columns:** RUN (the journal run id — what `crewship journal --run-id` and the Activity page take; `—` when the assignment never reached a run), AGENT (slug), TASK (truncated to 28), STATUS, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
+**Output columns:** RUN (the journal run id — what `crewship journal --run-id` and the Activity page take; `—` when the assignment never reached a run), AGENT (slug), TASK (truncated to 28), STATUS, OUTCOME, STARTED (relative time), DURATION, SOURCE, RESULT (error message or result summary; ANSI-sanitised, truncated to 50 chars).
 
 SOURCE is why the run is attributed to the issue: `task` (the issue's own mission-task plan), `mention` (an `@mention` dispatch), or `delegation` (a sub-agent's own further `/assign` call mid-mission). In `--format json`, the same run also carries `mission_id` (the issue's mission ID; omitted on a legacy row that predates `assignments.mission_id`), `run_id` / `trace_id`, `agent_id` and `agent_slug`.
+
+OUTCOME is the §9.6 routing decision (work package B6, #2349) — `NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`, `PARTIAL`, `NEEDS_HUMAN`, `FAILED`, or `CANCELLED`; `-` on a run that predates the `outcome` column. It answers a different question than STATUS: a `COMPLETED` run that never reported a recognised outcome shows `FAILED` here, with its error naming `"no outcome reported"` — an absent outcome is treated as a bug, not a silent success. `NEEDS_HUMAN` is the one outcome that raises an inbox item (`crewship inbox list --kind run_needs_human`). Full vocabulary and routing table: [API reference → Issues → Outcome](/api-reference/issues#outcome).
 
 
 ---

@@ -1862,6 +1862,30 @@ Every routine run emits a sequence of journal entries:
 
 Plus WebSocket broadcast on the workspace channel for live UI updates (PipelineRunNode in the orchestration graph + Runs sub-tab waterfall both subscribe).
 
+### Status, outcome and verdict
+
+Three fields on a run answer three different questions, and the names are close enough to
+confuse (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §9.6/§21 — "Outcome becomes a third
+confusing status field" is a named risk of that document, and this section is how the PR
+that added `outcome` discharges it):
+
+| Field | Answers | Set by | Vocabulary |
+|---|---|---|---|
+| `status` | Did the process complete, error, or get cancelled? | The executor, mechanically | `queued`, `running`, `completed`, `failed`, `cancelled`, `interrupted`, `dry_run`, `waiting` |
+| `outcome` | What should happen next with this result? | The runner, from the agent's own structured hand-off (work package B6, #2349) | `NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`, `PARTIAL`, `NEEDS_HUMAN`, `FAILED`, `CANCELLED` |
+| `runverdict` (`summary.generated`) | Did an LLM judge, reading the run after the fact, think it accomplished its goal? | An aux LLM call, best-effort, gated by the `run_verdict_summaries` flag | Free-form judgment text, not a closed enum |
+
+`status` is mechanical and never lies about whether the process ran. `runverdict` is an
+**advisory opinion**, generated after the fact by a model that did not do the work — useful
+as a second opinion, never authoritative, and silently absent for agentless/dry-run
+routines. `outcome` is the one **deterministic routing decision**: it is what the inbox
+(`NEEDS_HUMAN` → exactly one action-required card), the issue comment thread
+(`WORK_CREATED`/`PARTIAL`), and an issue session's state (`NEEDS_HUMAN` → `awaiting_input`)
+all key off, and a run that reports none of the seven values still gets one —
+`FAILED`, with `error_message` set to `"no outcome reported"` — rather than being read as
+a silent success. Full routing table and the action-contract shape: [API reference →
+Issues → Outcome](/api-reference/issues#outcome).
+
 ### The step's chat is a durable transcript
 
 Every `agent_run` step gets its own chat (titled `Pipeline <id> · step <id>`, one per attempt), and that chat keeps **both** halves of the turn: the rendered prompt the step sent, and the agent's answer with its reasoning and tool activity in the order they streamed. Read it with `crewship chat <chat-id>`, or open the chat in the dashboard — the transcript is the same one [`crewship chat stream`](/guides/watching-agent-runs) shows live, so a browser left open on a running step still has the text after a reload. A step that failed **after** the agent said something keeps what it said, which is usually the most useful thing on the screen.

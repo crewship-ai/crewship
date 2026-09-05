@@ -37,7 +37,7 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--state <enum>` | `unread` | Filter by state. One of `unread`, `read`, `resolved`, `all`. |
-| `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`. |
+| `--kind <enum>` | (unset) | Filter by kind. One of `waitpoint`, `escalation`, `failed_run`, `message`, `memory_consolidation`, `schedule_missed`, `schedule_circuit_breaker_tripped`, `webhook_fire_failed`, `automation_enqueue_failed`, `run_needs_human` (a run's [outcome](/api-reference/issues#outcome) resolved to `NEEDS_HUMAN`, work package B6). |
 | `--limit <n>` | `50` | Max rows. Server caps at 500. |
 | `--offset <n>` | `0` | Skip this many rows (server-side offset pagination). |
 | `--all` | `false` | Keep requesting pages until the server reports `has_more: false`. Exact only on a quiet workspace: a row that leaves the filter mid-walk shifts the window and is never returned. |
