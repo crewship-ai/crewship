@@ -188,10 +188,14 @@ crewship admin reencrypt
 
 The operation is idempotent — envelopes already at the current version are skipped — so an interrupted run can simply be repeated. Undecryptable values (no configured key opens them) are counted under `failed` and left untouched; the CLI exits non-zero in that case so a scripted rotation never retires the old key on a false success.
 
-The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, `escalations.resolution` (credential-type escalations only), and the two webhook-secret columns `agents.webhook_secret` and `pipeline_webhooks.signing_secret`.
+The walk covers every envelope-bearing column: `credentials.encrypted_value`, `credentials.encrypted_refresh_token`, `credentials.oauth_client_secret_enc`, `credentials.oauth_refresh_token_enc`, `credential_rotations.old_value`, `notification_channels.secret_enc`, `composio_settings.encrypted_api_key`, `oauth_states.code_verifier`, and the two webhook-secret columns `agents.webhook_secret` and `pipeline_webhooks.signing_secret`.
 
 <Note>
 **Webhook secrets are encrypted at rest, fail-closed.** `agents.webhook_secret` and `pipeline_webhooks.signing_secret` are encrypted whenever a usable key resolves; with no key the write is **rejected** rather than downgraded to plaintext (see [No key configured](#no-key-configured-fail-closed) below). Rows written in plaintext by older builds keep working — they are read back as-is. During master-key rotation such a bare (non-enveloped) webhook value is reported as **skipped**, not failed, so the `failed=0 ⇒ retire the old key` criterion stays honest. Migration `v140` backfills existing plaintext webhook secrets to envelopes when a key is present.
+</Note>
+
+<Note>
+**`escalations.resolution` is not in the walk.** It used to be, for `CREDENTIAL` escalations, when a human's typed answer was encrypted into it. Since the answer to a credential ask is a grant into the vault rather than a value (see [Credentials → What a `CREDENTIAL` escalation never carries](/guides/credentials#what-a-credential-escalation-never-carries)), that column only ever holds plaintext — the historical marker `[credential submitted]`, or the prose an expiry, cancel or auto-resolve leaves. Walking it could only ever produce `failed` rows, which made the `failed=0` criterion unreachable on any database that had answered a credential ask; it was removed from the inventory in `#2408`.
 </Note>
 
 One known edge case: databases created in the brief pre-release window before encrypt-on-resolve landed (March 2026) may hold credential-type escalation resolutions stored as plaintext. Those rows always count under `failed` (they are left untouched — no corruption), so a `failed: 0` state is unreachable on such a database without clearing the affected historical `escalations.resolution` rows manually.

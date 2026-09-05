@@ -105,11 +105,11 @@ func seedReencryptFixtures(t *testing.T, db *sql.DB) {
 	reencExec(t, db, `INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri, code_verifier)
 		VALUES ('st1', 'c1', 'ws1', 'http://cb', ?)`, reencMustEncrypt(t, "verifier-A"))
 
-	// escalations: CREDENTIAL resolution is an envelope; TEXT resolution is
-	// operator plaintext and MUST NOT be touched.
+	// escalations: since #2379 a CREDENTIAL resolution is the plaintext marker
+	// (the vault holds the value); TEXT resolution is operator plaintext.
+	// Neither is a rotation target (#2408) and neither may be touched.
 	reencExec(t, db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, created_at, type)
-		VALUES ('e1', 'ws1', 'cr1', 'ch1', 'a1', 'need cred', 'RESOLVED', ?, '2026-01-01T00:00:00Z', 'CREDENTIAL')`,
-		reencMustEncrypt(t, "escalated-cred-A"))
+		VALUES ('e1', 'ws1', 'cr1', 'ch1', 'a1', 'need cred', 'RESOLVED', '[credential submitted]', '2026-01-01T00:00:00Z', 'CREDENTIAL')`)
 	reencExec(t, db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, created_at, type)
 		VALUES ('e2', 'ws1', 'cr1', 'ch1', 'a1', 'question', 'RESOLVED', 'plain human answer', '2026-01-01T00:00:00Z', 'TEXT')`)
 }
@@ -145,9 +145,9 @@ func TestReencrypt_RotatesEveryInventoriedColumn(t *testing.T) {
 	if out.KeyVersion != "v2" {
 		t.Fatalf("key_version = %q, want v2", out.KeyVersion)
 	}
-	// 10 envelopes: c1×4, c3 legacy, r1, n1, composio, oauth_state, e1.
-	if out.Reencrypted != 10 {
-		t.Fatalf("reencrypted = %d, want 10 (%s)", out.Reencrypted, rec.Body.String())
+	// 9 envelopes: c1×4, c3 legacy, r1, n1, composio, oauth_state.
+	if out.Reencrypted != 9 {
+		t.Fatalf("reencrypted = %d, want 9 (%s)", out.Reencrypted, rec.Body.String())
 	}
 	if out.Failed != 1 { // c4 garbage
 		t.Fatalf("failed = %d, want 1", out.Failed)
@@ -172,7 +172,6 @@ func TestReencrypt_RotatesEveryInventoriedColumn(t *testing.T) {
 		{`SELECT secret_enc FROM notification_channels WHERE id='n1'`, nil, "hook-secret-A"},
 		{`SELECT encrypted_api_key FROM composio_settings WHERE workspace_id='ws1'`, nil, "composio-key-A"},
 		{`SELECT code_verifier FROM oauth_states WHERE state='st1'`, nil, "verifier-A"},
-		{`SELECT resolution FROM escalations WHERE id='e1'`, nil, "escalated-cred-A"},
 	}
 	for _, c := range checks {
 		var stored string
@@ -231,8 +230,8 @@ func TestReencrypt_Idempotent(t *testing.T) {
 	if out.Reencrypted != 0 {
 		t.Fatalf("second run reencrypted = %d, want 0", out.Reencrypted)
 	}
-	if out.Skipped != 10 {
-		t.Fatalf("second run skipped = %d, want 10", out.Skipped)
+	if out.Skipped != 9 {
+		t.Fatalf("second run skipped = %d, want 9", out.Skipped)
 	}
 	if out.Failed != 1 {
 		t.Fatalf("second run failed = %d, want 1", out.Failed)
@@ -251,9 +250,9 @@ func TestReencrypt_NoOpOnV1(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	// The legacy raw-base64 value (c3) is normalized to a v1 envelope; the
-	// 9 already-current envelopes are skipped.
-	if out.Reencrypted != 1 || out.Skipped != 9 || out.Failed != 1 {
-		t.Fatalf("got reencrypted=%d skipped=%d failed=%d, want 1/9/1", out.Reencrypted, out.Skipped, out.Failed)
+	// 8 already-current envelopes are skipped.
+	if out.Reencrypted != 1 || out.Skipped != 8 || out.Failed != 1 {
+		t.Fatalf("got reencrypted=%d skipped=%d failed=%d, want 1/8/1", out.Reencrypted, out.Skipped, out.Failed)
 	}
 }
 
@@ -336,5 +335,53 @@ func TestReencrypt_FailOpenWebhookColumns_BarePlaintextSkipped(t *testing.T) {
 	_ = db.QueryRow(`SELECT signing_secret FROM pipeline_webhooks WHERE id='wh1'`).Scan(&sg)
 	if ws != "barehexsecret" || sg != "baresig" {
 		t.Errorf("bare values were mutated: webhook_secret=%q signing_secret=%q", ws, sg)
+	}
+}
+
+// TestReencrypt_CredentialEscalationResolutionIsNotATarget pins #2408: after
+// #2379 escalations.resolution never holds an envelope again — the migration
+// rewrote every historical resolved CREDENTIAL row to the plaintext marker,
+// supply resolves with NULL, and expiry / cancel / auto-resolve have always
+// written plaintext prose there with no type filter. Counting those rows as
+// rotation targets made every deployment that ever answered a credential ask
+// report failed ≥ 1 forever, which is exactly the "failed=0 ⇒ retire the old
+// key" gate the runbook tells the operator to trust.
+func TestReencrypt_CredentialEscalationResolutionIsNotATarget(t *testing.T) {
+	reencSetV1(t)
+	db := setupTestDB(t)
+	reencExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'W', 'w1')`)
+
+	// What the #2379 migration leaves behind for a historical answered ask.
+	reencExec(t, db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, created_at, type)
+		VALUES ('e-marker', 'ws1', 'cr1', 'ch1', 'a1', 'need cred', 'RESOLVED', '[credential submitted]', '2026-01-01T00:00:00Z', 'CREDENTIAL')`)
+	// What expireEscalationRow writes for a credential ask nobody answered.
+	reencExec(t, db, `INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, created_at, type)
+		VALUES ('e-expired', 'ws1', 'cr1', 'ch1', 'a1', 'need cred', 'EXPIRED', 'expired: no human answered by 2026-01-02T00:00:00Z', '2026-01-01T00:00:00Z', 'CREDENTIAL')`)
+
+	reencRotateToV2(t)
+	rec, out := callReencrypt(t, db, "OWNER")
+	if rec.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if out.Failed != 0 {
+		t.Fatalf("failed = %d, want 0 — plaintext escalation resolutions poison the retire-old-key gate (%s)", out.Failed, rec.Body.String())
+	}
+	for _, c := range out.Columns {
+		if c.Table == "escalations" {
+			t.Fatalf("escalations.%s is still a reencrypt target; nothing writes an envelope there since #2379", c.Column)
+		}
+	}
+	// The rows themselves are untouched either way.
+	for id, want := range map[string]string{
+		"e-marker":  "[credential submitted]",
+		"e-expired": "expired: no human answered by 2026-01-02T00:00:00Z",
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT resolution FROM escalations WHERE id = ?`, id).Scan(&got); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if got != want {
+			t.Fatalf("%s resolution = %q, want %q", id, got, want)
+		}
 	}
 }
