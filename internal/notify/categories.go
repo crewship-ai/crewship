@@ -236,6 +236,10 @@ var categoryByKind = map[string]string{
 	// the same channels (A4 — trigger failure visible for all three kinds).
 	"webhook_fire_failed":       CategoryRoutinesMissed,
 	"automation_enqueue_failed": CategoryRoutinesMissed,
+	// A run whose §9.6 outcome came back NEEDS_HUMAN is the same "an agent
+	// needs something from a human" concern as an escalation — routed
+	// together so one preference/channel setting covers both (B6, #2349).
+	"run_needs_human": CategoryAgentsEscalation,
 }
 
 // SubkindRoutineUpdate is the payload discriminator a notify step writes so its

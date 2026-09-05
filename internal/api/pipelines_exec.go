@@ -743,6 +743,11 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 		AutomationID     string `json:"automation_id,omitempty"`
 		AutomationName   string `json:"automation_name,omitempty"`
 		TriggerEventType string `json:"trigger_event_type,omitempty"`
+		// Outcome is the §9.6 routing decision (work package B6, #2349) —
+		// NO_CHANGE | SUCCEEDED | WORK_CREATED | PARTIAL | NEEDS_HUMAN |
+		// FAILED | CANCELLED. Empty on a non-terminal run, or one that
+		// predates the outcome column.
+		Outcome string `json:"outcome,omitempty"`
 	}
 	out := make([]runRecordDTO, 0, len(records))
 	for _, rec := range records {
@@ -772,6 +777,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 			IdempotencyKey:   rec.IdempotencyKey,
 			ChainDepth:       rec.ChainDepth,
 			ChainOrigin:      rec.ChainOrigin,
+			Outcome:          rec.Outcome,
 		}
 		dto.AutomationID, dto.AutomationName, dto.TriggerEventType = automationProvenance(rec.MetadataJSON)
 		if rec.EndedAt != nil && !rec.EndedAt.IsZero() {

@@ -104,6 +104,18 @@ func seedInboxRows(now time.Time) []seedRow {
 			payload: map[string]any{"run_id": "run_seed_failed"},
 		},
 		{
+			kind: inbox.KindRunNeedsHuman, title: "Frontend needs your input on WEB-13",
+			body:   "Blocked: the staging deploy key is missing from the crew's credential store.",
+			sender: "Frontend", priority: "high", blocking: true,
+			payload: map[string]any{
+				"attention_class": "input",
+				"thread_key":      "run:run_seed_needs_human",
+				"who_can_act":     []string{"role:MANAGER"},
+				"actions":         []map[string]any{{"id": "take_over", "label": "Take over", "effect": "Opens the issue for you to continue", "irreversible": false}},
+				"context":         map[string]any{"issue": "WEB-13", "run": "run_seed_needs_human"},
+			},
+		},
+		{
 			kind: inbox.KindMessage, title: "Riley replied in #ops",
 			body:   "\"The migration is staged — I need the gate approved before 23:00.\"",
 			sender: "Riley", priority: "medium", category: "chat.replies",

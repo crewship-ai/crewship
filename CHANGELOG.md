@@ -310,6 +310,25 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   same way `GET /issue/{id}` already is. Mid-run delivery of a follow-up
   through the steering queue (F3) is out of scope for this package and is
   tracked separately as B3b (#2350).
+- **The outcome contract — one routing table, not a guess per consumer (#2358).**
+  `outcome` (PRD-ISSUES-AND-ROUTINES-2026 §9.6, work package B6) lands on
+  both run tables — `assignments` and `pipeline_runs` — as a CHECK'd column
+  with the seven-value vocabulary (`NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`,
+  `PARTIAL`, `NEEDS_HUMAN`, `FAILED`, `CANCELLED`), parsed from the agent's
+  EXISTING structured hand-off — the `---CHECKPOINT---` block a session-
+  bearing run already emits (B5), or the `---HANDOFF---` block a mission-task
+  run emits — rather than a second, invented block. A run that ends cleanly
+  but reports no recognised outcome is recorded `FAILED` with `error_message`
+  set to `"no outcome reported"`: an absent outcome is a bug, not a silent
+  success. The §9.6 routing table is implemented once
+  (`internal/orchestrator/outcome.go`) and used by every consumer:
+  `NEEDS_HUMAN` raises exactly one `run_needs_human` inbox item with a §12
+  action contract and moves the issue session to `awaiting_input` — the
+  transition B4 named as unreachable without this column; `NO_CHANGE` and
+  `SUCCEEDED` create no inbox item; the terminal `run.*`/`assignment.*`
+  journal entries carry it. `issue runs` / `crewship issue runs` and the
+  routine run surfaces (`GET .../pipeline-runs/{id}`, `run-records`,
+  `crewship routine records`) all expose it.
 - **The setup wizard reads like a product, not a form (#2305).** Real brand
   marks for the toolchains, a Before-you-start checklist, Claude Code as the
   one fully supported toolchain with the experimental ones behind a disclosure,

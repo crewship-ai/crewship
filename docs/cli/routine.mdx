@@ -602,11 +602,18 @@ field cannot tell the two apart. When a run carries an `automation_name`, the
 column reads `automation` and `SOURCE` names the rule that started it:
 
 ```text
-RUN ID            STATUS     MODE  TRIGGER     SOURCE            DURATION  COST     STARTED
-crun_9f2c…        completed  live  automation  Triage new bugs   4.1s      $0.0031  2026-08-07 08:00
-crun_71ab…        completed  live  schedule    sch_nightly       12.4s     $0.0180  2026-08-07 07:00
-crun_2d40…        completed  live  manual      —                 1.2s      $0.0004  2026-08-07 06:41
+RUN ID            STATUS     OUTCOME    MODE  TRIGGER     SOURCE            DURATION  COST     STARTED
+crun_9f2c…        completed  SUCCEEDED  live  automation  Triage new bugs   4.1s      $0.0031  2026-08-07 08:00
+crun_71ab…        completed  NEEDS_HUMAN live schedule    sch_nightly       12.4s     $0.0180  2026-08-07 07:00
+crun_2d40…        completed  FAILED     live  manual      —                 1.2s      $0.0004  2026-08-07 06:41
 ```
+
+`OUTCOME` is the §9.6 routing decision (work package B6, #2349) — `-` when the run
+predates the `outcome` column. It is not the same question `STATUS` answers: a run whose
+process completed cleanly but never reported a recognised outcome shows `FAILED` here
+(`error_message` names it `"no outcome reported"`), and `NEEDS_HUMAN` is the one value
+that raises an inbox item (`crewship inbox list --kind run_needs_human`). Full vocabulary:
+[API reference → Issues → Outcome](/api-reference/issues#outcome).
 
 `CHAIN` appears **only when some run on the page was composed** rather than
 started directly — a routine that another routine called, or one an automation
@@ -623,6 +630,7 @@ fields, whether or not the table drew them:
 | `chain_origin` | The run or journal entry that started the chain. Absent on a chain root. |
 | `automation_id` / `automation_name` | The rule that fired this run. Absent unless an automation did. |
 | `trigger_event_type` | The journal event type that matched the rule. |
+| `outcome` | The §9.6 routing decision (work package B6, #2349). Absent on a non-terminal run or one that predates the column. |
 
 ```bash
 # Every run a rule started, and which rule

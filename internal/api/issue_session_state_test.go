@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // seedSession inserts one issue_agent_sessions row in the given state,
@@ -152,25 +154,32 @@ func TestActivateSessionForAssignment_NoSession_NoOp(t *testing.T) {
 
 // ── settleSessionForAssignment ──────────────────────────────────────────
 
-func TestSettleSessionForAssignment_StatusToState(t *testing.T) {
+func TestSettleSessionForAssignment_OutcomeToState(t *testing.T) {
+	// §9.6/B6 (#2349): settleSessionForAssignment now resolves the outcome
+	// (not the raw status) through orchestrator.RouteForOutcome — this is
+	// the test that pins the transition B4 could not reach:
+	// NEEDS_HUMAN -> awaiting_input, alongside the two mappings B4 already
+	// had right.
 	cases := []struct {
-		status    string
+		outcome   string
+		status    string // the technical status a run with this outcome would carry
 		wantState string
 	}{
-		{"COMPLETED", "idle"},
-		{"CANCELLED", "idle"},
-		{"FAILED", "error"},
+		{orchestrator.OutcomeSucceeded, "COMPLETED", "idle"},
+		{orchestrator.OutcomeCancelled, "CANCELLED", "idle"},
+		{orchestrator.OutcomeFailed, "FAILED", "error"},
+		{orchestrator.OutcomeNeedsHuman, "COMPLETED", "awaiting_input"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.status, func(t *testing.T) {
+		t.Run(tc.outcome, func(t *testing.T) {
 			f := setupMentionFixture(t)
-			sessID := "sess_settle_" + tc.status
-			asgID := "asg_settle_" + tc.status
+			sessID := "sess_settle_" + tc.outcome
+			asgID := "asg_settle_" + tc.outcome
 			seedSession(t, f, sessID, "active")
 			seedSessionAssignment(t, f, asgID, sessID, tc.status)
 			execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, asgID, sessID)
 
-			settleSessionForAssignment(context.Background(), f.db, asgID, tc.status)
+			settleSessionForAssignment(context.Background(), f.db, asgID, tc.outcome)
 
 			state, activeRunID := sessionState(t, f, sessID)
 			if state != tc.wantState {
@@ -200,7 +209,7 @@ func TestSettleSessionForAssignment_OvertakenByNewerRun_NoOp(t *testing.T) {
 	execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = 'asg_new', state = 'active' WHERE id = 'sess_race'`)
 
 	// The OLD run's finishAssignment-equivalent settle arrives late.
-	settleSessionForAssignment(context.Background(), f.db, "asg_old", "COMPLETED")
+	settleSessionForAssignment(context.Background(), f.db, "asg_old", orchestrator.OutcomeSucceeded)
 
 	state, activeRunID := sessionState(t, f, "sess_race")
 	if state != "active" {
@@ -220,7 +229,94 @@ func TestSettleSessionForAssignment_NoSession_NoOp(t *testing.T) {
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, depth, created_at, mission_id)
 		VALUES (?, ?, ?, ?, ?, 'test task', 'COMPLETED', 1, datetime('now'), ?)`,
 		"asg_settle_no_sess", f.wsID, f.missionID, f.target, f.target, f.missionID)
-	settleSessionForAssignment(context.Background(), f.db, "asg_settle_no_sess", "COMPLETED")
+	settleSessionForAssignment(context.Background(), f.db, "asg_settle_no_sess", orchestrator.OutcomeSucceeded)
+}
+
+// ── ReconcileStaleActiveSessions, outcome-aware (§9.6, B6, #2349) ───────
+
+func TestReconcileStaleActiveSessions_ResolvesThroughOutcome(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    string
+		outcome   sql.NullString // NULL simulates a pre-B6 row with no outcome recorded
+		wantState string
+	}{
+		{"needs_human_outcome_reaches_awaiting_input", "COMPLETED", sql.NullString{String: orchestrator.OutcomeNeedsHuman, Valid: true}, "awaiting_input"},
+		{"succeeded_outcome_reaches_idle", "COMPLETED", sql.NullString{String: orchestrator.OutcomeSucceeded, Valid: true}, "idle"},
+		{"failed_outcome_reaches_error", "FAILED", sql.NullString{String: orchestrator.OutcomeFailed, Valid: true}, "error"},
+		{"null_outcome_falls_back_to_status_failed", "FAILED", sql.NullString{}, "error"},
+		{"null_outcome_falls_back_to_status_completed", "COMPLETED", sql.NullString{}, "idle"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupMentionFixture(t)
+			sessID := "sess_stale_" + tc.name
+			asgID := "asg_stale_" + tc.name
+			seedSession(t, f, sessID, "active")
+			seedSessionAssignment(t, f, asgID, sessID, tc.status)
+			execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, asgID, sessID)
+			if tc.outcome.Valid {
+				execOrFatal(t, f.db, `UPDATE assignments SET outcome = ? WHERE id = ?`, tc.outcome.String, asgID)
+			}
+
+			n, err := f.assign.ReconcileStaleActiveSessions(context.Background())
+			if err != nil {
+				t.Fatalf("ReconcileStaleActiveSessions: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("reconciled = %d, want 1", n)
+			}
+
+			state, activeRunID := sessionState(t, f, sessID)
+			if state != tc.wantState {
+				t.Errorf("state = %q, want %q", state, tc.wantState)
+			}
+			if activeRunID != "" {
+				t.Errorf("active_run_id = %q, want cleared", activeRunID)
+			}
+		})
+	}
+}
+
+// TestReconcileStaleActiveSessions_MatchesRouteForOutcome_ForEveryOutcome
+// guards against drift between ReconcileStaleActiveSessions's hand-written
+// SQL CASE and orchestrator.RouteForOutcome's SessionState — the two encode
+// the SAME mapping in two languages (settleSessionForAssignment's Go path,
+// and this function's SQL backstop path), and nothing else pins them
+// together. Iterating orchestrator.AllOutcomes and computing the WANT value
+// from RouteForOutcome itself means a future change to the routing table
+// that forgets to update this file's SQL fails here, rather than only
+// showing up as a session silently resting in the wrong state after a
+// crash.
+func TestReconcileStaleActiveSessions_MatchesRouteForOutcome_ForEveryOutcome(t *testing.T) {
+	for _, outcome := range orchestrator.AllOutcomes {
+		t.Run(outcome, func(t *testing.T) {
+			status := "COMPLETED"
+			if outcome == orchestrator.OutcomeFailed {
+				status = "FAILED"
+			} else if outcome == orchestrator.OutcomeCancelled {
+				status = "CANCELLED"
+			}
+			want := orchestrator.RouteForOutcome(outcome).SessionState
+
+			f := setupMentionFixture(t)
+			sessID := "sess_route_" + outcome
+			asgID := "asg_route_" + outcome
+			seedSession(t, f, sessID, "active")
+			seedSessionAssignment(t, f, asgID, sessID, status)
+			execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, asgID, sessID)
+			execOrFatal(t, f.db, `UPDATE assignments SET outcome = ? WHERE id = ?`, outcome, asgID)
+
+			if _, err := f.assign.ReconcileStaleActiveSessions(context.Background()); err != nil {
+				t.Fatalf("ReconcileStaleActiveSessions: %v", err)
+			}
+			state, _ := sessionState(t, f, sessID)
+			if state != want {
+				t.Errorf("outcome %s: SQL reconcile state = %q, orchestrator.RouteForOutcome says %q — the two have drifted",
+					outcome, state, want)
+			}
+		})
+	}
 }
 
 // ── ReconcileExpiredEphemeralSessions (F41) ─────────────────────────────

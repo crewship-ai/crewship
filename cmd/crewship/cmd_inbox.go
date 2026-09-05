@@ -734,7 +734,7 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 
 func init() {
 	inboxListCmd.Flags().String("state", "unread", "Filter by state: unread|read|resolved|all")
-	inboxListCmd.Flags().String("kind", "", "Filter by kind: waitpoint|escalation|failed_run|message|memory_consolidation|schedule_missed|schedule_circuit_breaker_tripped|webhook_fire_failed|automation_enqueue_failed")
+	inboxListCmd.Flags().String("kind", "", "Filter by kind: waitpoint|escalation|failed_run|message|memory_consolidation|schedule_missed|schedule_circuit_breaker_tripped|webhook_fire_failed|automation_enqueue_failed|run_needs_human")
 	inboxListCmd.Flags().Int("limit", 50, "Max rows to return (server caps at 500)")
 	inboxListCmd.Flags().Int("offset", 0, "Skip this many rows (server-side offset pagination)")
 	inboxListCmd.Flags().Bool("all", false, "Walk every page until the server reports has_more=false")

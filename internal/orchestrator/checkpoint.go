@@ -49,6 +49,13 @@ type CheckpointData struct {
 	NextStep string `json:"next_step"`
 	// Confidence mirrors HANDOFF's own field: low, medium or high.
 	Confidence string `json:"confidence"`
+	// Outcome is the §9.6 routing decision for THIS run (work package B6,
+	// #2349) — the same field HANDOFF carries, added here rather than
+	// inventing a third block: a session-bearing run is instructed to emit
+	// CHECKPOINT, not HANDOFF (sessionCheckpointOutputFormatInstruction,
+	// internal/api/issue_mentions.go), so this is where its outcome lives.
+	// Raw as the model wrote it; NormalizeOutcome (outcome.go) validates it.
+	Outcome string `json:"outcome"`
 	// Parsed is true only when the model actually emitted a well-formed
 	// block. Recorded explicitly rather than left to be inferred from
 	// every other field being empty — the same "measurable rather than
@@ -76,6 +83,7 @@ var checkpointFieldPrefixes = []struct {
 	{"blockers:", func(c *CheckpointData, v string) { c.Blockers = v }},
 	{"next_step:", func(c *CheckpointData, v string) { c.NextStep = v }},
 	{"confidence:", func(c *CheckpointData, v string) { c.Confidence = v }},
+	{"outcome:", func(c *CheckpointData, v string) { c.Outcome = v }},
 }
 
 // ParseCheckpoint extracts the §9.5 structured checkpoint from an agent's

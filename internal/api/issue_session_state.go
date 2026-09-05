@@ -18,25 +18,24 @@ package api
 //     "only a live run may hold active" (§10.1) — this is where a run
 //     becomes live.
 //   - settleSessionForAssignment, called from finishAssignment right after
-//     the terminal-state CAS is WON (assignments_run.go) — status is
-//     already COMPLETED/FAILED/CANCELLED by the time this runs, so the
-//     session transition and the run's own terminal status can never
+//     the terminal-state CAS is WON (assignments_run.go) — status (and now
+//     outcome, §9.6/B6) is already decided by the time this runs, so the
+//     session transition and the run's own terminal outcome can never
 //     disagree about whether the run is still live.
 //
-// What is deliberately NOT implemented here: `active -> awaiting_input`.
-// That transition fires on outcome=NEEDS_HUMAN (§9.6), and `outcome` does
-// not exist on `assignments` until B6 — without it there is no way to
-// distinguish "finished, nothing more needed" from "finished, blocked on a
-// human" other than the run's own status, which this file uses for the two
-// transitions status CAN answer honestly: COMPLETED/CANCELLED -> idle
-// (nothing further is owed), FAILED -> error (something needs a retry).
-// Naming this rather than guessing at NEEDS_HUMAN from status keeps the
-// state machine honest until B6 gives it the real signal.
+// `active -> awaiting_input` (work package B6, #2349): fires on
+// outcome=NEEDS_HUMAN, resolved through orchestrator.RouteForOutcome —
+// previously undecidable from status alone (COMPLETED could mean "nothing
+// more needed" or "blocked on a human" and status could not tell them
+// apart), this is the transition B4 named as deliberately unreachable until
+// `outcome` existed.
 
 import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // activateSessionForAssignment moves assignmentID's session to 'active' and
@@ -75,9 +74,11 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 }
 
 // settleSessionForAssignment moves assignmentID's session off 'active' once
-// the run has reached a terminal status — COMPLETED/CANCELLED -> idle
-// (nothing further owed), FAILED -> error (needs a retry). See the file
-// header for why NEEDS_HUMAN/awaiting_input is not reachable here.
+// the run has reached a terminal outcome — resolved through
+// orchestrator.RouteForOutcome (§9.6, work package B6, #2349): NO_CHANGE /
+// SUCCEEDED / WORK_CREATED / PARTIAL / CANCELLED -> idle (nothing further
+// owed), FAILED -> error (needs a retry), and — the transition B4 could not
+// reach without this column — NEEDS_HUMAN -> awaiting_input.
 //
 // `AND active_run_id = ?` is the guard that makes this safe against the
 // race the exclusivity slot's own release creates: finishAssignment's
@@ -90,17 +91,14 @@ func activateSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID 
 // that has been overtaken is simply a no-op: whichever run's id
 // active_run_id currently holds is the one whose eventual settle gets to
 // write the next transition.
-func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, runStatus string) {
+func settleSessionForAssignment(ctx context.Context, db *sql.DB, assignmentID, outcome string) {
 	var sessionID sql.NullString
 	if err := db.QueryRowContext(ctx,
 		`SELECT session_id FROM assignments WHERE id = ?`, assignmentID,
 	).Scan(&sessionID); err != nil || !sessionID.Valid || sessionID.String == "" {
 		return
 	}
-	newState := "idle"
-	if runStatus == "FAILED" {
-		newState = "error"
-	}
+	newState := orchestrator.RouteForOutcome(outcome).SessionState
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, _ = db.ExecContext(ctx, `
 		UPDATE issue_agent_sessions
@@ -167,33 +165,79 @@ func (h *AssignmentHandler) ReconcileExpiredEphemeralSessions(ctx context.Contex
 // scheduler, per F48) means that gap self-heals within one tick interval
 // regardless of why the original write was missed.
 //
-// FAILED -> 'error', COMPLETED/CANCELLED -> 'idle' — the identical mapping
-// settleSessionForAssignment uses, so a session's resting state does not
-// depend on whether the direct write or this reconciliation was what
-// actually landed it. A session already 'idle'/'error'/'closed'/'stale' is
-// untouched (its active_run_id, if any, is stale bookkeeping only, not a
-// live-state discrepancy this function needs to fix).
+// Resolved through orchestrator.RouteForOutcome — the SAME Go function
+// settleSessionForAssignment uses (§9.6, work package B6, #2349) — rather
+// than a second, hand-written copy of the outcome-to-state mapping: a
+// SELECT gathers the candidate (session, status, outcome) rows and this
+// function decides each one's next state in Go via sessionStateForTerminalRun
+// below, so a future change to the routing table cannot update one call
+// site and silently leave the other on a stale mapping (caught in review).
+// A row with no outcome (NULL: it predates this migration, or was written
+// by a path other than finishAssignment) falls back to the FAILED->'error',
+// everything else->'idle' mapping by status alone — the same fallback
+// DeriveOutcome itself uses. A session already
+// 'idle'/'error'/'awaiting_input'/'closed'/'stale' is untouched (its
+// active_run_id, if any, is stale bookkeeping only, not a live-state
+// discrepancy this function needs to fix).
 func (h *AssignmentHandler) ReconcileStaleActiveSessions(ctx context.Context) (int, error) {
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT s.id, a.status, COALESCE(a.outcome, '')
+		  FROM issue_agent_sessions s
+		  JOIN assignments a ON a.id = s.active_run_id
+		 WHERE s.state = 'active'
+		   AND s.active_run_id IS NOT NULL
+		   AND a.status IN ('COMPLETED','FAILED','CANCELLED')`)
+	if err != nil {
+		return 0, err
+	}
+	type candidate struct{ sessionID, status, outcome string }
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.sessionID, &c.status, &c.outcome); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, c)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	rows.Close()
+
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(ctx, `
-		UPDATE issue_agent_sessions
-		   SET state = CASE
-		                  WHEN (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id) = 'FAILED'
-		                  THEN 'error' ELSE 'idle'
-		                END,
-		       active_run_id = NULL,
-		       updated_at = ?
-		 WHERE state = 'active'
-		   AND active_run_id IS NOT NULL
-		   AND (SELECT a.status FROM assignments a WHERE a.id = issue_agent_sessions.active_run_id)
-		       IN ('COMPLETED','FAILED','CANCELLED')`,
-		now)
-	if err != nil {
-		return 0, err
+	n := 0
+	for _, c := range candidates {
+		state := sessionStateForTerminalRun(c.outcome, c.status)
+		res, err := h.db.ExecContext(ctx, `
+			UPDATE issue_agent_sessions
+			   SET state = ?, active_run_id = NULL, updated_at = ?
+			 WHERE id = ? AND state = 'active' AND active_run_id IS NOT NULL`,
+			state, now, c.sessionID)
+		if err != nil {
+			return n, err
+		}
+		if affected, raErr := res.RowsAffected(); raErr != nil {
+			return n, raErr
+		} else if affected > 0 {
+			n++
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
+	return n, nil
+}
+
+// sessionStateForTerminalRun resolves the issue_agent_sessions state a
+// terminal assignment settles its session to — orchestrator.RouteForOutcome
+// when the row has a recorded outcome, or the FAILED->'error'/else->'idle'
+// fallback by status alone for a row with none (same fallback DeriveOutcome
+// itself uses). Shared by ReconcileStaleActiveSessions so the mapping lives
+// in exactly one Go function, not duplicated as a hand-written SQL CASE.
+func sessionStateForTerminalRun(outcome, status string) string {
+	if outcome != "" {
+		return orchestrator.RouteForOutcome(outcome).SessionState
 	}
-	return int(n), nil
+	if status == "FAILED" {
+		return "error"
+	}
+	return "idle"
 }

@@ -15,7 +15,7 @@ It lives at `/inbox` in the running web UI and is the first item in the **Plan**
 
 ## What lands in the Inbox
 
-Seven kinds of items get written through to `inbox_items` the moment their source signal fires. `inbox.AllKinds` is the single source of truth for the set, and `TestInboxKindsMatchSchema` inserts one row per entry against the real migrated schema — a kind added there without a matching migration fails CI rather than failing silently at runtime, where the alert simply never arrives:
+Items get written through to `inbox_items` the moment their source signal fires. `inbox.AllKinds` is the single source of truth for the set, and `TestInboxKindsMatchSchema` inserts one row per entry against the real migrated schema — a kind added there without a matching migration fails CI rather than failing silently at runtime, where the alert simply never arrives:
 
 | Kind | When it's created | Resolves via |
 |------|-------------------|--------------|
@@ -26,6 +26,7 @@ Seven kinds of items get written through to `inbox_items` the moment their sourc
 | `schedule_missed` | A cron schedule was overdue and dropped or deferred occurrences per its `catchup_policy` | **Run now** — fires the schedule out of cycle (`POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/run`, the same call as `crewship routine schedules now`) — or Dismiss. |
 | `schedule_circuit_breaker_tripped` | A schedule auto-disabled itself after N consecutive failures, to stop the spam and the cost bleed | **Re-enable schedule** — `PATCH /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}` with `{"enabled": true}`, the same call as `crewship routine schedules enable`. OWNER/ADMIN only. |
 | `message` | The orchestrator broadcasts a notification — e.g. "ENG-12 ready for review" — addressed at a user or role. Also carries **"your agent replied"** chat notifications: when an assistant reply lands in a session you aren't currently viewing, one per-user item appears with a scrubbed preview (repeated replies refresh it in place instead of stacking). See [Chat & Sessions](/guides/chat-sessions#your-agent-replied-notifications). | One-click jump to the linked issue or the **Open chat** deep link, or Dismiss. Opening the chat (or `crewship chat read`) clears it automatically. |
+| `run_needs_human` | A run's [outcome](/api-reference/issues#outcome) (work package B6, #2349) resolved to `NEEDS_HUMAN` — an issue-session assignment or a routine run reported it is blocked on a decision, missing input, or a credential. Exactly one item per run, carrying a §12 action contract (`attention_class`, `thread_key`, `actions`, `who_can_act`, `context`) in `payload_json`. Addressed at the issue's owner when it has one, `MANAGER` otherwise. | **Take over** (issue runs) / **Review run** (routine runs) — opens the source; there is no separate resolve endpoint, so Archive clears the card once you've acted. |
 
 Chat-reply items get priority placement: under Smart grouping they form their own **Agent replies** group directly beneath *Decisions needed* (never buried in FYI), and each row shows an **Open chat** quick action on hover that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
 

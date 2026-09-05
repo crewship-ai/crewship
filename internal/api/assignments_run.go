@@ -1201,13 +1201,42 @@ func (h *AssignmentHandler) finishAssignment(
 		errVal = errMsg
 	}
 
+	// §9.6 outcome contract (work package B6, #2349): the ONE place an
+	// assignment's outcome is decided, alongside the status it has always
+	// been decided next to. ReportedOutcome checks both existing
+	// structured hand-off shapes (CHECKPOINT for session-bearing runs,
+	// HANDOFF for mission tasks) — see orchestrator/outcome.go for why
+	// extending both beats inventing a third block. DeriveOutcome refuses
+	// to trust a self-report from a CANCELLED or FAILED run (Tier 1 stop
+	// and a crashed execution both win over whatever the model said) and
+	// defaults an unreported outcome on an otherwise-clean completion to
+	// FAILED — "an absent outcome is a bug, not a silent success" (§9.6).
+	outcome, defaultedReason := orchestrator.DeriveOutcome(status, orchestrator.ReportedOutcome(result))
+	// effectiveErrMsg tracks whatever ends up in errVal (the DB write
+	// below) as a plain string, so every OTHER sink that reports an error
+	// reason for this run — the terminal run.* journal entry, a few lines
+	// down — stays in sync with the row rather than reading the original,
+	// possibly-empty errMsg parameter and silently disagreeing with it.
+	effectiveErrMsg := errMsg
+	if defaultedReason != "" && errVal == nil {
+		// Rev 3 dropped a dedicated outcome_reason column in favor of
+		// reusing error_message (§9.4/§9.6) — so a COMPLETED run that
+		// never reported an outcome ends up with a non-empty error_message
+		// even though its technical status stays COMPLETED. That is
+		// deliberate: error_message is the "stated reason" §9.6 requires,
+		// and it must never overwrite a REAL failure reason, hence the
+		// errVal == nil guard.
+		errVal = defaultedReason
+		effectiveErrMsg = defaultedReason
+	}
+
 	// CAS on "not already terminal" rather than status='RUNNING': early
 	// dispatch failures can reach here while the row is still PENDING
 	// (the RUNNING stamp itself failed), and those must still finish.
 	res, err := h.db.ExecContext(ctx,
-		`UPDATE assignments SET status=?, result_summary=?, error_message=?, finished_at=?
+		`UPDATE assignments SET status=?, result_summary=?, error_message=?, finished_at=?, outcome=?
 		  WHERE id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED')`,
-		status, resultVal, errVal, now, assignmentID)
+		status, resultVal, errVal, now, outcome, assignmentID)
 	if err != nil {
 		// Unknown whether the transition landed — emit nothing. If it
 		// didn't land, the row is still RUNNING and the stuck-RUNNING
@@ -1227,28 +1256,48 @@ func (h *AssignmentHandler) finishAssignment(
 		return false
 	}
 
-	// B4 session state (§10.1, #2343): the terminal CAS just won above means
-	// THIS call owns this run's fate, so it also owns the session
-	// transition off 'active' — COMPLETED/CANCELLED -> idle, FAILED ->
-	// error (see settleSessionForAssignment's doc comment for why
-	// awaiting_input is not reachable without B6's outcome). No-op for a
-	// run with no session, and a no-op if a newer run has already taken
-	// over active_run_id (see that function's CAS guard).
-	settleSessionForAssignment(ctx, h.db, assignmentID, status)
+	// B4 session state (§10.1, #2343), now driven by the §9.6 outcome table
+	// (B6, #2349): the terminal CAS just won above means THIS call owns
+	// this run's fate, so it also owns the session transition off 'active'.
+	// settleSessionForAssignment resolves outcome through
+	// orchestrator.RouteForOutcome — NEEDS_HUMAN reaches 'awaiting_input',
+	// which no combination of status alone could distinguish from a plain
+	// completion before this column existed. No-op for a run with no
+	// session, and a no-op if a newer run has already taken over
+	// active_run_id (see that function's CAS guard).
+	settleSessionForAssignment(ctx, h.db, assignmentID, outcome)
+
+	// §12/§9.6 (work package B6, #2349): the ROUTING TABLE decides whether
+	// this outcome reaches the inbox — not a literal `== NEEDS_HUMAN`
+	// comparison here, so a future change to outcomeRoutes (orchestrator/
+	// outcome.go) can't update session routing while leaving this call
+	// site on a stale copy of the same decision (caught in review).
+	// CreatesInboxItem is true only for NEEDS_HUMAN today (§12's hard
+	// rule: "NO_CHANGE and SUCCEEDED never create an item"). Exactly one
+	// item per run: createOutcomeInboxItem keys the row's id on
+	// assignmentID and inserts (never upserts), so a retried call — the
+	// sweeper re-finishing a row, a duplicate terminal write losing the
+	// CAS above and never reaching here — cannot double it.
+	if orchestrator.RouteForOutcome(outcome).CreatesInboxItem {
+		h.createOutcomeInboxItem(ctx, assignmentID, workspaceID, targetSlug, result)
+	}
 
 	// Consume every delivery this run claimed (§9.3/§10.2, work package B2,
 	// #2337) — "did a run consume this" is a fact about whether the run's
 	// turn PROCESSED the delivery, not about whether it succeeded, so this
-	// runs for every terminal status (COMPLETED, FAILED, CANCELLED) rather
-	// than only on success. Placed right after the terminal CAS is won: this
-	// is the one place an assignment's outcome is decided, and a delivery
-	// left 'claimed' forever is exactly the gap intent.go's F37 comment on
-	// mission_comment_mentions names as needing B4's lease sweep to close —
-	// this closes the ordinary (non-crash) case without waiting for it.
+	// runs for every terminal status (COMPLETED, FAILED, CANCELLED) and
+	// every outcome alike — B6 does not change that: a NEEDS_HUMAN or
+	// FAILED outcome still means the run's turn read and acted on the
+	// delivery, it just didn't finish the job. Placed right after the
+	// terminal CAS is won: this is the one place an assignment's outcome is
+	// decided, and a delivery left 'claimed' forever is exactly the gap
+	// intent.go's F37 comment on mission_comment_mentions names as needing
+	// B4's lease sweep to close — this closes the ordinary (non-crash) case
+	// without waiting for it.
 	if n, err := consumeDeliveriesForRun(ctx, h.db, assignmentID); err != nil {
 		h.logger.Warn("consume deliveries for run", "error", err, "assignment_id", assignmentID)
 	} else if n > 0 {
-		h.logger.Info("deliveries consumed", "assignment_id", assignmentID, "count", n)
+		h.logger.Info("deliveries consumed", "assignment_id", assignmentID, "count", n, "outcome", outcome)
 	}
 
 	// §11.3 (work package B5, #2345): a checkpoint at the end of EVERY
@@ -1277,9 +1326,9 @@ func (h *AssignmentHandler) finishAssignment(
 		if status == "FAILED" {
 			severity = journal.SeverityError
 		}
-		payload := map[string]any{}
-		if errMsg != "" {
-			payload["error_message"] = errMsg
+		payload := map[string]any{"outcome": outcome}
+		if effectiveErrMsg != "" {
+			payload["error_message"] = effectiveErrMsg
 		}
 		if status == "COMPLETED" {
 			payload["exit_code"] = 0
@@ -1337,7 +1386,7 @@ func (h *AssignmentHandler) finishAssignment(
 			   LEFT JOIN agents a ON a.id = asn.assigned_to_id
 			  WHERE asn.id = ?`, assignmentID).Scan(&crewID, &assignedByID, &assignedToID)
 
-		termPayload := map[string]any{"assignment_id": assignmentID}
+		termPayload := map[string]any{"assignment_id": assignmentID, "outcome": outcome}
 		if targetSlug != "" {
 			termPayload["target_slug"] = targetSlug
 		}

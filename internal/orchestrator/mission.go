@@ -94,7 +94,12 @@ type HandoffData struct {
 	Summary    string `json:"summary"`
 	Confidence string `json:"confidence"` // low, medium, high
 	Artifacts  string `json:"artifacts"`
-	Parsed     bool   `json:"parsed"` // true if handoff block was found
+	// Outcome is the §9.6 routing decision (work package B6, #2349) — the
+	// HANDOFF block's own field, not a second block. Raw/unnormalized as
+	// the model wrote it; callers resolve it through NormalizeOutcome
+	// (outcome.go) before trusting it as one of the seven valid values.
+	Outcome string `json:"outcome,omitempty"`
+	Parsed  bool   `json:"parsed"` // true if handoff block was found
 }
 
 // ParseHandoff extracts structured handoff data from an agent's result summary.
@@ -127,11 +132,24 @@ func parseHandoff(resultSummary string) HandoffData {
 			hd.Confidence = strings.TrimSpace(strings.TrimPrefix(line, "confidence:"))
 		} else if strings.HasPrefix(line, "artifacts:") {
 			hd.Artifacts = strings.TrimSpace(strings.TrimPrefix(line, "artifacts:"))
+		} else if v, ok := cutPrefixFold(line, "outcome:"); ok {
+			// Case-insensitive unlike the three fields above (matches
+			// CHECKPOINT's own "outcome:" field, checkpoint.go): a model
+			// that writes "Outcome:" here has a real, consequential
+			// downstream effect if the line is missed — DeriveOutcome
+			// (outcome.go) reads a silently-unparsed outcome as "not
+			// reported" and defaults the whole run to FAILED — unlike a
+			// missed summary/confidence, which only affects Parsed.
+			hd.Outcome = v
 		}
 	}
 
 	// Require summary and confidence for a valid handoff — partial blocks
 	// (e.g. summary-only) are treated as unparsed so callers don't skip review.
+	// Outcome is NOT required for Parsed: it is a newer field (B6) than the
+	// compliance metric §11.3 tracks, and a HANDOFF block missing only
+	// outcome is exactly the "absent outcome" case DeriveOutcome defaults
+	// to FAILED for, not a malformed block.
 	hd.Parsed = hd.Summary != "" && hd.Confidence != ""
 	return hd
 }

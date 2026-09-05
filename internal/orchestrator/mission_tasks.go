@@ -325,8 +325,13 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 	b.WriteString("summary: <1-3 sentences describing what you did and the result>\n")
 	b.WriteString("confidence: <low|medium|high>\n")
 	b.WriteString("artifacts: <comma-separated list of files created/modified, or \"none\">\n")
+	b.WriteString("outcome: <NO_CHANGE|SUCCEEDED|WORK_CREATED|PARTIAL|NEEDS_HUMAN|FAILED>\n")
 	b.WriteString("---END HANDOFF---\n")
 	b.WriteString("This block is REQUIRED. It helps the next agent in the pipeline understand your output.\n")
+	b.WriteString("outcome tells the system what to do next: NO_CHANGE (nothing to do), SUCCEEDED (did the work,\n")
+	b.WriteString("nothing further needed), WORK_CREATED (produced or updated an issue), PARTIAL (some done,\n")
+	b.WriteString("some failed, no human needed yet), NEEDS_HUMAN (blocked on a decision, input or credential —\n")
+	b.WriteString("goes to a human's inbox), or FAILED (could not complete). Omitting it is treated as FAILED.\n")
 
 	// Closing directive
 	if len(depOutputs) > 0 {

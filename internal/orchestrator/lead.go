@@ -94,6 +94,8 @@ When you receive results from crew members, expect this structure:
   * summary: 1-3 sentence description of what was done
   * confidence: self-assessed quality (low/medium/high)
   * artifacts: list of files created or modified
+  * outcome: NO_CHANGE|SUCCEEDED|WORK_CREATED|PARTIAL|NEEDS_HUMAN|FAILED — the routing
+    decision (NEEDS_HUMAN reaches a human's inbox; the rest stay in history/digest/comment)
 If a result lacks summary or has low confidence, request clarification before proceeding.
 
 To create a multi-task mission (advanced orchestration):

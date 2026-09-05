@@ -52,6 +52,9 @@ type runRecordRow struct {
 	AutomationID     string `json:"automation_id,omitempty"`
 	AutomationName   string `json:"automation_name,omitempty"`
 	TriggerEventType string `json:"trigger_event_type,omitempty"`
+	// Outcome is the §9.6 routing decision (work package B6, #2349) — empty
+	// for a non-terminal run, or one that predates the outcome column.
+	Outcome string `json:"outcome,omitempty"`
 }
 
 // triggerLabel is what the TRIGGER column prints.
@@ -178,9 +181,9 @@ Examples:
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		if composed {
-			fmt.Fprintln(w, "RUN ID\tSTATUS\tMODE\tTRIGGER\tSOURCE\tCHAIN\tDURATION\tCOST\tSTARTED")
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tCHAIN\tDURATION\tCOST\tSTARTED")
 		} else {
-			fmt.Fprintln(w, "RUN ID\tSTATUS\tMODE\tTRIGGER\tSOURCE\tDURATION\tCOST\tSTARTED")
+			fmt.Fprintln(w, "RUN ID\tSTATUS\tOUTCOME\tMODE\tTRIGGER\tSOURCE\tDURATION\tCOST\tSTARTED")
 		}
 		for _, r := range rows {
 			dur := "—"
@@ -191,18 +194,22 @@ Examples:
 			if r.CostUSD > 0 {
 				cost = fmt.Sprintf("$%.4f", r.CostUSD)
 			}
+			outcome := r.Outcome
+			if outcome == "" {
+				outcome = "—"
+			}
 			if composed {
 				chain := "—"
 				if r.ChainDepth > 0 {
 					chain = fmt.Sprintf("%d", r.ChainDepth)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					truncIDForCLI(r.ID, 16), r.Status, r.Mode, triggerLabel(r), triggerSource(r),
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					truncIDForCLI(r.ID, 16), r.Status, outcome, r.Mode, triggerLabel(r), triggerSource(r),
 					chain, dur, cost, formatTimestamp(r.StartedAt))
 				continue
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				truncIDForCLI(r.ID, 16), r.Status, r.Mode, triggerLabel(r), triggerSource(r),
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				truncIDForCLI(r.ID, 16), r.Status, outcome, r.Mode, triggerLabel(r), triggerSource(r),
 				dur, cost, formatTimestamp(r.StartedAt))
 		}
 		return w.Flush()

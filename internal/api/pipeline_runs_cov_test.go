@@ -139,6 +139,40 @@ func TestCovPRun_ListWorkspaceRuns_LimitAndSinceFilters(t *testing.T) {
 	}
 }
 
+// The workspace-wide feed must carry outcome too (§9.6, work package B6,
+// #2349) — GetRun already did, ListWorkspaceRuns did not (caught in code
+// review): a dashboard reading the list feed would never see it even
+// though the detail view did.
+func TestCovPRun_ListWorkspaceRuns_IncludesOutcome(t *testing.T) {
+	h, db, userID, wsID := runsHandlerRig(t)
+	seedRunsPipeline(t, db, wsID, "covprun-outcome-p1", "covprun-outcome-p1")
+	seedRunRow(t, db, wsID, "covprun-outcome-p1", "covprun-outcome-p1", "covprun-outcome-r1", "completed")
+	if _, err := db.Exec(`UPDATE pipeline_runs SET outcome = 'NEEDS_HUMAN' WHERE id = 'covprun-outcome-r1'`); err != nil {
+		t.Fatalf("seed outcome: %v", err)
+	}
+
+	req := withWorkspaceUser(
+		httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID+"/pipeline-runs", nil),
+		userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.ListWorkspaceRuns(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(resp.Rows))
+	}
+	if got, _ := resp.Rows[0]["outcome"].(string); got != "NEEDS_HUMAN" {
+		t.Errorf("outcome = %v, want NEEDS_HUMAN", resp.Rows[0]["outcome"])
+	}
+}
+
 func TestCovPRun_ListWorkspaceRuns_DBError_500(t *testing.T) {
 	h, db, userID, wsID := runsHandlerRig(t)
 	db.Close()
