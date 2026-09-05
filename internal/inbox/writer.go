@@ -13,7 +13,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -145,6 +147,28 @@ func notifyExternal(ctx context.Context, item Item) {
 	externalNotifier.NotifyInboxItem(ctx, item)
 }
 
+// Action is one entry of the §12 attention contract's `actions[]` — a
+// permitted, named thing a recipient can do about this item. Mirrors the
+// PRD's own JSON shape verbatim (id/label/effect/irreversible) so the wire
+// format and the Go type never drift.
+type Action struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Effect       string `json:"effect,omitempty"`
+	Irreversible bool   `json:"irreversible,omitempty"`
+}
+
+// AttentionClass is the closed §12 vocabulary for Item.AttentionClass — kept
+// as named constants so a producer can't typo past the DB CHECK silently
+// (an unrecognised value fails the CHECK loudly at insert time, same as an
+// unrecognised Kind).
+const (
+	AttentionDecision = "decision"
+	AttentionInput    = "input"
+	AttentionReview   = "review"
+	AttentionRepair   = "repair"
+)
+
 // Item is the payload passed to Insert. The exported fields map 1:1
 // onto inbox_items columns; the writer fills in the deterministic
 // id, state ('unread'), and timestamps so callers don't repeat that
@@ -179,6 +203,23 @@ type Item struct {
 	// This package stays a leaf and does not import internal/notify, so the
 	// value is validated where it is authored, not here.
 	Category string
+
+	// ThreadKey, AttentionClass and Actions are the §12 attention contract
+	// (PRD-ISSUES-AND-ROUTINES-2026, work package B10, #2364), promoted from
+	// ad hoc payload fields (B6's run_needs_human was the one existing
+	// example) to real, queryable columns.
+	//
+	// ThreadKey is the identity of the RECURRING CONDITION this item is
+	// about, stable across every occurrence — "the same routine needs a
+	// decision", not "this specific save call". Insert/Upsert persist it as
+	// a column but do not act on it; WriteThreaded is the write path that
+	// actually merges same-thread items (see its doc comment). Empty is
+	// legal — most existing kinds this PR does not touch have no thread
+	// concept yet — and callers that pass Insert/Upsert an empty ThreadKey
+	// get the same (kind, source_id)-only dedup they always had.
+	ThreadKey      string
+	AttentionClass string // "" | decision | input | review | repair (see the Attention* constants)
+	Actions        []Action
 }
 
 // Insert persists a new inbox row. INSERT OR IGNORE so the
@@ -206,12 +247,8 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if in.Priority == "" {
 		in.Priority = "medium"
 	}
-	payloadJSON := []byte("{}")
-	if in.Payload != nil {
-		if b, err := json.Marshal(in.Payload); err == nil {
-			payloadJSON = b
-		}
-	}
+	payloadJSON := marshalPayload(in.Payload)
+	actionsJSON := marshalActions(in.Actions)
 	id := "ibx_" + in.Kind + "_" + in.SourceID
 	// Fixed-width sortable form: every inbox_items writer (here + the hire
 	// path in internal/api/agents_hire.go) must agree on this format so the
@@ -230,17 +267,22 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 			title, body_md,
 			sender_type, sender_id, sender_name,
 			state, priority, blocking, payload_json,
+			thread_key, attention_class, actions_json,
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
-			'unread', ?, ?, ?, ?, ?)`,
+			'unread', ?, ?, ?,
+			NULLIF(?, ''), NULLIF(?, ''), ?,
+			?, ?)`,
 		id, in.WorkspaceID, in.Kind, in.SourceID,
 		in.TargetUserID, in.TargetRole,
 		in.Title, in.BodyMD,
 		in.SenderType, in.SenderID, in.SenderName,
-		in.Priority, blocking, string(payloadJSON), now, now,
+		in.Priority, blocking, string(payloadJSON),
+		in.ThreadKey, in.AttentionClass, string(actionsJSON),
+		now, now,
 	)
 	if err != nil {
 		logger.Warn("inbox insert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
@@ -300,12 +342,8 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	if in.Priority == "" {
 		in.Priority = "medium"
 	}
-	payloadJSON := []byte("{}")
-	if in.Payload != nil {
-		if b, err := json.Marshal(in.Payload); err == nil {
-			payloadJSON = b
-		}
-	}
+	payloadJSON := marshalPayload(in.Payload)
+	actionsJSON := marshalActions(in.Actions)
 	id := "ibx_" + in.Kind + "_" + in.SourceID
 	// Fixed-width sortable form — see Insert for why every inbox_items writer
 	// must share this format for the created_at index to order correctly.
@@ -321,12 +359,15 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 			title, body_md,
 			sender_type, sender_id, sender_name,
 			state, priority, blocking, payload_json,
+			thread_key, attention_class, actions_json,
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''),
 			?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
-			'unread', ?, ?, ?, ?, ?)
+			'unread', ?, ?, ?,
+			NULLIF(?, ''), NULLIF(?, ''), ?,
+			?, ?)
 		ON CONFLICT(kind, source_id) DO UPDATE SET
 			title = excluded.title,
 			body_md = excluded.body_md,
@@ -336,6 +377,9 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 			priority = excluded.priority,
 			blocking = excluded.blocking,
 			payload_json = excluded.payload_json,
+			thread_key = excluded.thread_key,
+			attention_class = excluded.attention_class,
+			actions_json = excluded.actions_json,
 			state = 'unread',
 			read_at = NULL,
 			read_by_user_id = NULL,
@@ -348,7 +392,9 @@ func Upsert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 		in.TargetUserID, in.TargetRole,
 		in.Title, in.BodyMD,
 		in.SenderType, in.SenderID, in.SenderName,
-		in.Priority, blocking, string(payloadJSON), now, now,
+		in.Priority, blocking, string(payloadJSON),
+		in.ThreadKey, in.AttentionClass, string(actionsJSON),
+		now, now,
 	)
 	if err != nil {
 		logger.Warn("inbox upsert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
@@ -458,5 +504,379 @@ func ResolveByPipeline(ctx context.Context, db *sql.DB, logger *slog.Logger, wor
 		now, userID, action, now, workspaceID, pipelineID, pipelineID)
 	if err != nil {
 		logger.Warn("inbox resolve by pipeline", "error", err, "pipeline_id", pipelineID)
+	}
+}
+
+// marshalPayload is Insert/Upsert/WriteThreaded's shared encoding for
+// Item.Payload — '{}' on nil or a marshal failure, matching the convention
+// every existing caller already depends on (a producer that races a bad
+// value into Payload gets an empty object, not a write failure).
+func marshalPayload(payload map[string]interface{}) []byte {
+	if payload == nil {
+		return []byte("{}")
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
+}
+
+// marshalActions is the actions_json equivalent of marshalPayload — '[]' on
+// nil/empty or a marshal failure, never NULL, so every reader can
+// json.Unmarshal it unconditionally (actions_json's own column default).
+func marshalActions(actions []Action) []byte {
+	if len(actions) == 0 {
+		return []byte("[]")
+	}
+	b, err := json.Marshal(actions)
+	if err != nil {
+		return []byte("[]")
+	}
+	return b
+}
+
+// mergeJSONObjects layers `incoming` on top of `base` — `base`'s keys survive
+// unless `incoming` sets the same key, in which case `incoming` wins. Used by
+// WriteThreaded's merge branch so a second producer's write adds to what the
+// first producer said instead of overwriting it (a routine's governance
+// review payload keeps its risk_reasons even after the trigger-activation
+// review contributes routine_version/first_fire_at into the SAME row).
+// Malformed JSON on either side is treated as empty rather than failing the
+// whole write — a merge is a best-effort enrichment, not a new source of
+// truth.
+func mergeJSONObjects(baseJSON, incomingJSON string) string {
+	base := map[string]interface{}{}
+	_ = json.Unmarshal([]byte(baseJSON), &base)
+	incoming := map[string]interface{}{}
+	_ = json.Unmarshal([]byte(incomingJSON), &incoming)
+	for k, v := range incoming {
+		base[k] = v
+	}
+	out, err := json.Marshal(base)
+	if err != nil {
+		return incomingJSON
+	}
+	return string(out)
+}
+
+// mergeActionsJSON unions two actions_json arrays by Action.ID — existing
+// actions are kept in place, an incoming action with a NEW id is appended,
+// and an incoming action reusing an EXISTING id replaces it in place (a
+// producer refreshing its own action's label/effect on a later call, e.g. a
+// newer routine_version changing what "Approve" would do).
+func mergeActionsJSON(baseJSON, incomingJSON string) string {
+	var base, incoming []Action
+	_ = json.Unmarshal([]byte(baseJSON), &base)
+	_ = json.Unmarshal([]byte(incomingJSON), &incoming)
+	if len(incoming) == 0 {
+		return string(marshalActions(base))
+	}
+	byID := make(map[string]int, len(base))
+	for i, a := range base {
+		byID[a.ID] = i
+	}
+	for _, a := range incoming {
+		if i, ok := byID[a.ID]; ok {
+			base[i] = a
+		} else {
+			base = append(base, a)
+		}
+	}
+	return string(marshalActions(base))
+}
+
+// threadedRow is what WriteThreaded reads back about an existing open
+// thread-mate before deciding how to merge into it.
+type threadedRow struct {
+	id          string
+	title       string
+	bodyMD      sql.NullString
+	payloadJSON string
+	actionsJSON string
+}
+
+// WriteThreaded is the write path for every producer that can name a
+// thread_key (§12): the a4 trigger-failure kinds, B6's run_needs_human
+// contract, B8's routine receipts (governance review + trigger-activation
+// review), and the escalation/waitpoint producers that raise a review item
+// for a subject that can recur. It is the server-side merge B10 replaces
+// the client merge with (F28).
+//
+// When NO open (non-resolved) item exists yet in this workspace under
+// in.ThreadKey, this behaves exactly like Upsert — a normal (kind,
+// source_id)-keyed row is written, now carrying the thread_key for the
+// NEXT call to find.
+//
+// When an open item already shares in.ThreadKey, this UPDATES that row IN
+// PLACE instead of raising a sibling card — the fix for the exact duplicate
+// #2364's live check found (a `routine save --draft` raising both a
+// governance "proposed for review" card and a B8 "trigger ready" receipt for
+// the SAME routine, because the two producers shared no identity beyond
+// "the same routine"). The existing row's OWN (kind, source_id) is left
+// untouched — it is still what that row's own producer resolves via
+// ResolveBySource — and:
+//   - title stays the FIRST producer's (the earlier, usually broader,
+//     question — e.g. "may this routine run at all" before "may its
+//     trigger fire")
+//   - body_md gets the incoming producer's body appended as a new
+//     paragraph, unless it is already present (repeat calls, e.g. the
+//     same condition recurring across several days, must not keep growing
+//     the card)
+//   - payload_json is merged key-by-key, incoming wins on collision
+//     (mergeJSONObjects) — this is how routine_version reaches the row
+//     regardless of which producer's call carried it
+//   - actions_json is merged by action id (mergeActionsJSON) — the merged
+//     card offers every action either producer contributed
+//   - attention_class takes the incoming value when non-empty (a later,
+//     more specific class supersedes an earlier default), otherwise keeps
+//     the existing one
+//   - the row is resurrected to unread and every per-user read marker
+//     cleared (A7), matching Upsert — new content means a user who already
+//     read the old occurrence has not read this one
+//
+// A caller resolving the thread later must use ResolveByThreadOrSource, not
+// ResolveBySource: the row's stored identity may belong to a DIFFERENT
+// producer than the one now trying to resolve it.
+func WriteThreaded(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
+	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
+		return nil
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if in.ThreadKey == "" {
+		// No thread concept for this call — fall back to the (kind,
+		// source_id) dedup every existing caller already understands.
+		return Upsert(ctx, db, logger, in)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		logger.Warn("inbox write-threaded: begin tx", "error", err, "thread_key", in.ThreadKey)
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var existing threadedRow
+	var bodyMD sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, title, body_md, payload_json, actions_json
+		  FROM inbox_items
+		 WHERE workspace_id = ? AND thread_key = ? AND state != 'resolved'
+		 ORDER BY created_at ASC, id ASC LIMIT 1`,
+		in.WorkspaceID, in.ThreadKey).Scan(&existing.id, &existing.title, &bodyMD, &existing.payloadJSON, &existing.actionsJSON)
+	existing.bodyMD = bodyMD
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if err := upsertRowTx(ctx, tx, in); err != nil {
+			logger.Warn("inbox write-threaded: insert", "error", err, "thread_key", in.ThreadKey)
+			return err
+		}
+	case err != nil:
+		logger.Warn("inbox write-threaded: lookup", "error", err, "thread_key", in.ThreadKey)
+		return err
+	default:
+		if err := mergeThreadedRowTx(ctx, tx, existing, in); err != nil {
+			logger.Warn("inbox write-threaded: merge", "error", err, "thread_key", in.ThreadKey, "id", existing.id)
+			return err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		logger.Warn("inbox write-threaded: commit", "error", err, "thread_key", in.ThreadKey)
+		return err
+	}
+	committed = true
+	// Same fan-out rule as Upsert: every WriteThreaded call describes a real
+	// event (a new occurrence, or new information about an open one), never
+	// a retried duplicate, so it always notifies.
+	notifyExternal(ctx, in)
+	return nil
+}
+
+// upsertRowTx is Upsert's insert/on-conflict statement, extracted so
+// WriteThreaded's "no open thread-mate yet" branch shares it instead of
+// duplicating the column list a third time. Runs on the caller's
+// transaction.
+func upsertRowTx(ctx context.Context, tx *sql.Tx, in Item) error {
+	if in.Priority == "" {
+		in.Priority = "medium"
+	}
+	payloadJSON := marshalPayload(in.Payload)
+	actionsJSON := marshalActions(in.Actions)
+	id := "ibx_" + in.Kind + "_" + in.SourceID
+	now := tsformat.Format(time.Now())
+	blocking := 0
+	if in.Blocking {
+		blocking = 1
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO inbox_items (
+			id, workspace_id, kind, source_id,
+			target_user_id, target_role,
+			title, body_md,
+			sender_type, sender_id, sender_name,
+			state, priority, blocking, payload_json,
+			thread_key, attention_class, actions_json,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?,
+			NULLIF(?, ''), NULLIF(?, ''),
+			?, ?,
+			NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
+			'unread', ?, ?, ?,
+			NULLIF(?, ''), NULLIF(?, ''), ?,
+			?, ?)
+		ON CONFLICT(kind, source_id) DO UPDATE SET
+			title = excluded.title,
+			body_md = excluded.body_md,
+			sender_type = excluded.sender_type,
+			sender_id = excluded.sender_id,
+			sender_name = excluded.sender_name,
+			priority = excluded.priority,
+			blocking = excluded.blocking,
+			payload_json = excluded.payload_json,
+			thread_key = excluded.thread_key,
+			attention_class = excluded.attention_class,
+			actions_json = excluded.actions_json,
+			state = 'unread',
+			read_at = NULL,
+			read_by_user_id = NULL,
+			resolved_at = NULL,
+			resolved_by_user_id = NULL,
+			resolved_action = NULL,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at`,
+		id, in.WorkspaceID, in.Kind, in.SourceID,
+		in.TargetUserID, in.TargetRole,
+		in.Title, in.BodyMD,
+		in.SenderType, in.SenderID, in.SenderName,
+		in.Priority, blocking, string(payloadJSON),
+		in.ThreadKey, in.AttentionClass, string(actionsJSON),
+		now, now,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id)
+	return err
+}
+
+// mergeThreadedRowTx updates an existing open thread-mate in place — see
+// WriteThreaded's doc comment for exactly what merges vs. what is
+// preserved. kind/source_id are deliberately NOT touched: the row's
+// resolve identity must keep answering to whichever producer originally
+// raised it, which is why a caller resolving a merged thread must use
+// ResolveByThreadOrSource rather than assume its own (kind, source_id).
+func mergeThreadedRowTx(ctx context.Context, tx *sql.Tx, existing threadedRow, in Item) error {
+	if in.Priority == "" {
+		in.Priority = "medium"
+	}
+	title := existing.title
+	if title == "" {
+		title = in.Title
+	}
+	body := existing.bodyMD.String
+	if in.BodyMD != "" && !strings.Contains(body, in.BodyMD) {
+		if body != "" {
+			body = body + "\n\n---\n\n" + in.BodyMD
+		} else {
+			body = in.BodyMD
+		}
+	}
+	mergedPayload := mergeJSONObjects(existing.payloadJSON, string(marshalPayload(in.Payload)))
+	mergedActions := mergeActionsJSON(existing.actionsJSON, string(marshalActions(in.Actions)))
+	attentionClass := in.AttentionClass
+
+	now := tsformat.Format(time.Now())
+	_, err := tx.ExecContext(ctx, `
+		UPDATE inbox_items SET
+			title = ?,
+			body_md = ?,
+			sender_type = COALESCE(NULLIF(?, ''), sender_type),
+			sender_id = COALESCE(NULLIF(?, ''), sender_id),
+			sender_name = COALESCE(NULLIF(?, ''), sender_name),
+			priority = ?,
+			blocking = ?,
+			payload_json = ?,
+			attention_class = COALESCE(NULLIF(?, ''), attention_class),
+			actions_json = ?,
+			state = 'unread',
+			read_at = NULL,
+			read_by_user_id = NULL,
+			resolved_at = NULL,
+			resolved_by_user_id = NULL,
+			resolved_action = NULL,
+			updated_at = ?
+		WHERE id = ?`,
+		title, body,
+		in.SenderType, in.SenderID, in.SenderName,
+		in.Priority, boolToInt(in.Blocking), mergedPayload,
+		attentionClass, mergedActions,
+		now, existing.id,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, existing.id)
+	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ResolveByThreadOrSource resolves an inbox item either by its OWN (kind,
+// source_id) — the ordinary case, identical to ResolveBySource — or, when
+// that finds nothing, by (workspace_id, thread_key). The fallback matters
+// exactly when WriteThreaded has merged two producers' items into one row:
+// the row's stored identity belongs to whichever producer wrote it FIRST,
+// so the second producer's own decision route (e.g. POST .../activate)
+// would otherwise resolve nothing and leave a decided card looking open.
+// threadKey may be empty for a caller with no thread concept, in which case
+// this is exactly ResolveBySource.
+func ResolveByThreadOrSource(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID, kind, sourceID, threadKey, action, userID string) {
+	if db == nil {
+		return
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano) // tsformat:allow: resolved_at is read back for display, never compared in SQL — matches ResolveBySource
+	res, err := db.ExecContext(ctx, `
+		UPDATE inbox_items
+		SET state = 'resolved',
+		    resolved_at = COALESCE(resolved_at, ?),
+		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
+		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
+		    updated_at = ?
+		WHERE kind = ? AND source_id = ? AND state != 'resolved'`,
+		now, userID, action, now, kind, sourceID)
+	if err != nil {
+		logger.Warn("inbox resolve by thread or source", "error", err, "kind", kind, "source_id", sourceID)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 || threadKey == "" || workspaceID == "" {
+		return
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE inbox_items
+		SET state = 'resolved',
+		    resolved_at = COALESCE(resolved_at, ?),
+		    resolved_by_user_id = COALESCE(resolved_by_user_id, NULLIF(?, '')),
+		    resolved_action = COALESCE(resolved_action, NULLIF(?, '')),
+		    updated_at = ?
+		WHERE workspace_id = ? AND thread_key = ? AND state != 'resolved'`,
+		now, userID, action, now, workspaceID, threadKey); err != nil {
+		logger.Warn("inbox resolve by thread or source: thread fallback", "error", err, "thread_key", threadKey)
 	}
 }

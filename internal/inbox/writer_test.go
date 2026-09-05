@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -520,5 +521,385 @@ func TestResolveBySource_ValidatesRequiredFields(t *testing.T) {
 	}
 	if state != "unread" {
 		t.Errorf("invalid inputs should be no-op; got state=%q on seeded row", state)
+	}
+}
+
+// --- B10: the attention contract's server-side merge (PRD-ISSUES-AND-
+// ROUTINES-2026 §12, #2364) ---
+//
+// The next few tests characterise and then fix the exact duplicate #2364's
+// live check on dev1 found: one `routine save --draft` raised BOTH the B8
+// receipt ("Routine trigger ready", kind=escalation, source=
+// routinetrigger:<ws>:<scheduleID>) and the older governance card ("Routine
+// proposed for review", kind=escalation, source=routineprop:<ws>:<slug>) —
+// two rows for one save, because the two producers shared no identity
+// beyond "the same routine". See internal/api/pipeline_governance.go and
+// internal/api/pipeline_trigger.go for the real call sites this reproduces.
+
+// TestUpsert_TwoProducersSameSubject_RaiseTwoRows characterises the BUG:
+// Upsert's dedup key is (kind, source_id), so two producers describing the
+// same real-world subject under two different source ids raise two
+// independent cards. This is what main does today — it is not a regression
+// this PR introduces, it is the mechanism behind the live-observed
+// duplicate, pinned here so TestWriteThreaded_MergesAcrossProducers below
+// has something concrete to fix.
+func TestUpsert_TwoProducersSameSubject_RaiseTwoRows(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	if err := Upsert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1",
+		Kind:        "escalation",
+		SourceID:    "routineprop:ws1:daily-triage",
+		TargetRole:  "MANAGER",
+		Title:       "Routine proposed for review: daily-triage",
+		Payload:     map[string]interface{}{"risk_reasons": []string{"http_egress"}},
+	}); err != nil {
+		t.Fatalf("upsert governance card: %v", err)
+	}
+	if err := Upsert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1",
+		Kind:        "escalation",
+		SourceID:    "routinetrigger:ws1:sched_1",
+		TargetRole:  "MANAGER",
+		Title:       "Routine trigger ready: daily-triage",
+		Payload:     map[string]interface{}{"routine_version": 3},
+	}); err != nil {
+		t.Fatalf("upsert trigger-ready card: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1' AND state != 'resolved'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("characterisation drifted: want 2 rows from the two (kind,source_id)-keyed producers, got %d", n)
+	}
+}
+
+// TestWriteThreaded_MergesAcrossProducers is the fix: the SAME two producer
+// calls as above, but each carrying the shared thread_key B10 gives them
+// (routine:<workspace>:<slug>), now go through WriteThreaded instead of
+// Upsert. They must collapse into ONE card that carries both producers'
+// information — the routine_version pinned by the second call included.
+func TestWriteThreaded_MergesAcrossProducers(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+	threadKey := "routine:ws1:daily-triage"
+
+	if err := WriteThreaded(ctx, db, quietLogger(), Item{
+		WorkspaceID:    "ws1",
+		Kind:           "escalation",
+		SourceID:       "routineprop:ws1:daily-triage",
+		TargetRole:     "MANAGER",
+		Title:          "Routine proposed for review: daily-triage",
+		BodyMD:         "A routine was authored that needs approval before it can run.",
+		Priority:       "high",
+		Blocking:       true,
+		ThreadKey:      threadKey,
+		AttentionClass: AttentionDecision,
+		Payload:        map[string]interface{}{"risk_reasons": []string{"http_egress"}},
+		Actions:        []Action{{ID: "approve_routine", Label: "Approve"}, {ID: "reject_routine", Label: "Reject"}},
+	}); err != nil {
+		t.Fatalf("write governance card: %v", err)
+	}
+	if err := WriteThreaded(ctx, db, quietLogger(), Item{
+		WorkspaceID:    "ws1",
+		Kind:           "escalation",
+		SourceID:       "routinetrigger:ws1:sched_1",
+		TargetRole:     "MANAGER",
+		Title:          "Routine trigger ready: daily-triage",
+		BodyMD:         "Routine daily-triage (version 3) is ready. Activate the trigger?",
+		Priority:       "high",
+		Blocking:       true,
+		ThreadKey:      threadKey,
+		AttentionClass: AttentionDecision,
+		Payload:        map[string]interface{}{"routine_version": 3, "schedule_id": "sched_1"},
+		Actions:        []Action{{ID: "activate_trigger", Label: "Activate"}, {ID: "dismiss_trigger", Label: "Dismiss"}},
+	}); err != nil {
+		t.Fatalf("write trigger-ready card: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1' AND state != 'resolved'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want ONE merged card across the two producers, got %d", n)
+	}
+
+	var payloadJSON, actionsJSON, bodyMD, kind, sourceID string
+	if err := db.QueryRow(`SELECT kind, source_id, body_md, payload_json, actions_json FROM inbox_items WHERE workspace_id = 'ws1'`).
+		Scan(&kind, &sourceID, &bodyMD, &payloadJSON, &actionsJSON); err != nil {
+		t.Fatalf("read merged row: %v", err)
+	}
+	// Identity is the FIRST producer's — the governance card is what a later
+	// Approve/Reject on the routine definition itself must still resolve.
+	if kind != "escalation" || sourceID != "routineprop:ws1:daily-triage" {
+		t.Errorf("merged row identity changed: kind=%q source_id=%q", kind, sourceID)
+	}
+	if !strings.Contains(bodyMD, "needs approval") || !strings.Contains(bodyMD, "Activate the trigger") {
+		t.Errorf("merged body should carry both asks, got %q", bodyMD)
+	}
+	if !strings.Contains(payloadJSON, `"routine_version":3`) {
+		t.Errorf("merged payload should carry routine_version from the second call, got %q", payloadJSON)
+	}
+	if !strings.Contains(payloadJSON, "risk_reasons") {
+		t.Errorf("merged payload should still carry the first call's risk_reasons, got %q", payloadJSON)
+	}
+	if !strings.Contains(actionsJSON, "approve_routine") || !strings.Contains(actionsJSON, "activate_trigger") {
+		t.Errorf("merged actions should union both producers' actions, got %q", actionsJSON)
+	}
+}
+
+// TestWriteThreaded_RecurringCondition_OneCardAcrossFiveDays is §12's
+// primary accept line: "one card across five days of the same recurring
+// condition". Five separate calls under the SAME thread_key — as a daily
+// sweep re-raising a still-unresolved condition would make — must never
+// grow past one open row.
+func TestWriteThreaded_RecurringCondition_OneCardAcrossFiveDays(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	for day := 1; day <= 5; day++ {
+		if err := WriteThreaded(ctx, db, quietLogger(), Item{
+			WorkspaceID:    "ws1",
+			Kind:           "schedule_missed",
+			SourceID:       "sched_recurring",
+			TargetRole:     "MANAGER",
+			Title:          "Schedule missed its window",
+			BodyMD:         fmt.Sprintf("Missed occurrence, day %d.", day),
+			Priority:       "high",
+			ThreadKey:      "trigger:schedule:sched_recurring",
+			AttentionClass: AttentionRepair,
+			Payload:        map[string]interface{}{"missed_count": day},
+			Actions:        []Action{{ID: "acknowledge", Label: "Acknowledge"}},
+		}); err != nil {
+			t.Fatalf("day %d: write threaded: %v", day, err)
+		}
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("five occurrences of the same recurring condition must be ONE card, got %d", n)
+	}
+	var payloadJSON string
+	if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&payloadJSON); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if !strings.Contains(payloadJSON, `"missed_count":5`) {
+		t.Errorf("the one card should reflect the LATEST occurrence, got %q", payloadJSON)
+	}
+}
+
+// TestResolveByThreadOrSource_FallsBackToThread proves the resolve half of
+// the merge: a decision route that only knows the SECOND producer's own
+// (kind, source_id) — which was never actually written as its own row,
+// because WriteThreaded merged it into the first producer's row — still
+// resolves the merged card via the shared thread_key.
+func TestResolveByThreadOrSource_FallsBackToThread(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+	threadKey := "routine:ws1:daily-triage"
+
+	if err := WriteThreaded(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "escalation", SourceID: "routineprop:ws1:daily-triage",
+		Title: "Routine proposed for review", ThreadKey: threadKey,
+	}); err != nil {
+		t.Fatalf("write first: %v", err)
+	}
+	if err := WriteThreaded(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "escalation", SourceID: "routinetrigger:ws1:sched_1",
+		Title: "Routine trigger ready", ThreadKey: threadKey,
+	}); err != nil {
+		t.Fatalf("write second: %v", err)
+	}
+
+	// The trigger-activation decision route resolves by ITS OWN (kind,
+	// source_id), which is not the row's stored identity — must fall back
+	// to the thread.
+	ResolveByThreadOrSource(ctx, db, quietLogger(), "ws1", "escalation", "routinetrigger:ws1:sched_1", threadKey, "approved", "u1")
+
+	var state, resolvedAction string
+	if err := db.QueryRow(`SELECT state, resolved_action FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&state, &resolvedAction); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if state != "resolved" || resolvedAction != "approved" {
+		t.Errorf("thread fallback should have resolved the merged card, got state=%q action=%q", state, resolvedAction)
+	}
+}
+
+// TestResolveByThreadOrSource_ExactMatchStillWorks is the ordinary case —
+// no merge happened, and the caller's own (kind, source_id) is the row's
+// real identity. Must behave exactly like ResolveBySource.
+func TestResolveByThreadOrSource_ExactMatchStillWorks(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	ctx := context.Background()
+
+	if err := Insert(ctx, db, quietLogger(), Item{
+		WorkspaceID: "ws1", Kind: "waitpoint", SourceID: "wp-solo", Title: "Approve",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	ResolveByThreadOrSource(ctx, db, quietLogger(), "ws1", "waitpoint", "wp-solo", "", "approved", "u1")
+
+	var state string
+	if err := db.QueryRow(`SELECT state FROM inbox_items WHERE kind='waitpoint' AND source_id='wp-solo'`).Scan(&state); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if state != "resolved" {
+		t.Errorf("want resolved, got %q", state)
+	}
+}
+
+// --- B10: the digest scheduler (§12/F30, #2364) ---
+
+// newDigestTestDB is newInboxTestDB plus one pipeline row — pipeline_runs'
+// pipeline_id FK requires a real pipeline to hang runs off of. assignments'
+// own FK chain (chat/agents) is heavier and not needed here: digestCounts
+// sums both tables, and exercising the pipeline_runs half is enough to
+// prove the sweep's SQL and merge behavior; internal/pipeline's own outcome
+// tests (runs_outcome_test.go) cover the assignments half at the producer.
+func newDigestTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db := newInboxTestDB(t)
+	if _, err := db.Exec(`
+INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash)
+VALUES ('pipe1', 'ws1', 'daily-triage', 'Daily Triage', '{}', 'hash1')`); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	return db
+}
+
+// seedRun inserts one pipeline_runs row with the given outcome and
+// ended_at, satisfying every NOT NULL column fireOne's own writer would.
+func seedRun(t *testing.T, db *sql.DB, id, outcome, endedAt string) {
+	t.Helper()
+	if _, err := db.Exec(`
+INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, status, mode, started_at, ended_at, outcome)
+VALUES (?, 'ws1', 'pipe1', 'daily-triage', 'completed', 'run', ?, ?, ?)`,
+		id, endedAt, endedAt, outcome); err != nil {
+		t.Fatalf("seed run %s: %v", id, err)
+	}
+}
+
+// TestRunDigestSweepOnce_SummarizesSucceededAndNoChange is the "no card
+// exists until B10" half of the red-first evidence for the digest
+// scheduler: before this package had RunDigestSweepOnce, SUCCEEDED/
+// NO_CHANGE runs left no inbox trace at all (F30). One sweep must
+// produce exactly one card naming both counts.
+func TestRunDigestSweepOnce_SummarizesSucceededAndNoChange(t *testing.T) {
+	t.Parallel()
+	db := newDigestTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+
+	seedRun(t, db, "r1", "SUCCEEDED", recent)
+	seedRun(t, db, "r2", "NO_CHANGE", recent)
+	seedRun(t, db, "r3", "FAILED", recent)
+	seedRun(t, db, "r4", "SUCCEEDED", recent)
+
+	if err := RunDigestSweepOnce(ctx, db, quietLogger(), now, 24*time.Hour); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1' AND kind = 'message'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want exactly one digest card, got %d", n)
+	}
+	var payloadJSON string
+	if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&payloadJSON); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(payloadJSON, `"succeeded":2`) || !strings.Contains(payloadJSON, `"no_change":1`) {
+		t.Errorf("digest payload should count 2 succeeded and 1 no_change (FAILED excluded), got %q", payloadJSON)
+	}
+}
+
+// TestRunDigestSweepOnce_SecondSweepRefreshesTheSameCard is the digest's
+// own "one card, not a new one every sweep" proof.
+func TestRunDigestSweepOnce_SecondSweepRefreshesTheSameCard(t *testing.T) {
+	t.Parallel()
+	db := newDigestTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-1 * time.Hour).UTC().Format(time.RFC3339Nano)
+
+	seedRun(t, db, "r1", "SUCCEEDED", recent)
+	if err := RunDigestSweepOnce(ctx, db, quietLogger(), now, 24*time.Hour); err != nil {
+		t.Fatalf("first sweep: %v", err)
+	}
+
+	// A second SUCCEEDED lands before the next sweep.
+	seedRun(t, db, "r2", "SUCCEEDED", recent)
+	if err := RunDigestSweepOnce(ctx, db, quietLogger(), now.Add(time.Hour), 24*time.Hour); err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want the second sweep to refresh the SAME card, got %d rows", n)
+	}
+	var payloadJSON string
+	if err := db.QueryRow(`SELECT payload_json FROM inbox_items WHERE workspace_id = 'ws1'`).Scan(&payloadJSON); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(payloadJSON, `"succeeded":2`) {
+		t.Errorf("refreshed card should reflect BOTH successes, got %q", payloadJSON)
+	}
+}
+
+// TestRunDigestSweepOnce_NoActivityWritesNothing pins the other hard rule
+// this package documents: an empty digest is not news.
+func TestRunDigestSweepOnce_NoActivityWritesNothing(t *testing.T) {
+	t.Parallel()
+	db := newDigestTestDB(t)
+	ctx := context.Background()
+	if err := RunDigestSweepOnce(ctx, db, quietLogger(), time.Now(), 24*time.Hour); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("no activity in the window should write no card, got %d", n)
+	}
+}
+
+// TestRunDigestSweepOnce_OutsideWindowIsExcluded proves the window bound
+// itself, not just that SOME query ran.
+func TestRunDigestSweepOnce_OutsideWindowIsExcluded(t *testing.T) {
+	t.Parallel()
+	db := newDigestTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-48 * time.Hour).UTC().Format(time.RFC3339Nano)
+	seedRun(t, db, "r1", "SUCCEEDED", stale)
+
+	if err := RunDigestSweepOnce(ctx, db, quietLogger(), now, 24*time.Hour); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("a run 48h old with a 24h window should be excluded, got %d card(s)", n)
 	}
 }
