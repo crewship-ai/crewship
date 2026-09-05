@@ -215,6 +215,13 @@ func (v *packVerifier) run(ctx context.Context) []verifyCheck {
 
 	v.verifyFiles(ctx, crewID)
 
+	// Before anything is run: has this pack ALREADY failed here? The runs
+	// below are started by verify, but the seed also schedules them, and a
+	// scheduled run that hard-failed is what the operator sees in
+	// `crewship routine list`. Checked ahead of the env gate so a skipped
+	// pack cannot hide it.
+	v.verifyRunHistory()
+
 	if runnable, reason := packRunnable(v.pack); !runnable {
 		v.add("env", verifySkip, reason+" — the pack is seeded but cannot run")
 		return v.checks
@@ -273,6 +280,109 @@ func (v *packVerifier) verifyFiles(ctx context.Context, crewID string) {
 	default:
 		v.add("files", verifyPass, fmt.Sprintf("%d file(s) byte-identical to the seed", len(v.pack.Files)))
 	}
+}
+
+// verifyHistoryLimit is how far back the history row looks per routine. Far
+// enough to catch the seeded schedule's own runs, short enough that a busy
+// workspace's verdict row stays readable.
+const verifyHistoryLimit = 20
+
+// verifyRunHistory reports a pack routine that has ALREADY failed in this
+// workspace. The rest of this command runs the routines itself and judges
+// what comes back — but the seed also SCHEDULES them, and a scheduled run
+// that hard-failed is a broken demo whatever the fresh run does. Without
+// this row a workspace whose `crewship routine list` shows FAILED verified
+// clean: the missing-token skip returned before anything looked at the runs.
+func (v *packVerifier) verifyRunHistory() {
+	var slugs []string
+	for _, slug := range []string{v.pack.ProbeSlug, v.pack.ReportSlug} {
+		if slug != "" {
+			slugs = append(slugs, slug)
+		}
+	}
+	if len(slugs) == 0 {
+		return
+	}
+	var failures, unreadable []string
+	for _, slug := range slugs {
+		records, err := verifyFailedRunRecords(v.client, v.wsID, slug)
+		if err != nil {
+			unreadable = append(unreadable, slug+": "+err.Error())
+			continue
+		}
+		for _, r := range records {
+			failures = append(failures, r.describe(slug))
+		}
+	}
+	switch {
+	case len(failures) > 0:
+		v.add("history", verifyFail, fmt.Sprintf("%d failed run(s) already in the workspace: %s",
+			len(failures), strings.Join(failures, "; ")))
+	case len(unreadable) > 0:
+		// A check that could not run is not a pass. --strict decides
+		// whether that is tolerable, exactly as it does for a skipped pack.
+		v.add("history", verifySkip, "run history unreadable — "+strings.Join(unreadable, "; "))
+	default:
+		v.add("history", verifyPass, "no failed run in the last "+strconv.Itoa(verifyHistoryLimit)+
+			" records of "+strings.Join(slugs, ", "))
+	}
+}
+
+// verifyRunRecord is the part of a run record this command judges.
+type verifyRunRecord struct {
+	ID           string `json:"id"`
+	Status       string `json:"status"`
+	StartedAt    string `json:"started_at"`
+	FailedAtStep string `json:"failed_at_step"`
+	ErrorMessage string `json:"error_message"`
+}
+
+// describe names the run the way `crewship routine records <slug>` would, so
+// the row is something an operator can act on rather than a count.
+func (r verifyRunRecord) describe(slug string) string {
+	out := slug + " run " + r.ID + " FAILED"
+	if r.StartedAt != "" {
+		out += " (started " + r.StartedAt + ")"
+	}
+	if r.FailedAtStep != "" {
+		out += " at step " + r.FailedAtStep
+	}
+	if r.ErrorMessage != "" {
+		out += ": " + truncateForSmoke(r.ErrorMessage, 160)
+	}
+	return out
+}
+
+// verifyFailedRunRecords lists a routine's failed runs. The status filter is
+// applied twice — once by the server, once here — because a server that
+// ignores the query parameter would otherwise hand back every run as a
+// failure and turn every workspace red.
+func verifyFailedRunRecords(client *cli.Client, wsID, slug string) ([]verifyRunRecord, error) {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run-records?status=failed&limit=%d",
+		url.PathEscape(wsID), url.PathEscape(slug), verifyHistoryLimit))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		// Pre-v83 deployment: the run store is not wired, so there is no
+		// history to read. Said out loud, not swallowed.
+		return nil, errors.New("run-records is not wired on this server (predates migration v83)")
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var records []verifyRunRecord
+	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
+		return nil, err
+	}
+	var failed []verifyRunRecord
+	for _, r := range records {
+		if strings.EqualFold(strings.TrimSpace(r.Status), "failed") {
+			failed = append(failed, r)
+		}
+	}
+	return failed, nil
 }
 
 func verifyDownloadCrewFile(ctx context.Context, client *cli.Client, crewID, dest string) ([]byte, error) {
