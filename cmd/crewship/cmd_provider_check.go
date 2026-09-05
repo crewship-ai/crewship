@@ -247,10 +247,11 @@ func buildFromSpec(spec llm.ProviderSpec, o checkOptions, base, model string, ge
 		}), target, nil
 	case llm.CodecOpenAICompat:
 		return llm.NewOpenAICompat(llm.OpenAICompatConfig{
-			Name:        spec.ID,
-			DisplayName: spec.DisplayName,
-			BaseURL:     base,
-			APIKey:      key,
+			Name:           spec.ID,
+			DisplayName:    spec.DisplayName,
+			BaseURL:        base,
+			APIKey:         key,
+			MaxTokensField: spec.MaxTokensField,
 			// Non-streaming only, so stream_options never reaches the wire —
 			// but declaring it keeps this config identical to the one a
 			// streaming caller would build, so a backend that rejects the key

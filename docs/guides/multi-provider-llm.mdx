@@ -147,7 +147,7 @@ config value.
 | `Timeout` | 120s | Ignored when `Client` is set. |
 | `StreamClient` | derived | No total deadline; `ResponseHeaderTimeout` 60s. |
 | `IncludeUsage` | `false` | Emits `stream_options:{include_usage:true}`. |
-| `MaxTokensField` | `max_tokens` | Newer OpenAI models want `max_completion_tokens`. |
+| `MaxTokensField` | `max_tokens` for compatibility; hosted OpenAI sets `max_completion_tokens` | OpenAI-compatible backends may still require the legacy field. |
 | `DefaultMaxTokens` | `0` — key omitted | |
 | `ExtraBody` | none | Merged **last**, overwrites anything it collides with. |
 | `StopReasons` | built-in map | Overlay; a key present here wins. |

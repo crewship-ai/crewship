@@ -158,7 +158,11 @@ func rawModelsURL(base string) string {
 
 // NewOpenAI creates a provider that calls the OpenAI Chat Completions API.
 func NewOpenAI(apiKey string) *OpenAI {
-	return NewOpenAICompat(OpenAICompatConfig{APIKey: apiKey, IncludeUsage: true})
+	return NewOpenAICompat(OpenAICompatConfig{
+		APIKey:         apiKey,
+		IncludeUsage:   true,
+		MaxTokensField: "max_completion_tokens",
+	})
 }
 
 // NewOpenAIWithBaseURL creates an OpenAI-compatible provider with a custom base URL.
