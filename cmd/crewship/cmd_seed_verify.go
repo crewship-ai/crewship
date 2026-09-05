@@ -149,14 +149,14 @@ func seedVerify(ctx context.Context, client *cli.Client, opts verifyOptions) ([]
 	if err != nil {
 		return nil, err
 	}
-	crewIDs, err := verifyListCrews(client)
+	crewIDs, crewBorn, err := verifyListCrews(client)
 	if err != nil {
 		return nil, fmt.Errorf("list crews: %w", err)
 	}
 
 	var checks []verifyCheck
 	for _, p := range selected {
-		v := &packVerifier{client: client, wsID: wsID, pack: p, opts: opts, crewIDs: crewIDs}
+		v := &packVerifier{client: client, wsID: wsID, pack: p, opts: opts, crewIDs: crewIDs, crewBorn: crewBorn}
 		checks = append(checks, v.run(ctx)...)
 	}
 	return checks, nil
@@ -192,8 +192,15 @@ type packVerifier struct {
 	pack    seeddata.PackDef
 	opts    verifyOptions
 	crewIDs map[string]string
-	checks  []verifyCheck
-	started time.Time
+	// crewBorn is when each crew row was created. `seed --nuke` recreates
+	// crews but UPSERTS pipelines by slug, so a routine keeps its original
+	// created_at and its pipeline_runs survive the nuke. The crew is
+	// therefore the only honest marker of "this seed generation", and the
+	// history row is scoped to it — otherwise a freshly seeded workspace
+	// fails on runs that belong to a workspace that no longer exists.
+	crewBorn map[string]string
+	checks   []verifyCheck
+	started  time.Time
 }
 
 func (v *packVerifier) add(step, result, detail string) {
@@ -304,6 +311,7 @@ func (v *packVerifier) verifyRunHistory() {
 		return
 	}
 	var failures, unreadable []string
+	stale := 0
 	for _, slug := range slugs {
 		records, err := verifyFailedRunRecords(v.client, v.wsID, slug)
 		if err != nil {
@@ -311,6 +319,14 @@ func (v *packVerifier) verifyRunHistory() {
 			continue
 		}
 		for _, r := range records {
+			// Runs from a previous seed generation are not this demo's
+			// failures. `seed --nuke` recreates the crew but upserts the
+			// pipeline by slug, so run-records?slug= still answers with the
+			// nuked workspace's history.
+			if r.startedBefore(v.crewBorn[v.pack.CrewSlug]) {
+				stale++
+				continue
+			}
 			failures = append(failures, r.describe(slug))
 		}
 	}
@@ -323,8 +339,14 @@ func (v *packVerifier) verifyRunHistory() {
 		// whether that is tolerable, exactly as it does for a skipped pack.
 		v.add("history", verifySkip, "run history unreadable — "+strings.Join(unreadable, "; "))
 	default:
-		v.add("history", verifyPass, "no failed run in the last "+strconv.Itoa(verifyHistoryLimit)+
-			" records of "+strings.Join(slugs, ", "))
+		msg := "no failed run in the last " + strconv.Itoa(verifyHistoryLimit) +
+			" records of " + strings.Join(slugs, ", ")
+		if stale > 0 {
+			// Said out loud: a silent filter is how a real failure gets
+			// dropped by a clock comparison nobody can see.
+			msg += fmt.Sprintf(" (%d older run(s) from a previous seed ignored)", stale)
+		}
+		v.add("history", verifyPass, msg)
 	}
 }
 
@@ -339,6 +361,25 @@ type verifyRunRecord struct {
 
 // describe names the run the way `crewship routine records <slug>` would, so
 // the row is something an operator can act on rather than a count.
+// startedBefore reports whether the record began before ts (RFC3339). A
+// record with no timestamp, or a ts this cannot parse, is never filtered
+// out: dropping a failure because its clock was unreadable would be the
+// silent pass this whole check exists to prevent.
+func (r verifyRunRecord) startedBefore(ts string) bool {
+	if ts == "" || r.StartedAt == "" {
+		return false
+	}
+	cut, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return false
+	}
+	started, err := time.Parse(time.RFC3339, r.StartedAt)
+	if err != nil {
+		return false
+	}
+	return started.Before(cut)
+}
+
 func (r verifyRunRecord) describe(slug string) string {
 	out := slug + " run " + r.ID + " FAILED"
 	if r.StartedAt != "" {
@@ -885,24 +926,25 @@ func stepOutput(run *cli.PipelineRunDetail, step string) (string, bool) {
 	}
 }
 
-func verifyListCrews(client *cli.Client) (map[string]string, error) {
+func verifyListCrews(client *cli.Client) (map[string]string, map[string]string, error) {
 	// ?limit: the list defaults to 100 rows, and a long-lived workspace can
 	// hold more crews than that.
 	resp, err := client.Get("/api/v1/crews?limit=500")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	if err := cli.CheckError(resp); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	type crew struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID        string `json:"id"`
+		Slug      string `json:"slug"`
+		CreatedAt string `json:"created_at"`
 	}
 	var rows []crew
 	if err := json.Unmarshal(body, &rows); err != nil {
@@ -911,15 +953,17 @@ func verifyListCrews(client *cli.Client) (map[string]string, error) {
 			Items []crew `json:"items"`
 		}
 		if err2 := json.Unmarshal(body, &wrapped); err2 != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		rows = append(wrapped.Crews, wrapped.Items...)
 	}
 	out := map[string]string{}
+	born := map[string]string{}
 	for _, c := range rows {
 		out[c.Slug] = c.ID
+		born[c.Slug] = c.CreatedAt
 	}
-	return out, nil
+	return out, born, nil
 }
 
 var countsLineRe = regexp.MustCompile(`(?m)^\s*COUNTS:\s*(.+?)\s*$`)

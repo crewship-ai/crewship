@@ -660,3 +660,75 @@ func TestSeedVerifyCmd_IsRegisteredUnderSeed(t *testing.T) {
 	}
 	_ = fmt.Sprint
 }
+
+// `seed --nuke` recreates the crews but UPSERTS the pipelines by slug, so a
+// routine keeps its original created_at and its pipeline_runs outlive the
+// nuke. Observed on dev1: a freshly seeded workspace reported six failed
+// runs, three of them from a workspace that had been nuked an hour earlier
+// — the history row would have failed a demo that was in fact clean. The
+// crew row is the only honest marker of "this seed generation", so runs that
+// predate it are not this demo's failures. They are counted out loud rather
+// than dropped in silence.
+func TestSeedVerify_HistoryIgnoresRunsFromAPreviousSeed(t *testing.T) {
+	born := verifyNow.Add(-30 * time.Minute)
+	vs := newVerifyStub(t)
+	t.Setenv("SEED_GITHUB_TOKEN", "ghp_test_token_0000000000000000000000")
+	vs.s.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
+		{"id": "crew-ops", "slug": "ops", "created_at": born.Format(time.RFC3339Nano)},
+		{"id": "crew-quality", "slug": "quality", "created_at": born.Format(time.RFC3339Nano)},
+		{"id": "crew-eng", "slug": "engineering", "created_at": born.Format(time.RFC3339Nano)},
+	}))
+	vs.s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines/docs-drift-audit/run-records", func(_ *http.Request, _ []byte) (int, []byte, string) {
+		b, _ := json.Marshal([]map[string]any{
+			{"id": "run-before-the-nuke", "status": "failed",
+				"started_at":     born.Add(-2 * time.Hour).Format(time.RFC3339Nano),
+				"failed_at_step": "sha_label"},
+		})
+		return 200, b, "application/json"
+	})
+	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("docs-drift"))
+	if err != nil {
+		t.Fatalf("seedVerify: %v", err)
+	}
+	c := expectResult(t, checks, "docs-drift", "history", verifyPass)
+	if !strings.Contains(c.Detail, "previous seed") {
+		t.Errorf("the filter must say it dropped something — a silent clock comparison is how a real failure disappears: %q", c.Detail)
+	}
+	// Deliberately not asserting the command's exit status here: the stub's
+	// report step fails for reasons of its own, and this test is about the
+	// history row alone.
+	for _, c := range checks {
+		if c.Step == "history" && c.Result == verifyFail {
+			t.Errorf("history must not fail on a pre-nuke run: %q", c.Detail)
+		}
+	}
+}
+
+// The other direction, so the scoping cannot become a blanket amnesty: a
+// failure from THIS seed generation still fails.
+func TestSeedVerify_HistoryStillFailsOnARunFromThisSeed(t *testing.T) {
+	born := verifyNow.Add(-30 * time.Minute)
+	vs := newVerifyStub(t)
+	t.Setenv("SEED_GITHUB_TOKEN", "ghp_test_token_0000000000000000000000")
+	vs.s.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
+		{"id": "crew-ops", "slug": "ops", "created_at": born.Format(time.RFC3339Nano)},
+		{"id": "crew-quality", "slug": "quality", "created_at": born.Format(time.RFC3339Nano)},
+		{"id": "crew-eng", "slug": "engineering", "created_at": born.Format(time.RFC3339Nano)},
+	}))
+	vs.s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines/docs-drift-audit/run-records", func(_ *http.Request, _ []byte) (int, []byte, string) {
+		b, _ := json.Marshal([]map[string]any{
+			{"id": "run-after-the-seed", "status": "failed",
+				"started_at":     born.Add(5 * time.Minute).Format(time.RFC3339Nano),
+				"failed_at_step": "review"},
+		})
+		return 200, b, "application/json"
+	})
+	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("docs-drift"))
+	if err != nil {
+		t.Fatalf("seedVerify: %v", err)
+	}
+	c := expectResult(t, checks, "docs-drift", "history", verifyFail)
+	if !strings.Contains(c.Detail, "run-after-the-seed") {
+		t.Errorf("the row must still name a failure from this generation: %q", c.Detail)
+	}
+}
