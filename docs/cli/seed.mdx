@@ -176,7 +176,7 @@ GitHub with `SEED_GITHUB_TOKEN` (or `GH_TOKEN`) from its own environment.
 | 9b. Routines | Starter routine library + eval scenarios (deterministic recipes, a morning briefing, an agentless feed-watch probe and its wake-gated change report) | Non-fatal |
 | 9b. Schedules | Demo crons so `/activity` has data on first load — including a wake-gated feed watch whose agentless probe runs token-zero every 15 minutes | Non-fatal |
 | 10. Issues | Pack issues with their projects and labels (unless `--skip-issues`) | Fatal |
-| 10c. Pages | Page specs, demo payloads, then one run of every routine a panel names as producer — skipping a pack whose requirement is unmet | Fatal on spec, non-fatal per run |
+| 10c. Pages | Page specs, demo payloads, then one run of every routine a panel names as producer — fired even when a pack's requirement is unmet, so the failed run record says why the panel is empty | Fatal on spec, non-fatal per run |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready | Fatal in sync mode, deferred otherwise |
 | 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |
 | 11. Summary | Prints `Seed complete: N crews, M agents` | — |

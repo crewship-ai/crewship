@@ -137,13 +137,15 @@ func TestPacks_RoutineScriptsAreDelivered(t *testing.T) {
 
 // The deterministic core of every pack ships with its own unit tests, and
 // they run here so a change to a script is red in `go test` before it is
-// wrong in a container. Skipped only when there is no python3 — CI has one
-// (the api-contract job installs it), a laptop without it still runs the Go
-// half.
+// wrong in a container. python3 is required, not optional: without it the
+// test fails rather than skips, because a skip reads as a pass.
 func TestPacks_ScriptUnitTestsPass(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
-		t.Skip("python3 not on PATH — pack script suites not run")
+		// A hard failure, not a skip: a skip reads as a pass, and the scripts
+		// these suites cover run in every seeded workspace. Every CI runner
+		// and every dev box carries python3.
+		t.Fatalf("python3 not on PATH — the pack script suites cannot run: %v", err)
 	}
 	entries, err := fs.ReadDir(packsFS, "packs")
 	if err != nil {
