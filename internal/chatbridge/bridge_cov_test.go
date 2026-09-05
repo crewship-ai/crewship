@@ -405,6 +405,10 @@ func TestHandleChatMessageSuccessFullFlow(t *testing.T) {
 	if msgs[1].Role != "assistant" || msgs[1].Content != "Hello world" {
 		t.Errorf("assistant message = role %q content %q, want assistant 'Hello world'", msgs[1].Role, msgs[1].Content)
 	}
+	doneMeta, _ := events[len(events)-1].Metadata.(map[string]any)
+	if got, _ := doneMeta["message_id"].(string); got != msgs[1].ID {
+		t.Errorf("done message_id = %q, want persisted assistant id %q", got, msgs[1].ID)
+	}
 	// 12 tool calls + 1 tool result = 13 summaries → capped at 10 + overflow note.
 	if !strings.Contains(msgs[1].ToolSummary, "[tool: Bash]") {
 		t.Errorf("tool summary missing tool call entries: %q", msgs[1].ToolSummary)

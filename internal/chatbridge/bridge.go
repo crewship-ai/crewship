@@ -1215,6 +1215,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	repliedAt := time.Now().UTC()
+	assistantMessageID := generateMsgID()
 	// The setup agent has no write tools. Its only structured output is a
 	// hidden, narrowly validated template suggestion in its final text. Put
 	// that suggestion on both durable message metadata (reload/history) and
@@ -1223,7 +1224,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// extractor is additionally pinned to the reserved setup-agent slug.
 	assistantMetadata := onboardingProposalMetadata(info.AgentSlug, acc.Text())
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:          generateMsgID(),
+		ID:          assistantMessageID,
 		AgentID:     info.AgentID,
 		Role:        conversation.RoleAssistant,
 		Content:     acc.Text(),
@@ -1249,15 +1250,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// racing mark-read (cursor >= repliedAt) suppresses it.
 	b.notifyReply(ctx, chatID, userID, info, acc.Text(), repliedAt)
 
-	// Stamp the active OTel trace id onto the "done" event so the
-	// frontend can attach it to the assistant turn. This is what
-	// powers feedback signal correlation — the user's thumb-down on
-	// a turn lands in message_feedback with trace_id pointing back
-	// at the routine run that produced the answer. When no telemetry
-	// provider is configured the trace context is invalid and
-	// ResolveTrace returns ok=false; we just omit the field in that
-	// case so the frontend's optional read stays clean.
-	doneMeta := map[string]any{}
+	// The live turn starts with a client-generated id because it renders before
+	// persistence. Return the durable id at the done boundary so reactions and
+	// feedback target the same message that history returns after a reload.
+	// The active OTel trace id also rides on this event for feedback correlation.
+	doneMeta := map[string]any{"message_id": assistantMessageID}
 	for key, value := range assistantMetadata {
 		doneMeta[key] = value
 	}
