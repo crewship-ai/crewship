@@ -10,6 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -81,12 +84,22 @@ func newVerifyStub(t *testing.T) *verifyStub {
 			if _, ok := req["delay_seconds"]; !ok {
 				return 400, []byte(`{"error":"verify must park the run (delay_seconds) — a synchronous run would hold the HTTP request"}`), "application/json"
 			}
+			// The real deferred path answers a pending id, never a run id:
+			// the run is minted when the dispatcher fires. verify has to
+			// find it through the routine's run records.
+			b, _ := json.Marshal(map[string]any{"status": "scheduled", "pending_id": "pend-" + slug, "fire_at": time.Now().Add(time.Second).Format(time.RFC3339Nano)})
+			return 202, b, "application/json"
+		})
+		s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines/"+slug+"/run-records", func(_ *http.Request, _ []byte) (int, []byte, string) {
 			id := "run-" + strings.TrimSuffix(strings.TrimPrefix(slug, "ci-"), "-audit")
 			if slug == "ci-nightly-triage" {
 				id = "run-report"
 			}
-			b, _ := json.Marshal(map[string]any{"run_id": id, "status": "scheduled"})
-			return 202, b, "application/json"
+			b, _ := json.Marshal([]map[string]any{
+				{"id": "run-yesterday", "status": "completed", "started_at": time.Now().Add(-24 * time.Hour).Format(time.RFC3339Nano)},
+				{"id": id, "status": "running", "started_at": time.Now().Format(time.RFC3339Nano)},
+			})
+			return 200, b, "application/json"
 		})
 	}
 	runDetail := func(id string, outputs map[string]any) (int, []byte, string) {
@@ -134,8 +147,8 @@ func newVerifyStub(t *testing.T) *verifyStub {
 	})
 	s.OnGet("/api/v1/pages/ci-watch", func(_ *http.Request, _ []byte) (int, []byte, string) {
 		b, _ := json.Marshal(map[string]any{"slug": "ci-watch", "panels": []map[string]any{
-			{"id": "status", "run_id": vs.panelRun, "producer": "routine/ci-nightly-triage"},
-			{"id": "summary", "run_id": vs.panelRun, "producer": "routine/ci-nightly-triage"},
+			{"id": "status", "provenance": map[string]any{"run_id": vs.panelRun, "producer": "routine/ci-nightly-triage"}},
+			{"id": "summary", "provenance": map[string]any{"run_id": vs.panelRun, "producer": "routine/ci-nightly-triage"}},
 		}})
 		return 200, b, "application/json"
 	})
@@ -246,8 +259,11 @@ func TestSeedVerify_LeakedTokenFailsTheReport(t *testing.T) {
 	if !strings.Contains(c.Detail, "secret") {
 		t.Errorf("detail: %q", c.Detail)
 	}
-	if strings.Contains(c.Detail, "ghp_abcdefghijklmnopqrstuvwxyz0123456789") {
-		t.Error("the verdict row must not repeat the whole token")
+	if strings.Contains(c.Detail, "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Error("the verdict row must not echo the token's bytes")
+	}
+	if !strings.Contains(c.Detail, "token") {
+		t.Errorf("the verdict row should name the kind: %q", c.Detail)
 	}
 }
 
@@ -359,7 +375,7 @@ func TestSeedVerify_DocsDriftReconcilesAndFactChecksOnlyWithACheckout(t *testing
 		return 200, b, "application/json"
 	})
 	vs.s.OnGet("/api/v1/pages/docs-drift", func(_ *http.Request, _ []byte) (int, []byte, string) {
-		b, _ := json.Marshal(map[string]any{"panels": []map[string]any{{"id": "status", "run_id": "run-docs-drift"}, {"id": "summary", "run_id": "run-docs-drift"}}})
+		b, _ := json.Marshal(map[string]any{"panels": []map[string]any{{"id": "status", "provenance": map[string]any{"run_id": "run-docs-drift"}}, {"id": "summary", "provenance": map[string]any{"run_id": "run-docs-drift"}}}})
 		return 200, b, "application/json"
 	})
 	vs.s.OnGet("/api/v1/inbox", func(_ *http.Request, _ []byte) (int, []byte, string) {
@@ -367,7 +383,7 @@ func TestSeedVerify_DocsDriftReconcilesAndFactChecksOnlyWithACheckout(t *testing
 		return 200, b, "application/json"
 	})
 	opts := verifyOpts("docs-drift")
-	opts.repoDir = t.TempDir() // not a git repository → the fact-check cannot run
+	opts.repoDir = t.TempDir() // not a checkout that has the commit → the fact-check cannot run
 	checks, err := seedVerify(context.Background(), covStubClient(vs.s), opts)
 	if err != nil {
 		t.Fatalf("seedVerify: %v", err)
@@ -376,12 +392,66 @@ func TestSeedVerify_DocsDriftReconcilesAndFactChecksOnlyWithACheckout(t *testing
 	if !strings.Contains(c.Detail, "candidates=3 confirmed=1 rejected=2") {
 		t.Errorf("detail: %q", c.Detail)
 	}
-	fc := expectResult(t, checks, "docs-drift", "fact-check", verifyFail)
-	if !strings.Contains(fc.Detail, "2 of 2") {
-		t.Errorf("without the commit locally every citation is unverifiable and must say so: %q", fc.Detail)
+	fc := expectResult(t, checks, "docs-drift", "fact-check", verifySkip)
+	if !strings.Contains(fc.Detail, "does not contain commit") {
+		t.Errorf("an unrelated checkout must be a skip with the reason, not a false FAIL: %q", fc.Detail)
 	}
 	expectResult(t, checks, "docs-drift", "inbox", verifyPass)
 	expectResult(t, checks, "docs-drift", "page", verifyPass)
+}
+
+// With a checkout that has the scanned commit, every cited path is checked
+// against it: a real path passes, an invented one fails the fact-check.
+func TestSeedVerify_DocsDriftFactCheckAgainstARealCheckout(t *testing.T) {
+	repo := t.TempDir()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("init", "-q")
+	if err := os.MkdirAll(filepath.Join(repo, "docs", "manifest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs", "manifest", "crew.md"), []byte("# crew\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "docs")
+	sha := run("rev-parse", "HEAD")
+
+	for _, tc := range []struct {
+		name, cite, want, detail string
+	}{
+		{"real path passes", "`docs/manifest/crew.md:1`", verifyPass, "1 cited path(s) exist"},
+		{"invented path fails", "`docs/manifest/crew.md:1`. Code: `internal/made/up.go:3`", verifyFail, "internal/made/up.go"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			vs := newVerifyStub(t)
+			scan := `{"repo":"x/y","sha":"` + sha + `","pairs":1,"total_candidates":1,"results":[],"panel":{"state":"ok","label":"l","sha_label":"s"}}`
+			review := "## Docs drift — 1 confirmed of 1 candidates\n\n### docs/manifest/crew.md\n- **`files`** — missing. Docs: " + tc.cite + ".\n\nCOUNTS: candidates=1 confirmed=1 rejected=0 truncated=0"
+			vs.s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipeline-runs/run-docs-drift", func(_ *http.Request, _ []byte) (int, []byte, string) {
+				b, _ := json.Marshal(map[string]any{"id": "run-docs-drift", "status": "completed", "step_outputs": map[string]any{"scan": scan, "review": review}})
+				return 200, b, "application/json"
+			})
+			vs.s.OnGet("/api/v1/pages/docs-drift", clitest.JSONResponse(200, map[string]any{"panels": []map[string]any{{"id": "status", "provenance": map[string]any{"run_id": "run-docs-drift"}}}}))
+			vs.s.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{"rows": []map[string]any{{"title": "Docs drift — weekly audit", "created_at": verifyNow.Add(time.Minute).Format(time.RFC3339)}}}))
+			opts := verifyOpts("docs-drift")
+			opts.repoDir = repo
+			checks, err := seedVerify(context.Background(), covStubClient(vs.s), opts)
+			if err != nil {
+				t.Fatalf("seedVerify: %v", err)
+			}
+			fc := expectResult(t, checks, "docs-drift", "fact-check", tc.want)
+			if !strings.Contains(fc.Detail, tc.detail) {
+				t.Errorf("detail: %q, want it to mention %q", fc.Detail, tc.detail)
+			}
+		})
+	}
 }
 
 func TestSeedVerify_UnknownPackIsAnError(t *testing.T) {

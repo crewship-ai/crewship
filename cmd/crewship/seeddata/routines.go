@@ -1332,6 +1332,12 @@ func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 		"approval-gate-demo":    true, // production change plan + human decision
 		"cost-spike-probe":      true, // budget wake gate
 		"page-watch":            true, // routine-produced operational page
+		// Deterministic recipes the test harness, the walkthrough and the
+		// CLI docs address by slug (test-determinism.sh, walkthrough.sh,
+		// docs/cli/routine.mdx) — a fresh seed must keep answering them.
+		"extract-contacts": true,
+		"normalize-dates":  true,
+		"summarize-text":   true,
 		// Demo packs (packs.go): a real source, a deterministic core, a
 		// verifiable report.
 		"ci-probe":           true, // token-zero wake gate over GitHub Actions

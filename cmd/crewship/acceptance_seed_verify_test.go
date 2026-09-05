@@ -51,8 +51,11 @@ func seedVerifyAcceptanceStub(t *testing.T) *httptest.Server {
 			}
 			w.WriteHeader(404)
 		case r.Method == http.MethodPost && strings.HasPrefix(p, "/api/v1/workspaces/ws_test/pipelines/") && strings.HasSuffix(p, "/run"):
-			slug := strings.TrimSuffix(strings.TrimPrefix(p, "/api/v1/workspaces/ws_test/pipelines/"), "/run")
-			write(w, 202, map[string]any{"run_id": "run_" + slug, "status": "scheduled"})
+			// The deferred path's real answer: a pending id, no run id.
+			write(w, 202, map[string]any{"status": "scheduled", "pending_id": "pend_1", "fire_at": now.Add(time.Second).Format(time.RFC3339Nano)})
+		case r.Method == http.MethodGet && strings.HasPrefix(p, "/api/v1/workspaces/ws_test/pipelines/") && strings.HasSuffix(p, "/run-records"):
+			slug := strings.TrimSuffix(strings.TrimPrefix(p, "/api/v1/workspaces/ws_test/pipelines/"), "/run-records")
+			write(w, 200, []map[string]any{{"id": "run_" + slug, "status": "running", "started_at": time.Now().UTC().Format(time.RFC3339Nano)}})
 		case r.Method == http.MethodGet && p == "/api/v1/workspaces/ws_test/pipeline-runs/run_ci-probe":
 			write(w, 200, map[string]any{"id": "run_ci-probe", "status": "completed", "inputs": map[string]any{"repo": "crewship-ai/crewship"},
 				"step_outputs": map[string]any{"probe": probe, "wake": "true"}})
@@ -70,7 +73,7 @@ func seedVerifyAcceptanceStub(t *testing.T) *httptest.Server {
 			write(w, 200, map[string]any{"rows": []map[string]any{{"title": "Nightly CI — something to handle", "created_at": now.Add(time.Minute).Format(time.RFC3339)}}})
 		case r.Method == http.MethodGet && p == "/api/v1/pages/ci-watch":
 			write(w, 200, map[string]any{"panels": []map[string]any{
-				{"id": "status", "run_id": "run_ci-nightly-triage"}, {"id": "summary", "run_id": "run_ci-nightly-triage"}}})
+				{"id": "status", "provenance": map[string]any{"run_id": "run_ci-nightly-triage"}}, {"id": "summary", "provenance": map[string]any{"run_id": "run_ci-nightly-triage"}}}})
 		default:
 			write(w, 404, map[string]string{"detail": "no stub for " + r.Method + " " + p})
 		}

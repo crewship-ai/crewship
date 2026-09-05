@@ -232,6 +232,16 @@ class TestAuditWrapper(unittest.TestCase):
         self.assertTrue(all("pkg" in v["error"] for v in out["results"]), out)
         self.assertEqual(out["panel"]["state"], "critical")
 
+    def test_token_never_lands_in_a_remote_url(self):
+        """A URL-embedded token is persisted into .git/config on the shared
+        volume; the script must pass it as a header instead."""
+        audit = os.path.join(HERE, "..", "scripts", "docs_audit.sh")
+        with open(audit, encoding="utf-8") as f:
+            text = f.read()
+        self.assertNotIn("x-access-token:${GH_TOKEN}@", text)
+        self.assertNotIn("${GH_TOKEN}@github.com", text)
+        self.assertIn("http.extraheader", text)
+
     def test_map_without_pairs_list_is_an_error(self):
         r = self._audit(json.dumps({"dvojice": []}))
         self.assertEqual(r.returncode, 0, r.stderr)

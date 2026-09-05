@@ -320,8 +320,10 @@ func (v *packVerifier) verifyProbe(ctx context.Context) bool {
 	case "ci-watch":
 		return v.verifyCIProbe(ctx, run, probe)
 	default:
-		v.add("probe", verifyPass, "run "+run.ID+" completed")
-		return true
+		// A probe nobody wrote a comparison for is not a pass — it is a
+		// pack this command does not know how to judge yet.
+		v.add("probe", verifyFail, "no independent check implemented for pack "+v.pack.Slug)
+		return false
 	}
 }
 
@@ -379,8 +381,8 @@ func (v *packVerifier) verifyReport(ctx context.Context) (*cli.PipelineRunDetail
 	case "site-replica":
 		return run, v.verifyReplicaReport(run)
 	default:
-		v.add("report", verifyPass, "run "+run.ID+" completed")
-		return run, true
+		v.add("report", verifyFail, "no report check implemented for pack "+v.pack.Slug)
+		return run, false
 	}
 }
 
@@ -486,6 +488,13 @@ func (v *packVerifier) verifyCitedPaths(text, sha string) {
 	}
 	if repoDir == "" || sha == "" || sha == "unknown" {
 		v.add("fact-check", verifySkip, fmt.Sprintf("%d citation(s), but no local checkout (--repo-dir) or no scan SHA to check them against", len(cites)))
+		return
+	}
+	// The checkout has to CONTAIN the scanned commit, or every citation
+	// would read as missing — an unrelated repository in the working
+	// directory must not turn into a false FAIL.
+	if !gitHasCommit(repoDir, sha) {
+		v.add("fact-check", verifySkip, fmt.Sprintf("%d citation(s), but %s does not contain commit %s — fetch it or pass --repo-dir", len(cites), repoDir, short(sha)))
 		return
 	}
 	var bad []string
@@ -600,11 +609,15 @@ func (v *packVerifier) verifyPage(run *cli.PipelineRunDetail) {
 		v.add("page", verifyFail, err.Error())
 		return
 	}
+	// Provenance is nested on the wire (pages_handler.go: "nested, never
+	// flat"); a flat run_id would decode to "" and fail every panel.
 	var page struct {
 		Panels []struct {
 			ID         string `json:"id"`
-			RunID      string `json:"run_id"`
-			ProducedAt string `json:"produced_at"`
+			Provenance struct {
+				RunID      string `json:"run_id"`
+				ProducedAt string `json:"produced_at"`
+			} `json:"provenance"`
 		} `json:"panels"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
@@ -617,8 +630,8 @@ func (v *packVerifier) verifyPage(run *cli.PipelineRunDetail) {
 	}
 	var stale []string
 	for _, p := range page.Panels {
-		if p.RunID != run.ID {
-			stale = append(stale, fmt.Sprintf("%s (run %s)", p.ID, firstNonEmpty(p.RunID, "never")))
+		if p.Provenance.RunID != run.ID {
+			stale = append(stale, fmt.Sprintf("%s (run %s)", p.ID, firstNonEmpty(p.Provenance.RunID, "never")))
 		}
 	}
 	if len(stale) > 0 {
@@ -634,7 +647,13 @@ func (v *packVerifier) verifyPage(run *cli.PipelineRunDetail) {
 // terminal state. Parked, because the synchronous run path holds the run
 // inside the HTTP request — and a client timeout there cancels the server's
 // work mid-step. The dispatcher picks a parked run up outside any request.
+//
+// A parked run answers with a pending id, not a run id (the run is minted
+// when the dispatcher fires it, ~5 s later), so the run is located through
+// the routine's run records: the newest record started after the request
+// was made. A future server that answers a run id directly is honoured.
 func verifyRunRoutine(ctx context.Context, client *cli.Client, wsID, slug string, timeout time.Duration) (*cli.PipelineRunDetail, error) {
+	requested := time.Now().Add(-5 * time.Second) // clock skew between client and server
 	resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", wsID, slug),
 		map[string]any{"inputs": map[string]any{}, "delay_seconds": 1})
 	if err != nil {
@@ -645,21 +664,29 @@ func verifyRunRoutine(ctx context.Context, client *cli.Client, wsID, slug string
 		return nil, fmt.Errorf("run %s: %w", slug, err)
 	}
 	var started struct {
-		RunID string `json:"run_id"`
-		ID    string `json:"id"`
+		RunID     string `json:"run_id"`
+		ID        string `json:"id"`
+		PendingID string `json:"pending_id"`
+		Status    string `json:"status"`
 	}
 	if err := cli.ReadJSON(resp, &started); err != nil {
 		return nil, fmt.Errorf("run %s: %w", slug, err)
-	}
-	runID := firstNonEmpty(started.RunID, started.ID)
-	if runID == "" {
-		return nil, fmt.Errorf("run %s: no run id in the response", slug)
 	}
 	pollCtx := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		pollCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
+	}
+	runID := firstNonEmpty(started.RunID, started.ID)
+	if runID == "" {
+		if started.PendingID == "" {
+			return nil, fmt.Errorf("run %s: neither a run id nor a pending id in the response", slug)
+		}
+		runID, err = awaitParkedRun(pollCtx, client, wsID, slug, requested)
+		if err != nil {
+			return nil, fmt.Errorf("run %s (pending %s): %w", slug, started.PendingID, err)
+		}
 	}
 	detail, err := client.PollPipelineRun(pollCtx, runID, 2*time.Second, nil)
 	if err != nil {
@@ -673,6 +700,58 @@ func verifyRunRoutine(ctx context.Context, client *cli.Client, wsID, slug string
 		return detail, nil
 	}
 	return nil, fmt.Errorf("run %s (%s) ended %s at step %s: %s", slug, runID, strings.ToUpper(detail.Status), detail.FailedAtStep, detail.ErrorMessage)
+}
+
+// awaitParkedRun polls the routine's run records until one started after
+// `since` exists, and returns its id.
+func awaitParkedRun(ctx context.Context, client *cli.Client, wsID, slug string, since time.Time) (string, error) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		if id := newestRunSince(client, wsID, slug, since); id != "" {
+			return id, nil
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return "", fmt.Errorf("the dispatcher never fired the parked run — is the server's pending-run dispatcher running?")
+			}
+			return "", ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+func newestRunSince(client *cli.Client, wsID, slug string, since time.Time) string {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run-records?limit=20", wsID, slug))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return ""
+	}
+	var records []struct {
+		ID        string `json:"id"`
+		StartedAt string `json:"started_at"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
+		return ""
+	}
+	bestID, bestAt := "", time.Time{}
+	for _, r := range records {
+		at, err := time.Parse(time.RFC3339Nano, r.StartedAt)
+		if err != nil {
+			if at, err = time.Parse(time.RFC3339, r.StartedAt); err != nil {
+				continue
+			}
+		}
+		if at.Before(since) || !at.After(bestAt) {
+			continue
+		}
+		bestID, bestAt = r.ID, at
+	}
+	return bestID
 }
 
 // stepOutput returns a step's output as text.
@@ -697,7 +776,9 @@ func stepOutput(run *cli.PipelineRunDetail, step string) (string, bool) {
 }
 
 func verifyListCrews(client *cli.Client) (map[string]string, error) {
-	resp, err := client.Get("/api/v1/crews")
+	// ?limit: the list defaults to 100 rows, and a long-lived workspace can
+	// hold more crews than that.
+	resp, err := client.Get("/api/v1/crews?limit=500")
 	if err != nil {
 		return nil, err
 	}
@@ -754,16 +835,28 @@ func parseCountsLine(text string) (map[string]int, bool) {
 
 var secretLeakRe = regexp.MustCompile(`(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|x-access-token:[^@\s]+@|Bearer [A-Za-z0-9._-]{20,}|API_KEY=\S+)`)
 
-// leakedSecret returns the first substring that looks like a credential.
+// leakedSecret reports the KIND of the first credential-shaped substring,
+// never its bytes: the row that proves a token leaked must not be a second
+// place it leaks to (verify output lands in CI logs and JSON).
 func leakedSecret(text string) string {
 	m := secretLeakRe.FindString(text)
 	if m == "" {
 		return ""
 	}
-	if len(m) > 24 {
-		m = m[:24] + "…"
+	switch {
+	case strings.HasPrefix(m, "ghp_"):
+		return "a GitHub token (ghp_…)"
+	case strings.HasPrefix(m, "github_pat_"):
+		return "a GitHub fine-grained token (github_pat_…)"
+	case strings.HasPrefix(m, "sk-ant-"):
+		return "an Anthropic key (sk-ant-…)"
+	case strings.HasPrefix(m, "x-access-token:"):
+		return "a token embedded in a git URL (x-access-token:…@)"
+	case strings.HasPrefix(m, "Bearer "):
+		return "a bearer token"
+	default:
+		return "an API_KEY= assignment"
 	}
-	return m
 }
 
 type citation struct{ path string }
@@ -783,6 +876,12 @@ func citedPaths(text string) []citation {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
 	return out
+}
+
+// gitHasCommit reports whether the checkout knows the commit at all.
+func gitHasCommit(dir, sha string) bool {
+	cmd := exec.Command("git", "-C", dir, "cat-file", "-e", sha+"^{commit}")
+	return cmd.Run() == nil
 }
 
 func isGitRepo(dir string) bool {

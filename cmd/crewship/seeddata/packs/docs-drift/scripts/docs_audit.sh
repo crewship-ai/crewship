@@ -31,20 +31,25 @@ if [ -n "${LOCAL_REPO:-}" ]; then WORK="$LOCAL_REPO"; fi
 [ -f "$MAP" ]  || fail "docs map is missing: $MAP"
 [ -f "$DRIFT" ] || fail "docs_drift.py is missing: $DRIFT"
 
-# Clone / update. The token goes into git via the URL only; it never reaches
-# the output.
+# Clone / update. The token travels as a per-invocation HTTP header, NOT in
+# the remote URL: a URL-embedded token is written into .git/config on the
+# crew's shared volume, where every agent of the crew can read it (and quote
+# it into a report). The header is never persisted.
+AUTH_HEADER="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN:-}" | base64 | tr -d '\n')"
+GIT_AUTH=(-c "http.extraheader=${AUTH_HEADER}")
 if [ -n "${LOCAL_REPO:-}" ]; then
   :
 elif [ -d "$WORK/.git" ]; then
-  git -C "$WORK" remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" >/dev/null 2>&1
-  git -C "$WORK" fetch --quiet --depth 1 origin "$BRANCH" 2>/dev/null || fail "git fetch failed"
+  git -C "$WORK" remote set-url origin "https://github.com/${REPO}.git" >/dev/null 2>&1
+  git "${GIT_AUTH[@]}" -C "$WORK" fetch --quiet --depth 1 origin "$BRANCH" 2>/dev/null || fail "git fetch failed"
   git -C "$WORK" checkout --quiet FETCH_HEAD 2>/dev/null || fail "git checkout failed"
 else
   mkdir -p "$(dirname "$WORK")"
-  git clone --quiet --depth 1 --branch "$BRANCH" \
-    "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$WORK" 2>/dev/null \
+  git "${GIT_AUTH[@]}" clone --quiet --depth 1 --branch "$BRANCH" \
+    "https://github.com/${REPO}.git" "$WORK" 2>/dev/null \
     || fail "git clone failed"
 fi
+unset AUTH_HEADER
 
 SHA="$(git -C "$WORK" rev-parse HEAD 2>/dev/null || echo unknown)"
 

@@ -498,13 +498,18 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 	return seedScopedCredential(client, cred, "")
 }
 
+// credentialsListPath lists past the 100-row default: a long-lived workspace
+// with more credentials than that would otherwise miss an existing one and
+// POST a duplicate.
+const credentialsListPath = "/api/v1/credentials?limit=500"
+
 // seedScopedCredential creates a credential at WORKSPACE scope, or at CREW
 // scope when crewID is set. An existing credential of the same name is
 // reused by id — and, when the definition carries a value, that value is
 // pushed to it, so a rotated SEED_* variable lands on a re-seed instead of
 // being silently discarded in favour of whatever was stored last time.
 func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewID string) (string, error) {
-	existingID, err := resolveByName(client, "/api/v1/credentials", cred.Name)
+	existingID, err := resolveByName(client, credentialsListPath, cred.Name)
 	if err == nil && existingID != "" {
 		fmt.Fprintf(os.Stderr, "  = Credential exists: %s\n", cred.Name)
 		if cred.Value != "" && !strings.HasPrefix(cred.Value, "demo-placeholder-") {
@@ -536,7 +541,7 @@ func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewI
 		// Someone created it between the pre-check and the POST: resolve
 		// again, and let a second miss surface as resolveByName's own
 		// "not found" rather than a wrapped guess.
-		return resolveByName(client, "/api/v1/credentials", cred.Name)
+		return resolveByName(client, credentialsListPath, cred.Name)
 	}
 	if err := cli.CheckError(resp); err != nil {
 		return "", err

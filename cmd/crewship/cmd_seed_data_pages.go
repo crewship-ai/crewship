@@ -201,12 +201,18 @@ func seedPanelProducer(panel seeddata.PagePanelDef) (pages.ProducerKind, string)
 }
 
 // seedRunRoutine triggers one run through the same endpoint the UI's Run button
-// uses. An empty body is deliberate: every input on a seeded routine carries a
+// uses. No inputs, deliberately: every input on a seeded routine carries a
 // default, and passing none is what a demoer pressing Run would send.
+//
+// The run is PARKED (delay_seconds) rather than started inline: the inline
+// path holds the run inside this HTTP request, and the CLI client's timeout
+// would cancel the server's work mid-step — fatal for a producer with an
+// agent step that takes minutes. The dispatcher picks a parked run up
+// outside any request.
 func seedRunRoutine(client *cli.Client, wsID, slug string) error {
 	resp, err := client.Post(
 		fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/run", wsID, slug),
-		map[string]any{})
+		map[string]any{"delay_seconds": 1})
 	if err != nil {
 		return err
 	}
