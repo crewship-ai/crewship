@@ -230,10 +230,6 @@ nothing behind it, while `PATCH /api/v1/projects` has taken `start_date` and
   signalled) the same way, but the issue's own status is left unchanged
   rather than moved to `CANCELLED`. The full contract is in the
   [issues API reference](/api-reference/issues).
-- **Two words for "finished".** Issues move to `DONE`; the engine records a
-  mission as `COMPLETED`. Both appear in the same status column and every
-  shipped filter treats them alike, so a reader of the raw API will see both.
-  Collapsing them is a 1.1 refactor.
 
 ## Where the code is
 

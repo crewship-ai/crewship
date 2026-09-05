@@ -288,7 +288,7 @@ The superseded draft recorded twelve observations from a live dev1 session (two 
 | **A temporary agent-token `403` made the issue board unavailable from a live crew, while unauthenticated reads stayed healthy** | **F60** (new) | OPEN — no package; needs its own issue |
 | Board and detail did not repaint from every server-emitted lifecycle event | F32 | PARTIAL — `a6` registers the three issue events; ~39 remain for B11 |
 | **The Issues board fetched at most 100 rows, exposed no total or pagination, and rendered some fetch failures as an empty board** | **F61** (new) | OPEN — no package; a truth defect in a shipped surface, 1.0-eligible, needs its own issue |
-| `DONE` and `COMPLETED` mixed in one column | F11 | OPEN — B13 |
+| `DONE` and `COMPLETED` mixed in one column | F11 | FIXED-IN `b13-done-completed` #2370 — DONE retired COMPLETED on `missions.status` (§3.1) |
 | Stop changed status without proving execution stopped | F6, F7 | FIXED-IN `a1` (Tier 1); hard kill B7 |
 | Delegation replaced the polymorphic assignee with the agent, hiding the human owner | I5, scenario 9 | OPEN — **A10** (§9.10, added rev 3) |
 | **Start validated that an assignee exists, not that it is an executable agent** | **F62** (new) | OPEN — folds into A10 (`delegate_agent_id` is typed, so the check becomes a FK) |
@@ -307,11 +307,12 @@ The superseded draft recorded twelve observations from a live dev1 session (two 
 | MERGED — `a9` #2269 (5 of 7 producers guarded; webhook route, direct agent-run route and peer query are a labelled 1.0 limit) | F2 (the kill; deferral semantics stay B2), F51 |
 | MERGED (partial by design) — `a6` #2291 | F18 (read-only display; editor B9), F32 (3 of ~42), F33 (header now honest; read-side SQL unassigned) |
 | MERGED (partial by design) — `t1` #2293 | F34 (scenarios 11–13 proven; the RunStore blind spot is #2283) |
-| OPEN — Track B | F3, F4, F8, F10, F11, F13, F14, F15, F17, F21, F22, F28, F29, F30 |
+| OPEN — Track B | F3, F4, F8, F10, F13, F14, F15, F17, F21, F22, F28, F29, F30 |
 | OPEN — filed as issues | F5 (sub-agent streaming), F33 read-side (#2284), F60, F61, the RunStore test blind spot (#2283), issues board resilience (#2285, #2286), parallel-agent file ownership (#2287) |
 | ACCEPTED as constraints (design must respect, not fix) | F12 (N5), F16, F24, F31, F35, F36, F39, F40, F41, F42, F43, F44, F45, F46, F47, F48, F49, F50, F52–F59 |
 | Applied as integration steps in `a7` #2296 | F37, F38 |
 | MERGED — `a10` #2297 | F62 |
+| FIXED-IN `b13-done-completed` #2370 (B13, §3.1: DONE retired COMPLETED on `missions.status`) | F11 |
 
 ---
 
@@ -344,6 +345,18 @@ Found by an adversarial review of rev 1 against the code. Listed with the same s
 | "The partial unique index enforces one active turn per session" (§9.4) | **True mechanism, missing wiring** | Partial unique indexes are a supported, precedented pattern here (`migrate_consts_v152_journal_hash_chain.go:80`, `v33_v41.go:103`). But `insertCappedAssignment` (`internal/api/delegation_limits.go:537-577`) has no `session_id` in its struct or its `INSERT`, so the index would guard a column nothing sets. Resolving-or-creating the session must happen in the same statement or transaction as the fan-out guard, or the TOCTOU it exists to close is reintroduced. |
 | "Delete the rev-1 draft; git history keeps it" (rev-3 analysis, in conversation) | **Wrong on both counts** | The draft was never tracked, so `rm` would have lost it outright — and it still held four sections this document had not absorbed (owner/delegate schema, input routing, twelve dev1 regression cases, the provider matrix). Caught by a second session's review; ported in rev 3 (§2.9, §9.10, §10.5, A0 step 10). |
 | Golden scenarios graded by WP-13, which ships last | **Internal contradiction** | §25 requires the scenarios to exist and fail on the pre-WP baseline; §17 rev 1 built them in the final phase. Rev 2 moves the harness to Track A. |
+
+**Resolved in B13 (#2370): `DONE` survives, `COMPLETED` is retired, on `missions.status` only.**
+
+The "dangerously undersold" row above was right that this needed investigation, not a find-and-replace. The investigation: every `UPDATE missions SET status = ...` in the codebase was read, not just the ones matching a literal. Only two paths ever write a terminal, human-approved status to `missions.status` — `IssueHandler.Review`'s `approve` action (`internal/api/issue_handler_workflow.go`, REVIEW→`DONE`, for `mission_type='issue'` rows) and `MissionHandler.Update` (`internal/api/mission_handler_mutate.go`, REVIEW→`COMPLETED`, for `mission_type='orchestration'` rows). Both are the *same* operator action — "I looked at the review output, it's good, close it out" — spelled two ways because they grew on two different handlers. The mission engine's own automatic terminal write, `finalizeMission` (`internal/orchestrator/mission.go`), never writes `COMPLETED`: every call site passes `"REVIEW"` or `"FAILED"` (`internal/orchestrator/mission_tasks_completion.go:479,514`, `mission.go:334`). So "the engine's terminal write" rev 1 worried about disturbing does not exist as a second automated path — there is one human approval action, wearing two words depending on which handler an operator's client happens to call.
+
+That collapses the decision: **`DONE` is the sole word for "approved out of review" on `missions.status`**, for both issue-type and orchestration-type rows. `MissionHandler.Update` now writes `DONE` on the same REVIEW→terminal transition `IssueHandler.Review` already used. Which of the two lifecycles a row belongs to remains fully answerable from `mission_type` (already the discriminator every one of F11's defensive queries filters on) — never from a second status word chosen to mean the same thing.
+
+This does not collide with the §9.6 outcome contract (B6, `internal/orchestrator/outcome.go`). `outcome` lives on `assignments`/`pipeline_runs` — one row per *execution* — and answers "how did this run go" (`SUCCEEDED`/`NEEDS_HUMAN`/`FAILED`/...). `missions.status` answers a different question, "where is this piece of work in its lifecycle" (`DONE`/`FAILED`/`CANCELLED`/...), for one row per issue/mission. The two axes are deliberately orthogonal per §9.6; recording a mission's completion "as outcome" would mean writing a run-scoped fact onto a mission-scoped row, which is exactly the confusion §9.6 exists to prevent. The mission's completion is recorded where it always was — the `missions.status` transition itself, plus the existing `mission_activity` audit row and the F4.5 crew-lessons.md hook (`internal/api/mission_outcome_hook.go`) — an activity/audit record, not a second status column.
+
+**Scope.** `missions.status` only. `assignments.status` (`internal/api/assignments_run.go`'s CAS) and `pipeline_runs.status` (`internal/pipeline/runs.go`'s `MarkTerminal` CAS) keep `COMPLETED`/`completed` exactly as they are — both CAS clauses are byte-for-byte untouched, pinned by a dedicated regression test in each package (§19).
+
+**Migration and compatibility.** A dedicated, additive migration backfills every existing `missions.status = 'COMPLETED'` row to `'DONE'` (own file, per the repo's schema/backfill split convention). Going forward, `PATCH .../missions/{id}` still *accepts* `{"status":"COMPLETED"}` as an input alias — normalized to `DONE` server-side before the transition is validated or written — so a script or CLI build that predates this change does not start getting `400`s. Every *read* path (the JSON response, `status=` filters, and the eight-plus defensive `IN ('DONE','COMPLETED')` counting queries named by F11) shows and matches `DONE` only; there is no dual-emission of the retired word. The alias is kept indefinitely rather than on a timed deprecation clock — Crewship has no external SDK version to coordinate a removal against yet, and the check costs one `strings.EqualFold`. It is documented here and in `docs/api-reference/missions.mdx`; a future cleanup issue can remove it once nothing depends on it.
 
 ---
 
@@ -1186,6 +1199,7 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 | `docs/prd/RELEASE-1-0-READINESS-2026-08-10.md` | 283 commits stale and self-disclaiming. A0 re-measures before any number from it is cited. |
 | `docs/prd/CODEX-WORK-ORDER-RELEASE-1-0.md` | Its "blocking" tier (#1781, #1783, #1785, plus the tracker's #2183) is the real 1.0 critical path. Track A must not displace it. |
 | `RELEASING.md` | Still documents `v0.1.0-beta.1` while `package.json` says `1.0.0-rc.1`. Not this PRD's defect; worth an issue. |
+| #2370 B13, the `DONE`/`COMPLETED` decision | Resolved in §3.1 ("Resolved in B13"); decision recorded as D20 below. |
 
 ## 23. Decision log
 
@@ -1210,6 +1224,7 @@ Backwards compatibility: old `assignments` rows keep NULL `mission_id`/`session_
 | D17 | A9 was gated on investigation until F51 was confirmed from code | It rested on a code comment until the exec wrapper was read: `TmuxSessionName` is per-slug and the wrapper opens with `kill-session`. Confirmed. The §27 experiment is now recommended for *observation* of the failure from the user's side, not required for the decision. |
 | D18 | Owner/delegate schema is Track A, not B | Additive, nullable, backfilled — A2's shape — and it is the only thing that can enforce I5 and make scenario 9 testable (§9.10). |
 | D19 | The A9 loser is requeued, not failed | `FAILED` would be a lie in run history; `QUEUED` plus the existing completion pump is the machinery the codebase already has. Deferral *into the live turn* stays B2. |
+| D20 | `DONE` retired `COMPLETED` on `missions.status`; the mission engine's own terminal write never produced `COMPLETED` in the first place | F11's two words for "finished" turned out to be one human approval action (REVIEW→terminal) spelled two ways on two handlers, not two lifecycles genuinely needing two words — `finalizeMission` (the engine's automated writer) only ever writes `REVIEW`/`FAILED` (§3.1). Outcome (D3, §9.6) stays run-scoped and unaffected; `mission_type` remains the sole discriminator between an issue and an orchestrated mission. Scope is `missions.status` only — `assignments.status`/`pipeline_runs.status` keep `COMPLETED`/`completed`, pinned by test. |
 
 ## 24. Readiness — stated honestly, and split by release
 
