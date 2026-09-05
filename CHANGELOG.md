@@ -879,6 +879,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The New agent dialog can create a workspace-wide (crewless) Agent; only a Lead still needs a crew (#2170).**
+  `requiresCrew` was the literal `true` in `create-agent-dialog.tsx`, so every
+  agent created from the browser had to be given a crew — while
+  `agents_create.go:137` only rejects a missing `crew_id` for the `LEAD` role
+  and `crewship agent create --crew` has always been optional. The three
+  surfaces disagreed on what the product allows, and the browser was the
+  strict one. The Crew field is now optional for an Agent — the picker
+  carries a "Workspace-wide (no crew)" row that clears a preselection, the
+  empty-workspace banner no longer tells an Agent author to go make a crew
+  first, and the dialog posts `crew_id: null` — while a Lead keeps the
+  required marker, the disabled Create button and the "Create a crew first
+  — leads need one" hint. A crewless agent already had a home in the UI:
+  `/crews` lists it under **Unassigned**. Tests cover both branches and fail
+  on the literal.
+
 - **Docs stopped contradicting the code on rollback, concurrency, and the
   monthly budget; the waitpoint approve-default asymmetry is now
   documented instead of silently differing (A5) (#2289).** No API or CLI behaviour

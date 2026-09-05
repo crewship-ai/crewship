@@ -91,8 +91,8 @@ that installs it. Today:
 
 - Create-crew `Continue` is `primaryDisabled={!stepValid}` with no text
   (`create-crew-dialog.tsx:372`); create-agent does it right
-  (`create-agent-dialog.tsx:924`, "Create a crew first — agents and leads both
-  need one").
+  (`create-agent-dialog.tsx:924`, "Create a crew first — leads need one";
+  since #2170 an Agent needs no crew, so the hint only fires for a Lead).
 - Crew Overview quick actions `Apply avatar style` / `Reset avatar overrides`
   are `disabled={agentsForCrew.length===0}` with only `opacity-50`
   (`overview-tab.tsx:132,138`, `scale/s-crew-050-1440.png`).
