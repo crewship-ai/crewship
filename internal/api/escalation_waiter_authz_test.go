@@ -147,7 +147,10 @@ func TestWaitForEscalationResponse_TokenBindingScopesLookup(t *testing.T) {
 			name:       "master token stays unrestricted",
 			escID:      "esc-b1",
 			wantStatus: http.StatusOK,
-			wantBody:   escWaitAuthzSecret,
+			// #2376: even the unrestricted caller is answered with the
+			// decision, never the stored ciphertext's plaintext — the value
+			// is not on this path for anyone.
+			wantBody: `"status":"RESOLVED"`,
 		},
 		{
 			name:       "unknown id looks the same as a foreign id",
@@ -169,9 +172,10 @@ func TestWaitForEscalationResponse_TokenBindingScopesLookup(t *testing.T) {
 			if !strings.Contains(body, tc.wantBody) {
 				t.Errorf("body = %s, want it to contain %q", body, tc.wantBody)
 			}
-			// The refusal must not leak the other tenant's plaintext, and
-			// must not leak it in encrypted form either.
-			if tc.wantStatus == http.StatusNotFound && strings.Contains(body, escWaitAuthzSecret) {
+			// No answer, refused or granted, carries the plaintext: a refusal
+			// must not leak the other tenant's secret, and an answer (#2376)
+			// is a decision plus a handle, never the value.
+			if strings.Contains(body, escWaitAuthzSecret) {
 				t.Errorf("CROSS-TENANT LEAK: refusal body carried ws-b's credential plaintext: %s", body)
 			}
 			// The waiter registered before the DB read must always be

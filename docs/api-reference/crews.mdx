@@ -54,6 +54,7 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}/standup`](#crew-standup) | Get the crew standup summary |
 | GET | [`/api/v1/crews/{crewId}/escalations`](#list-escalations) | List crew escalations |
 | PATCH | [`/api/v1/escalations/{escalationId}/resolve`](#resolve-escalation) | Resolve an escalation |
+| POST | [`/api/v1/escalations/{escalationId}/supply`](#supply-escalation-credential) | Supply the credential value an agent asked for |
 | POST | [`/api/v1/escalations/{escalationId}/cancel`](#cancel-escalation) | Withdraw an escalation without deciding it |
 | POST | [`/api/v1/escalations/sweep-expired`](#sweep-expired-escalations) | Expire every past-deadline escalation |
 | GET | [`/api/v1/escalations/pending-count`](#pending-escalation-count) | Count pending escalations |
@@ -1416,17 +1417,59 @@ built, so a row can never be listed as `PENDING` past its own `deadline_at`.
 PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
 ```
 
-**Request:** `escalationId` is a required path parameter, `workspace_id` selects the workspace, and the JSON body is the escalation decision (`action` and optional resolution details).
+**Request:** `escalationId` is a required path parameter, `workspace_id` selects the workspace, and the JSON body is the escalation decision (`action` and, for a `TEXT` or `LINK` escalation, the required `resolution` text). A `CREDENTIAL` escalation takes **no** `resolution` — any text answers `400`, a value goes through [supply](#supply-escalation-credential), and approving an ask that still has no value answers `409`.
 
 **Response:** `200 OK` with the resolved escalation `id`, `status`, and `action`.
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid decision body |
+| `400` | Invalid decision body, a missing `resolution` on a `TEXT`/`LINK` escalation, or any `resolution` on a `CREDENTIAL` one |
 | `401` | Missing authentication |
 | `403` | Insufficient role |
 | `404` | Escalation not found |
-| `409` | Escalation is no longer `PENDING` — the message names the state it reached (`RESOLVED`, `EXPIRED` or `CANCELLED`) |
+| `409` | Escalation is no longer `PENDING` — the message names the state it reached (`RESOLVED`, `EXPIRED` or `CANCELLED`) — or it is a credential ask that still needs a value |
+
+### Supply Escalation Credential
+
+```
+POST /api/v1/escalations/{escalationId}/supply?workspace_id={workspaceId}
+```
+
+**Auth:** `MANAGER`+ (`create` role) — the same gate as resolve; supplying the
+value **is** the decision, and the credential [four-eyes
+rule](/guides/credentials#segregation-of-duties-second-approver) applies to it
+exactly as to approving.
+
+**Request:** `escalationId` is a required path parameter, `workspace_id` selects
+the workspace, and the JSON body is `{"value": string, "name"?: string,
+"type"?: string, "security_level"?: 1..4}`. `value` is required and capped at
+64 KiB. `name` and `type` are read only for a **free-text** ask (one that
+staged no credential); on a structured ask they are ignored and
+`security_level`, when set, overrides the tier the agent proposed.
+
+This is the only route a human-supplied secret takes (#2376). The value goes
+into the vault as a **handle-only** credential; in one transaction the
+credential becomes `ACTIVE`, is granted to the asking agent under the name it
+asked for (leased when the workspace auto-leases), and the escalation is
+resolved with **nothing** in its resolution column. The waiting agent is
+answered with the credential's name and `use: "keeper_execute"` — never the
+value. See [Asking a human for a
+credential](/guides/credentials#asking-a-human-for-a-credential).
+
+**Response:** `200 OK` with `{ "id": string, "status": "RESOLVED", "action":
+"approve", "credential": { "id", "name", "type", "security_level",
+"handle_only", "granted", "lease_expires_at", "use" }, "agent_still_waiting":
+boolean, "agent_gave_up_at"?: string, "note"?: string }`. The response never
+echoes the value.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing or oversized `value`, invalid `security_level`, a free-text ask supplied without a legal `name`, or the escalation is not `CREDENTIAL` |
+| `401` | Missing authentication |
+| `403` | Insufficient role, or the four-eyes rule refuses the caller |
+| `404` | Escalation not found |
+| `409` | Escalation is no longer `PENDING`; the linked credential is a proposal awaiting approval (use resolve) or is no longer waiting for a value; or a free-text ask names a credential that already exists |
+| `500` | Encryption or database failure — nothing is stored |
 
 ### Cancel Escalation
 

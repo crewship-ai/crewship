@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var escalationCmd = &cobra.Command{
@@ -227,6 +232,124 @@ var escalationResolveCmd = &cobra.Command{
 	},
 }
 
+// escalationSupplyCmd answers a CREDENTIAL escalation with the value the
+// agent asked for (#2376).
+//
+// The value is read from stdin and ONLY from stdin. There is no --value flag,
+// on purpose: an argument is visible to anything that can read the process
+// table and lands in shell history, and this command exists precisely so a
+// human-supplied secret has one path into the system — the vault. The agent
+// is answered with the credential's name and how to use it; it never sees the
+// value, and `escalation resolve --resolution` refuses to carry one.
+var escalationSupplyCmd = &cobra.Command{
+	Use:   "supply <id>",
+	Short: "Supply the credential value an agent asked for (read from stdin)",
+	Long: `Supply the value for a CREDENTIAL escalation. The value is read from stdin —
+never from a flag — and stored in the vault; the agent that asked is granted
+the credential and receives its name, not the value.
+
+  printf '%s' "$PG_PASSWORD" | crewship escalation supply esc_abc
+  crewship escalation supply esc_abc < /path/to/token
+
+An escalation the agent raised with a structured ask already names the
+credential. For a free-text ask, name it yourself:
+
+  printf '%s' "$TOKEN" | crewship escalation supply esc_abc --name GH_TOKEN --type CLI_TOKEN
+
+The value is read up to the first newline when stdin is a terminal, and in
+full otherwise — so a multi-line secret (a private key) works through a
+redirect. A trailing newline from an interactive prompt or 'echo' is stripped;
+use printf '%s' when the secret itself ends in one.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		name, _ := cmd.Flags().GetString("name")
+		credType, _ := cmd.Flags().GetString("type")
+		level, _ := cmd.Flags().GetInt("security-level")
+
+		value, err := readSecretFromStdin(cmd.InOrStdin())
+		if err != nil {
+			return err
+		}
+		if value == "" {
+			return fmt.Errorf("no value on stdin — pipe or redirect the secret in (printf '%%s' \"$SECRET\" | crewship escalation supply <id>)")
+		}
+
+		body := map[string]interface{}{"value": value}
+		if name != "" {
+			body["name"] = name
+		}
+		if credType != "" {
+			body["type"] = strings.ToUpper(credType)
+		}
+		if level != 0 {
+			body["security_level"] = level
+		}
+
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/escalations/"+args[0]+"/supply", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Credential struct {
+				Name          string `json:"name"`
+				HandleOnly    bool   `json:"handle_only"`
+				Granted       bool   `json:"granted"`
+				LeaseExpires  string `json:"lease_expires_at"`
+				SecurityLevel int    `json:"security_level"`
+			} `json:"credential"`
+			AgentStillWaiting *bool  `json:"agent_still_waiting"`
+			Note              string `json:"note"`
+		}
+		_ = cli.ReadJSON(resp, &out)
+		// The whole receipt goes to stderr through PrintSuccess: a mutation
+		// command must leave stdout to the output format (#2086), and there
+		// is nothing here a script would parse — the value is not echoed and
+		// the credential's name is what the agent already asked for.
+		receipt := fmt.Sprintf("Escalation %s answered: credential %s stored in the vault and granted to the agent (handle-only, L%d).",
+			args[0], out.Credential.Name, out.Credential.SecurityLevel)
+		if out.Credential.LeaseExpires != "" {
+			receipt += fmt.Sprintf(" Leased until %s.", out.Credential.LeaseExpires)
+		}
+		if out.Note != "" {
+			receipt += " " + out.Note
+		}
+		cli.PrintSuccess(receipt)
+		return nil
+	},
+}
+
+// readSecretFromStdin reads a secret the way the credential commands do: one
+// line from a terminal (the operator pressed Enter), everything from a pipe or
+// file (a key may span lines). One trailing newline is dropped either way —
+// it is what 'echo' and an interactive prompt append, never part of a secret
+// anyone typed on purpose.
+func readSecretFromStdin(in io.Reader) (string, error) {
+	if f, ok := in.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		fmt.Fprint(os.Stderr, "Credential value (not echoed): ")
+		b, err := term.ReadPassword(int(f.Fd()))
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", fmt.Errorf("read value: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := io.ReadAll(bufio.NewReader(in))
+	if err != nil {
+		return "", fmt.Errorf("read value from stdin: %w", err)
+	}
+	return strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r"), nil
+}
+
 // escalationCancelCmd withdraws a question instead of deciding it.
 //
 // Deliberately not `resolve --action cancel`: an agent reading action=reject
@@ -387,8 +510,13 @@ func init() {
 
 	escalationCancelCmd.Flags().String("reason", "", "Why the question is being withdrawn (recorded in the journal)")
 
+	escalationSupplyCmd.Flags().String("name", "", "Credential name for a free-text ask (an environment variable name, e.g. PG_PASSWORD); ignored when the agent's ask already named one")
+	escalationSupplyCmd.Flags().String("type", "", "Credential type for a free-text ask: SECRET|CLI_TOKEN|GENERIC_SECRET|USERPASS|SSH_KEY|CERTIFICATE|API_KEY (default SECRET)")
+	escalationSupplyCmd.Flags().Int("security-level", 0, "Tier 1..4 to store the credential at; overrides the level the agent proposed")
+
 	escalationCmd.AddCommand(escalationListCmd)
 	escalationCmd.AddCommand(escalationResolveCmd)
+	escalationCmd.AddCommand(escalationSupplyCmd)
 	escalationCmd.AddCommand(escalationCancelCmd)
 	escalationCmd.AddCommand(escalationSweepExpiredCmd)
 	escalationCmd.AddCommand(escalationPendingCountCmd)

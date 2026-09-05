@@ -36,3 +36,45 @@ export async function escalationResolve(
     return { ok: false, error: e instanceof Error ? e.message : String(e), status: 0 }
   }
 }
+
+// escalationSupplyCredential — POSTs the value an agent asked for (#2376).
+// This is the ONLY route a human-typed secret takes: it lands in the vault,
+// the agent is granted the credential and told its name, never the value.
+// /resolve refuses resolution text on a CREDENTIAL escalation, so the two
+// cannot be confused. `name`/`type` are only needed for a free-text ask that
+// staged no credential.
+export async function escalationSupplyCredential(
+  escalationID: string,
+  value: string,
+  workspaceID: string,
+  opts: { name?: string; type?: string; securityLevel?: number } = {},
+): Promise<
+  | { ok: true; credential: { id: string; name: string; handle_only: boolean; granted: boolean } | null }
+  | { ok: false; error: string; status: number }
+> {
+  try {
+    const res = await apiFetch(
+      `/api/v1/escalations/${encodeURIComponent(escalationID)}/supply?workspace_id=${encodeURIComponent(workspaceID)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value,
+          ...(opts.name ? { name: opts.name } : {}),
+          ...(opts.type ? { type: opts.type } : {}),
+          ...(opts.securityLevel ? { security_level: opts.securityLevel } : {}),
+        }),
+      },
+    )
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      return { ok: false, error: body?.error ?? `Supply failed (${res.status})`, status: res.status }
+    }
+    const body = (await res.json().catch(() => null)) as {
+      credential?: { id: string; name: string; handle_only: boolean; granted: boolean }
+    } | null
+    return { ok: true, credential: body?.credential ?? null }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), status: 0 }
+  }
+}

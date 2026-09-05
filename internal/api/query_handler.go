@@ -664,6 +664,15 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			HandleOnly:     d.HandleOnly,
+		}
+		// A handle-only credential is delivered as its NAME and nothing else
+		// (#2376): the value is never decrypted on a delivery path, so there is
+		// nothing for a later gate to forget to withhold.
+		if d.HandleOnly {
+			logHandleOnlyWithheld(h.logger, agentID, d.EnvVar)
+			creds = append(creds, c)
+			continue
 		}
 		dec, err := encryption.Decrypt(d.EncryptedValue)
 		if err != nil {

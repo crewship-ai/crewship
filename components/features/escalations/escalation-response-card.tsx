@@ -18,6 +18,7 @@ import type { Escalation } from "@/lib/types/escalation"
 import { parseEvidencePack } from "@/lib/types/escalation"
 import { apiFetch } from "@/lib/api-fetch"
 import { FourEyesNotice } from "./four-eyes-notice"
+import { escalationSupplyCredential } from "@/lib/api/escalations"
 
 interface EscalationResponseCardProps {
   escalation: Escalation
@@ -86,6 +87,9 @@ export function EscalationResponseCard({
   onResolved,
 }: EscalationResponseCardProps) {
   const [resolution, setResolution] = useState("")
+  // The name for a free-text credential ask (#2376): the agent described
+  // what it needs in prose, so the human names the credential they store.
+  const [credentialName, setCredentialName] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showRedirect, setShowRedirect] = useState(false)
@@ -95,12 +99,48 @@ export function EscalationResponseCard({
 
   const evidencePack = parseEvidencePack(escalation.metadata)
   const metadataUrl = parseMetadataUrl(escalation.metadata)
-  // An agent-proposed credential is already in the vault as PENDING_APPROVAL,
-  // so approve/reject here don't require the human to type the secret.
-  const hasPendingCredential = Boolean(escalation.credential_id)
+  // Three shapes of a CREDENTIAL escalation (#2376):
+  //   - a PROPOSAL: the agent supplied a value, it sits PENDING_APPROVAL in
+  //     the vault; Approve activates it, nothing to type.
+  //   - an ASK: the agent staged a REQUESTED credential and needs a human to
+  //     fill it; the masked input posts to /supply.
+  //   - a legacy free-text ask: no staged row; the human names it and
+  //     supplies it in one step.
+  // /resolve never carries the value — the server refuses text on a
+  // CREDENTIAL escalation — so approve/reject send none.
+  const isCredential = escalation.type === "CREDENTIAL"
+  const credentialStatus = escalation.credential_status ?? null
+  const hasPendingCredential = isCredential && Boolean(escalation.credential_id) && credentialStatus !== "REQUESTED"
+  const needsCredentialValue = isCredential && !hasPendingCredential
+  const needsCredentialName = needsCredentialValue && !escalation.credential_id
+
+  const handleSupply = async () => {
+    if (!resolution) return
+    if (needsCredentialName && !credentialName.trim()) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await escalationSupplyCredential(escalation.id, resolution, workspaceId, {
+        name: needsCredentialName ? credentialName.trim() : undefined,
+      })
+      if (!res.ok) {
+        setError(res.error)
+        return
+      }
+      setResolution("")
+      setCredentialName("")
+      onResolved()
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const handleResolve = async (action: "approve" | "reject" | "redirect") => {
-    const needsResolution = !(hasPendingCredential && action !== "redirect")
+    if (isCredential && action === "approve" && needsCredentialValue) {
+      await handleSupply()
+      return
+    }
+    const needsResolution = !isCredential
     if (needsResolution && !resolution.trim()) return
     if (action === "redirect" && !redirectTo) return
 
@@ -114,9 +154,10 @@ export function EscalationResponseCard({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resolution:
-            resolution.trim() ||
-            (action === "approve" ? "Approved" : action === "reject" ? "Rejected" : ""),
+          resolution: isCredential
+            ? ""
+            : resolution.trim() ||
+              (action === "approve" ? "Approved" : action === "reject" ? "Rejected" : ""),
           action,
           redirect_to: action === "redirect" ? redirectTo : undefined,
           workspace_id: workspaceId,
@@ -262,22 +303,43 @@ export function EscalationResponseCard({
 
       {/* Response input */}
       <div className="space-y-2">
-        {escalation.type === "CREDENTIAL" ? (
-          <Input
-            type="password"
-            placeholder="Paste credential value..."
-            aria-label="Credential value"
-            value={resolution}
-            onChange={(e) => setResolution(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault()
-                handleResolve("approve")
-              }
-            }}
-            disabled={submitting}
-            className="font-mono text-sm"
-          />
+        {isCredential && hasPendingCredential ? (
+          <p className="text-xs text-muted-foreground" data-testid="escalation-credential-proposal">
+            The agent proposed a value; it is in the vault awaiting your approval. Nothing to type.
+          </p>
+        ) : isCredential ? (
+          <div className="space-y-2" data-testid="escalation-credential-ask">
+            <p className="text-xs text-muted-foreground">
+              The agent is asking for a credential it does not have. What you enter goes straight
+              into the vault; the agent is granted it by name and never sees the value.
+            </p>
+            {needsCredentialName && (
+              <Input
+                placeholder="Credential name, e.g. PG_PASSWORD"
+                aria-label="Credential name"
+                value={credentialName}
+                onChange={(e) => setCredentialName(e.target.value.toUpperCase())}
+                disabled={submitting}
+                className="font-mono text-sm"
+              />
+            )}
+            <Input
+              type="password"
+              autoComplete="off"
+              placeholder="Credential value (never shown to the agent)"
+              aria-label="Credential value"
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSupply()
+                }
+              }}
+              disabled={submitting}
+              className="font-mono text-sm"
+            />
+          </div>
         ) : (
           <Textarea
             placeholder={escalation.type === "LINK" ? "Confirm completion..." : "Type your response..."}
@@ -322,17 +384,22 @@ export function EscalationResponseCard({
           <Button
             size="sm"
             onClick={() => handleResolve("approve")}
-            disabled={submitting || (!hasPendingCredential && !resolution.trim())}
+            disabled={
+              submitting ||
+              (needsCredentialValue
+                ? !resolution || (needsCredentialName && !credentialName.trim())
+                : !hasPendingCredential && !resolution.trim())
+            }
             className="bg-success hover:bg-success text-white"
           >
             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-            {submitting ? "Sending..." : "Approve"}
+            {submitting ? "Sending..." : needsCredentialValue ? "Supply" : "Approve"}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => handleResolve("reject")}
-            disabled={submitting || (!hasPendingCredential && !resolution.trim())}
+            disabled={submitting || (!isCredential && !resolution.trim())}
             className="border-destructive/30 text-destructive hover:bg-destructive/5 dark:border-destructive/50 dark:text-destructive dark:hover:bg-destructive/30"
           >
             <XCircle className="h-3.5 w-3.5 mr-1" />

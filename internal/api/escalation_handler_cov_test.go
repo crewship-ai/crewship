@@ -77,15 +77,18 @@ func covEscResolve(h *QueryHandler, userID, wsID, escID string, body map[string]
 	return rr
 }
 
-func TestCovEsc_Resolve_CredentialEncryptFailure_500(t *testing.T) {
+// #2376: there is no encrypt step on this path any more — a CREDENTIAL
+// escalation refuses resolution text before anything is stored, so a broken
+// key is never reached from here. The refusal is the contract now.
+func TestCovEsc_Resolve_CredentialRefusesText_400(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", "definitely-not-hex")
 	h, userID, wsID, crewID, agentID := covEscFixture(t)
 	covEscSeed(t, h, "covesc-e1", wsID, crewID, agentID, "CREDENTIAL")
 	rr := covEscResolve(h, userID, wsID, "covesc-e1", map[string]string{
 		"resolution": "hunter2", "action": "approve",
 	})
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

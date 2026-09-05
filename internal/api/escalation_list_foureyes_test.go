@@ -304,9 +304,13 @@ func TestListEscalations_FourEyesMatchesResolve(t *testing.T) {
 			}
 			listSaysBlocked := items[0].SecondApproverRequired
 
-			rr := covEscResolve(h, ownerID, wsID, "fe2-esc", map[string]string{
-				"resolution": "granted", "action": "approve",
-			})
+			// A TEXT escalation is answered with text; a CREDENTIAL one takes
+			// none (#2376) — the value goes through supply.
+			body := map[string]string{"action": "approve"}
+			if tc.escType != "CREDENTIAL" {
+				body["resolution"] = "granted"
+			}
+			rr := covEscResolve(h, ownerID, wsID, "fe2-esc", body)
 			if rr.Code != tc.wantStatus {
 				t.Fatalf("resolve status = %d, want %d; body=%s", rr.Code, tc.wantStatus, rr.Body.String())
 			}
@@ -350,7 +354,7 @@ func TestListEscalations_FourEyesFollowsATierChange(t *testing.T) {
 		t.Errorf("security_level_label = %q, want %q", after.SecurityLevelLabel, tierFloor.Label())
 	}
 	rr := covEscResolve(h, ownerID, wsID, "fe2-esc", map[string]string{
-		"resolution": "granted", "action": "approve",
+		"action": "approve",
 	})
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("resolve after re-tiering = %d, want 403; body=%s", rr.Code, rr.Body.String())

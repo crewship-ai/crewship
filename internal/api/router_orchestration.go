@@ -858,6 +858,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
 	r.authedMut("PATCH", "/api/v1/escalations/{escalationId}/resolve", roleCreate, queries.ResolveEscalation)
+	// The value an agent asked a human for goes HERE, into the vault — never
+	// through /resolve, which refuses text on a CREDENTIAL escalation (#2376).
+	r.authedMut("POST", "/api/v1/escalations/{escalationId}/supply", roleCreate, queries.SupplyEscalationCredential)
 	// Withdraw a question instead of deciding it. Same MANAGER+ gate as
 	// resolve — closing out a blocking request is the same class of act
 	// whichever way it is closed — but a distinct terminal state, because

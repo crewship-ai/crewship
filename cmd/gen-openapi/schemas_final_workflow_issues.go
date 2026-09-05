@@ -129,7 +129,10 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 		// internal/api/escalation_lifecycle.go). The resolve succeeds, but the
 		// run that asked will not receive the answer, so the response says so
 		// rather than letting a caller assume it unblocked something.
-		"PATCH /api/v1/escalations/{escalationId}/resolve": {Response: obj(map[string]any{"id": str(), "status": str(), "action": str(), "agent_still_waiting": boolean(), "agent_gave_up_at": str(), "note": str()})}, "GET /api/v1/escalations/pending-count": {Response: obj(map[string]any{"count": integer()})}, "DELETE /api/v1/crews/{crewId}/escalations": {Response: obj(map[string]any{"deleted": integer()})},
+		"PATCH /api/v1/escalations/{escalationId}/resolve": {Response: obj(map[string]any{"id": str(), "status": str(), "action": str(), "agent_still_waiting": boolean(), "agent_gave_up_at": str(), "note": str()})},
+		// The answer to a credential ask is a grant (#2376): the handle the agent
+		// may use the credential by, never the value.
+		"POST /api/v1/escalations/{escalationId}/supply": {Response: obj(map[string]any{"id": str(), "status": str(), "action": str(), "credential": obj(map[string]any{"id": str(), "name": str(), "type": str(), "security_level": integer(), "handle_only": boolean(), "granted": boolean(), "lease_expires_at": str(), "use": str()}), "agent_still_waiting": boolean(), "agent_gave_up_at": str(), "note": str()})}, "GET /api/v1/escalations/pending-count": {Response: obj(map[string]any{"count": integer()})}, "DELETE /api/v1/crews/{crewId}/escalations": {Response: obj(map[string]any{"deleted": integer()})},
 		// Escalation lifecycle beyond "a human decided": withdrawing a question
 		// that stopped mattering, and forcing the deadline sweep.
 		"POST /api/v1/escalations/{escalationId}/cancel": {Response: obj(map[string]any{"id": str(), "status": str()})},

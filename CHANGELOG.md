@@ -31,6 +31,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **A credential a human supplies to an agent is a grant, never a value the agent can read (#2376).**
+  A `CREDENTIAL` escalation raised without a value stages a `REQUESTED`
+  credential in the vault; the human fills it through the new
+  `POST /api/v1/escalations/{id}/supply` — `crewship escalation supply <id>`,
+  which reads the value from stdin and has no flag for it — and the agent
+  is answered with the credential's name and `use: keeper_execute`. The
+  value used to be encrypted into `escalations.resolution` and handed back
+  to the agent in plaintext by the wait endpoint, landing in its stdout,
+  transcript and model context; that column is no longer written for a
+  `CREDENTIAL` escalation, historical rows hold `[credential submitted]`,
+  and `/resolve` answers **400** to any resolution text on one. New
+  `credentials.handle_only` marks a credential the agent may use but never
+  read, enforced at the shared delivery loader on every path, Keeper on or
+  off. Agent prompt, inbox card, escalation card and docs updated.
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
 - **The Track A live validation is on record, and the PRD says what it found (#2331).**
   `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by

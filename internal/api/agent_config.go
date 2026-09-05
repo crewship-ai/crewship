@@ -829,6 +829,14 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			Username:       d.Username,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			HandleOnly:     d.HandleOnly,
+		}
+		// Handle-only (#2376): the entry travels so the [KEEPER] block can
+		// name it; the value is never decrypted here, Keeper on or off.
+		if d.HandleOnly {
+			logHandleOnlyWithheld(h.logger, agentID, d.EnvVar)
+			creds = append(creds, ce)
+			continue
 		}
 		dec, err := decryptCredential(d.EncryptedValue)
 		if err != nil {
@@ -1624,7 +1632,10 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	// of this prompt builder. Gated set is table-driven (internal/credpolicy).
 	var secretCreds []string
 	for i := range creds {
-		if credpolicy.IsKeeperGated(creds[i].Type) {
+		// A handle-only credential (#2376) is listed here whatever its type:
+		// /keeper/execute is the only way it can be used, so the block that
+		// teaches that call is where its name belongs.
+		if credpolicy.IsKeeperGated(creds[i].Type) || creds[i].HandleOnly {
 			secretCreds = append(secretCreds, creds[i].EnvVar)
 		}
 	}

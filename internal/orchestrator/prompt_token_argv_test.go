@@ -186,9 +186,10 @@ func TestPromptRecipes_AuthHeaderIsReadFromACurlConfigOnFD3(t *testing.T) {
 // population so that deletion is caught too. Adding an authenticated recipe
 // means bumping the number here, deliberately.
 var wantAuthenticatedRecipes = map[string]int{
-	// The SIDECAR AUTH worked example, then /keeper/execute, /escalate,
+	// The SIDECAR AUTH worked example, then /keeper/execute, the two
+	// /escalate recipes (ask for a credential, propose one — #2376),
 	// /expose-port and /skills/author.
-	"crewshipSystemPreamble": 5,
+	"crewshipSystemPreamble": 6,
 	// /assign, /query, /mission/create, cross-crew /assign, /spawn.
 	"BuildLeadContext": 5,
 	// /query, /escalate and — since #1754 unlocked delegation for non-leads —

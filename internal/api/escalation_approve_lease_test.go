@@ -42,7 +42,7 @@ func seedCredentialEscalation(t *testing.T, db *sql.DB, userID, wsID, crewID, ag
 
 func approveEscalation(t *testing.T, h *QueryHandler, userID, wsID, escID string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"resolution":"granted","action":"approve"}`))
+	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"action":"approve"}`))
 	req.SetPathValue("escalationId", escID)
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
@@ -140,7 +140,7 @@ func TestEscalationApprove_RejectGrantsNothing(t *testing.T) {
 	escID, credID := seedCredentialEscalation(t, h.db, userID, wsID, crewID, leadID)
 	enableAutoLease(t, h.db, wsID, 900)
 
-	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"resolution":"no","action":"reject"}`))
+	req := httptest.NewRequest("PATCH", "/", bytes.NewBufferString(`{"action":"reject"}`))
 	req.SetPathValue("escalationId", escID)
 	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()

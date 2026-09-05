@@ -21,6 +21,12 @@ export const escalationSchema = z.object({
   // credential already in the vault. Non-null ⇒ Approve activates it (the
   // human does not need to supply the secret).
   credential_id: z.string().nullable().default(null),
+  // The linked credential's status (#2376). REQUESTED ⇒ the agent is ASKING
+  // for a value: the card collects it (masked) and posts it to /supply.
+  // PENDING_APPROVAL ⇒ the agent PROPOSED a value: Approve activates it.
+  // Absent on a pre-#2376 server and on a free-text ask, which is supplied
+  // by naming the credential.
+  credential_status: z.string().nullable().optional().default(null),
   // Four-eyes, as it will be applied to THIS escalation (#1559). The server
   // decides it at resolve time from two inputs the console could not see — the
   // workspace require_second_approver toggle and the tier of the linked

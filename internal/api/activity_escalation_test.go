@@ -150,7 +150,9 @@ func TestEscalation_Resolve_Validations(t *testing.T) {
 		want int
 	}{
 		{"bad json", `bad`, 400},
-		{"empty resolution", `{"resolution":""}`, 400},
+		// "resolution required" is decided per type once the row is read
+		// (#2376), so on an unknown id it is the lookup that answers.
+		{"empty resolution", `{"resolution":""}`, 404},
 		{"bad action", `{"resolution":"ok","action":"yolo"}`, 400},
 		{"redirect missing target", `{"resolution":"ok","action":"redirect"}`, 400},
 	}
