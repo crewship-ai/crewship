@@ -2323,6 +2323,8 @@ Two caveats worth internalizing before you lean on routines for anything time- o
 **Crash recovery is at-least-once, step-granular, not exact.** A hard kill loses at most the in-flight step, which re-executes (and re-bills) on resume. `call_pipeline` has no nested checkpointing — a kill mid-nested-run re-executes the **entire** nested pipeline. `max_cost_usd` under-counts after a crash, since whatever the killed step had already spent isn't in the restored total. See [Durability and restart recovery](#durability-and-restart-recovery) for the full resume matrix.
 </Warning>
 
+**Instrumentation for the mention → wake → reply loop is real, not aspirational.** The Issues & Routines PRD's §19.3 service levels — comment-persisted-to-ack latency, first-agent-acknowledgement latency, lost/duplicate deliveries, context-pack size and compaction, checkpoint compliance, and outcome routing — are computed series on `GET /metrics`, not declared targets: see the [Prometheus metrics reference](/observability/metrics) for which series answers which of those questions (grouped as delivery, continuation, duplication, and human comprehension, per §24.1). A percentile with zero samples in its window is absent from the scrape, never reported as `0`.
+
 ## Limitations (current MVP)
 
 These are known gaps in the current MVP — none block production use, but they shape what you can rely on today.

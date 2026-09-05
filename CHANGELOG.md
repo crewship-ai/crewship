@@ -29,6 +29,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   missing, was already chronicled and is untouched.
 -->
 
+### Added
+
+- **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#TBD).**
+  `crewshipd` had no way to compute a p50/p95 anywhere — no Prometheus
+  client, no histograms, and SQLite has no `PERCENTILE_CONT` (F39). New
+  collectors in `internal/server/metrics_domain.go` answer the delivery,
+  continuation, duplication and human-comprehension questions §24.1 says
+  actually get measured: delivery-ack and delivery-claim latency
+  percentiles, lost deliveries, a duplicate-active-run canary, context-pack
+  token-size percentile and compaction outcomes, checkpoint compliance
+  counts, and outcome-routing counts with a violation canary. A percentile
+  with zero samples in its window is absent from the scrape, never a
+  fabricated `0`. See [Prometheus metrics](/observability/metrics) and
+  `docs/guides/routines.mdx`'s Production notes.
+
 ### Security
 
 - **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
