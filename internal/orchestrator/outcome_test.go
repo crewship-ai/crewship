@@ -79,6 +79,28 @@ func TestReportedOutcome_ChecksBothHandoffShapes(t *testing.T) {
 	}
 }
 
+// A model that capitalizes the HANDOFF "outcome:" line must not silently
+// lose it — the same case-insensitive treatment CHECKPOINT's "outcome:"
+// field already gets via cutPrefixFold. Unlike a missed summary/confidence
+// (which only flips Parsed), a missed outcome line has a much bigger
+// consequence: DeriveOutcome reads it as "not reported" and defaults the
+// whole run to FAILED.
+func TestParseHandoff_OutcomeFieldIsCaseInsensitive(t *testing.T) {
+	text := "---HANDOFF---\nsummary: did the thing\nconfidence: high\nOutcome: succeeded\n---END HANDOFF---\n"
+	hd := parseHandoff(text)
+	if hd.Outcome != "succeeded" {
+		t.Errorf("Outcome = %q, want %q (case-insensitive prefix match)", hd.Outcome, "succeeded")
+	}
+	// ReportedOutcome hands back the raw value as parsed; NormalizeOutcome
+	// (used by DeriveOutcome) is what upper-cases and validates it.
+	if got := ReportedOutcome(text); got != "succeeded" {
+		t.Errorf("ReportedOutcome = %q, want the raw parsed value %q", got, "succeeded")
+	}
+	if outcome, reason := DeriveOutcome("COMPLETED", ReportedOutcome(text)); outcome != OutcomeSucceeded || reason != "" {
+		t.Errorf("DeriveOutcome(COMPLETED, %q) = (%q, %q), want (%q, \"\")", ReportedOutcome(text), outcome, reason, OutcomeSucceeded)
+	}
+}
+
 func TestReportedOutcome_ChecklistPrefersCheckpointOverHandoff(t *testing.T) {
 	// A result carrying BOTH blocks (unusual, but not forbidden) — CHECKPOINT
 	// wins, matching the doc comment: it's what session-bearing runs are

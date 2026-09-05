@@ -1212,6 +1212,12 @@ func (h *AssignmentHandler) finishAssignment(
 	// defaults an unreported outcome on an otherwise-clean completion to
 	// FAILED — "an absent outcome is a bug, not a silent success" (§9.6).
 	outcome, defaultedReason := orchestrator.DeriveOutcome(status, orchestrator.ReportedOutcome(result))
+	// effectiveErrMsg tracks whatever ends up in errVal (the DB write
+	// below) as a plain string, so every OTHER sink that reports an error
+	// reason for this run — the terminal run.* journal entry, a few lines
+	// down — stays in sync with the row rather than reading the original,
+	// possibly-empty errMsg parameter and silently disagreeing with it.
+	effectiveErrMsg := errMsg
 	if defaultedReason != "" && errVal == nil {
 		// Rev 3 dropped a dedicated outcome_reason column in favor of
 		// reusing error_message (§9.4/§9.6) — so a COMPLETED run that
@@ -1221,6 +1227,7 @@ func (h *AssignmentHandler) finishAssignment(
 		// and it must never overwrite a REAL failure reason, hence the
 		// errVal == nil guard.
 		errVal = defaultedReason
+		effectiveErrMsg = defaultedReason
 	}
 
 	// CAS on "not already terminal" rather than status='RUNNING': early
@@ -1316,8 +1323,8 @@ func (h *AssignmentHandler) finishAssignment(
 			severity = journal.SeverityError
 		}
 		payload := map[string]any{"outcome": outcome}
-		if errMsg != "" {
-			payload["error_message"] = errMsg
+		if effectiveErrMsg != "" {
+			payload["error_message"] = effectiveErrMsg
 		}
 		if status == "COMPLETED" {
 			payload["exit_code"] = 0

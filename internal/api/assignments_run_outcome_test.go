@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
@@ -60,6 +61,56 @@ func TestFinishAssignment_NoOutcomeReported_DefaultsToFailedWithReason(t *testin
 	}
 	if errMsg != orchestrator.ReasonNoOutcomeReported {
 		t.Errorf("error_message = %q, want the stated reason %q", errMsg, orchestrator.ReasonNoOutcomeReported)
+	}
+}
+
+// The terminal run.* journal entry — the audit-of-record — must carry the
+// SAME defaulted reason the DB row does, not the original (empty) errMsg
+// parameter. The two must never disagree about why a run's outcome is
+// FAILED.
+func TestFinishAssignment_NoOutcomeReported_JournalEntryCarriesTheDefaultedReason(t *testing.T) {
+	h, wsID, crewID, leadID, workerID, chatID := covAsgRig(t)
+	_ = crewID
+	jw := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+
+	if _, err := h.db.Exec(`
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+		VALUES ('asg-outcome-journal', ?, ?, ?, ?, 'task', 'RUNNING', datetime('now'))`,
+		wsID, chatID, leadID, workerID); err != nil {
+		t.Fatalf("seed assignment: %v", err)
+	}
+
+	const runID = "run-outcome-journal-1"
+	h.finishAssignment(context.Background(), "asg-outcome-journal", runID, chatID, "asg-worker", wsID,
+		"Looked into it, seems fine.", "", nil)
+	if err := jw.Flush(context.Background()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	entries, _, err := journal.List(context.Background(), h.db, journal.Query{
+		WorkspaceID: wsID, Types: []journal.EntryType{journal.EntryRunCompleted}, Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("journal.List: %v", err)
+	}
+	var found *journal.Entry
+	for i := range entries {
+		if entries[i].TraceID == runID {
+			found = &entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no run.completed entry found for run %s among %d entries", runID, len(entries))
+	}
+	if got, _ := found.Payload["outcome"].(string); got != orchestrator.OutcomeFailed {
+		t.Errorf("payload.outcome = %q, want %q", got, orchestrator.OutcomeFailed)
+	}
+	if got, _ := found.Payload["error_message"].(string); got != orchestrator.ReasonNoOutcomeReported {
+		t.Errorf("payload.error_message = %q, want the stated reason %q (must match the DB row, not the original empty errMsg)",
+			got, orchestrator.ReasonNoOutcomeReported)
 	}
 }
 

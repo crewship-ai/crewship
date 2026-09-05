@@ -278,6 +278,47 @@ func TestReconcileStaleActiveSessions_ResolvesThroughOutcome(t *testing.T) {
 	}
 }
 
+// TestReconcileStaleActiveSessions_MatchesRouteForOutcome_ForEveryOutcome
+// guards against drift between ReconcileStaleActiveSessions's hand-written
+// SQL CASE and orchestrator.RouteForOutcome's SessionState — the two encode
+// the SAME mapping in two languages (settleSessionForAssignment's Go path,
+// and this function's SQL backstop path), and nothing else pins them
+// together. Iterating orchestrator.AllOutcomes and computing the WANT value
+// from RouteForOutcome itself means a future change to the routing table
+// that forgets to update this file's SQL fails here, rather than only
+// showing up as a session silently resting in the wrong state after a
+// crash.
+func TestReconcileStaleActiveSessions_MatchesRouteForOutcome_ForEveryOutcome(t *testing.T) {
+	for _, outcome := range orchestrator.AllOutcomes {
+		t.Run(outcome, func(t *testing.T) {
+			status := "COMPLETED"
+			if outcome == orchestrator.OutcomeFailed {
+				status = "FAILED"
+			} else if outcome == orchestrator.OutcomeCancelled {
+				status = "CANCELLED"
+			}
+			want := orchestrator.RouteForOutcome(outcome).SessionState
+
+			f := setupMentionFixture(t)
+			sessID := "sess_route_" + outcome
+			asgID := "asg_route_" + outcome
+			seedSession(t, f, sessID, "active")
+			seedSessionAssignment(t, f, asgID, sessID, status)
+			execOrFatal(t, f.db, `UPDATE issue_agent_sessions SET active_run_id = ? WHERE id = ?`, asgID, sessID)
+			execOrFatal(t, f.db, `UPDATE assignments SET outcome = ? WHERE id = ?`, outcome, asgID)
+
+			if _, err := f.assign.ReconcileStaleActiveSessions(context.Background()); err != nil {
+				t.Fatalf("ReconcileStaleActiveSessions: %v", err)
+			}
+			state, _ := sessionState(t, f, sessID)
+			if state != want {
+				t.Errorf("outcome %s: SQL reconcile state = %q, orchestrator.RouteForOutcome says %q — the two have drifted",
+					outcome, state, want)
+			}
+		})
+	}
+}
+
 // ── ReconcileExpiredEphemeralSessions (F41) ─────────────────────────────
 
 func TestReconcileExpiredEphemeralSessions_ActiveGoesError_OthersGoClosed(t *testing.T) {

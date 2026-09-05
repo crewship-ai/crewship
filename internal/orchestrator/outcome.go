@@ -165,25 +165,25 @@ type OutcomeRoute struct {
 	// it already got right (FAILED -> error, everything else -> idle) and
 	// ADDING the one B4 could not reach (NEEDS_HUMAN -> awaiting_input).
 	SessionState string
-	// DigestEligible marks outcomes the B10 digest scheduler should be
-	// able to roll up (§9.6: "History only. Digest-eligible."). Not wired
-	// to a scheduler here (B10) — recorded so the table is a complete
-	// statement of §9.6, not a partial one that silently drops a column.
-	DigestEligible bool
-	// IssueComment marks outcomes that get a comment on the issue in
-	// addition to history (§9.6: WORK_CREATED, PARTIAL). This is
-	// DOCUMENTATION of existing behaviour (finishAssignment already posts
-	// a mission comment for any non-empty, non-error result — see the
-	// HANDOFF-parsing block there) rather than a new effect B6 adds.
-	IssueComment bool
+	// §9.6's table also names two other lanes — "Digest-eligible" for
+	// NO_CHANGE/SUCCEEDED, and an issue comment for WORK_CREATED/PARTIAL.
+	// Deliberately NOT modeled as fields here: neither has a real consumer
+	// today. finishAssignment's existing mission-comment block posts for
+	// ANY non-empty, non-error result regardless of outcome (a SUCCEEDED
+	// or NO_CHANGE run with output gets a comment too — it predates B6 and
+	// B6 does not change it), and no comment-posting path exists for
+	// pipeline_runs at all. A field that looked wired but drove nothing
+	// is worse than no field — B10 (digest) and a future issue-comment
+	// wiring pass are where these become real, and should add the field
+	// alongside the consumer that reads it, not before.
 }
 
 // outcomeRoutes is the §9.6 table, spelled out once.
 var outcomeRoutes = map[string]OutcomeRoute{
-	OutcomeNoChange:    {SessionState: "idle", DigestEligible: true},
-	OutcomeSucceeded:   {SessionState: "idle", DigestEligible: true},
-	OutcomeWorkCreated: {SessionState: "idle", IssueComment: true},
-	OutcomePartial:     {SessionState: "idle", IssueComment: true},
+	OutcomeNoChange:    {SessionState: "idle"},
+	OutcomeSucceeded:   {SessionState: "idle"},
+	OutcomeWorkCreated: {SessionState: "idle"},
+	OutcomePartial:     {SessionState: "idle"},
 	OutcomeNeedsHuman:  {SessionState: "awaiting_input", CreatesInboxItem: true},
 	OutcomeFailed:      {SessionState: "error"},
 	OutcomeCancelled:   {SessionState: "idle"},

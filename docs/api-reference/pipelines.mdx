@@ -213,12 +213,15 @@ cron.
 Both `run-records` rows and `GET /api/v1/workspaces/{wsId}/pipeline-runs/{runId}` carry
 an `outcome` field (work package B6, `docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §9.6)
 — the same deterministic routing decision issue-session runs carry, described in full
-under [Issues → Outcome](/api-reference/issues#outcome). In short: `NO_CHANGE` and
-`SUCCEEDED` stay in history; `WORK_CREATED`/`PARTIAL` also get an issue comment when the
-run is issue-triggered; `NEEDS_HUMAN` raises exactly one `run_needs_human` inbox item
-with an action contract; a run that ends cleanly but reports no recognised outcome is
-recorded `FAILED` with `error_message` set to `"no outcome reported"`. `outcome` is
-parsed from a `---CHECKPOINT---` or `---HANDOFF---` block in the run's own output when
+under [Issues → Outcome](/api-reference/issues#outcome). In short: `NEEDS_HUMAN` raises
+exactly one `run_needs_human` inbox item with an action contract; a run that ends
+cleanly but reports no recognised outcome is recorded `FAILED` with `error_message` set
+to `"no outcome reported"`; every other outcome (`NO_CHANGE`, `SUCCEEDED`,
+`WORK_CREATED`, `PARTIAL`, `CANCELLED`) is recorded and otherwise history-only for a
+routine run today — **no comment-posting path exists for `pipeline_runs` at all**, so
+`WORK_CREATED`/`PARTIAL` do not (yet) post to the triggering issue the way §9.6's table
+intends; see the note under [Issues → Outcome](/api-reference/issues#outcome). `outcome`
+is parsed from a `---CHECKPOINT---` or `---HANDOFF---` block in the run's own output when
 one of the run's steps is an `agent_run` step whose prompt asks for one — a routine with
 no agent step, or one that never reports an outcome, gets the `FAILED`/"no outcome
 reported" default like any other run. Empty on a non-terminal run, or one that predates

@@ -132,8 +132,15 @@ func parseHandoff(resultSummary string) HandoffData {
 			hd.Confidence = strings.TrimSpace(strings.TrimPrefix(line, "confidence:"))
 		} else if strings.HasPrefix(line, "artifacts:") {
 			hd.Artifacts = strings.TrimSpace(strings.TrimPrefix(line, "artifacts:"))
-		} else if strings.HasPrefix(line, "outcome:") {
-			hd.Outcome = strings.TrimSpace(strings.TrimPrefix(line, "outcome:"))
+		} else if v, ok := cutPrefixFold(line, "outcome:"); ok {
+			// Case-insensitive unlike the three fields above (matches
+			// CHECKPOINT's own "outcome:" field, checkpoint.go): a model
+			// that writes "Outcome:" here has a real, consequential
+			// downstream effect if the line is missed — DeriveOutcome
+			// (outcome.go) reads a silently-unparsed outcome as "not
+			// reported" and defaults the whole run to FAILED — unlike a
+			// missed summary/confidence, which only affects Parsed.
+			hd.Outcome = v
 		}
 	}
 

@@ -718,15 +718,30 @@ Pages like every list: `limit` (default 100, max 500) and `offset`, with the tot
 
 Every finished run — an issue-session assignment or a routine (`pipeline_runs`) run — carries an `outcome`, the deterministic routing decision the runner reports, distinct from its technical `status`:
 
-| Outcome | Meaning | Routing |
+| Outcome | Meaning | §9.6's intended routing |
 |---|---|---|
 | `NO_CHANGE` | Ran, nothing to do | History only |
 | `SUCCEEDED` | Did the work, nothing further needed | History |
-| `WORK_CREATED` | Produced or updated an issue | History + a comment on the issue |
-| `PARTIAL` | Some done, some failed, no human needed yet | History + a comment on the issue |
+| `WORK_CREATED` | Produced or updated an issue | History (+ an issue comment, once wired — see note) |
+| `PARTIAL` | Some done, some failed, no human needed yet | History (+ an issue comment, once wired — see note) |
 | `NEEDS_HUMAN` | Blocked on a decision, missing input, or a credential | **Inbox** (`run_needs_human`), with an action contract — see below |
 | `FAILED` | The run failed, or reported no outcome at all | Inbox once retries are exhausted (not yet wired — no retry counting exists) |
 | `CANCELLED` | Stopped by a human (Tier 1 stop) or superseded | History |
+
+<Note>
+**What this table describes vs. what is wired today.** `NEEDS_HUMAN`'s inbox
+routing and the session-state transition below are real, outcome-driven
+effects — this PR (B6) added them. The "+ an issue comment" cells for
+`WORK_CREATED`/`PARTIAL` are §9.6's stated *intent*, not yet a real,
+outcome-gated effect: an issue-session assignment already gets a mission
+comment posted on completion (`finishAssignment`), but that path predates
+`outcome` and fires for ANY non-empty, non-error result — a `SUCCEEDED` or
+`NO_CHANGE` run with output gets one too, and a routine (`pipeline_runs`)
+run gets no issue comment at all regardless of outcome, since no
+comment-posting path exists for that run shape yet. Gating the comment on
+`outcome` specifically (and adding one for routine runs) is a follow-up, not
+part of this PR.
+</Note>
 
 `outcome` is parsed from the agent's existing structured hand-off — the `---CHECKPOINT---` block a session-bearing run is instructed to emit (§11.3), or the `---HANDOFF---` block a mission-task run emits — never a second, invented block. **A run that ends cleanly (no execution error) but reports no recognised outcome is recorded `FAILED`, with `error_message` set to `"no outcome reported"`** — an absent outcome is treated as a bug, not a silent success. A run stopped by Stop (Tier 1 cooperative cancellation) or superseded always gets `CANCELLED`, regardless of what its own hand-off said.
 

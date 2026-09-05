@@ -83,10 +83,7 @@ func (s *RunStore) createOutcomeInboxItem(ctx context.Context, runID, output str
 		reason = "This run stopped and needs a decision, missing input, or a credential to continue."
 	}
 	reason = outcomeInboxScrubber.Scrub(reason)
-	const maxReason = 500
-	if len(reason) > maxReason {
-		reason = reason[:maxReason] + "...(truncated)"
-	}
+	reason = truncateReasonRuneSafe(reason, 500)
 
 	contractContext := map[string]any{"run": runID, "routine": pipelineSlug}
 	// TriggeredViaIssue carries the issue identifier in triggered_by_id
@@ -122,4 +119,21 @@ func (s *RunStore) createOutcomeInboxItem(ctx context.Context, runID, output str
 	}); err != nil {
 		slog.Default().Warn("create outcome inbox item", "error", err, "run_id", runID)
 	}
+}
+
+// truncateReasonRuneSafe caps s at max bytes without splitting a multi-byte
+// UTF-8 rune — the same shape truncateForGraderLog (outcomes.go) and
+// truncateForPreview (journal.go) already use in this package, applied here
+// too: a NEEDS_HUMAN reason over the cap with a Czech, CJK or emoji
+// character sitting at the cut point would otherwise land invalid UTF-8 in
+// the inbox card body, rendering as U+FFFD.
+func truncateReasonRuneSafe(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && cut > max-4 && (s[cut]&0xc0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + "...(truncated)"
 }
