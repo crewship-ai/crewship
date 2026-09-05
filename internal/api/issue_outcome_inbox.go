@@ -142,14 +142,17 @@ func (h *AssignmentHandler) createOutcomeInboxItem(ctx context.Context, assignme
 		threadKey = "issue:" + workspaceID + ":" + missionID.String
 	}
 
+	// attention_class/thread_key/actions are no longer duplicated into
+	// payload (B10, #2364, caught in review): they are real columns now
+	// (Item.AttentionClass/ThreadKey/Actions below), and hand-carrying the
+	// same three facts a second time here was a drift risk with no reader
+	// left to serve — nothing reads them from payload any more (the API
+	// response and the CLI both serve the typed columns directly). Only
+	// who_can_act and context stay in payload: neither has a dedicated
+	// column.
 	payload := map[string]any{
-		"attention_class": "input",
-		"thread_key":      threadKey,
-		"who_can_act":     whoCanAct,
-		"actions": []map[string]any{
-			{"id": "take_over", "label": "Take over", "effect": "Opens the issue for you to continue", "irreversible": false},
-		},
-		"context": contractContext,
+		"who_can_act": whoCanAct,
+		"context":     contractContext,
 	}
 
 	if err := inbox.WriteThreaded(ctx, h.db, h.logger, inbox.Item{
