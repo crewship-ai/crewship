@@ -121,7 +121,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - **The reliability editor — every §13.2 field settable, a DST-safe fire
-  preview, webhook edit in place (#TBD, closes #2362).** Almost every
+  preview, webhook edit in place (#2372, closes #2362).** Almost every
   schedule field the backend already carried (cron/timezone, catch-up
   policy, the wake gate, the circuit-breaker threshold, the version pin,
   enable/disable) had no UI door — the create form offered name, cron,
