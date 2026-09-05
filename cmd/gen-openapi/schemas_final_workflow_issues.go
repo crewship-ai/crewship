@@ -28,6 +28,13 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 	relation := obj(map[string]any{"id": str(), "source_id": str(), "target_id": str(), "relation_type": str(), "target_identifier": nullable(str()), "target_title": str(), "target_status": str(), "created_at": str()})
 	comment := obj(map[string]any{"id": str(), "mission_id": str(), "author_type": str(), "author_id": str(), "author_name": str(), "body": str(), "created_at": str(), "updated_at": str()})
 	activity := obj(map[string]any{"id": str(), "mission_id": str(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()), "action": str(), "details": nullable(str()), "created_at": str()})
+	// B11 (§14.1, #2368): the ordered event log, read by seq (not
+	// created_at) so a client can cursor exactly what it has already
+	// consumed — the shape `events` (activity above) cannot serve, since
+	// it has no cursor and caps at 50 rows DESC. payload_json/source_kind/
+	// source_id mirror mission_activity's own widened columns (§9.1, B1).
+	issueEvent := obj(map[string]any{"id": str(), "mission_id": str(), "seq": integer(), "actor_type": str(), "actor_id": str(), "actor_name": nullable(str()), "action": str(), "details": nullable(str()), "payload_json": nullable(str()), "source_kind": nullable(str()), "source_id": nullable(str()), "created_at": str()})
+	issueEventsPage := obj(map[string]any{"events": arr(issueEvent), "after_seq": integer(), "latest_seq": integer()})
 	// mission_id and source (#2313, item 3) tell a client WHY a run is
 	// attributed to the issue, not just that it is: "task" (the issue's own
 	// mission_tasks plan), "mention" (an @mention dispatch, via
@@ -104,6 +111,7 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 		"DELETE /api/v1/crews/{crewId}/issues/{identifier}/attachments/{attachmentId}": {Response: obj(map[string]any{"status": str()})},
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/relations":                     {Response: arr(relation)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/relations": {Response: obj(map[string]any{"id": str(), "status": str()})}, "DELETE /api/v1/relations/{relationId}": {Response: obj(map[string]any{"status": str()})},
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: arr(comment)}, "POST /api/v1/crews/{crewId}/issues/{identifier}/comments": {Response: comment}, "GET /api/v1/crews/{crewId}/issues/{identifier}/activity": {Response: arr(activity)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/runs": {Response: arr(issueRun)}, "GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks": {Response: arr(issue)},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/events": {Response: issueEventsPage},
 		"POST /api/v1/crews/{crewId}/issues": {Response: ref("Issue")}, "GET /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")}, "PATCH /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")},
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/review": {Response: obj(map[string]any{"status": str(), "action": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/start": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/stop": {Response: obj(map[string]any{"status": str(), "identifier": str(), "runs_stopped": integer(), "hard": boolean()})}, "PATCH /api/v1/issues/bulk": {Response: obj(map[string]any{"updated": integer()})},
 		// B1 (#2332): an issue's agent sessions — one row per (issue, agent),

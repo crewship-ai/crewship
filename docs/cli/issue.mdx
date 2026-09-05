@@ -32,6 +32,7 @@ crewship issue <subcommand> [flags]
 | `stop` | Stop an issue (cancel running tasks) |
 | `review` | Review an issue (approve or request changes) |
 | `activity` | Show the activity timeline for an issue |
+| `events` | Show the ordered, seq-cursored event log for an issue (for resync after a dropped realtime frame) |
 | `runs` | List runs triggered by an issue |
 | `sessions` | List an issue's agent sessions |
 | `changes` | Show the git diff produced by work on an issue |
@@ -300,6 +301,24 @@ crewship issue activity BE-42 --format json | jq '.[] | select(.action=="status_
 ```
 
 **Output columns:** WHEN (relative time), ACTOR (`type/name`), ACTION, DETAILS (truncated to 60 chars).
+
+---
+
+## `crewship issue events`
+
+The same `mission_activity` rows as `activity`, but ordered by `seq` (the B1 event log's monotonic per-issue cursor) instead of `created_at`, and NOT capped at 50 — this is the endpoint the board's client-side gap detector calls to resync after a WebSocket frame is dropped under load (F43, work package B11, #2368). Hits `GET /api/v1/crews/{crewId}/issues/{ident}/events?after_seq=`.
+
+```bash
+crewship issue events BE-42                    # full history, seq order
+crewship issue events BE-42 --after-seq 42     # only what happened after seq 42
+crewship issue events BE-42 --format json | jq '.latest_seq'
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--after-seq` | `int` | `0` | Only return events with `seq` greater than this. `0` returns the full history. |
+
+**Output columns:** SEQ, WHEN (relative time), ACTOR (`type/name`), ACTION, DETAILS (truncated to 60 chars). In `--format json`, the response is `{"events": [...], "after_seq": N, "latest_seq": N}` — `latest_seq` is the issue's current high-water mark, so a client with no new events can still tell "caught up at N" from "server has never heard of this issue".
 
 ---
 

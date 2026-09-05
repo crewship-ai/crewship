@@ -107,6 +107,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs", authed(wsCtx(http.HandlerFunc(issues.ListRuns))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions", authed(wsCtx(http.HandlerFunc(issues.ListSessions))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints", authed(wsCtx(http.HandlerFunc(issues.ListCheckpoints))))
+	// B11 (§9.1/§14.1, #2368): the ordered event log a client's gap
+	// detector resyncs through (F43) — after_seq=0 is the full history.
+	// openapi: query after_seq:integer
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/events", authed(wsCtx(http.HandlerFunc(issues.ListEvents))))
 	// Labels
 	r.mux.Handle("GET /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.ListLabels))))
 	r.authedMut("POST", "/api/v1/labels", roleCreate, issues.CreateLabel)

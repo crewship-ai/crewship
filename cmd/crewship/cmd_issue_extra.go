@@ -421,6 +421,78 @@ var issueActivityCmd = &cobra.Command{
 	},
 }
 
+// issueEventsCmd reads the ordered B1 event log via its own cursor
+// (seq), NOT the activity timeline's created_at-ordered top-50 above. CLI
+// parity for GET /api/v1/crews/{crewId}/issues/{identifier}/events
+// (internal/api/issue_events_list.go, PRD-ISSUES-AND-ROUTINES-2026 §14.1,
+// work package B11, #2368) — the same endpoint the board's gap detector
+// calls to resync after a dropped WebSocket frame (F43).
+var issueEventsCmd = &cobra.Command{
+	Use:   "events <identifier>",
+	Short: "Show the ordered event log for an issue (seq-cursored, for resync)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		issue, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		identifier := derefStr(issue.Identifier, issue.ID)
+		afterSeq, _ := cmd.Flags().GetInt("after-seq")
+		path := fmt.Sprintf("/api/v1/crews/%s/issues/%s/events", issue.CrewID, url.PathEscape(identifier))
+		params := url.Values{}
+		if afterSeq > 0 {
+			params.Set("after_seq", strconv.Itoa(afterSeq))
+		}
+		if enc := params.Encode(); enc != "" {
+			path += "?" + enc
+		}
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var result struct {
+			Events []struct {
+				Seq       int     `json:"seq"`
+				ActorType string  `json:"actor_type"`
+				ActorName *string `json:"actor_name"`
+				Action    string  `json:"action"`
+				Details   *string `json:"details"`
+				CreatedAt string  `json:"created_at"`
+			} `json:"events"`
+			AfterSeq  int `json:"after_seq"`
+			LatestSeq int `json:"latest_seq"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"SEQ", "WHEN", "ACTOR", "ACTION", "DETAILS"}
+		rows := make([][]string, 0, len(result.Events))
+		for _, e := range result.Events {
+			rows = append(rows, []string{
+				strconv.Itoa(e.Seq),
+				issueRelativeTime(e.CreatedAt),
+				fmt.Sprintf("%s/%s", e.ActorType, derefStr(e.ActorName, "-")),
+				e.Action,
+				truncateStr(derefStr(e.Details, ""), 60),
+			})
+		}
+		return f.Auto(result, headers, rows)
+	},
+}
+
 // issueRunsCmd lists the pipeline runs triggered by an issue. CLI parity
 // for GET /api/v1/crews/{crewId}/issues/{identifier}/runs — the data the
 // dashboard's issue "Runs" tab shows.
@@ -960,6 +1032,8 @@ func init() {
 	issueCmd.AddCommand(issueUnbindRoutineCmd)
 	issueCmd.AddCommand(issueSubtasksCmd)
 	issueCmd.AddCommand(issueActivityCmd)
+	issueEventsCmd.Flags().Int("after-seq", 0, "Only show events with seq greater than this (0 = full history)")
+	issueCmd.AddCommand(issueEventsCmd)
 
 	issueBulkUpdateCmd.Flags().String("ids", "", "Comma-separated issue IDs (max 100; REQUIRED)")
 	issueBulkUpdateCmd.Flags().String("status", "", "New status for all listed issues")
