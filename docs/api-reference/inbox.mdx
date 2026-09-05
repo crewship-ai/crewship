@@ -68,6 +68,9 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 | `priority` | string | `low` / `normal` / `high` / `urgent`. |
 | `blocking` | bool | When `true`, the source flow is paused until the item is resolved. |
 | `payload` | object \| omitted | Parsed JSON — inlined so the UI doesn't need a second `JSON.parse`. |
+| `thread_key` | string \| omitted | The §12 attention contract's merge key (work package B10). Rows sharing a `thread_key` in one workspace collapse to one card server-side — see [The attention contract](/guides/inbox#the-attention-contract). Omitted for a kind that hasn't adopted the contract. |
+| `attention_class` | string \| omitted | `decision` \| `input` \| `review` \| `repair`. Omitted for a kind that hasn't adopted the contract. |
+| `actions` | array \| omitted | `[{"id", "label", "effect", "irreversible"}, ...]` — the permitted actions for this row, unioned across every producer that merged into it. Omitted for a kind that hasn't adopted the contract; fall back to the kind-specific action row in the [Inbox guide](/guides/inbox#what-lands-in-the-inbox). |
 | `read_at` | RFC3339 \| omitted | Legacy, workspace-shared: the first time **anyone** marked this item read. Not what `state` reflects — see the "Reading is per-user" note under [State transitions](#patch-apiv1inboxid). |
 | `resolved_at` | RFC3339 \| omitted | |
 | `resolved_by_user_id` | string \| omitted | |
