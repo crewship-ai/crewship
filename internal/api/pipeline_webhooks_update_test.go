@@ -175,6 +175,74 @@ func TestUpdateWebhook_RotateSecret_IsOptIn(t *testing.T) {
 	}
 }
 
+// TestUpdateWebhook_RetargetAndVersionPin exercises the parity fields PATCH
+// shares with UpdateSchedule (target_pipeline_slug + target_pipeline_version)
+// — same absent-keeps-existing / explicit-null-clears convention, and again,
+// none of it touches the token.
+func TestUpdateWebhook_RetargetAndVersionPin(t *testing.T) {
+	h, db, userID, wsID := webhookHandlerRig(t)
+	origPipelineID := "pw-retarget-orig"
+	seedWebhookPipeline(t, db, wsID, origPipelineID, "retarget-orig")
+	newPipelineID := "pw-retarget-new"
+	seedWebhookPipeline(t, db, wsID, newPipelineID, "retarget-new")
+	wh := seedWebhookRow(t, db, wsID, origPipelineID, "s", true)
+	originalTokenHash := wh.TokenHash
+
+	body := `{"target_pipeline_slug":"retarget-new","target_pipeline_version":3}`
+	req := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-webhooks/"+wh.ID, strings.NewReader(body)),
+		userID, wsID, "OWNER")
+	req.SetPathValue("webhookId", wh.ID)
+	rr := httptest.NewRecorder()
+	h.UpdateWebhook(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr.Code, rr.Body.String())
+	}
+	var out webhookResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.TargetPipelineID != newPipelineID {
+		t.Errorf("target_pipeline_id = %q, want %q", out.TargetPipelineID, newPipelineID)
+	}
+	if out.TargetPipelineSlug != "retarget-new" {
+		t.Errorf("target_pipeline_slug = %q, want retarget-new", out.TargetPipelineSlug)
+	}
+	if out.TargetPipelineVersion == nil || *out.TargetPipelineVersion != 3 {
+		t.Errorf("target_pipeline_version = %v, want 3", out.TargetPipelineVersion)
+	}
+
+	reloaded, err := pipeline.NewWebhookStore(db).GetByID(t.Context(), wh.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.TokenHash != originalTokenHash {
+		t.Fatalf("retargeting must not rotate the token/URL: before=%q after=%q", originalTokenHash, reloaded.TokenHash)
+	}
+
+	// A second PATCH that mentions neither field keeps both — same
+	// absent-keeps-existing convention UpdateSchedule uses.
+	req2 := withWorkspaceUser(httptest.NewRequest("PATCH",
+		"/api/v1/workspaces/"+wsID+"/pipeline-webhooks/"+wh.ID, strings.NewReader(`{"name":"unrelated edit"}`)),
+		userID, wsID, "OWNER")
+	req2.SetPathValue("webhookId", wh.ID)
+	rr2 := httptest.NewRecorder()
+	h.UpdateWebhook(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body=%s", rr2.Code, rr2.Body.String())
+	}
+	var out2 webhookResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &out2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out2.TargetPipelineID != newPipelineID {
+		t.Errorf("an unrelated edit lost the retarget: target_pipeline_id = %q, want %q", out2.TargetPipelineID, newPipelineID)
+	}
+	if out2.TargetPipelineVersion == nil || *out2.TargetPipelineVersion != 3 {
+		t.Errorf("an unrelated edit lost the version pin: got %v, want 3", out2.TargetPipelineVersion)
+	}
+}
+
 func TestUpdateWebhook_Forbidden_BelowManageRole(t *testing.T) {
 	h, db, userID, wsID := webhookHandlerRig(t)
 	pipelineID := "pw-forbidden"
