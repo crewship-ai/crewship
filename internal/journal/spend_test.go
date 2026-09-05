@@ -86,7 +86,7 @@ func TestSpend_ByAgent_GroupsAndSums(t *testing.T) {
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	now := time.Now().UTC()
+	now := spendTestNow()
 	emitCost(t, w, "ws_s", "crew_a", "agent_a", 1.50, now.Add(-2*time.Hour))
 	emitCost(t, w, "ws_s", "crew_a", "agent_a", 0.50, now.Add(-1*time.Hour))
 	emitCost(t, w, "ws_s", "crew_b", "agent_b", 3.00, now.Add(-30*time.Minute))
@@ -133,7 +133,7 @@ func TestSpend_ByRoutine_And_TopRoutinesRuns(t *testing.T) {
 	db := openSpendTestDB(t)
 	defer db.Close()
 
-	now := time.Now().UTC()
+	now := spendTestNow()
 	insertPipelineRun(t, db, "run_1", "ws_s", "pln_1", "expensive-routine", now.Add(-1*time.Hour), 10.0)
 	insertPipelineRun(t, db, "run_2", "ws_s", "pln_1", "expensive-routine", now.Add(-2*time.Hour), 5.0)
 	insertPipelineRun(t, db, "run_3", "ws_s", "pln_2", "cheap-routine", now.Add(-30*time.Minute), 0.10)
@@ -180,7 +180,7 @@ func TestSpend_ByRoutine_And_TopRoutinesRuns(t *testing.T) {
 // under the wrong day) and asserts the returned bucket Date equals the
 // UTC date of the entry.
 func TestSpend_DayBuckets_AreUTC(t *testing.T) {
-	inst := time.Now().UTC().Add(-2 * time.Hour) // in the 24h window
+	inst := spendTestNow().Add(-2 * time.Hour) // in the 24h window
 
 	// Pick a fixed offset that pushes inst across a day boundary, so the
 	// local calendar date is guaranteed to differ from the UTC one. This
@@ -239,7 +239,7 @@ func TestSpend_TotalExact_WhenByAgentTruncates(t *testing.T) {
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	now := time.Now().UTC()
+	now := spendTestNow()
 	// Three distinct (crew,agent) buckets, same day → three groups. With
 	// the cap at 2 the ByAgent breakdown truncates, but all three costs
 	// must still be reflected in the total.
@@ -270,7 +270,7 @@ func TestSpend_TopN_Respected(t *testing.T) {
 	db := openSpendTestDB(t)
 	defer db.Close()
 
-	now := time.Now().UTC()
+	now := spendTestNow()
 	labels := []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"}
 	for i, l := range labels {
 		insertPipelineRun(t, db, "run_"+l, "ws_s", "pln_"+l, "r"+l, now.Add(-time.Duration(i)*time.Minute), float64(10-i))
@@ -293,7 +293,7 @@ func TestSpend_TopN_Respected(t *testing.T) {
 // for routines, run id ASC for runs) rather than on SQLite's arbitrary
 // row order — so identical inputs always yield an identical ranking.
 func TestSpend_TopN_TieOrderStable(t *testing.T) {
-	now := time.Now().UTC()
+	now := spendTestNow()
 
 	// Every routine/run costs exactly the same, so ONLY the secondary sort
 	// key can decide order. Insert in a jumbled id order to make sure the
@@ -352,4 +352,18 @@ func equalStrs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// spendTestNow is time.Now() pulled back by three hours in the first three
+// hours of a UTC day, so rows seeded "1–2 h ago" never straddle a date
+// boundary — with a raw time.Now() the spend tests failed between 00:00 and
+// 02:00 UTC every day (#2360). The pull-back keeps every seeded row well
+// inside the 24 h window the query is bounded by, and the "outside the
+// window" rows (seeded a day earlier) stay outside.
+func spendTestNow() time.Time {
+	now := time.Now().UTC()
+	if now.Hour() < 3 {
+		now = now.Add(-3 * time.Hour)
+	}
+	return now
 }

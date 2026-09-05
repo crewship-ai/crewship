@@ -68,7 +68,7 @@ func newSpendBackedServer(t *testing.T) *httptest.Server {
 
 	const wsID = "c000000000000000000acc"
 	tsFmt := func(tm time.Time) string { return tm.UTC().Format("2006-01-02T15:04:05.000000000Z07:00") }
-	now := time.Now().UTC()
+	now := spendTestNow()
 
 	// Two cost.incurred rows for agent_a → total 2.00, one by-agent bucket.
 	for i, c := range []float64{1.25, 0.75} {
@@ -245,4 +245,18 @@ func TestFetchSpend_PropagatesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+// spendTestNow is time.Now() pulled back by three hours in the first three
+// hours of a UTC day, so rows seeded "1–2 h ago" never straddle a date
+// boundary — with a raw time.Now() the spend tests failed between 00:00 and
+// 02:00 UTC every day (#2360). The pull-back keeps every seeded row well
+// inside the 24 h window the query is bounded by, and the "outside the
+// window" rows (seeded a day earlier) stay outside.
+func spendTestNow() time.Time {
+	now := time.Now().UTC()
+	if now.Hour() < 3 {
+		now = now.Add(-3 * time.Hour)
+	}
+	return now
 }
