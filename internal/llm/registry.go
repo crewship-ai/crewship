@@ -91,6 +91,10 @@ type ProviderSpec struct {
 	// seam the slot-fallback work needs so the default does not have to be a
 	// second hardcoded literal next to DefaultAuxiliaryModels().
 	DefaultAuxModel string
+	// MaxTokensField is the output-limit key used by OpenAI-compatible codecs.
+	// Empty keeps the compatibility default ("max_tokens"). Hosted OpenAI uses
+	// "max_completion_tokens", the current Chat Completions API field.
+	MaxTokensField string
 	// New constructs the provider. REQUIRED. base and apiKey arrive already
 	// resolved (explicit → env → default), so a New that ignores one is
 	// simply a provider that does not take it.
@@ -207,6 +211,7 @@ func init() {
 		BaseDefault:     "https://api.openai.com/v1/chat/completions",
 		CatalogID:       "openai",
 		DefaultAuxModel: HousekeepingModel("openai"),
+		MaxTokensField:  "max_completion_tokens",
 		New: func(m AuxModel, base, apiKey string) (Provider, error) {
 			return NewOpenAI(apiKey), nil
 		},

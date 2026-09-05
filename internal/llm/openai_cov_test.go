@@ -218,12 +218,15 @@ func TestOpenAIBuildRequestBody_AllFields(t *testing.T) {
 	s := string(body)
 	for _, want := range []string{
 		`"role":"system"`, `"content":"be brief"`,
-		`"max_tokens":77`, `"temperature":0.3`,
+		`"max_completion_tokens":77`, `"temperature":0.3`,
 		`"stream":true`, `"name":"lookup"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("body %s missing %s", s, want)
 		}
+	}
+	if strings.Contains(s, `"max_tokens"`) {
+		t.Errorf("hosted OpenAI body contains deprecated max_tokens: %s", s)
 	}
 }
 

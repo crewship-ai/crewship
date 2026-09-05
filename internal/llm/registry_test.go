@@ -108,6 +108,7 @@ func TestRegisteredProviderSpecs_Values(t *testing.T) {
 		baseDefault     string
 		catalogID       string
 		defaultAuxModel string
+		maxTokensField  string
 	}{
 		{
 			id: "anthropic", displayName: "Anthropic",
@@ -122,6 +123,7 @@ func TestRegisteredProviderSpecs_Values(t *testing.T) {
 			keyEnv: "OPENAI_API_KEY", baseEnv: "",
 			baseDefault: "https://api.openai.com/v1/chat/completions",
 			catalogID:   "openai", defaultAuxModel: "gpt-5.4-mini",
+			maxTokensField: "max_completion_tokens",
 		},
 		{
 			// No KeyEnv: the local judge needs no credential, and declaring
@@ -163,6 +165,9 @@ func TestRegisteredProviderSpecs_Values(t *testing.T) {
 			}
 			if s.DefaultAuxModel != tt.defaultAuxModel {
 				t.Errorf("DefaultAuxModel = %q, want %q", s.DefaultAuxModel, tt.defaultAuxModel)
+			}
+			if s.MaxTokensField != tt.maxTokensField {
+				t.Errorf("MaxTokensField = %q, want %q", s.MaxTokensField, tt.maxTokensField)
 			}
 		})
 	}

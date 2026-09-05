@@ -201,6 +201,39 @@ func TestBuildCheckProvider(t *testing.T) {
 	}
 }
 
+// The diagnostic must exercise the same output-limit field as auxiliary calls.
+// Otherwise `provider check` can succeed against a permissive fixture while the
+// registry-built gpt-5.4-mini evaluator fails on the first real request (#2015).
+func TestBuildCheckProvider_OpenAIUsesMaxCompletionTokens(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	p, target, err := buildCheckProvider(checkOptions{
+		Provider: "openai",
+		Model:    "gpt-5.4-mini",
+		BaseURL:  srv.URL + "/v1",
+	}, envFunc(nil))
+	if err != nil {
+		t.Fatalf("buildCheckProvider: %v", err)
+	}
+	if _, err := runProviderCheck(context.Background(), p, target, ""); err != nil {
+		t.Fatalf("runProviderCheck: %v", err)
+	}
+	if got := body["max_completion_tokens"]; got != float64(checkMaxTokens) {
+		t.Errorf("max_completion_tokens = %#v, want %d", got, checkMaxTokens)
+	}
+	if got, exists := body["max_tokens"]; exists {
+		t.Errorf("deprecated max_tokens reached hosted OpenAI diagnostic: %#v", got)
+	}
+}
+
 func TestResolveCheckKey(t *testing.T) {
 	tests := []struct {
 		name       string
