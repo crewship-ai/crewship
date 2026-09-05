@@ -55,9 +55,9 @@ type scheduleResponse struct {
 	// a breaker threshold whether or not it has ever failed.
 	// DisabledReason is "" for an operator-disabled schedule and
 	// "circuit_breaker" once the breaker has tripped it.
-	ConsecutiveFailures    int       `json:"consecutive_failures"`
-	MaxConsecutiveFailures int       `json:"max_consecutive_failures"`
-	DisabledReason         string    `json:"disabled_reason,omitempty"`
+	ConsecutiveFailures    int    `json:"consecutive_failures"`
+	MaxConsecutiveFailures int    `json:"max_consecutive_failures"`
+	DisabledReason         string `json:"disabled_reason,omitempty"`
 	// Activation is "draft" for a trigger atomic routine authoring created
 	// with activation="draft" and still awaiting a MANAGER's sign-off (B8,
 	// #2359) — distinct from an operator/circuit-breaker disable, and the
