@@ -72,29 +72,46 @@ PASS = proven by a named test and, where possible, observed live on dev1; LIMIT 
 | 1 | Mention an idle agent → ack < 1 s, one session, one run | PASS | `TestMentions_DeliveryAckedBeforeDispatch`, `TestMentions_SecondMentionReusesTheSameSession`; live: OPS-16/OPS-21; `crewshipd_delivery_ack_latency_seconds` p50 0 s on dev1 |
 | 2 | Ten duplicate deliveries → one run | PASS (test) | `TestDeliveries_TenConcurrentIdenticalDeliveriesProduceOneRun`; not driven live |
 | 3 | Follow-up during an active run → no second run, consumed once | PASS | `delegation_limits_session_test.go`, `issue_session_followups_test.go`; live: OPS-21 (one run, then one follow-up run) |
-| 4 | Correction during an active run reflected in the next step | NOT PROVEN | B3 folds follow-ups into a new run after the current one ends; mid-run delivery is the F3 known limit (#2350) |
+| 4 | Correction during an active run reflected in the next step | NOT PROVEN | B3 folds follow-ups into a new run after the current one ends; mid-run delivery is the F3 known limit — **#2350** |
 | 5a | Stop → no further step, CANCELLED, late callback changes nothing | PASS | `TestIssue_Stop_*`, `TestRunAssignment_CancelRequested_*`; live: OPS-8, OPS-13 (after #2317), OPS-14 (after #2320) |
 | 5b | Hard stop terminates the exec within 5 s, sibling unaffected | LIMIT | `TestIssue_Stop_Hard_TerminatesTargetNotSibling` (fake provider); live: sibling isolation held, termination time not observable (#2365 caveat) |
 | 6 | Restart between event and consumption → nothing lost, no duplicate | PASS | `TestDeliveries_RestartBetweenEventAndConsumptionLosesNothing`; B4 live: restart mid-run, sweeper failed both orphaned runs, sessions → error |
 | 7 | Resume after 7 days → no repeated work; pack bounded | PASS (test) | `TestAssembleContextPack_PackSizeBounded_DoesNotGrowWithThreadLength`, the 7-day wake test; live: checkpoint read back, `last_consumed_seq` 0 → 4, comment text unproven (#2357) |
 | 8 | Parent with open child → no DONE without force; force writes a receipt | PASS | `issue_terminal_children_test.go`; live: OPS-31/32 (409, then the forced receipt) |
 | 9 | Owner stays owner after delegating | PASS | `TestIssueDelegate_PreservesOwner_Scenario9`; live: OPS-8 |
-| 10 | A peer agent's GO cannot satisfy a waitpoint | NOT PROVEN | no B package touched waitpoint actors; the B10 contract carries `who_can_act` but no test drives a peer GO |
+| 10 | A peer agent's GO cannot satisfy a waitpoint | NOT PROVEN | no B package touched waitpoint actors; the B10 contract carries `who_can_act` but no test drives a peer GO — **#2388** |
 | 11 | Schedule fires on time; wake gate false suppresses | PASS | `golden_schedule_test.go` (t1); live: `issue-triage-daily` fired 2026-09-05 08:00:29 UTC |
 | 12 | Downtime over three fire times → catch-up honoured, all three variants | PASS (test) | `TestGolden12_Catchup_AllThreePolicies` (flaky at a minute boundary, #2386); not driven live |
 | 13 | Duplicate webhook with the same idempotency key → one run | PASS (test) | `golden_webhook_test.go` (t1); not driven live |
 | 14 | Routine authored → routine + trigger together, first fire stated, rollback proven | PASS | `TestPipelineInternalSave_Trigger_RollbackOnBadCron`; live: B8 draft save and bad-cron rollback |
-| 15 | NEEDS_HUMAN → one item with an action contract; acting resumes the run, receipt, same thread | PARTIAL | one item + contract: `TestFinishAssignment_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithActionContract`, merged across runs (B10); **acting on it to resume the run is not built** |
+| 15 | NEEDS_HUMAN → one item with an action contract; acting resumes the run, receipt, same thread | PARTIAL | one item + contract: `TestFinishAssignment_NeedsHumanOutcome_CreatesExactlyOneInboxItemWithActionContract`, merged across runs (B10); **acting on it to resume the run is not built — #2389** |
 
 Count: 9 PASS, 3 PASS-by-test-only, 1 LIMIT, 1 PARTIAL, 2 NOT PROVEN. The two-weeks-green clock of §24 has not started.
 
 ### Flags on dev1, and the §20 phases as a plan
 
-`crewship feature-flag list` on dev1 (2026-09-05): `issue_agent_sessions` on (default, 100 %), `issue_deliveries` on (default, 100 %), `run_verdict_summaries` on. Nothing is in shadow mode: B1/B2 shipped their flags **default-on**, so dev1 went straight to the dogfood phase without the week of shadow comparison §20 step 1 describes — the comparison "would the new path have produced the same runs" was never run. The other packages (B3–B13) carry no flag at all.
+`crewship feature-flag list` on dev1 (2026-09-05): `issue_agent_sessions` on (default, 100 %), `issue_deliveries` on (default, 100 %), `run_verdict_summaries` on. Nothing is in shadow mode: B1/B2 shipped their flags **default-on**, so dev1 went straight to the dogfood phase without the week of shadow comparison §20 step 1 describes — the comparison "would the new path have produced the same runs" was never run. **B3–B13 carry no flag at all, so they are on everywhere `main` is deployed — including `stage`, which is CD-owned and receives `main` automatically.** The canary on dev2/dev3 is therefore observation, not a switch, and the "default on" row below governs only the two B1/B2 flags; the rest cannot be turned off short of a revert.
 
 | §20 phase | State | Plan |
 |---|---|---|
 | 1 Shadow | skipped | Not recoverable after the fact; the honest substitute is the live-check record above. |
 | 2 Dogfood | running since 2026-09-04 on dev1 | Daily `issue-triage-daily` fire; Track B issues ENG-7…ENG-19 on the dev1 board. Keep for two weeks: until 2026-09-19. |
 | 3 Canary | not started | dev2/dev3 after the dogfood window, one week: 2026-09-19 → 2026-09-26, with the §19.3 series read daily. |
-| 4 Default on | not reached | Only once all fifteen scenarios are PASS (4, 10, 15 must be built first) and green for two weeks — earliest 2026-10-03, and only if the canary week is clean. |
+| 4 Default on | not reached (B1/B2 flags only; B3–B13 have no flag) | Only once all fifteen scenarios are PASS (#2350, #2388, #2389 must be built first) and green for two weeks — earliest 2026-10-03, and only if the canary week is clean. |
+
+### §19.3 — first reading, dev1, 2026-09-05 13:30 UTC
+
+Read from `GET /metrics` on dev1 after the live checks (seed + validation traffic, ~20 deliveries). Targets are the PRD's; whether a value is "inside" is stated per row, and rows without a series say so.
+
+| §19.3 question | Series (B12) | Value on dev1 | Inside target? |
+|---|---|---|---|
+| Delivery ack latency | `crewshipd_delivery_ack_latency_seconds` p50 / p95 (n = 19) | 0 s / 0 s | yes (target < 1 s) — but the sample is one instance's validation traffic |
+| Claim latency (queue wait) | `crewshipd_delivery_claim_latency_seconds` p50 / p95 | 0 s / 19 s | p95 reflects the one queued-behind-a-busy-agent case; no target set for this row |
+| Lost deliveries | `crewshipd_deliveries_lost` | 0 | yes |
+| Duplicate active runs (I2 canary) | `crewshipd_duplicate_active_runs` | 0 | yes |
+| Context pack size | `crewshipd_context_pack_tokens` p50 / p95 | 134 / 351 tokens | yes (bounded) |
+| Checkpoint compliance | `crewshipd_session_runs_checkpointed_total` / `_finished_total` | 8 / 21 | **no** — 38 %; the seeded agents skip the checkpoint block on short runs |
+| Scheduled-fire punctuality | no series (B12 left it to the scheduler) | one data point: 08:00:00 fire at 08:00:29 | not measurable yet |
+| Inbox items per successful run | no series | — | not measurable yet |
+
+Next reading planned 2026-09-12 (end of the first dogfood week), then weekly through the canary window; the two missing series need their own issue before default-on.
