@@ -53,8 +53,24 @@ export function InboxV2() {
 
   useInboxV2DeepLink(requestedID, requestedSearch, setSelectedKey, setFilters)
 
-  const active = useInbox(workspaceId, "active", { loadAll: true })
-  const resolved = useInbox(workspaceId, "resolved", { loadAll: true })
+  // B10 (#2364): ONE `state=all` fetch instead of two (`active` + `resolved`
+  // used to each hit GET /api/v1/inbox separately, for the same workspace,
+  // on every load). `active`/`resolved` below are in-memory slices of that
+  // one result — patch/refresh/error/loading all forward to the single
+  // underlying query, since useInbox's own PATCH reconciliation already
+  // treats stateParam "all" as "keep every transition in this one cached
+  // list" (hooks/use-inbox.ts). Approvals and the missions walk are
+  // separate server truths this hook does not yet fold in — see the PR
+  // description for what B10 shipped here and what is still open.
+  const all = useInbox(workspaceId, "all", { loadAll: true })
+  const active = useMemo(
+    () => ({ ...all, items: all.items.filter((it) => it.state !== "resolved") }),
+    [all],
+  )
+  const resolved = useMemo(
+    () => ({ ...all, items: all.items.filter((it) => it.state === "resolved") }),
+    [all],
+  )
   // GET /api/v1/approvals is now roleManage (#2233) — a MEMBER/MANAGER
   // fetch would 403. Rather than surface that as a permanent error banner
   // in `sourceHealth` below, skip the fetch for a role that could never
