@@ -41,6 +41,7 @@ type pendingFollowUp struct {
 	AuthorType string
 	AuthorName string
 	Body       string
+	Priority   string // §11.5 delivery priority: correction sorts ahead of normal (B3b, #2350)
 }
 
 // dispatchQueuedFollowUpsForSession looks for deliveries left 'pending'
@@ -208,11 +209,17 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 		         WHEN c.author_type = 'agent' THEN (SELECT name      FROM agents WHERE id = c.author_id)
 		         ELSE ''
 		       END,
-		       COALESCE(c.body, '')
+		       COALESCE(c.body, ''),
+		       COALESCE(m.priority, 'normal')
 		  FROM mission_comment_mentions m
 		  LEFT JOIN mission_comments c ON c.id = m.comment_id
 		 WHERE m.mission_id = ? AND m.agent_id = ? AND m.state = 'pending'
-		 ORDER BY m.position, m.created_at`, missionID, agentID)
+		 -- §9.3 ordering (B3b, #2350): stop > correction > normal, then the
+		 -- natural arrival order within a priority. CASE mirrors
+		 -- deliveryPriorityRank; keep the two in step.
+		 ORDER BY CASE COALESCE(m.priority, 'normal')
+		            WHEN 'stop' THEN 0 WHEN 'correction' THEN 1 ELSE 2 END,
+		          m.position, m.created_at`, missionID, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +229,7 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 	for rows.Next() {
 		var p pendingFollowUp
 		var authorName sql.NullString
-		if err := rows.Scan(&p.DeliveryID, &p.AuthorType, &authorName, &p.Body); err != nil {
+		if err := rows.Scan(&p.DeliveryID, &p.AuthorType, &authorName, &p.Body, &p.Priority); err != nil {
 			return nil, err
 		}
 		p.AuthorName = authorName.String
@@ -260,8 +267,33 @@ func pendingFollowUpsFor(ctx context.Context, db *sql.DB, missionID, agentID str
 // len(pending) — otherwise an overflowing digest would open with "12
 // comment(s)" while quoting only 9 of them, which is a second, smaller
 // version of the same lie.
+// followUpEntryLabel names a folded delivery in the digest by its priority
+// so a correction reads as a correction, not an ordinary later comment
+// (B3b, #2350).
+func followUpEntryLabel(priority string) string {
+	switch priority {
+	case deliveryPriorityStop:
+		return "STOP"
+	case deliveryPriorityCorrection:
+		return "CORRECTION"
+	default:
+		return "Comment"
+	}
+}
+
 func followUpDigestBody(pending []pendingFollowUp) (body string, includedIDs []string) {
-	const headerFmt = "%d comment(s) arrived and were queued while the previous run on this issue was still in progress:\n\n"
+	// The header names corrections explicitly when the fold contains any,
+	// so the resumed step reads them as steering its prior effort (§18
+	// scenario 4, B3b #2350) rather than as unrelated new comments. The
+	// count arg is still filled per call.
+	headerFmt := "%d comment(s) arrived and were queued while the previous run on this issue was still in progress:\n\n"
+	for _, p := range pending {
+		if p.Priority == deliveryPriorityCorrection || p.Priority == deliveryPriorityStop {
+			headerFmt = "%d comment(s) arrived while the previous run on this issue was still in progress. " +
+				"Any marked CORRECTION are steering the work you just did — read and apply them first:\n\n"
+			break
+		}
+	}
 	// The header can only get SHORTER as fewer entries are included (fewer
 	// digits in the count), never longer, so budgeting against the
 	// worst-case header — every comment included — is exact enough without
@@ -279,7 +311,7 @@ func followUpDigestBody(pending []pendingFollowUp) (body string, includedIDs []s
 		if author == "" {
 			author = "someone"
 		}
-		entry := fmt.Sprintf("--- Comment %d, from %s ---\n%s\n\n", i+1, author, p.Body)
+		entry := fmt.Sprintf("--- %s %d, from %s ---\n%s\n\n", followUpEntryLabel(p.Priority), i+1, author, p.Body)
 		n := utf8.RuneCountInString(entry)
 		if used+n > budget {
 			break
@@ -302,7 +334,7 @@ func followUpDigestBody(pending []pendingFollowUp) (body string, includedIDs []s
 		if author == "" {
 			author = "someone"
 		}
-		entries = []string{fmt.Sprintf("--- Comment 1, from %s ---\n%s\n\n", author, p.Body)}
+		entries = []string{fmt.Sprintf("--- %s 1, from %s ---\n%s\n\n", followUpEntryLabel(p.Priority), author, p.Body)}
 		includedIDs = []string{p.DeliveryID}
 	}
 

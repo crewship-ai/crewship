@@ -197,6 +197,16 @@ Written down on purpose (they are release conditions, not footnotes):
   agent is busy produces one extra run, not five, and not zero: nothing is
   silently dropped, and nothing is marked read before an agent has actually
   read it.
+- **A correction jumps the queue and is labelled as one.** A comment that
+  arrives while the agent's run on this issue is still going is a
+  *correction* (the delivery's priority, `stop > correction > normal`, per
+  the interruption-as-an-event model). When the queued comments are folded
+  into the next run, corrections lead the brief, ahead of ordinary
+  follow-ups, and are marked `CORRECTION` with a header telling the agent to
+  read and apply them first — so the next step reflects your correction
+  rather than treating it as just another later comment. This is delivery at
+  the next safe boundary (the next run on the same session), not mid-token
+  interruption of a turn already under way, which stays future work.
 - **A busy agent is woken later, not interrupted, on a DIFFERENT issue.**
   Beyond the same-session case above, an agent still has only one live run
   at a time across every issue and chat it touches. Mentioning it while it

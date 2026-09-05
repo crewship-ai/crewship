@@ -41,7 +41,36 @@ import (
 // (mentionRecorder.record) always writes this — 'stop' and 'correction' are
 // reserved for the interrupt-as-event producers §11.5 describes and no
 // B2 code path emits either.
-const deliveryPriorityNormal = "normal"
+// Delivery priority is §11.5's interruption-as-an-event model, stored in
+// mission_comment_mentions.priority (CHECK stop|correction|normal, the
+// deliveries_widen migration). §9.3's ordering is stop > correction >
+// normal: a correction — a comment that arrived while the session already
+// had a run in flight (B3b, #2350) — is consumed at the next safe boundary
+// AHEAD of ordinary follow-ups, so the resumed step reflects the correction
+// first. stop is reserved for the §10.3 stop path and is not written here.
+const (
+	deliveryPriorityStop       = "stop"
+	deliveryPriorityCorrection = "correction"
+	deliveryPriorityNormal     = "normal"
+)
+
+// The fold's priority ordering (stop > correction > normal) lives in one
+// place: the ORDER BY CASE in pendingFollowUpsFor (issue_session_followups.go).
+// It is not duplicated as a Go comparator because nothing re-sorts the rows
+// after that query — keeping a second copy in sync would be pure risk.
+
+// markDeliveryPriority raises a still-pending delivery's priority. Used
+// when a comment turns out to have arrived during an active run (B3b): the
+// delivery was created 'normal' before the session-busy result was known,
+// so this reclassifies it to 'correction' while it waits to be folded into
+// the next step. Scoped to state='pending' so it can never rewrite a
+// delivery a run has already claimed or consumed.
+func markDeliveryPriority(ctx context.Context, db *sql.DB, deliveryID, priority string) error {
+	_, err := db.ExecContext(ctx,
+		`UPDATE mission_comment_mentions SET priority = ? WHERE id = ? AND state = 'pending'`,
+		priority, deliveryID)
+	return err
+}
 
 // deliveryParams is what createDelivery needs to write one pending row.
 type deliveryParams struct {
