@@ -61,7 +61,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   read, enforced at the shared delivery loader on every path, Keeper on or
   off. Agent prompt, inbox card, escalation card and docs updated.
 - **`crewship issue update --force` follows the 409 the terminal-children rule
-  sends (#TBD).** #2377 taught the server to refuse moving a parent to
+  sends (#2382).** #2377 taught the server to refuse moving a parent to
   DONE/REVIEW while a sub-issue is live and to say "retry with ?force=true";
   the CLI had no way to do that. It does now, and the override is recorded
   as the same receipt the API writes.
