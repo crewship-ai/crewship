@@ -37,11 +37,19 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	batch := obj(map[string]any{"items": arr(batchItem), "tags": arr(str()), "tier_override": str()})
 	testRun := obj(map[string]any{"definition": anyValue(), "author_crew_id": str(), "sample_inputs": anyObject()})
 	stepRun := obj(map[string]any{"step_id": str(), "inputs": anyObject(), "step_outputs": map[string]any{"type": "object", "additionalProperties": str()}, "tier_override": str()})
+	// routineTrigger is B8's atomic-authoring extension (#2359): an optional
+	// trigger created in the SAME transaction as the routine + version.
+	// Only "schedule" and "manual" are supported today.
+	routineTrigger := obj(map[string]any{
+		"kind": str(), "cron": str(), "timezone": str(), "catchup_policy": str(),
+		"max_consecutive_failures": integer(), "inputs": anyObject(),
+	})
 	save := obj(map[string]any{
 		"slug": str(), "name": str(), "description": str(), "definition": anyValue(), "author_crew_id": str(),
 		"author_agent_id":  str(),
 		"last_test_run_at": str(), "last_test_run_passed": boolean(), "skip_test_gate": boolean(),
 		"skip_governance_gate": boolean(), "save_token": str(), "change_summary": str(),
+		"trigger": routineTrigger, "activation": str(),
 	})
 	importBody := obj(map[string]any{
 		"format": str(), "pipeline": obj(map[string]any{"name": str(), "description": str(), "slug": str(), "dsl_version": str(), "definition": anyValue()}),
@@ -96,6 +104,8 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/test_run": request("WorkflowTestRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/save": request("WorkflowPipelineSaveRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/import": request("WorkflowPipelineImportRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback": request("WorkflowRollbackRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata": request("WorkflowRunMetadataRequest"), "POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal": request("WorkflowSignalRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run": request("WorkflowEmptyRequest"), "POST /api/v1/workspaces/{workspaceId}/pipeline-schedules": request("WorkflowScheduleRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}": request("WorkflowScheduleRequest"),
+		// B8 (#2359): activate a draft trigger — no request body.
+		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate": request("WorkflowEmptyRequest"),
 		"PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags": request("WorkflowTagsRequest"), "PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override": request("WorkflowStepOverrideRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget": request("WorkflowBudgetRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay": request("WorkflowReplayRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve": request("WorkflowWaitpointApprovalRequest"),
 		"POST /api/v1/crews/{crewId}/missions": request("WorkflowMissionCreateRequest"), "PATCH /api/v1/crews/{crewId}/missions/{missionId}": request("WorkflowMissionUpdateRequest"), "POST /api/v1/crews/{crewId}/missions/{missionId}/tasks": request("WorkflowTaskCreateRequest"), "PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}": request("WorkflowTaskUpdateRequest"),

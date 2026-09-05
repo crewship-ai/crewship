@@ -194,6 +194,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}",
 		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}",
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run",
+		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate",
 		"DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/import",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel",
