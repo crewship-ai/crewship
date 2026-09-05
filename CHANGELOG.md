@@ -120,7 +120,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
-- **Atomic routine authoring — routine, version and trigger commit together (#TBD).**
+- **Atomic routine authoring — routine, version and trigger commit together (#2367).**
   `save_routine` (and the user/CLI/internal save endpoints) now accept an
   optional `trigger` block; `pipeline.Store.SaveWithTrigger` creates the
   routine, its version, and a cron schedule in ONE transaction — a bad cron
