@@ -80,23 +80,46 @@ describe("useIssueEventGapResync", () => {
     expect(onResync).toHaveBeenCalledWith("m1", "ENG-1", [{ seq: 6 }, { seq: 7 }])
   })
 
-  it("does not resync when crewId is not yet known, but still tracks the seq", () => {
+  it("does not resync when crewId is not yet known", () => {
     const onResync = vi.fn()
+    renderHook(() => useIssueEventGapResync({ crewId: null, onResync }))
+
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 5 })
+    emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 8 }) // a gap, but no crewId yet
+
+    expect(api.apiFetch).not.toHaveBeenCalled()
+    expect(onResync).not.toHaveBeenCalled()
+  })
+
+  // Code review on #2377: the original version advanced the cursor past a
+  // gap it could not act on (no crewId yet), so once a crew id DID show
+  // up the gap was gone for good — the next-arriving frame read as a
+  // fresh "no gap" baseline instead of a still-outstanding one. Fixed:
+  // the cursor stays at the pre-gap seq until a resync actually confirms
+  // it caught up, so the SAME gap is retried the moment crewId arrives.
+  it("retries a gap once crewId becomes available, instead of losing it", async () => {
+    const onResync = vi.fn()
+    api.apiFetch.mockResolvedValue(
+      jsonResponse({ events: [{ seq: 6 }, { seq: 7 }, { seq: 8 }], after_seq: 5, latest_seq: 8 }),
+    )
     const { rerender } = renderHook(({ crewId }) => useIssueEventGapResync({ crewId, onResync }), {
       initialProps: { crewId: null as string | null },
     })
 
     emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 5 })
     emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 8 }) // a gap, but no crewId yet
-
     expect(api.apiFetch).not.toHaveBeenCalled()
 
-    // crewId shows up later; the NEXT consecutive frame (seq 9, following
-    // the already-tracked 8) must not re-trigger a resync for the gap that
-    // already passed.
+    // crewId shows up. The NEXT frame's gap check still compares against
+    // seq 5 (never advanced), so seq 9 here reads as a gap against 5, not
+    // as "consecutive to the already-lost seq 8" — and resyncs from 5.
     rerender({ crewId: "crew-1" })
     emit("issue.delivery.acked", { mission_id: "m1", identifier: "ENG-1", seq: 9 })
-    expect(api.apiFetch).not.toHaveBeenCalled()
+
+    expect(api.apiFetch).toHaveBeenCalledTimes(1)
+    expect(api.apiFetch.mock.calls[0][0]).toBe("/api/v1/crews/crew-1/issues/ENG-1/events?after_seq=5")
+    await new Promise((r) => setTimeout(r, 0))
+    expect(onResync).toHaveBeenCalledWith("m1", "ENG-1", [{ seq: 6 }, { seq: 7 }, { seq: 8 }])
   })
 
   it("tracks missions independently — a gap on one mission does not affect another", () => {

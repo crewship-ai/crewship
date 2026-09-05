@@ -51,8 +51,10 @@ const MAX_RESYNC_PAGES = 20
  */
 export function useIssueEventGapResync(params: {
   /** The crew the resync GET is scoped under — null skips fetching (no
-   *  crew resolved yet) but still tracks the seq so a later gap on the
-   *  SAME jump isn't re-detected once a crew id does arrive. */
+   *  crew resolved yet). A gap detected before crewId is known is NOT
+   *  advanced past (see the handler body) so it is still detected — and
+   *  retried — once a crew id does arrive, instead of being silently
+   *  forgotten (a real bug caught in review on #2377). */
   crewId: string | null
   /** Called with the missionId, its identifier (when the triggering
    *  payload carried one), and the ordered, FULLY-paged events GET
@@ -84,13 +86,38 @@ export function useIssueEventGapResync(params: {
 
       const lastSeq = lastSeqRef.current.get(missionId) ?? null
       const { hasGap, afterSeq } = detectSeqGap(lastSeq, seq)
-      // Track the observed seq unconditionally — including the "can't
-      // resync, no crewId yet" branch below — so a gap this hook could not
-      // act on this time is not re-flagged forever once a crew id shows up
-      // and every SUBSEQUENT frame keeps arriving normally.
-      lastSeqRef.current.set(missionId, seq)
-      if (!hasGap || !crewId) return
-      if (inFlightRef.current.has(missionId)) return
+
+      if (!hasGap) {
+        // No gap. `afterSeq` here is detectSeqGap's OWN correct next
+        // cursor — `seq` for the first-ever observation or a genuinely
+        // consecutive frame, but `lastSeq` (unchanged) for a stale or
+        // out-of-order-OLDER frame. Setting the cursor to the raw `seq`
+        // instead would regress it backwards on that last case — a real
+        // bug caught in review on #2377 — so this always takes
+        // detectSeqGap's answer, never the frame's own seq directly.
+        lastSeqRef.current.set(missionId, afterSeq)
+        return
+      }
+
+      // A gap. Deliberately do NOT advance lastSeqRef past `afterSeq`
+      // (the OLD lastSeq) until a resync actually confirms it caught up —
+      // three cases fall through to here and all three need the SAME
+      // seq still treated as missing next time:
+      //   1. No crewId yet — nothing this hook can fetch with. Advancing
+      //      the cursor here would mean the gap is silently forgotten the
+      //      moment a crewId later shows up, because the next frame would
+      //      read as "consecutive" against a cursor that was never
+      //      actually resynced (caught live in review on #2377).
+      //   2. A resync for this mission is already in flight — that fetch
+      //      already pages up to the server's CURRENT latest_seq, so a
+      //      second, concurrent GET for the same mission would be pure
+      //      waste; its own completion (below) is what advances the
+      //      cursor.
+      //   3. The resync itself fails (network error) — the `.catch`
+      //      below intentionally does nothing, leaving the cursor at
+      //      `afterSeq` so the NEXT frame retries from the same point
+      //      rather than silently giving up on the missed range.
+      if (!crewId || inFlightRef.current.has(missionId)) return
 
       const identifier = typeof payload.identifier === "string" ? payload.identifier : undefined
       const ident = identifier ?? missionId
@@ -98,19 +125,23 @@ export function useIssueEventGapResync(params: {
       void resyncMission(crewId, ident, afterSeq)
         .then((result) => {
           if (!result) return
-          // Trust the server's high-water mark over the frame that
-          // triggered this resync — another frame may have landed while
-          // the fetch was in flight, and this is what makes a SUBSEQUENT
-          // consecutive ack (seq = result.latestSeq + 1) read as
-          // consecutive rather than as yet another gap.
-          lastSeqRef.current.set(missionId, result.latestSeq)
+          // Trust the paged, ACTUALLY-FETCHED high-water mark over the
+          // frame that triggered this resync — another frame may have
+          // landed while the fetch was in flight, and this is what makes
+          // a SUBSEQUENT consecutive ack (seq = result.latestSeq + 1)
+          // read as consecutive rather than as yet another gap. `Math.max`
+          // against whatever is stored now is a defensive floor, not the
+          // expected path — a NEWER consecutive frame could in principle
+          // have already advanced the cursor past this resync's own
+          // watermark while the fetch was in flight.
+          lastSeqRef.current.set(missionId, Math.max(lastSeqRef.current.get(missionId) ?? 0, result.latestSeq))
           if (result.events.length > 0) onResync(missionId, identifier, result.events)
         })
         .catch(() => {
-          // Best-effort: a failed resync leaves lastSeqRef at the newly
-          // observed seq (already set above), so the NEXT consecutive
-          // frame is judged against that, not against a stale cursor that
-          // would re-flag the same gap forever.
+          // Best-effort: lastSeqRef was never advanced past `afterSeq`
+          // for this gap, so the NEXT delivery.acked frame re-detects it
+          // and retries from the same point — a failed resync does not
+          // silently give up on the missed range.
         })
         .finally(() => {
           inFlightRef.current.delete(missionId)
