@@ -24,6 +24,11 @@ const statusConfig: Record<string, { color: string; label: string; icon: React.E
   PLANNING: { color: "text-purple bg-purple/10 border-purple/30", label: "Planning", icon: Clock },
   IN_PROGRESS: { color: "text-primary bg-primary/10 border-primary/30", label: "Running", icon: Loader2 },
   REVIEW: { color: "text-warn bg-warn/10 border-warn/30", label: "In Review", icon: ChevronRight },
+  // B13 (#2370): the backend now writes DONE, not COMPLETED, for an
+  // orchestration mission approved out of REVIEW (PRD-ISSUES-AND-ROUTINES-
+  // 2026 §3.1). COMPLETED stays mapped too — a not-yet-backfilled row, or
+  // an older server, can still report it.
+  DONE: { color: "text-success bg-success/10 border-success/30", label: "Completed", icon: CheckCircle2 },
   COMPLETED: { color: "text-success bg-success/10 border-success/30", label: "Completed", icon: CheckCircle2 },
   FAILED: { color: "text-destructive bg-destructive/10 border-destructive/30", label: "Failed", icon: AlertTriangle },
   CANCELLED: { color: "text-muted-foreground bg-muted-foreground/10 border-border/30", label: "Cancelled", icon: Square },
@@ -82,7 +87,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
           method: "POST",
         })
       } else {
-        const newStatus = action === "cancel" ? "CANCELLED" : "COMPLETED"
+        const newStatus = action === "cancel" ? "CANCELLED" : "DONE"
         res = await apiFetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -232,7 +237,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             </Button>
           )}
           {/* Restart — available for finished/failed missions */}
-          {(mission.status === "COMPLETED" || mission.status === "FAILED" || mission.status === "CANCELLED" || mission.status === "REVIEW") && (
+          {(mission.status === "DONE" || mission.status === "COMPLETED" || mission.status === "FAILED" || mission.status === "CANCELLED" || mission.status === "REVIEW") && (
             <Button
               size="sm"
               variant="outline"
