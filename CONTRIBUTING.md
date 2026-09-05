@@ -352,13 +352,17 @@ forgot (#849, #886), a `pnpm prisma generate` or `pnpm build` break, the
 `## [Unreleased]` section. That makes a missing entry not untidiness but
 a release note that does not exist — and a change nobody is told about.
 
-**A PR that touches `internal/api/`, `cmd/crewship/`, `app/`,
-`components/`, `lib/`, `hooks/` or `stores/` must add an entry under
-`## [Unreleased]`.** The **Changelog Guard** workflow enforces it. The
-last three are peer top-level trees, not sub-directories of the two
-above, and they carry as much user-visible behaviour: a chat or socket
-fix lands in `hooks/use-chat.ts`, retry and error copy in
-`lib/api-error.ts`. Test files inside any of those trees don't count as
+**A PR that touches `internal/api/`, `internal/orchestrator/`,
+`internal/harbormaster/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
+`hooks/` or `stores/` must add an entry under `## [Unreleased]`.** The
+**Changelog Guard** workflow enforces it. The three frontend trees at the
+end are peer top-level trees, not sub-directories of `app/` and
+`components/`, and they carry as much user-visible behaviour: a chat or
+socket fix lands in `hooks/use-chat.ts`, retry and error copy in
+`lib/api-error.ts`. The two extra `internal/` packages are the agent's
+runtime (what lands in its environment, how a run starts and stops) and
+the approval gate a human reads; the rest of `internal/` is deliberately
+not watched, because it reaches a user through the trees already listed. Test files inside any of those trees don't count as
 user-visible, and Dependabot is exempt by actor.
 
 **The entry has to be under `## [Unreleased]`, and the guard checks that**,
