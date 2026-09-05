@@ -365,12 +365,13 @@ var issueSubtasksCmd = &cobra.Command{
 	},
 }
 
-// issueActivityCmd dumps the mission_activity timeline. The server
-// caps the result at 50 rows DESC; we surface that as-is so users
-// can pipe into jq for deeper analysis.
+// issueActivityCmd dumps the mission_activity timeline. The server takes the
+// issue's most recent 50 rows and returns them OLDEST FIRST, ordered by the
+// same mission_activity.seq that `issue events` uses — the two commands read
+// one table and now tell one story. Surfaced as-is so users can pipe into jq.
 var issueActivityCmd = &cobra.Command{
 	Use:   "activity <identifier>",
-	Short: "Show the activity timeline for an issue",
+	Short: "Show the activity timeline for an issue (oldest first, last 50 rows)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
