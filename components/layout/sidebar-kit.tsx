@@ -474,7 +474,7 @@ export function SidebarSection({
       )}
       <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">{label}</span>
       {count != null && (
-        <span className="ml-auto text-[10px] tabular-nums text-muted-foreground/50">{count}</span>
+        <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{count}</span>
       )}
       {!collapsible && actions}
     </>
