@@ -38,6 +38,7 @@ export interface InboxV2Confirmation {
  * the page from /crews and /agents; every row reads, none fetch.
  */
 export interface InboxCrewRef {
+  icon?: string | null
   id: string
   name: string
   slug: string
@@ -55,7 +56,12 @@ export interface InboxAgentRef {
   crew?: { name: string; slug: string; color?: string | null } | null
 }
 
+export interface InboxRoutineRef { id: string; slug: string; name: string; author_crew_id?: string; icon?: string; color?: string }
+
 export interface InboxLookup {
+  issueById?: ReadonlyMap<string, Mission>
+  missionById?: ReadonlyMap<string, Mission>
+  routineBySlug?: ReadonlyMap<string, InboxRoutineRef>
   crewById: ReadonlyMap<string, InboxCrewRef>
   agentBySlug: ReadonlyMap<string, InboxAgentRef>
   /** The approvals queue names agents by id, inbox rows by slug. */

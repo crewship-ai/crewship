@@ -11,7 +11,7 @@ import type { InboxV2Filters } from "./inbox-v2-derive"
  * bell changed the URL and left the reading pane on whatever was already open.
  *
  * The first effect existed for that reason but only ever *set* a selection.
- * Leaving `/inbox-v2?item=x` for plain `/inbox-v2` therefore kept row x in the
+ * Leaving `/inbox?item=x` for plain `/inbox` therefore kept row x in the
  * pane — a link that names no row is a request to show no row, and answering it
  * with the previous one is how a person ends up deciding the wrong request. The
  * search filter had no effect at all, so `?agent=riley` after `?agent=casey`

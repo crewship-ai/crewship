@@ -384,7 +384,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
               (run.current_step_id !== "" && currentStep?.type === "wait")
             if (!isWaitingForApproval) return null
             return (
-              <Link href="/inbox-v2">
+              <Link href="/inbox">
                 <Button size="sm" variant="ghost" className="h-6 gap-1.5 text-[10px]">
                   <Sparkles className="h-3 w-3" />
                   Resolve in Inbox

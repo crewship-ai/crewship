@@ -58,6 +58,12 @@ type pendingFollowUp struct {
 // human mentions the agent again, or the requeue this dispatch attempt
 // itself might have started) gets another chance.
 func (h *AssignmentHandler) dispatchQueuedFollowUpsForSession(ctx context.Context, finishedAssignmentID, workspaceID string) {
+	// DispatchMention starts execution asynchronously. A fast completion can
+	// re-enter here before its caller claims the pending deliveries, selecting
+	// the same batch again. Keep selection, dispatch and claim attachment in
+	// one critical section; no agent execution is awaited while holding it.
+	h.followUpMu.Lock()
+	defer h.followUpMu.Unlock()
 	var missionID, agentID string
 	var sessionID sql.NullString
 	if err := h.db.QueryRowContext(ctx,

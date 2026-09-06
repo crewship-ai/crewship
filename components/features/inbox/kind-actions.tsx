@@ -41,7 +41,9 @@ export function KindActions({
   onDenyHire,
   crewHref,
   onAct,
+  hideMessageLinks = false,
 }: {
+  hideMessageLinks?: boolean
   item: InboxItem
   onResolve: (action: string) => void | Promise<void>
   onRefresh: (action?: string) => void | Promise<void>
@@ -109,7 +111,7 @@ export function KindActions({
             await onRefresh(approved ? "approved" : "denied")
           })
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -144,7 +146,7 @@ export function KindActions({
       // non-blocking hire surfaces (blocking lands as kind=waitpoint).
       if (item.payload?.kind === "hire") {
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -230,7 +232,7 @@ export function KindActions({
       // or expired" complaint was the second click hitting the
       // already-denied row.
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             disabled={disabled || busy !== null}
@@ -329,7 +331,7 @@ export function KindActions({
             await onRefresh(action === "approve" ? "approved" : "rejected")
           })
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -403,7 +405,7 @@ export function KindActions({
           })
 
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -491,7 +493,7 @@ export function KindActions({
           })
 
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="soft" disabled={disabled || busy !== null}
               onClick={() => void resolveKeeper("approve")}>
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -550,7 +552,7 @@ export function KindActions({
       if (escType === "CREDENTIAL") {
         if (item.payload?.has_pending_credential === true) {
           return (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 disabled={disabled || busy !== null}
@@ -574,7 +576,7 @@ export function KindActions({
           )
         }
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               variant="ghost"
@@ -596,7 +598,7 @@ export function KindActions({
       // Real agent escalation (non-credential): inline approve / reject.
       if (escType !== "") {
         return (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={disabled || busy !== null}
@@ -638,7 +640,7 @@ export function KindActions({
       // failure time. If the slug is missing we fall back to just
       // marking the inbox item resolved so the user isn't stuck.
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             disabled={disabled || busy !== null}
@@ -893,8 +895,8 @@ export function KindActions({
       // the title and has nowhere to go. "Agent replied" items carry
       // chat_url instead — deep link straight into the session.
       return (
-        <div className="flex items-center gap-2">
-          {safeChatURL(item) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!hideMessageLinks && safeChatURL(item) && (
               <Button asChild size="sm" className="gap-1.5">
                 <Link href={safeChatURL(item) as string}>
                   <MessageSquare className="h-3 w-3" />
@@ -902,7 +904,7 @@ export function KindActions({
                 </Link>
               </Button>
             )}
-          {typeof item.payload?.issue_identifier === "string" && (
+          {!hideMessageLinks && typeof item.payload?.issue_identifier === "string" && (
             <Button asChild size="sm" className="gap-1.5">
               <Link
                 href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}

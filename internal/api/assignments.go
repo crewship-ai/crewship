@@ -54,6 +54,9 @@ type agentConfigResolver interface {
 }
 
 type AssignmentHandler struct {
+	// Serializes follow-up selection through claim attachment. Agent execution
+	// stays asynchronous; a fast completion waits before selecting again.
+	followUpMu      sync.Mutex
 	db              *sql.DB
 	orch            *orchestrator.Orchestrator
 	hub             *ws.Hub

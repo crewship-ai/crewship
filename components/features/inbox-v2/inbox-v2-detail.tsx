@@ -1,5 +1,7 @@
 "use client"
 
+import { MarkdownContent } from "@/components/features/issues/markdown-content"
+
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
@@ -8,6 +10,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { InboxMessageSurface, messageSection, messageDivider } from "@/components/features/inbox/inbox-message-surface"
 import { InboxDetail } from "@/components/features/inbox/inbox-detail"
 import type { WorkspaceRole } from "@/components/features/inbox/inbox-derive"
 import { canRole, deciderCopy, remainingLabel, since } from "@/components/features/inbox/inbox-derive"
@@ -22,6 +25,8 @@ import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 import { entryKindPill, outcomeStatus } from "./inbox-v2-derive"
+import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { InboxTriage } from "./inbox-v2-triage"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Confirmation, type InboxV2Entry } from "./inbox-v2-types"
 
@@ -33,6 +38,7 @@ interface Props {
   detailedInboxItem?: InboxItem
   detailLoading?: boolean
   confirmation: InboxV2Confirmation | null
+  nextReview?: { count: number; onOpen: () => void }
   onClearConfirmation: () => void
   onViewReceipt: (entry: InboxV2Entry) => void
   onInboxResolve: (item: InboxItem, action: string) => Promise<void>
@@ -49,10 +55,11 @@ interface Props {
   onDenyHire?: () => Promise<void>
   /** What the triage card shows when nothing is open. */
   triage?: {
+    incomplete?: boolean
+    loading?: boolean
     action: InboxV2Entry[]
     updates: InboxV2Entry[]
     history: InboxV2Entry[]
-    live: boolean
     onOpen: (entry: InboxV2Entry) => void
     onCrew: (crewName: string) => void
   }
@@ -94,7 +101,7 @@ export function InboxV2Detail(props: Props) {
     const item = props.detailedInboxItem ?? entry.inboxItem
     if (!item) return null
     return (
-      <div className="mx-auto w-full max-w-4xl p-4 lg:p-6">
+      <div className="mx-auto w-full max-w-4xl p-3 sm:p-5 lg:p-8">
         {props.detailLoading && (
           <div className="mb-2 text-[11px] text-muted-foreground">Loading decision evidence…</div>
         )}
@@ -113,24 +120,24 @@ export function InboxV2Detail(props: Props) {
     )
   }
   if (entry.source === "approval") return <ApprovalDetail entry={entry} role={props.role} onDecide={props.onApprovalDecide} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} />
-  if (entry.source === "mission") return <MissionDetail entry={entry} />
+  if (entry.source === "mission") return <MissionDetail entry={entry} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} />
   return <GroupedIncident entry={entry} onArchive={props.onArchiveGroup} />
 }
 
 function DecisionConfirmation({
-  confirmation, onClearConfirmation, onViewReceipt,
+  confirmation, onClearConfirmation, onViewReceipt, nextReview,
 }: Props & { confirmation: InboxV2Confirmation }) {
   const positive = !["denied", "rejected", "cancelled"].includes(confirmation.action)
   const label = outcomeLabel(confirmation.action)
   return (
     <div className="flex min-h-full items-start justify-center p-6 lg:p-12">
       <DetailCard className={cn("w-full max-w-xl", positive ? "border-success/35 bg-success/[.06]" : "border-border")}>
-        <div className="flex flex-col items-center gap-5 py-6 text-center">
+        <div className="flex flex-col items-center gap-4 py-2 text-center">
           <span className={cn(
-            "flex h-14 w-14 items-center justify-center rounded-full border",
+            "flex h-9 w-9 items-center justify-center rounded-full border",
             positive ? "border-success/50 bg-success/10 text-success" : "border-destructive/50 bg-destructive/10 text-destructive",
           )}>
-            {positive ? <CheckCircle2 className="h-7 w-7" /> : <X className="h-7 w-7" />}
+            {positive ? <CheckCircle2 className="h-5 w-5" /> : <X className="h-5 w-5" />}
           </span>
           <div>
             <h2 className="text-lg font-semibold">{label}</h2>
@@ -138,7 +145,8 @@ function DecisionConfirmation({
             <p className="mt-2 text-xs text-muted-foreground-soft">Saved {since(confirmation.at)} · the record stays in History</p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button onClick={() => onViewReceipt(confirmation.entry)} className="gap-2">
+            {nextReview && <Button onClick={nextReview.onOpen}>Next to review · {nextReview.count}</Button>}
+            <Button variant={nextReview ? "outline" : "default"} onClick={() => onViewReceipt(confirmation.entry)} className="gap-2">
               View record <ExternalLink className="h-3.5 w-3.5" />
             </Button>
             <Button variant="outline" onClick={onClearConfirmation}>Back to inbox</Button>
@@ -183,8 +191,9 @@ function ApprovalDetail({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-4 lg:p-6">
-      <DetailCard tone={pending ? "warn" : "default"} className={pending ? "bg-warn/[.05]" : undefined}>
+    <div className="mx-auto flex w-full max-w-4xl flex-col p-3 sm:p-5 lg:p-8">
+      <InboxMessageSurface>
+      <section className={messageSection}>
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <ShieldAlert className="h-4 w-4 text-warn" />
@@ -197,7 +206,7 @@ function ApprovalDetail({
             )}
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{entry.title}</h2>
+            <div className="flex items-start gap-3"><EntryAvatar entry={entry} lookup={lookup} compact /><h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entry.title}</h1></div>
             <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               <span>Requested by</span>
               {agent ? (
@@ -208,7 +217,7 @@ function ApprovalDetail({
               {crew && (
                 <>
                   <span>·</span>
-                  <Link href={entityHref({ kind: "crew", slug: crew.slug })} className="text-foreground hover:underline">{crew.name}</Link>
+                  <Link href={entityHref({ kind: "crew", slug: crew.slug })} className="inline-flex items-center gap-1.5 text-foreground hover:underline"><CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" />{crew.name}</Link>
                 </>
               )}
               <span>· {formatDateTime(row.created_at)}</span>
@@ -218,9 +227,11 @@ function ApprovalDetail({
             <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">What you are approving</div>
             <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{row.reason || "No reason supplied."}</p>
           </div>
+          {Object.keys(row.payload ?? {}).length > 0 && <div className="border-t border-border/60 pt-4"><h3 className="mb-2 text-body font-medium">Impact and context</h3><HumanContext payload={row.payload ?? {}} /></div>}
           {pending && (
             <>
               <Textarea
+                aria-label="Decision comment"
                 value={comment}
                 onChange={(event) => setComment(event.target.value)}
                 placeholder="Optional context for the permanent audit record"
@@ -233,7 +244,7 @@ function ApprovalDetail({
                 <Button disabled={!allowed || busy !== null} variant="outline" onClick={() => void decide("denied")} className="gap-2">
                   <X className="h-4 w-4" /> {busy === "denied" ? "Denying…" : "Deny"}
                 </Button>
-                <span className="self-center text-xs text-muted-foreground">{deciderCopy("manage")}{allowed ? " · you can" : ""}</span>
+                {!allowed && <span className="self-center text-xs text-muted-foreground">{deciderCopy("manage")}</span>}
               </div>
             </>
           )}
@@ -246,22 +257,19 @@ function ApprovalDetail({
             </div>
           )}
         </div>
-      </DetailCard>
+      </section>
 
-      <DetailCard title="Impact and context" subtitle="captured from the source request">
-        <HumanContext payload={row.payload ?? {}} />
-      </DetailCard>
 
-      {(crew || agent || row.mission_id) && (
-        <DetailCard bare>
+      {(agent || row.mission_id) && (
+        <section className={messageDivider}>
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground-soft">Where this came from</span>
             {agent && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "chat", agentSlug: agent.slug })}>Chat with {agent.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
-            {crew && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "crew", slug: crew.slug })}>Open {crew.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
             {row.mission_id && <Button asChild size="xs" variant="outline"><Link href={`/missions/${encodeURIComponent(row.mission_id)}/timeline`}>Open mission <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
           </div>
-        </DetailCard>
+        </section>
       )}
+      </InboxMessageSurface>
     </div>
   )
 }
@@ -294,21 +302,23 @@ function humanValue(value: unknown): string {
   return String(value)
 }
 
-function MissionDetail({ entry }: { entry: InboxV2Entry }) {
+function MissionDetail({ entry, lookup }: { entry: InboxV2Entry; lookup: InboxLookup }) {
+  const identity = entryIdentity(entry, lookup)
   const mission = entry.mission!
   const task = entry.task!
   const review = task.needs_review
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-4 lg:p-6">
-      <DetailCard tone={review ? "warn" : "default"}>
+    <div className="mx-auto flex w-full max-w-4xl flex-col p-3 sm:p-5 lg:p-8">
+      <InboxMessageSurface><div className={messageSection}>
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
             {review ? <Clock3 className="h-4 w-4 text-warn" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
             <span className="text-sm font-semibold">{review ? "Review requested" : "Mission needs attention"}</span>
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{entry.title}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{mission.title} · {entry.subject} · {since(entry.createdAt)}</p>
+            <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entry.title}</h1>
+            <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><EntryAvatar entry={entry} lookup={lookup} compact />{identity.name}{identity.crew && <> · {identity.crew.name}</>} · {since(entry.createdAt)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{mission.title}</p>
           </div>
           {entry.summary && <p className="whitespace-pre-wrap text-sm leading-relaxed">{entry.summary}</p>}
           <Button asChild className="w-fit gap-2">
@@ -317,7 +327,7 @@ function MissionDetail({ entry }: { entry: InboxV2Entry }) {
             </Link>
           </Button>
         </div>
-      </DetailCard>
+      </div></InboxMessageSurface>
     </div>
   )
 }
@@ -325,21 +335,27 @@ function MissionDetail({ entry }: { entry: InboxV2Entry }) {
 function GroupedIncident({ entry, onArchive }: { entry: InboxV2Entry; onArchive: Props["onArchiveGroup"] }) {
   const [busy, setBusy] = useState(false)
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4 lg:p-6">
-      <DetailCard className="border-destructive/25 bg-destructive/[.035]">
+    <div className="mx-auto flex w-full max-w-4xl flex-col p-3 sm:p-5 lg:p-8">
+      <InboxMessageSurface><div className={messageSection}>
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2 text-destructive">
             <AlertTriangle className="h-4 w-4" />
             <span className="text-sm font-semibold">Grouped system incident</span>
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{entry.title}</h2>
+            <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entry.title}</h1>
             <p className="mt-1 text-sm text-muted-foreground">{entry.groupedItems?.length ?? 0} related updates grouped into one item.</p>
           </div>
           <div className="rounded-lg border border-border/60 bg-background/40 p-3 text-sm">
             <p className="font-medium">No client decision is required.</p>
             <p className="mt-1 text-muted-foreground">The underlying service issue belongs in System Health. These notices remain available here without competing with approvals.</p>
           </div>
+          <details className="border-t border-border/60 pt-3">
+            <summary className="cursor-pointer text-body">View {entry.groupedItems?.length ?? 0} related updates</summary>
+            <ul className="mt-3 divide-y divide-border/60">
+              {entry.groupedItems?.map((item) => <li key={item.id} className="py-3"><p className="text-body font-medium">{item.title}</p><p className="text-micro text-muted-foreground">{since(item.created_at)}</p>{item.body_md && <div className="mt-1 text-body text-muted-foreground"><MarkdownContent>{item.body_md}</MarkdownContent></div>}</li>)}
+            </ul>
+          </details>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
@@ -361,7 +377,7 @@ function GroupedIncident({ entry, onArchive }: { entry: InboxV2Entry; onArchive:
             <Button asChild variant="ghost" className="gap-2"><Link href="/admin">Open System Health <ExternalLink className="h-3.5 w-3.5" /></Link></Button>
           </div>
         </div>
-      </DetailCard>
+      </div></InboxMessageSurface>
     </div>
   )
 }

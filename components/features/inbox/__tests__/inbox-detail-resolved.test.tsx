@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 import type { InboxItem } from "@/hooks/use-inbox"
 
@@ -86,7 +86,8 @@ describe("a decision whose source is gone", () => {
 
   it("offers no way out while the source is still live", () => {
     render(<InboxDetail item={orphan()} role="OWNER" onResolve={noop} onArchive={noop} onMarkUnread={noop} onRefresh={noop} />)
-    expect(screen.queryByRole("button", { name: /^Archive$/ })).toBeNull()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    expect(screen.queryByRole("menuitem", { name: /^Archive$/ })).toBeNull()
   })
 
   it("offers Archive once the server says the source is gone", () => {
@@ -99,6 +100,7 @@ describe("a decision whose source is gone", () => {
         role="OWNER" onResolve={noop} onArchive={noop} onMarkUnread={noop} onRefresh={noop}
       />,
     )
-    expect(screen.getByRole("button", { name: /^Archive$/ })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    expect(screen.getByRole("menuitem", { name: /^Archive$/ })).toBeTruthy()
   })
 })
