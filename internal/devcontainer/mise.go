@@ -277,40 +277,80 @@ func InstallMise(ctx context.Context, containerID string, exec ExecFunc) error {
 	return nil
 }
 
-// miseAgentDirs are the directories mise itself owns under the agent home.
-// Created as root and chowned to the agent user before any agent-side mise
-// invocation — see the comment in InstallMiseTools.
+// Where mise lives in the image, and why it is not the agent's home.
+//
+// /home/agent is a per-crew named volume at runtime. Anything the build puts
+// under it is hidden the moment the volume mounts — the volume takes its
+// content from the FIRST image that mounted it (or from the init container
+// that chowns it), never from a rebuilt one. Tools mise installed under
+// ~/.local/share/mise were therefore present in the image and absent in the
+// running container: on 2026-09-06 a wizard-built crew's `claude` (2.1.261,
+// shim and all) sat in crewship-cache:… while the container had an empty
+// /home/agent/.local. Every mise path is pinned under /opt/mise, which is
+// image-resident and not a mount point, and the same MISE_* variables are
+// exported to the runtime container (MiseRuntimeEnv) so the shims resolve.
+const miseRoot = "/opt/mise"
+
+// miseAgentDirs are the directories mise itself owns. Created as root and
+// chowned to the agent user before any agent-side mise invocation — see the
+// comment in InstallMiseTools.
 var miseAgentDirs = []string{
-	"/home/agent/.config/mise",
-	"/home/agent/.local/share/mise",
-	"/home/agent/.local/state/mise",
-	"/home/agent/.cache/mise",
+	miseRoot + "/config",
+	miseRoot + "/data",
+	miseRoot + "/state",
+	miseRoot + "/cache",
 }
 
-// miseAgentDirParents are the XDG roots holding miseAgentDirs. They are shared
-// with other tooling, so they get a non-recursive chown: the agent needs to be
-// able to create siblings (mise writes lock files next to its dirs), not to own
-// whatever a feature installed alongside.
+// miseAgentDirParents are the roots holding miseAgentDirs, chowned
+// non-recursively so the agent can create siblings (mise writes lock files
+// next to its dirs).
 var miseAgentDirParents = []string{
-	"/home/agent/.config",
-	"/home/agent/.local",
-	"/home/agent/.local/share",
-	"/home/agent/.local/state",
-	"/home/agent/.cache",
+	miseRoot,
 }
 
-// miseAgentEnv pins every XDG root mise resolves, so it cannot fall back to a
-// path that was never prepared or chowned.
-var miseAgentEnv = []string{
-	"HOME=/home/agent",
-	"XDG_CONFIG_HOME=/home/agent/.config",
-	"XDG_DATA_HOME=/home/agent/.local/share",
-	"XDG_STATE_HOME=/home/agent/.local/state",
-	"XDG_CACHE_HOME=/home/agent/.cache",
+// miseConfigFile is the global mise config the build writes and the runtime
+// reads (MISE_GLOBAL_CONFIG_FILE).
+const miseConfigFile = miseRoot + "/config/config.toml"
+
+// miseBuildEnv pins every directory mise resolves at BUILD time under
+// /opt/mise, so `mise install` cannot fall back to a path under the agent's
+// home (hidden by the volume later) or one that was not prepared and chowned.
+var miseBuildEnv = [][2]string{
+	{"MISE_CONFIG_DIR", miseRoot + "/config"},
+	{"MISE_DATA_DIR", miseRoot + "/data"},
+	{"MISE_STATE_DIR", miseRoot + "/state"},
+	{"MISE_CACHE_DIR", miseRoot + "/cache"},
+	{"MISE_GLOBAL_CONFIG_FILE", miseConfigFile},
 }
+
+// MiseRuntimeEnv is what the running container gets (ensureAgentToolPath →
+// image ENV, /etc/environment, runtime env): the read-only parts — config,
+// data, global config — where the build left them under /opt/mise, and the
+// two mise writes to at every invocation — cache and state — under the
+// agent's home, which is the writable volume. The crew container runs with a
+// read-only root filesystem; pointing cache at /opt/mise there made every
+// `claude` invocation print "mise WARN failed to write cache file … Read-only
+// file system" into the adapter's stderr.
+var MiseRuntimeEnv = [][2]string{
+	{"MISE_CONFIG_DIR", miseRoot + "/config"},
+	{"MISE_DATA_DIR", miseRoot + "/data"},
+	{"MISE_STATE_DIR", "/home/agent/.local/state/mise"},
+	{"MISE_CACHE_DIR", "/home/agent/.cache/mise"},
+	{"MISE_GLOBAL_CONFIG_FILE", miseConfigFile},
+}
+
+// miseAgentEnv is miseBuildEnv plus HOME, as the exec env of every
+// agent-side mise call at build time.
+var miseAgentEnv = func() []string {
+	env := []string{"HOME=/home/agent"}
+	for _, kv := range miseBuildEnv {
+		env = append(env, kv[0]+"="+kv[1])
+	}
+	return env
+}()
 
 // InstallMiseTools writes the mise config and runs `mise install`.
-// Runs as agent user (user "1001:1001") since mise installs to ~/.local/share/mise/.
+// Runs as agent user (user "1001:1001"); mise installs under /opt/mise (see miseRoot).
 func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, exec ExecFunc) error {
 	if cfg.IsEmpty() {
 		return nil
@@ -319,25 +359,17 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	toml := cfg.ToTOML()
 
 	// Create every directory mise writes to, as root, before handing them to
-	// the agent user.
-	//
-	// The config is only one of four XDG roots mise touches: tool payloads go
-	// to $XDG_DATA_HOME/mise, tracked-config state to $XDG_STATE_HOME/mise and
-	// downloads to $XDG_CACHE_HOME/mise. Preparing .config/mise alone was
-	// enough on images that ship an agent-owned home, but on a base image
-	// where /home/agent (or an existing .local) belongs to root — a bare
-	// debian runtime image plus common-utils, which is exactly what the E2E
-	// provisioning test builds — `mise install` running as 1001 could not
-	// create its own state dir and died with
-	// "create_dir_all: ~/.local/state/mise/tracked-configs: Permission denied".
-	// The XDG parents are chowned non-recursively here (they are shared with
-	// other tooling — .local/share holds far more than mise — but the agent
-	// must be able to create siblings in them); the mise-owned subtrees get a
-	// full chown in the next step.
+	// the agent user. All four roots (config, data, state, cache) live under
+	// /opt/mise — see miseRoot for why not the agent's home — and the MISE_*
+	// variables in miseAgentEnv point every mise call at them, so `mise
+	// install` running as 1001 never touches a path that was not prepared
+	// and chowned. (Its ancestor under ~/.local died with "create_dir_all:
+	// ~/.local/state/mise/tracked-configs: Permission denied" on a root-owned
+	// home; the same rule applies here, hence the explicit chown.)
 	stdout, exitCode, err := exec(ctx, containerID, []string{
 		"sh", "-c", "mkdir -p " + strings.Join(miseAgentDirs, " ") +
 			" && chown 1001:1001 " + strings.Join(miseAgentDirParents, " ") +
-			" && cat > /home/agent/.config/mise/config.toml << 'MISE_EOF'\n" + toml + "MISE_EOF",
+			" && cat > " + miseConfigFile + " << 'MISE_EOF'\n" + toml + "MISE_EOF",
 	}, "0:0", nil)
 	if err != nil {
 		return fmt.Errorf("mise: write config: %v", err)
@@ -402,8 +434,12 @@ func InstallMiseTools(ctx context.Context, containerID string, cfg *MiseConfig, 
 	return nil
 }
 
-// miseShimsDir is where `mise reshim` writes, given miseAgentEnv's XDG_DATA_HOME.
-const miseShimsDir = "/home/agent/.local/share/mise/shims"
+// MiseShimsDir is where `mise reshim` writes, given MISE_DATA_DIR. On the
+// agent's PATH through AgentToolPathDirs.
+const MiseShimsDir = miseRoot + "/data/shims"
+
+// miseShimsDir keeps the older name for the verification below.
+const miseShimsDir = MiseShimsDir
 
 // verifyMiseShims fails when any shim mise just wrote does not resolve.
 func verifyMiseShims(ctx context.Context, containerID string, exec ExecFunc) error {

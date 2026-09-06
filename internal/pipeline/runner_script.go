@@ -325,6 +325,42 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		releaseHold := r.orch.RetainCrewContainer(cfg.ID, containerID)
 		defer releaseHold()
 		r.orch.RegisterStatsContainer(containerID, cfg.ID, req.WorkspaceID)
+
+		// The LIVENESS half of #1473. The exec below carries
+		// orchestrator.SidecarProxyEnv, so the crew egress allowlist applies to
+		// this step — but only crewship-sidecar enforces it, and until now the
+		// ONLY thing that started one was an agent run (ensureSidecar needs an
+		// *AgentRunRequest). startCrew brings the crew's declared SERVICE
+		// sidecars up, never that one. So on a crew no agent run had warmed,
+		// every script step that touched the network died on
+		//
+		//	Failed to connect to 127.0.0.1 port 9119: Couldn't connect to server
+		//
+		// and self-healed the moment anything ran an agent there — which is why
+		// it read as flaky rather than as a missing start. Deterministic on a
+		// fresh seed: ci-nightly-triage's `probe` script step runs before its
+		// `triage` agent step, so it failed on every fresh install.
+		//
+		// EnsureCrewSidecar is the crew-level door onto the same
+		// start / healthy-reuse / policy-change-restart sequence (and the same
+		// #1220 per-container lifecycle lock) the agent path uses. It gets the
+		// crew's full network policy and no credentials — see its doc for
+		// exactly what a crew-level start can and cannot supply.
+		//
+		// Hard failure on purpose: the proxy env is injected unconditionally, so
+		// carrying on would run the user's script against a dead proxy and
+		// surface as an unattributable connection-refused from inside their own
+		// code. It is a no-op when the sidecar is disabled instance-wide.
+		if err := r.orch.EnsureCrewSidecar(ctx, orchestrator.CrewSidecarSpec{
+			CrewID:                cfg.ID,
+			WorkspaceID:           req.WorkspaceID,
+			ContainerID:           containerID,
+			NetworkMode:           cfg.NetworkMode,
+			AllowedDomains:        cfg.AllowedDomains,
+			AllowPrivateEndpoints: cfg.AllowPrivateEndpoints,
+		}); err != nil {
+			return ScriptRunResult{}, fmt.Errorf("script runner: %w", err)
+		}
 	}
 
 	maxBytes := req.MaxBytes

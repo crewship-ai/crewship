@@ -551,6 +551,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// a crew is created or its config changes (CrewHandler.maybeAutoProvision),
 	// so it's ready before the first dispatch — no manual "Build now" step.
 	crews.SetProvisioner(provisioning)
+	// And the other direction: an agent created on, or moved to, an adapter
+	// the crew's image was not verified for rebuilds the crew.
+	agents.SetProvisioner(provisioning)
 	// ContainerStart is the one EnsureCrewRuntime caller with no agent run
 	// behind it to report the activity, so it reports its own. Guarded on
 	// non-nil: assigning a nil *Orchestrator to the interface would make a

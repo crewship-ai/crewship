@@ -20,7 +20,10 @@ type ScheduleUpdater interface {
 // AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 
 type AgentHandler struct {
-	db              *sql.DB
+	db *sql.DB
+	// provisioner rebuilds a crew whose image is not verified for a new
+	// agent's adapter CLI (agents_adapter_rebuild.go). Nil = skip.
+	provisioner     agentProvisionEnqueuer
 	hub             *ws.Hub
 	logger          *slog.Logger
 	license         *license.License

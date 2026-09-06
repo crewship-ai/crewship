@@ -8,7 +8,6 @@ import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
   AttentionStrip,
-  attentionState,
   heldForWorkspace,
   OutcomeKpis,
   RunningNow,
@@ -20,10 +19,8 @@ import {
 } from "@/components/features/dashboard/dashboard-overview"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
-import { BridgeStrip, deriveBridge } from "@/components/features/dashboard/bridge-strip"
 import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fleet-board"
-import { WorkSnapshot } from "@/components/features/dashboard/work-snapshot"
-import { ActivityTicker } from "@/components/features/dashboard/activity-ticker"
+import { DashboardResults } from "@/components/features/dashboard/dashboard-results"
 import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 import { Appear } from "@/components/ui/detail"
@@ -40,7 +37,7 @@ import {
   useCrewServiceSummaries,
   useCrewSpend,
   useCrewSummaries,
-  useDashboardMissions,
+  useDashboardResults,
   useInvalidateDashboard,
   useMemoryHealth,
   useMetricsTimeseries,
@@ -94,20 +91,16 @@ export default function DashboardPage() {
   const queryOpts = { enabled: onboardingChecked }
   const agentsQ = useAgentSummaries(workspaceId, queryOpts)
   const crewsQ = useCrewSummaries(workspaceId, queryOpts)
-  const missionsQ = useDashboardMissions(workspaceId, queryOpts)
+  const reviewQ = useDashboardResults(workspaceId, "REVIEW", queryOpts)
+  const completedQ = useDashboardResults(workspaceId, "DONE,COMPLETED", queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
   const memoryQ = useMemoryHealth(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
-  // Bumped on every realtime tick the dashboard already listens to, so the
-  // activity ticker refreshes in step with the cards above it.
-  const [liveTick, setLiveTick] = useState(0)
-
   const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data])
   const crews = useMemo(() => crewsQ.data ?? [], [crewsQ.data])
-  const missions = useMemo(() => missionsQ.data ?? [], [missionsQ.data])
   const services = useCrewServiceSummaries(workspaceId, crews, queryOpts)
   const activeRuns = useActiveRoutineRuns()
   const schedules = usePipelineSchedules(workspaceId)
@@ -121,7 +114,6 @@ export default function DashboardPage() {
     clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       invalidateDashboard()
-      setLiveTick((n) => n + 1)
     }, 220)
   }, [invalidateDashboard])
 
@@ -239,20 +231,6 @@ export default function DashboardPage() {
     [fleet, agents, spendByCrew, runVolumeBuckets],
   )
 
-  const attention = attentionState({ items: attentionItems, inboxLoading: inbox.loading, inboxError: inbox.error })
-  const bridge = useMemo(
-    () => deriveBridge({
-      agents,
-      crews,
-      spendRows: spendQ.isPending || spendQ.isError ? undefined : (spendQ.data?.rows ?? null),
-      kpis,
-      attentionCount: attentionItems.length,
-      attentionKnown: attention.inboxKnown,
-      schedules: schedules.schedules,
-    }),
-    [agents, crews, spendQ.data, kpis, attentionItems.length, attention.inboxKnown, schedules.schedules],
-  )
-
   const serviceTotals = useMemo(() => {
     let running = 0
     let total = 0
@@ -271,7 +249,7 @@ export default function DashboardPage() {
     return { running, total, checked: services.checked, unchecked }
   }, [services.byCrew, services.checked])
 
-  const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending || missionsQ.isPending
+  const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending
   const realtimeMeta = (
     <span
       className={cn(
@@ -283,7 +261,7 @@ export default function DashboardPage() {
             : "border-destructive/25 bg-destructive/10 text-destructive",
       )}
     >
-      <Radio className={cn("h-3 w-3", realtimeStatus === "connected" && "animate-pulse motion-reduce:animate-none")} />
+      <Radio className="h-3 w-3" />
       {realtimeStatus === "connected" ? "Live" : realtimeStatus === "connecting" ? "Connecting" : "Offline"}
     </span>
   )
@@ -316,7 +294,7 @@ export default function DashboardPage() {
               ))}
             </div>
             <SubBarSecondary asChild icon={Plus}>
-              <Link href="/issues?create=1"><span className="hidden sm:inline">New issue</span></Link>
+              <Link href="/issues?create=1" aria-label="New issue"><span className="hidden sm:inline">New issue</span></Link>
             </SubBarSecondary>
             <SubBarPrimary asChild icon={MessageSquare}>
               <Link href="/chat"><span className="hidden sm:inline">Chat with agent</span><span className="sm:hidden">Chat</span></Link>
@@ -338,22 +316,32 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <Appear order={0}><BridgeStrip data={bridge} window={reportWindow} realtimeStatus={realtimeStatus ?? "offline"} /></Appear>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-semibold tracking-tight">Your workspace at a glance</h1>
+          <p className="text-body text-muted-foreground">Review the results, unblock your crews, and give your agents their next task.</p>
+        </div>
 
-        <Appear order={1}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
+        <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
+
+        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+          <Appear order={1} className="min-w-0 xl:col-span-2">
+            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} completed={completedQ.data ?? []} runs={activeRuns.recentRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || completedQ.isPending} error={reviewQ.isError || completedQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void completedQ.refetch(); activeRuns.refresh() }} />
+          </Appear>
+          <Appear order={2} className="flex min-w-0 flex-col gap-4 [&>div]:h-auto">
+            <RunningNow runs={activeRuns.runs} agents={agents} crews={crews} loading={activeRuns.loading} error={activeRuns.error} />
+            <UpNext schedules={schedules.schedules} />
+          </Appear>
+        </div>
 
         <Appear order={2}><FleetBoard cards={fleetCards} workspaceId={workspaceId} /></Appear>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <Appear order={3} className="xl:col-span-2">
-            <RunningNow runs={activeRuns.runs} agents={agents} crews={crews}>
-              <ActivityTicker workspaceId={workspaceId} reloadKey={liveTick} />
-            </RunningNow>
-          </Appear>
-          <Appear order={4}><UpNext schedules={schedules.schedules} /></Appear>
+        <div className="flex flex-wrap items-center gap-2 pt-2">
+          <Radio className="h-4 w-4 text-primary-hover" aria-hidden />
+          <h2 className="text-body font-semibold">Agent run summary</h2>
+          <span className="text-label text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
         </div>
 
-        <Appear order={5}>
+        <Appear order={2}>
           <OutcomeKpis
             data={kpis}
             window={reportWindow}
@@ -364,18 +352,18 @@ export default function DashboardPage() {
         </Appear>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-          <Appear order={6} className="xl:col-span-3">
+          <Appear order={2} className="xl:col-span-3">
             <DashboardCard title={`Run volume · ${reportWindow} · by crew`} icon={Radio} hint={volumeQ.data ? `${runVolumeTotal} runs` : "unavailable"} action={<Link href="/activity" className="text-primary-hover hover:underline">Report →</Link>} className="h-full">
               <RunVolumeChart buckets={runVolume.buckets} series={runVolume.series} window={reportWindow} />
             </DashboardCard>
           </Appear>
-          <Appear order={7} className="xl:col-span-2"><WorkSnapshot missions={missions} workspaceId={workspaceId} /></Appear>
+          <Appear order={2} className="xl:col-span-2"><PagesStrip /></Appear>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-          <Appear order={8} className="xl:col-span-3"><PagesStrip /></Appear>
-          <Appear order={9} className="xl:col-span-2"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></Appear>
-        </div>
+        <details className="rounded-xl border border-border/60 bg-card">
+          <summary className="cursor-pointer px-4 py-3 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Capacity, memory and services</span></summary>
+          <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></div>
+        </details>
       </main>
     </div>
   )
@@ -386,10 +374,10 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
     <div className="flex min-h-[calc(100vh-48px)] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
-        <Skeleton className="h-[96px] rounded-xl" />
+        <Skeleton className="h-[52px] rounded-xl" />
         <Skeleton className="h-[120px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: Math.max(1, Math.min(3, crews || 3)) }, (_, index) => <Skeleton key={index} className="h-[172px] rounded-xl" />)}</div>
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[260px] rounded-xl xl:col-span-2" /><Skeleton className="h-[260px] rounded-xl" /></div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[420px] rounded-xl xl:col-span-2" /><Skeleton className="h-[200px] rounded-xl" /></div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: Math.max(1, Math.min(3, crews || 3)) }, (_, index) => <Skeleton key={index} className="h-[180px] rounded-xl" />)}</div>
         <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[118px] rounded-xl" />)}</div>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5"><Skeleton className="h-[330px] rounded-xl xl:col-span-3" /><Skeleton className="h-[330px] rounded-xl xl:col-span-2" /></div>
       </div>
