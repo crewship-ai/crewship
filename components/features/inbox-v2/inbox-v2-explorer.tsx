@@ -22,7 +22,7 @@ import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 
 import {
-  deadlineBucket, entryKindPill, entryTitle, entryVerb,
+  deadlineBucket, entryKindPill, entryTitle,
   facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, outcomeStatus,
   type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
@@ -41,9 +41,8 @@ import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2Vi
  * dismiss layer, the aria wiring, and — the reason it exists — staying OPEN
  * when a facet is picked, so two facets can be combined in one visit.
  *
- * The ROW is a decision, not a log line (docs/ux/audit-conversations.md
- * P1-1): a kind pill, the question without the server's prefix, the crew and
- * the agent by name, the age or the expiry, and a verb.
+ * Rows use the compact Routines explorer density: title, identity and age.
+ * Decisions additionally retain their kind/outcome and expiry.
  */
 
 const VIEWS: { key: InboxV2View; label: string; icon: LucideIcon; tone: string }[] = [
@@ -121,12 +120,6 @@ export function InboxV2Explorer({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-border/60 p-3" aria-label="Inbox views">
-        {VIEWS.map((v) => <button type="button" key={v.key} onClick={() => onView(v.key)} aria-pressed={view === v.key} className={cn("flex flex-col gap-2 rounded-xl border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary", view === v.key ? "border-primary/40 bg-primary/10" : "border-transparent hover:bg-muted/60")}>
-          <span className="flex items-center justify-between gap-1"><v.icon className={cn("h-4 w-4", v.tone)} aria-hidden /><span className="font-mono text-body font-semibold tabular-nums">{viewCounts[v.key]}</span></span>
-          <span className="whitespace-nowrap text-label font-medium">{v.label}</span>
-        </button>)}
-      </div>
       <SidebarToolbar>
         <div data-inbox-search className="min-w-0 flex-1">
           <SidebarSearch
@@ -202,10 +195,17 @@ export function InboxV2Explorer({
         {onToggleCollapse && <span className="hidden lg:inline-flex"><SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} /></span>}
       </SidebarToolbar>
 
-      <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
-        <CrewIcon icon={filters.crew ? lookup.crewById.get(filters.crew)?.icon || "users" : "users"} color={filters.crew ? lookup.crewById.get(filters.crew)?.color : null} size="sm" />
+      <div className="shrink-0 border-b border-border/60 pb-1" aria-label="Inbox views">
+        {VIEWS.map((v) => <SidebarRow as="div" key={v.key} selected={view === v.key} onSelect={() => onView(v.key)} aria-pressed={view === v.key}>
+          <v.icon className={cn("h-3.5 w-3.5 shrink-0", v.tone)} aria-hidden />
+          <span className="flex-1">{v.label}</span>
+          <span className="text-micro tabular-nums text-muted-foreground">{viewCounts[v.key]}</span>
+        </SidebarRow>)}
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 px-3 py-1.5">
+        <CrewIcon icon={filters.crew ? lookup.crewById.get(filters.crew)?.icon || "users" : "users"} color={filters.crew ? lookup.crewById.get(filters.crew)?.color : null} size="sm" className="h-5 w-5 rounded" />
         <label htmlFor="inbox-crew-filter" className="sr-only">Filter by crew</label>
-        <select id="inbox-crew-filter" value={filters.crew || ""} onChange={(event) => set({ crew: event.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-2 text-label focus-visible:outline-2 focus-visible:outline-primary">
+        <select id="inbox-crew-filter" value={filters.crew || ""} onChange={(event) => set({ crew: event.target.value || null })} className="h-6 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-2 text-label focus-visible:outline-2 focus-visible:outline-primary">
           <option value="">All crews</option>
           {[...lookup.crewById.values()].map((crew) => <option key={crew.id} value={crew.id}>{crew.name}</option>)}
         </select>
@@ -322,25 +322,21 @@ function EntryRow({ entry, selected, onOpen, lookup }: { entry: InboxV2Entry; se
   const expiring = deadlineMins != null && entry.actionable && deadlineBucket(entry) === "hour"
   const outcome = entry.historical ? outcomeStatus(entry.outcome) : null
   return (
-    <SidebarRow as="div" selected={selected} onSelect={onOpen} className={cn("mx-2 my-1 items-start gap-2.5 rounded-xl border p-3 transition-colors duration-150", selected ? "border-primary/30 bg-primary/10" : "border-transparent hover:border-border/60 hover:bg-muted/40")}>
+    <SidebarRow as="div" selected={selected} onSelect={onOpen} className="items-start gap-2 py-1.5 transition-colors duration-150">
       <span className="relative mt-0.5 shrink-0">
-        <EntryAvatar entry={entry} lookup={lookup} />
-        {entry.unread && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-card" />}
+        <EntryAvatar entry={entry} lookup={lookup} compact />
+        {entry.unread && <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary ring-1 ring-card"><span className="sr-only">Unread</span></span>}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="flex flex-wrap items-center justify-between gap-1.5">
-          {outcome ? <StatusPill status={outcome} /> : <StatusPill tone={pill.tone} label={pill.label} />}
-          <span className="text-micro text-muted-foreground">{entry.actionable ? "Review" : entryVerb(entry)}</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span title={entryTitle(entry)} className={cn("truncate text-body leading-5", entry.unread ? "font-semibold text-foreground" : "text-foreground/85")}>{entryTitle(entry)}</span>
+        <span className="flex min-w-0 items-center gap-1 text-micro leading-4 text-muted-foreground">
+          {crew && <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-3.5 w-3.5 rounded-sm [&_svg]:h-2.5 [&_svg]:w-2.5" />}
+          <span className="truncate">{crew ? `${crew.name} · ${name}` : name}</span>
+          <span className={cn("ml-auto shrink-0 tabular-nums", expiring && "font-semibold text-destructive")}>
+            {deadlineMins != null && entry.actionable ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired" : since(entry.createdAt)}
+          </span>
         </span>
-        <span className={cn("line-clamp-2 text-body leading-snug", entry.unread ? "font-semibold text-foreground" : "font-medium text-foreground/85")}>{entryTitle(entry)}</span>
-        <span className="flex min-w-0 items-center gap-1 text-label text-muted-foreground">
-          {crew && <><CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" /><span className="truncate">{crew.name}</span><span>·</span></>}
-          <span className="truncate">{name}</span>
-        </span>
-        <span className={cn("text-micro tabular-nums text-muted-foreground", expiring && "font-semibold text-destructive")}>
-          {deadlineMins != null && entry.actionable ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired" : since(entry.createdAt)}
-          {entry.unread && <span className="ml-2 text-primary-hover">Unread</span>}
-        </span>
+        {(outcome || entry.actionable) && <span className="mt-0.5">{outcome ? <StatusPill status={outcome} /> : <StatusPill tone={pill.tone} label={pill.label} />}</span>}
       </span>
     </SidebarRow>
   )

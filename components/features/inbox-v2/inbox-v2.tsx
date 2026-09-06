@@ -387,7 +387,7 @@ export function InboxV2() {
           // Full width on a phone — a fixed 340px column left a dead strip
           // beside it, because the reading pane is hidden until a row is
           // opened. Desktop keeps the fixed column.
-          collapsed ? "w-full lg:w-9" : "w-full lg:w-[370px] xl:w-[390px]",
+          collapsed ? "w-full lg:w-9" : "w-full lg:w-[280px]",
           selectedKey && "hidden lg:block",
         )}
       >

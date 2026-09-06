@@ -35,3 +35,10 @@ Validation: 381 focused frontend tests, lint, production export, full Go tests
 responsive list/detail, crew and name filtering, legacy deep links, and the
 absence of accidental decision actions while navigating. Public deployment
 is verified separately after embedding the export into the Go server.
+
+User refinement, 2026-09-06: Routines is the density reference. The desktop
+inbox sidebar is 280px, with search followed by three standard navigation
+rows. Updates use 20px identities and two compact lines (title, owner/age),
+without card borders, extra kind badges or repeated Open/Unread labels.
+Unread remains an accessible dot; decisions retain kind/outcome and expiry.
+Touch targets follow the shared sidebar kit. Message bodies are unchanged.

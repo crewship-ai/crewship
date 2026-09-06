@@ -24,15 +24,16 @@ export function entryIdentity(entry: InboxV2Entry, lookup: InboxLookup) {
   return { agent, crew, actor, routine, name: agent?.name || (mission ? "Issue" : actor?.label) || (entry.source === "group" ? "Grouped updates" : entry.source === "mission" ? "Issue" : "Workspace") }
 }
 
-export function EntryAvatar({ entry, lookup }: { entry: InboxV2Entry; lookup: InboxLookup }) {
+export function EntryAvatar({ entry, lookup, compact = false }: { entry: InboxV2Entry; lookup: InboxLookup; compact?: boolean }) {
+  const box = compact ? "h-5 w-5 shrink-0 rounded [&_svg]:h-3 [&_svg]:w-3" : "h-8 w-8 shrink-0 rounded-lg"
   const { agent, crew, actor, routine } = entryIdentity(entry, lookup)
-  if (agent) return <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-lg bg-muted" />
-  if (routine) return <CrewIcon icon={resolveRoutineIcon(routine)} color={resolveRoutineColor(routine)} size="sm" className="h-8 w-8 shrink-0" />
-  if (crew && entry.inboxItem?.payload?.mission_id) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-8 w-8 shrink-0" />
-  if (actor && actor.kind !== "crew") return <ActorAvatar actor={actor} size={32} />
-  if (crew) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-8 w-8 shrink-0" />
+  if (agent) return <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className={`${box} bg-muted`} />
+  if (routine) return <CrewIcon icon={resolveRoutineIcon(routine)} color={resolveRoutineColor(routine)} size="sm" className={box} />
+  if (crew && entry.inboxItem?.payload?.mission_id) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className={box} />
+  if (actor && actor.kind !== "crew") return <ActorAvatar actor={actor} size={compact ? 20 : 32} />
+  if (crew) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className={box} />
   const Icon = entry.source === "mission" ? CircleDot : Bell
-  return <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-hover"><Icon className="h-4 w-4" aria-hidden /></span>
+  return <span className={`flex items-center justify-center bg-primary/10 text-primary-hover ${box}`}><Icon className="h-4 w-4" aria-hidden /></span>
 }
 
 /** Search the names shown on screen, and use the same crew resolution for filtering. */
