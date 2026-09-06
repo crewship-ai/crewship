@@ -16,9 +16,11 @@ import (
 )
 
 type agentPaysWith struct {
-	CredentialID string     `json:"credential_id"`
-	Name         string     `json:"name"`
-	Login        *loginView `json:"login"`
+	CredentialID string     `json:"credential_id,omitempty"`
+	Name         string     `json:"name,omitempty"`
+	Login        *loginView `json:"login,omitempty"`
+	Provider     string     `json:"provider,omitempty"`
+	Restricted   bool       `json:"restricted,omitempty"`
 }
 
 // loadAgentPaysWith picks the first delivered login of the adapter's
@@ -39,6 +41,9 @@ func loadAgentPaysWith(ctx context.Context, db *sql.DB, logger *slog.Logger, age
 	for _, d := range delivered {
 		if !isLoginRow(d.Type, d.Provider) || providerlogin.Canonical(d.Provider) != want {
 			continue
+		}
+		if !canRole(RoleFromContext(ctx), "manage") {
+			return &agentPaysWith{Provider: want, Restricted: true}
 		}
 		login, name, err := loadLoginView(ctx, db, logger, d.ID)
 		if err != nil || login == nil {

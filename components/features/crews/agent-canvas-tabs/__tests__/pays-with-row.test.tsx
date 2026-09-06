@@ -80,6 +80,15 @@ beforeEach(() => {
   h.toast.error.mockReset()
 })
 
+it.each(["MANAGER", "MEMBER", "VIEWER"])("%s sees only provider identity, without account details or a picker", (role) => {
+  h.role = role
+  renderRow({ paysWith: { provider: "OPENAI", restricted: true } })
+  expect(screen.getByText("OpenAI")).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: /pays with/i })).not.toBeInTheDocument()
+  expect(screen.queryByText(/jana|ChatGPT Plus/)).not.toBeInTheDocument()
+  expect(h.apiFetch).not.toHaveBeenCalled()
+})
+
 describe("the picker", () => {
   it("lists every seat; the other provider's are visible and disabled as 'wrong provider'", async () => {
     serve([chatgpt, openaiKey, claude])
@@ -131,7 +140,8 @@ describe("the picker", () => {
     h.role = "MEMBER"
     serve([chatgpt])
     renderRow()
-    expect(await screen.findByRole("button", { name: /pays with/i })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /pays with/i })).not.toBeInTheDocument()
+    expect(screen.getByText("No provider reported")).toBeInTheDocument()
   })
 })
 

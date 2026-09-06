@@ -194,6 +194,10 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
+		return
+	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SubscriptionUsageByPlan(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {

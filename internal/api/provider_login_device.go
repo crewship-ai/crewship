@@ -144,12 +144,8 @@ func (h *ProviderLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	// The flow ends in a credential create, so it is gated exactly as the
-	// create is — MANAGER+, or a MEMBER holding credential.create.
-	if !requireRoleOrCapabilityOrForbid(w, r, h.logger, h.db,
-		workspaceID, user.ID, role,
-		CapabilityCredentialCreate, "credential.create", "workspace:"+workspaceID,
-		"create") {
+	if !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
 		return
 	}
 
@@ -242,7 +238,9 @@ func (h *ProviderLoginHandler) Status(w http.ResponseWriter, r *http.Request) {
 	var credentialID, errText sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT status, user_code, verification_url, expires_at, credential_id, error_text
-		  FROM provider_device_logins WHERE id = ? AND user_id = ?`, id, user.ID).
+		  FROM provider_device_logins d WHERE id = ? AND user_id = ?
+		  AND EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = d.workspace_id
+		    AND wm.user_id = d.user_id AND wm.role IN ('OWNER', 'ADMIN'))`, id, user.ID).
 		Scan(&status, &userCode, &verificationURL, &expiresStr, &credentialID, &errText)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Device sign-in not found")

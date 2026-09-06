@@ -3,9 +3,11 @@ import type { ProviderLogin } from "@/lib/credentials/provider-logins"
 /** `pays_with` on GET /agents/{id} — PRD provider-logins §10.3. Derived by the
  *  server from the agent's bindings and adapter; absent on an older server. */
 export interface AgentPaysWith {
-  credential_id: string
-  name: string
-  login: ProviderLogin
+  credential_id?: string
+  name?: string
+  login?: ProviderLogin
+  provider?: string
+  restricted?: boolean
 }
 
 export interface AgentRecord {

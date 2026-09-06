@@ -271,6 +271,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// three — a credential that stored successfully and did nothing. The CLI was
 	// the only caller that normalized.
 	req.Provider = credprovider.Canonical(req.Provider)
+	if isLoginRow(req.Type, req.Provider) && !canRole(role, "manage") {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
+		return
+	}
 	if req.Provider == "" {
 		req.Provider = "NONE"
 	}
@@ -820,6 +824,17 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Merged-payload validation — see validateCredentialUpdate.
+	nextType, nextProvider := currentType, currentProvider
+	if v, ok := body["type"].(string); ok {
+		nextType = v
+	}
+	if v, ok := body["provider"].(string); ok {
+		nextProvider = v
+	}
+	if !canRole(role, "manage") && (isLoginRow(currentType, currentProvider) || isLoginRow(nextType, nextProvider)) {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
+		return
+	}
 	if msg := validateCredentialUpdate(body, currentType, currentUsername, currentProvider); msg != "" {
 		replyError(w, http.StatusBadRequest, msg)
 		return

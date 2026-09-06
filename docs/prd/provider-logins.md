@@ -419,8 +419,13 @@ a neodstraňuje OAuth endpointy používané jinými integracemi.
 Provider krok Access nevyžaduje ruční volbu Keeper L1–L4 ani uživatelskou expiraci;
 create nepřepisuje dosavadní serverový výchozí stupeň (aktuálně L1), stejně jako
 device-code flow. Jde o zjednodušení formuláře, nikoli novou ochrannou politiku.
-Návrh omezit správu a metadata provider účtů na OWNER/ADMIN vyžaduje samostatné
-potvrzení a serverové vynucení; dosavadní RBAC tímto UI krokem změněn není.
+Následně schválené upřesnění RBAC (2026-09-06): správu a metadata provider účtů
+vidí pouze OWNER/ADMIN. Platí i pro starší API_KEY a AI_CLI_TOKEN záznamy modelových
+providerů. Ostatním rolím agent ukazuje pouze značku přiděleného providera,
+nikoli identitu účtu, vlastníka, plán či token. Běžné secrety zachovávají dosavadní
+role a crew-scope. Runtime delivery se tím nemění. Serverové brány a regresní
+testy: `internal/api/provider_login_policy.go`, `provider_login_policy_test.go`
+a společný `credentialVisibilityFilter`.
 
 Upřesnění uživatele 2026-09-06: nahoře přímo karty ChatGPT/OpenAI,
 Claude/Anthropic, Gemini/Google, Grok/xAI a dalších providerů přijímaných API,

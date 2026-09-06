@@ -109,7 +109,8 @@ func resolveDeliverySlots(delivered []deliveredCredential) ([]deliveredCredentia
 		if holder, taken := claimedBy[folded]; taken {
 			notices = append(notices, deliveredSlotNotice{
 				CredentialID: d.ID, Requested: requested,
-				Reason: "it would be delivered as " + folded + ", which credential " + holder + " already occupies",
+				ConflictingCredentialID: holder,
+				Reason:                  "it would be delivered as " + folded + ", which credential " + holder + " already occupies",
 			})
 			continue
 		}

@@ -23,7 +23,7 @@ import (
 // Router struct).
 func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	authed := r.authMw.RequireAuth
-	wsCtx := r.authMw.RequireWorkspace
+	wsCtx := func(h http.Handler) http.Handler { return r.authMw.RequireWorkspace(r.providerAccountPolicy(h)) }
 
 	ws := NewWorkspaceHandler(r.db, r.logger)
 	if r.hub != nil {

@@ -279,7 +279,7 @@ export function CredentialDetailSheet({
   // the value-update flow — and see Rotate only when explicitly
   // granted credential.rotate (#1034).
   const { abilities, hasCapability } = useAbilities()
-  const canUpdate = abilities.can("update", "Credential")
+  const canUpdate = abilities.can("update", "Credential") && (!credential?.login || abilities.can("manage", "Credential"))
   const canRotate = abilities.can("manage", "Credential") || hasCapability(Capability.CredentialRotate)
   const canDelete = abilities.can("delete", "Credential")
   // Lowering a classification is OWNER/ADMIN (credentials_reveal.go
@@ -1009,7 +1009,7 @@ export function CredentialDetailSheet({
                         see", which before P3 had no answer short of booting
                         the agent. */}
                     <div className="mb-4 space-y-2 text-xs" data-testid="credential-access-summary">
-                      <p><span className="font-medium">Management:</span> owners and admins manage credentials; managers can edit them. Reading a secret requires separate reveal permission and workspace policy.</p>
+                      <p><span className="font-medium">Management:</span> {seat ? "only workspace owners and admins can view and manage provider accounts." : "owners and admins manage credentials; managers can edit them. Reading a secret requires separate reveal permission and workspace policy."}</p>
                       <p><span className="font-medium">Your access:</span> {canUpdate ? "Edit details" : "Read visible metadata"}{canBind ? " · Manage assignments" : ""}{canReveal ? " · Reveal permitted" : " · Secret hidden"}.</p>
                       <p><span className="font-medium">Credential scope:</span> {credential.scope === "CREW" ? "Selected crews" : "Workspace"}. Scope is not a successful connection check; runtime access also depends on assignments, Keeper and policy.</p>
                       {accessLoading ? <p role="status">Checking visible assignments…</p>

@@ -1,5 +1,26 @@
 import { test, expect } from "@playwright/test"
 
+for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
+  test(`${role} cannot open provider administration`, async ({ page }) => {
+    let providerReads = 0
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url())
+      let body: unknown = []
+      if (url.pathname === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (url.pathname === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: role }]
+      else if (url.pathname.includes("/settings") || url.pathname.includes("/config") || url.pathname.includes("/health")) body = {}
+      if (url.searchParams.get("kind") === "provider_login") providerReads++
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/credentials?tab=providers")
+    await expect(page.getByText("No credentials yet", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("tab", { name: /Providers/ })).toHaveCount(0)
+    expect(providerReads).toBe(0)
+    if (role === "MANAGER") await expect(page.getByRole("button", { name: "Add secret", exact: true }).first()).toBeVisible()
+  })
+}
+
 // Isolated UI acceptance: no real token, account creation or provider traffic.
 // The real page and wizard render against an empty workspace API fixture.
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {

@@ -119,7 +119,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   // The seat as a row, for the status ladder — from the list when loaded,
   // else from what the agent carries.
   const currentRow: LoginCredential | null =
-    current ?? (paysWith ? { id: paysWith.credential_id, name: paysWith.name, provider: paysWith.login.provider, status: "ACTIVE", login: paysWith.login } : null)
+    current ?? (paysWith?.login && paysWith.credential_id && paysWith.name ? { id: paysWith.credential_id, name: paysWith.name, provider: paysWith.login.provider, status: "ACTIVE", login: paysWith.login } : null)
   const partners = currentRow
     ? seats.filter((s) => s.id !== currentRow.id && (s.login?.provider ?? s.provider) === (currentRow.login?.provider ?? currentRow.provider))
     : []
@@ -170,6 +170,17 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
     } finally {
       setSaving(false)
     }
+  }
+
+  if (!canBind) {
+    const visibleProvider = paysWith?.provider ?? paysWith?.login?.provider
+    return (
+      <ConfigRow label="Pays with" hint="Provider accounts are managed by workspace administrators.">
+        <span className="flex items-center gap-2 type-row">
+          {visibleProvider ? <><LoginBrandMark provider={visibleProvider} size="sm" />{getBrand(visibleProvider).label}</> : "No provider reported"}
+        </span>
+      </ConfigRow>
+    )
   }
 
   return (

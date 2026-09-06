@@ -220,10 +220,10 @@ export default function CredentialsPage() {
     try {
       const [a, b] = await Promise.all([
         apiFetch(`/api/v1/credentials?workspace_id=${oid}`, { signal }),
-        apiFetch(`/api/v1/credentials?workspace_id=${oid}&kind=provider_login`, { signal }).catch((err) => {
+        canBind ? apiFetch(`/api/v1/credentials?workspace_id=${oid}&kind=provider_login`, { signal }).catch((err) => {
           if ((err as { name?: string })?.name === "AbortError") throw err
           return null
-        }),
+        }) : Promise.resolve(null),
       ])
       res = a
       loginsRes = b
@@ -251,7 +251,10 @@ export default function CredentialsPage() {
     // error card from an earlier failure survives a later good refresh.
     setLoadError(null)
 
-    if (loginsRes && loginsRes.ok) {
+    if (!canBind) {
+      setProviderLogins([])
+      setLoginsError(null)
+    } else if (loginsRes && loginsRes.ok) {
       const rows = await loginsRes.json().catch(() => [])
       if (signal?.aborted) return
       setProviderLogins((Array.isArray(rows) ? rows : []).map(normalise).filter(hasLogin))
@@ -262,7 +265,7 @@ export default function CredentialsPage() {
       setProviderLogins(normalised.filter(hasLogin))
       setLoginsError(loginsRes ? `HTTP ${loginsRes.status}` : "network error")
     }
-  }, [])
+  }, [canBind])
 
   const loadData = React.useCallback(async () => {
     // Wait for the workspace store to resolve the selected workspace before
@@ -308,13 +311,22 @@ export default function CredentialsPage() {
     setSelectedIds(new Set())
     setFilters(EMPTY_CREDENTIAL_FILTERS)
     setLoginFilters(EMPTY_LOGIN_FILTERS)
-  }, [workspaceId])
+    setDetailCredential(null)
+    setDetailOpen(false)
+    setEditOpen(false)
+    setAddOpen(false)
+    if (!canBind) {
+      setTab("overview")
+      setProviderLogins([])
+    }
+  }, [workspaceId, canBind])
 
   /** Opens the wizard, optionally somewhere other than the shape grid. */
   const openAdd = React.useCallback((initial?: WizardInitial) => {
+    if (initial?.itemType === "PROVIDER_LOGIN" && !canBind) return
     setAddInitial(initial)
     setAddOpen(true)
-  }, [])
+  }, [canBind])
 
   const handleRefresh = React.useCallback(() => {
     if (!workspaceId) return
@@ -481,9 +493,9 @@ export default function CredentialsPage() {
       <SubBarSecondary icon={Plus} onClick={() => openAdd()}>
         Add secret
       </SubBarSecondary>
-        <SubBarPrimary icon={Plus} onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+        {canBind && <SubBarPrimary icon={Plus} onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
           Add provider
-        </SubBarPrimary>
+        </SubBarPrimary>}
     </>
   ) : null
 
@@ -518,7 +530,7 @@ export default function CredentialsPage() {
       actions={headerActions}
       tabs={[
         { id: "overview", label: "Overview", icon: LayoutDashboard },
-        { id: "providers", label: "Providers", icon: CreditCard, badge: providerLogins.length > 0 ? providerLogins.length : undefined },
+        ...(canBind ? [{ id: "providers" as const, label: "Providers", icon: CreditCard, badge: providerLogins.length > 0 ? providerLogins.length : undefined }] : []),
       ]}
       activeTab={tab}
       onTabChange={selectTab}
@@ -603,10 +615,10 @@ export default function CredentialsPage() {
             ) : (
               <CredentialsSidebar
                 loginProviders={loginProviders}
-                onSelectProvider={(key) => {
+                onSelectProvider={canBind ? (key) => {
                   setLoginFilters({ ...EMPTY_LOGIN_FILTERS, provider: key ? [key] : [] })
                   selectTab("providers")
-                }}
+                } : undefined}
                 filters={filters}
                 onFiltersChange={setFilters}
                 counts={{
@@ -692,7 +704,7 @@ export default function CredentialsPage() {
             setRotateCredential(c as unknown as Credential)
             setRotateOpen(true)
           }}
-          onRelogin={canManage ? (c) => relogin(c as Credential) : undefined}
+          onRelogin={canBind ? (c) => relogin(c as Credential) : undefined}
         />
       ) : loadError ? (
         // Load failure — visually and semantically distinct from the
@@ -728,7 +740,7 @@ export default function CredentialsPage() {
               if (isMobile) setSidebarCollapsed(true)
             }}
             onSelectStatus={(status) => setLoginFilters((f) => ({ ...f, status }))}
-            onAdd={canManage ? () => openAdd({ itemType: "PROVIDER_LOGIN" }) : undefined}
+            onAdd={canBind ? () => openAdd({ itemType: "PROVIDER_LOGIN" }) : undefined}
             onAssign={
               canBind
                 ? (id) => {
@@ -754,10 +766,10 @@ export default function CredentialsPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 Add first secret
               </Button>
-              <Button variant="outline" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+              {canBind && <Button variant="outline" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
                 <Plus className="mr-2 h-4 w-4" />
                 Add provider
-              </Button>
+              </Button>}
             </div>
           )}
         </EmptyState>

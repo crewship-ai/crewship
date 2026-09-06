@@ -249,7 +249,7 @@ func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
 	}
 	r.recordMut(method, pattern, role, scope)
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(role, scope, h))))
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.providerAccountPolicy(r.requireRoleScopeMW(role, scope, h)))))
 }
 
 // authedSelfMut registers a session-scoped mutation route that has no
