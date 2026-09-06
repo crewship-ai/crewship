@@ -1,3 +1,13 @@
+import type { ProviderLogin } from "@/lib/credentials/provider-logins"
+
+/** `pays_with` on GET /agents/{id} — PRD provider-logins §10.3. Derived by the
+ *  server from the agent's bindings and adapter; absent on an older server. */
+export interface AgentPaysWith {
+  credential_id: string
+  name: string
+  login: ProviderLogin
+}
+
 export interface AgentRecord {
   id: string
   workspace_id: string
@@ -36,6 +46,8 @@ export interface AgentRecord {
   expired_at?: string | null
   parent_lead_id?: string | null
   hire_reason?: string | null
+  /** The seat that pays for this agent's model, when the server reports it. */
+  pays_with?: AgentPaysWith | null
 }
 
 export interface InboxSummary { count: number; summary?: string; cost?: number }
