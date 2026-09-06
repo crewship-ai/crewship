@@ -251,7 +251,7 @@ describe("provider login (#2428)", () => {
     expect(screen.queryByRole("button", { name: /save secret/i })).not.toBeInTheDocument()
   })
 
-  it("stores a ChatGPT login as AI_CLI_TOKEN · OPENAI and asks for the whole auth.json", async () => {
+  it("stores a ChatGPT login as PROVIDER_LOGIN · OPENAI · subscription and asks for the whole auth.json", async () => {
     const { onSuccess } = renderWizard()
     pickShape(/provider login/i)
     pickOpenAI()
@@ -261,14 +261,17 @@ describe("provider login (#2428)", () => {
     fireEvent.change(box, { target: { value: '{"tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"x"}}' } })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
-    expect(bodyOf(createCall)).toMatchObject({ type: "AI_CLI_TOKEN", provider: "OPENAI" })
+    // Contract §10.2: the type is PROVIDER_LOGIN, the mode is its own field,
+    // the value is exactly what was pasted — the server splits it into parts.
+    expect(bodyOf(createCall)).toMatchObject({ type: "PROVIDER_LOGIN", provider: "OPENAI", mode: "subscription" })
+    expect(bodyOf(createCall).value).toContain('"refresh_token":"r"')
   })
 
-  it("stores the same seat as API_KEY when the operator picks a metered key", async () => {
+  it("stores the same seat as PROVIDER_LOGIN · api_key when the operator picks a metered key", async () => {
     const { onSuccess } = renderWizard()
     pickShape(/provider login/i)
     pickOpenAI()
@@ -276,11 +279,120 @@ describe("provider login (#2428)", () => {
     fireEvent.change(screen.getByLabelText(/^api key$/i), { target: { value: "sk-proj-abc" } })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "OpenAI API" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
-    expect(bodyOf(createCall)).toMatchObject({ type: "API_KEY", provider: "OPENAI" })
+    expect(bodyOf(createCall)).toMatchObject({ type: "PROVIDER_LOGIN", provider: "OPENAI", mode: "api_key" })
+  })
+
+  it("offers a sign-in choice only where a device flow exists — OpenAI subscription, not Anthropic, not a key", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    expect(screen.getByRole("button", { name: /import from codex cli/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps the setup-token paste for Anthropic — there is no device flow to offer", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    fireEvent.click(screen.getByRole("button", { name: /provider: generic secret/i }))
+    fireEvent.change(screen.getByPlaceholderText("Search brands…"), { target: { value: "anthropic" } })
+    fireEvent.click(screen.getByTitle("Anthropic"))
+    expect(screen.getByLabelText(/^setup token$/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
+  })
+
+  it("signs in with a code: asks for one, polls until complete, then saves without a create", async () => {
+    // Starting the flow answers with a code; the first poll says pending, the
+    // second says the login exists. The wizard then has a credential id and
+    // must not POST a second row — only name it and bind it.
+    h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string }) => {
+      const u = String(url)
+      if (u.startsWith("/api/v1/provider-logins/device?") && init?.method === "POST") {
+        return ok({ device_id: "dev_1", user_code: "ABCD-EFGH", verification_url: "https://auth.openai.com/device", expires_at: new Date(Date.now() + 600_000).toISOString(), interval_s: 1 })
+      }
+      if (u.startsWith("/api/v1/provider-logins/device/dev_1")) {
+        polls.count += 1
+        return ok(polls.count < 2 ? { status: "pending" } : { status: "complete", credential_id: "cred_dev" })
+      }
+      if (u.startsWith("/api/v1/credentials/cred_dev?") && init?.method === "PATCH") return ok({ id: "cred_dev" })
+      if (u.startsWith("/api/v1/credentials/bindings")) return ok({ id: "b1" }, 201)
+      if (u.startsWith("/api/v1/workspaces/")) return ok([])
+      return ok({ id: "cred_new" }, 201)
+    })
+    const polls = { count: 0 }
+    const onSuccess = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" onSuccess={onSuccess} onCancel={() => {}} devicePollMs={5} />)
+    pickShape(/provider login/i)
+    pickOpenAI()
+    fireEvent.click(screen.getByRole("button", { name: /sign in with a code/i }))
+
+    // The code, large and copyable, and the page to open.
+    expect(await screen.findByTestId("device-user-code")).toHaveTextContent("ABCD-EFGH")
+    expect(screen.getByRole("link", { name: /open auth\.openai\.com/i })).toHaveAttribute("href", "https://auth.openai.com/device")
+    // No paste box while a code is live — the value never comes through here.
+    expect(screen.queryByLabelText(/codex login \(auth\.json\)/i)).not.toBeInTheDocument()
+    // The step is held until the sign-in lands.
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
+
+    await waitFor(() => expect(screen.getByTestId("device-sign-in")).toHaveAttribute("data-phase", "complete"))
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+
+    const creates = h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/credentials?") && (init as { method?: string })?.method === "POST")
+    expect(creates).toHaveLength(0)
+    const patch = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/cred_dev?"))!
+    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana" })
+    const bind = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/bindings"))!
+    expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "WORKSPACE" })
+  })
+
+  it("names the owner: the members list, defaulting to the person signed in", async () => {
+    h.apiFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).startsWith("/api/v1/workspaces/ws1/members")) {
+        return ok([
+          { id: "m1", role: "OWNER", user: { id: "u_pavel", email: "pavel@unify.cz", full_name: null } },
+          { id: "m2", role: "MEMBER", user: { id: "u_jana", email: "jana@unify.cz", full_name: null } },
+        ])
+      }
+      return ok({ id: "cred_new" }, 201)
+    })
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    // A text box naming the signed-in person until the members arrive, then
+    // a select over them.
+    await waitFor(() => expect(screen.getByLabelText(/^owner$/i).tagName).toBe("SELECT"))
+    fireEvent.change(screen.getByLabelText(/^owner$/i), { target: { value: "u_jana" } })
+    fireEvent.change(screen.getByLabelText(/codex login \(auth\.json\)/i), { target: { value: "{}" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ owner_user_id: "u_jana" })
+  })
+
+  it("Re-login opens on the sign-in step with the seat's provider and mode chosen", () => {
+    render(
+      <AddCredentialWizard
+        workspaceId="ws1"
+        onSuccess={() => {}}
+        onCancel={() => {}}
+        initial={{ itemType: "PROVIDER_LOGIN", provider: "OPENAI", loginMode: "subscription", signIn: "device", step: "values", name: "ChatGPT Plus · jana" }}
+      />,
+    )
+    expect(screen.getByRole("button", { name: /values/i })).toHaveAttribute("aria-current", "step")
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("ChatGPT Plus · jana")
+    expect(screen.getByTestId("device-sign-in")).toBeInTheDocument()
   })
 })
 
