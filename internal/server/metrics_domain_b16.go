@@ -106,11 +106,31 @@ func (s *Server) collectScheduleFirePunctualityMetrics(ctx context.Context, b *s
 // carry a §9.6 outcome — assignments (agent runs; the run_needs_human
 // producer keys its item by assignment id) and pipeline_runs (routine
 // runs; the failed_run producer keys its item by run id) — so both are
-// denominators, and an inbox item of ANY kind whose source_id is one of
-// those run ids is a numerator: §12 says a SUCCEEDED / NO_CHANGE run
-// never creates an item, not merely never creates a particular kind. No
-// other producer today keys an item by a run id, so a match here is a
-// routing violation, not a coincidence.
+// denominators, and an inbox item of ANY kind whose source_id NAMES one of
+// those runs is a numerator: §12 says a SUCCEEDED / NO_CHANGE run never
+// creates an item, not merely never creates a particular kind.
+//
+// A run-keyed source_id has two shapes and the numerator has to know both:
+//
+//   - "<run_id>"           — the run-scoped producers (failed_run,
+//     run_needs_human), which key an item by the run as a whole.
+//   - "<run_id>:<step_id>" — a routine's notify step, which scopes its key
+//     to the step so two notify steps in one run each get their own row
+//     under the (kind, source_id) unique index.
+//
+// The second shape is the COMMON one for the violation this metric exists
+// to catch (a successful routine posting an inbox message), and an equality
+// join on the run id alone can never match it — the numerator was
+// structurally blind to exactly its own subject. So the join splits
+// source_id at its first ':' and compares the prefix for EQUALITY, never by
+// a prefix LIKE: run ids share prefixes with each other, and "run_ok" must
+// not collect "run_ok_extra"'s items. Run ids never contain a ':'
+// themselves (generateRunID emits "run_c<base36><hex>"), so the first ':'
+// is unambiguously the step separator.
+//
+// Assignments are matched on the bare shape only: they have no steps, so no
+// producer scopes an assignment-keyed item to one, and accepting a
+// ':'-suffixed form there would widen the match for nothing.
 //
 // The ratio is emitted only when at least one successful run exists — a
 // 0/0 has no honest value — while both raw counts are always emitted, so
@@ -148,7 +168,11 @@ func (s *Server) collectInboxItemsPerSuccessfulRunMetrics(ctx context.Context, b
 			          JOIN assignments a ON a.id = i.source_id
 			         WHERE a.outcome IN (`+inClause+`))
 			     + (SELECT COUNT(*) FROM inbox_items i
-			          JOIN pipeline_runs r ON r.id = i.source_id
+			          JOIN pipeline_runs r ON r.id = CASE
+			                WHEN instr(i.source_id, ':') > 0
+			                THEN substr(i.source_id, 1, instr(i.source_id, ':') - 1)
+			                ELSE i.source_id
+			              END
 			         WHERE r.outcome IN (`+inClause+`))`,
 			itemArgs...,
 		).Scan(&items); err != nil {

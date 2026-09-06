@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
-# Release-demo runtime walkthrough.
+# Release-demo runtime walkthrough (v1).
+#
+# SUPERSEDED for use-case-by-use-case testing by scripts/demo/ — one
+# self-verifying script per use case, run alone or all in order with
+# scripts/demo/run.sh (docs/guides/demo-use-cases.mdx). This file stays as
+# the linear, copy-a-block-at-a-time checklist it always was. Note that it
+# predates the demo packs: step 8 assumes seeded cron schedules the seed no
+# longer creates, and step 4's "approving a hire has no CLI path" is out of
+# date (`crewship hire approve`, `crewship escalation supply`).
 #
 # `crewship seed` builds the whole workspace declaratively (crews, agents,
 # 18 routines, schedules, memory, credentials, integrations). But some

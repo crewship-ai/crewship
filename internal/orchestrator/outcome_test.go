@@ -96,7 +96,7 @@ func TestParseHandoff_OutcomeFieldIsCaseInsensitive(t *testing.T) {
 	if got := ReportedOutcome(text); got != "succeeded" {
 		t.Errorf("ReportedOutcome = %q, want the raw parsed value %q", got, "succeeded")
 	}
-	if outcome, reason := DeriveOutcome("COMPLETED", ReportedOutcome(text)); outcome != OutcomeSucceeded || reason != "" {
+	if outcome, reason := DeriveOutcome("COMPLETED", ReportedOutcome(text), true); outcome != OutcomeSucceeded || reason != "" {
 		t.Errorf("DeriveOutcome(COMPLETED, %q) = (%q, %q), want (%q, \"\")", ReportedOutcome(text), outcome, reason, OutcomeSucceeded)
 	}
 }
@@ -124,7 +124,7 @@ func TestDeriveOutcome_CancelledAndFailedAreNeverOverridden(t *testing.T) {
 		{"failed", "NO_CHANGE"},
 	}
 	for _, tc := range cases {
-		outcome, reason := DeriveOutcome(tc.status, tc.reported)
+		outcome, reason := DeriveOutcome(tc.status, tc.reported, true)
 		want := OutcomeFailed
 		if tc.status == "CANCELLED" || tc.status == "cancelled" {
 			want = OutcomeCancelled
@@ -143,7 +143,7 @@ func TestDeriveOutcome_CompletedTrustsAValidReport(t *testing.T) {
 		if v == OutcomeCancelled {
 			continue // rejected on purpose — see the dedicated test below
 		}
-		outcome, reason := DeriveOutcome("COMPLETED", v)
+		outcome, reason := DeriveOutcome("COMPLETED", v, true)
 		if outcome != v {
 			t.Errorf("DeriveOutcome(COMPLETED, %q) = %q, want %q", v, outcome, v)
 		}
@@ -159,7 +159,7 @@ func TestDeriveOutcome_CompletedTrustsAValidReport(t *testing.T) {
 // trusting the claim would let a real completion silently reroute through
 // the CANCELLED lane. Caught by code review.
 func TestDeriveOutcome_CompletedSelfReportingCancelled_IsRejected(t *testing.T) {
-	outcome, reason := DeriveOutcome("COMPLETED", OutcomeCancelled)
+	outcome, reason := DeriveOutcome("COMPLETED", OutcomeCancelled, true)
 	if outcome != OutcomeFailed {
 		t.Errorf("DeriveOutcome(COMPLETED, CANCELLED) = %q, want %q (self-reported CANCELLED is not trusted)", outcome, OutcomeFailed)
 	}
@@ -168,9 +168,13 @@ func TestDeriveOutcome_CompletedSelfReportingCancelled_IsRejected(t *testing.T) 
 	}
 }
 
+// A run that HAD an agent (hasOutcomeCapableStep=true) and still reported
+// nothing recognised keeps the strict §9.6 default: that is a real
+// missing hand-off. The agentless counterpart is
+// TestDeriveOutcome_CompletedWithNoOutcomeCapableStep_IsSucceeded.
 func TestDeriveOutcome_CompletedWithNoValidReport_DefaultsFailedWithReason(t *testing.T) {
 	for _, reported := range []string{"", "bogus", "success", "done"} {
-		outcome, reason := DeriveOutcome("COMPLETED", reported)
+		outcome, reason := DeriveOutcome("COMPLETED", reported, true)
 		if outcome != OutcomeFailed {
 			t.Errorf("DeriveOutcome(COMPLETED, %q) = %q, want %q", reported, outcome, OutcomeFailed)
 		}
@@ -221,5 +225,95 @@ func TestRouteForOutcome_UnrecognisedOutcome_FailsClosedAsFailed(t *testing.T) {
 	want := RouteForOutcome(OutcomeFailed)
 	if r != want {
 		t.Errorf("RouteForOutcome(unknown) = %+v, want the FAILED row %+v", r, want)
+	}
+}
+
+// A clean completion from a run that had NOBODY who could report an
+// outcome — an agentless routine (a probe, or steps that are only
+// script/transform/notify/crewship) — is a success, not a failure. The
+// strict "an absent outcome is a bug" default only makes sense when a
+// model was actually asked for a hand-off; applied to an agentless run it
+// flags a bug that is unfixable by construction, and every clean routine
+// run in the product was recorded FAILED because of it.
+func TestDeriveOutcome_CompletedWithNoOutcomeCapableStep_IsSucceeded(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   string
+		reported string
+	}{
+		{"nothing reported", "COMPLETED", ""},
+		{"lowercase status", "completed", ""},
+		{"prose in the output", "COMPLETED", "all good"},
+		{"unrecognised value", "COMPLETED", "bogus"},
+		{"self-reported CANCELLED is still not trusted", "COMPLETED", OutcomeCancelled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome, reason := DeriveOutcome(tc.status, tc.reported, false)
+			if outcome != OutcomeSucceeded {
+				t.Errorf("DeriveOutcome(%q, %q, false) = %q, want %q", tc.status, tc.reported, outcome, OutcomeSucceeded)
+			}
+			if reason != "" {
+				t.Errorf("DeriveOutcome(%q, %q, false) reason = %q, want empty — there is no missing hand-off to state a reason for", tc.status, tc.reported, reason)
+			}
+		})
+	}
+}
+
+// The agentless success must not change where a run routes: SUCCEEDED has
+// to carry the same routing row FAILED's replacement is safe against — no
+// inbox item, and a session that settles idle rather than error. Pins that
+// the fix moves the word a human reads, not the lane.
+func TestDeriveOutcome_AgentlessSuccessRoutesWithoutAnInboxItem(t *testing.T) {
+	outcome, _ := DeriveOutcome("COMPLETED", "", false)
+	route := RouteForOutcome(outcome)
+	if route.CreatesInboxItem {
+		t.Errorf("RouteForOutcome(%q).CreatesInboxItem = true; an agentless success must never raise an item (§12)", outcome)
+	}
+	if route.SessionState != "idle" {
+		t.Errorf("RouteForOutcome(%q).SessionState = %q, want idle", outcome, route.SessionState)
+	}
+}
+
+// A recognised hand-off is trusted whether or not the run is believed to
+// have had an agent: the flag only decides the DEFAULT. (An agentless
+// routine cannot normally emit one, but a transform step echoing a nested
+// run's output could, and the reported value is still authoritative.)
+func TestDeriveOutcome_ReportedValueWinsRegardlessOfCapability(t *testing.T) {
+	for _, capable := range []bool{true, false} {
+		for _, v := range AllOutcomes {
+			if v == OutcomeCancelled {
+				continue // never trusted from a self-report — see the dedicated test
+			}
+			outcome, reason := DeriveOutcome("COMPLETED", v, capable)
+			if outcome != v || reason != "" {
+				t.Errorf("DeriveOutcome(COMPLETED, %q, %v) = (%q, %q), want (%q, empty)", v, capable, outcome, reason, v)
+			}
+		}
+	}
+}
+
+// A cancelled or technically-failed run is unaffected by the capability
+// flag — the status shortcuts win before the hand-off is ever consulted.
+func TestDeriveOutcome_StatusShortcutsIgnoreCapability(t *testing.T) {
+	cases := []struct {
+		status string
+		want   string
+	}{
+		{"CANCELLED", OutcomeCancelled},
+		{"cancelled", OutcomeCancelled},
+		{"FAILED", OutcomeFailed},
+		{"failed", OutcomeFailed},
+	}
+	for _, tc := range cases {
+		for _, capable := range []bool{true, false} {
+			outcome, reason := DeriveOutcome(tc.status, "", capable)
+			if outcome != tc.want {
+				t.Errorf("DeriveOutcome(%q, empty, %v) = %q, want %q", tc.status, capable, outcome, tc.want)
+			}
+			if reason != "" {
+				t.Errorf("DeriveOutcome(%q, empty, %v) reason = %q, want empty", tc.status, capable, reason)
+			}
+		}
 	}
 }
