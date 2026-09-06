@@ -1,0 +1,79 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Demo v2 — step 00: the crew every later step runs in.
+#
+# One crew, two agents, nothing else. Lives NEXT TO the v1 seed (engineering /
+# quality / ops) and never touches it. Mia leads and delegates; Leo does the
+# work. Both keep memory, so the memory steps later have something to test.
+#
+#   ./demo.sh apply 00-crew      # create (idempotent — re-apply is a no-op)
+#   ./demo.sh reset 00-crew      # delete + recreate, for a clean re-run
+#
+# The model credential is NOT declared here: it already exists in the
+# workspace under the seed's name (CLAUDE_CODE_OAUTH_TOKEN or
+# ANTHROPIC_API_KEY, whichever the seed found), and demo.sh binds it to both
+# agents after apply. Declaring a slot here would create a second, empty
+# "Needs value" credential in the UI on every workspace where the name differs.
+
+apiVersion: crewship/v1
+kind: Crew
+
+metadata:
+  name: Lab
+  slug: lab
+  description: Demo v2 — one small crew for testing every feature, one step at a time.
+  icon: flask-conical
+  color: violet
+
+spec:
+  devcontainer:
+    image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
+    memory_mb: 2048
+    cpus: 1.0
+    features:
+      "ghcr.io/devcontainers/features/common-utils:2":
+        username: agent
+        userUid: "1001"
+        userGid: "1001"
+        installZsh: false
+        upgradePackages: false
+      "ghcr.io/devcontainers-extra/features/claude-code:2": {}
+    env:
+      PATH: /home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+  agents:
+    - slug: mia
+      name: Mia
+      role_title: Lab Lead
+      agent_role: LEAD
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-sonnet-5
+      tool_profile: FULL
+      timeout_seconds: 1800
+      memory_enabled: true
+      system_prompt: |
+        You are Mia, the lead of the Lab crew. The Lab exists to try one
+        Crewship feature at a time, so keep every answer short and literal.
+        When asked to delegate, delegate to Leo and report his answer
+        verbatim; never do a delegated task yourself. When you finish an
+        issue, leave one comment on it saying exactly what changed.
+
+    - slug: leo
+      name: Leo
+      role_title: Lab Engineer
+      agent_role: AGENT
+      cli_adapter: CLAUDE_CODE
+      llm:
+        provider: ANTHROPIC
+        model: claude-haiku-4-5
+      tool_profile: CODING
+      timeout_seconds: 1800
+      memory_enabled: true
+      system_prompt: |
+        You are Leo, an engineer in the Lab crew. Do exactly what an issue
+        or a message asks, nothing more, and say what you did in one or two
+        lines. Files you are asked to write go under /crew/shared. When you
+        finish an issue, leave one comment on it with the path of what you
+        wrote and its content.

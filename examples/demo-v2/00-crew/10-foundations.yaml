@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Demo v2 — step 00, part two: the label every demo issue carries.
+#
+# It lives here, applied once with the crew, and not next to the issues that
+# use it, because a Label in a manifest is never idempotent today: apply
+# plans it as "create" without looking for the existing row, the second run
+# answers 409 and the whole file stops there (see the demo-v2 findings issue).
+# `./demo.sh reset 00-crew` recreates it together with the crew.
+
+apiVersion: crewship/v1
+kind: Label
+metadata:
+  name: demo-v2
+  slug: demo-v2
+spec:
+  color: "#8B5CF6"
+  description: Created by the demo v2 steps (examples/demo-v2)

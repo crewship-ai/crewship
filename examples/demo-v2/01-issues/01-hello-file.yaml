@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://schemas.crewship.ai/v1/manifest.json
+#
+# Demo v2 — step 01: the simplest issue with a result you can check.
+#
+# Leo writes one file with one known line into the crew's shared folder.
+# What to look at in the web UI after `crewship issue start`:
+#
+#   Issues  → the issue moves BACKLOG → IN_PROGRESS → DONE (or REVIEW)
+#   Issue   → Activity: started, session opened, comment from Leo, finished
+#   Issue   → Sessions: one agent session, its transcript
+#   Crew Lab → Files: shared/demo/hello.txt with the exact line
+#   Inbox   → whatever the run posted (is it clear who did what, and why?)
+#
+#   ./demo.sh apply 01-issues          # create the project and the issue
+#   crewship issue start LAB-1         # dispatch it (or the ▶ button in the UI)
+#   crewship crew files get lab shared/demo/hello.txt
+#   ./demo.sh reset 01-issues          # delete + recreate, run it again
+#
+# Re-applying without reset updates the issue in place (title, description,
+# priority); a DONE issue stays DONE — reset is the "run it again" path.
+
+apiVersion: crewship/v1
+kind: Project
+metadata:
+  name: Demo v2
+  slug: demo-v2
+  description: One feature per step, checked in the UI before release 1.0.
+spec:
+  color: "#8B5CF6"
+  status: planned   # "active" passes manifest validation but the API rejects it with a 500 (see the demo-v2 findings issue)
+  priority: medium
+  # lead_agent_slug: mia — a standalone Project cannot name a lead today:
+  # validation only sees agents declared in the same file (the manifest's
+  # RemoteAgents lookup is never populated), so `mia` is "not found" even
+  # though she exists. Set the lead in the UI for now.
+
+---
+apiVersion: crewship/v1
+kind: Issue
+metadata:
+  name: Write hello.txt into the crew's shared folder
+  slug: lab-hello-file
+spec:
+  crew_slug: lab
+  assignee_slug: leo
+  project_slug: demo-v2
+  labels: [demo-v2]
+  priority: medium
+  status: todo
+  title: Write hello.txt into the crew's shared folder
+  description: |
+    Create the file `/crew/shared/demo/hello.txt` containing exactly this one
+    line and nothing else:
+
+        hello from Crewship
+
+    Then read the file back and leave one comment on this issue with the
+    file's path and its content. Do not create or change anything else.
+
+    **Done means:** the file exists with that exact line, and your comment
+    is on the issue.
