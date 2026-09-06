@@ -54,6 +54,9 @@ import {
   Palette, Plus, ShieldCheck, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
+import { useSessionSafe } from "@/hooks/use-auth"
+import { DeviceSignIn } from "./device-sign-in"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -137,11 +140,35 @@ const MONO_AREA = "font-mono text-xs max-sm:text-base"
 
 interface Crew { id: string; name: string }
 
+/** GET /workspaces/{id}/members — the people a seat can belong to. */
+interface Member { id: string; user: { id: string; email: string; full_name: string | null } }
+
+/** How a subscription login gets in: pasted from the CLI's own file, or minted here with a code. */
+export type SignInMethod = "paste" | "device"
+
+/**
+ * Where the wizard starts. The Providers tab opens it on the Provider login
+ * shape; Re-login opens it on the sign-in step with the seat's provider and
+ * mode already chosen, so the person who owns the seat types nothing they
+ * have typed before.
+ */
+export interface WizardInitial {
+  itemType?: ItemTypeKey
+  provider?: string
+  loginMode?: ProviderLoginMode
+  signIn?: SignInMethod
+  step?: Step
+  name?: string
+}
+
 export interface AddCredentialWizardProps {
   workspaceId: string
   onSuccess: () => void
   onCancel: () => void
   knownTags?: string[]
+  initial?: WizardInitial
+  /** Overrides the device-code poll period; tests pass milliseconds. */
+  devicePollMs?: number
   /**
    * Reports whether there is unsaved input, for the shell's discard guard.
    * Optional so the wizard still renders standalone (and in its own tests)
@@ -180,32 +207,44 @@ function CardNote({ children }: { children: React.ReactNode }) {
 }
 
 export function AddCredentialWizard({
-  workspaceId, onSuccess, onCancel, knownTags, onDirtyChange, primaryRef,
+  workspaceId, onSuccess, onCancel, knownTags, initial, devicePollMs, onDirtyChange, primaryRef,
 }: AddCredentialWizardProps) {
   const { abilities } = useAbilities()
   // POST /credentials/bindings is roleManage — OWNER/ADMIN — and the handler
   // repeats the check. A MANAGER may create the credential but not claim a
   // slot for it, so the step is hidden from them rather than offered and 403'd.
   const canBind = abilities.can("manage", "Credential")
+  const session = useSessionSafe()
 
-  const [step, setStep] = React.useState<Step>("type")
+  const [step, setStep] = React.useState<Step>(initial?.step ?? "type")
   // Keeper tier. Defaults to L1 — the column's default — so a wizard run that
   // ignores this control behaves exactly as it did before the control existed.
   const [securityLevel, setSecurityLevel] = React.useState(1)
-  const [itemTypeKey, setItemTypeKey] = React.useState<ItemTypeKey>("TOKEN")
+  const [itemTypeKey, setItemTypeKey] = React.useState<ItemTypeKey>(initial?.itemType ?? "TOKEN")
   // Provider login only: a flat-rate seat or a metered key (#2428). Decides
   // the server type at save time and what the value box asks for.
-  const [loginMode, setLoginMode] = React.useState<ProviderLoginMode>("subscription")
+  const [loginMode, setLoginMode] = React.useState<ProviderLoginMode>(initial?.loginMode ?? "subscription")
+  // Provider login, subscription, a provider with a device flow: paste the
+  // CLI's file, or sign in with a code and let the server mint the login.
+  const [signIn, setSignIn] = React.useState<SignInMethod>(initial?.signIn ?? "paste")
+  // The credential a device sign-in created. Once set, the save step has no
+  // row to create — only a name to give it and a slot to claim.
+  const [deviceCredentialId, setDeviceCredentialId] = React.useState<string | null>(null)
+  const [deviceBusy, setDeviceBusy] = React.useState(false)
+  // Whose seat this is (§3.4: seats are per person). Defaults to the person
+  // signed in; the list of others arrives with the members request.
+  const [ownerId, setOwnerId] = React.useState<string>("")
+  const [members, setMembers] = React.useState<Member[]>([])
   const [primaryValue, setPrimaryValue] = React.useState("")
   const [extras, setExtras] = React.useState<Record<string, string>>({})
   const [custom, setCustom] = React.useState<CustomFieldDraft[]>([])
-  const [name, setName] = React.useState("")
+  const [name, setName] = React.useState(initial?.name ?? "")
   const [username, setUsername] = React.useState("")
   const [accountLabel, setAccountLabel] = React.useState("")
   const [tags, setTags] = React.useState<string[]>([])
   const [tagDraft, setTagDraft] = React.useState("")
-  const [provider, setProvider] = React.useState("NONE")
-  const providerTouched = React.useRef(false)
+  const [provider, setProvider] = React.useState(initial?.provider ?? "NONE")
+  const providerTouched = React.useRef(Boolean(initial?.provider))
   const [scope, setScope] = React.useState<"WORKSPACE" | "CREW">("WORKSPACE")
   const [crewIds, setCrewIds] = React.useState<string[]>([])
   const [crews, setCrews] = React.useState<Crew[]>([])
@@ -243,6 +282,28 @@ export function AddCredentialWizard({
   // is the fallback for every other shape.
   const login = itemTypeKey === "PROVIDER_LOGIN" ? providerLoginPresentation(provider, loginMode) : null
   const suggestedSlot = login?.slot ?? (detected ? defaultEnvVarName(detected) : null)
+  // Which providers can sign in with a code — the server runs the device flow
+  // (PRD §5.6 v2, §10.3). Anthropic has no device flow: `claude setup-token`
+  // is the only way in, so it keeps the paste. A key is always pasted.
+  const deviceFlowAvailable = Boolean(login) && loginMode === "subscription" && provider.toUpperCase() === "OPENAI"
+  const usingDevice = deviceFlowAvailable && signIn === "device"
+
+  // The owner list, only once the shape asks for one. A failure leaves the
+  // signed-in person as the one choice, which is also the default.
+  const sessionUserId = session.data?.user.id ?? ""
+  const sessionUserEmail = session.data?.user.email ?? ""
+  React.useEffect(() => {
+    if (!ownerId && sessionUserId) setOwnerId(sessionUserId)
+  }, [ownerId, sessionUserId])
+  const membersFetchedFor = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!login || membersFetchedFor.current === workspaceId) return
+    membersFetchedFor.current = workspaceId
+    apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: Member[]) => setMembers(Array.isArray(data) ? data.filter((m) => m?.user?.id) : []))
+      .catch(() => setMembers([]))
+  }, [login, workspaceId])
 
   React.useEffect(() => {
     if (!detected || providerTouched.current) return
@@ -272,13 +333,15 @@ export function AddCredentialWizard({
     // server routes and renders it by the provider column — and a brand with
     // no subscription login is a save that would only fail at run time.
     if (login && !login.supported) return "Provider"
+    // With a code the server holds the value; the step waits for the sign-in.
+    if (usingDevice) return deviceCredentialId ? null : "Sign-in"
     if (!primaryValue.trim()) return login?.label ?? itemType.primary.label
     if (itemType.usernameOnRow && !username.trim()) return "Username"
     for (const f of itemType.extra) {
       if (f.required && !(extras[f.key] ?? "").trim()) return f.label
     }
     return null
-  }, [itemType, login, primaryValue, username, extras])
+  }, [itemType, login, usingDevice, deviceCredentialId, primaryValue, username, extras])
 
   // What is holding step 2 back, in the order the boxes are on screen. The
   // Continue button being dead is not an explanation; naming the box is.
@@ -303,6 +366,9 @@ export function AddCredentialWizard({
       tags.length > 0 ||
       slotTouched ||
       providerTouched.current ||
+      // A login the code minted exists on the server already; walking away
+      // leaves it unnamed and unbound, which is worth one question.
+      deviceCredentialId ||
       Object.values(extras).some((v) => v.trim()) ||
       custom.some((f) => f.key.trim() || f.value.trim()),
   )
@@ -323,43 +389,72 @@ export function AddCredentialWizard({
     }
     setSubmitting(true)
     try {
-      const body: Record<string, unknown> = {
-        name: name.trim(),
-        value: primaryValue,
-        type: login ? providerLoginCredentialType(loginMode) : itemType.credentialType,
-        provider,
-        scope,
-        tags,
-      }
-      body.security_level = securityLevel
-      if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
-      if (accountLabel.trim()) body.account_label = accountLabel.trim()
-      // Only when set — an absent key leaves the column NULL, which is what a
-      // brand-new row with no expiry should be. `internal/api/credentials_mutate.go`
-      // writes this straight into `credentials.token_expires_at` (createCredentialRequest.TokenExpires,
-      // json tag "token_expires_at"), same column and same ISO-string shape
-      // EditCredentialDialog already sends on PATCH.
-      if (expiresAt) body.token_expires_at = new Date(expiresAt).toISOString()
-      if (scope === "CREW") body.crew_ids = crewIds
-
-      const res = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        setError(typeof data.error === "string" ? data.error : `Couldn't save the credential (HTTP ${res.status}).`)
-        return
-      }
-      const created = (await res.json().catch(() => ({}))) as { id?: string }
-      const credentialId = created?.id
-
-      // Everything past this point is a follow-up write on a credential that
-      // ALREADY EXISTS. A failure here is reported as a warning, never as
+      let credentialId: string | undefined
+      // Everything past the create is a follow-up write on a credential that
+      // ALREADY EXISTS. A failure there is reported as a warning, never as
       // "save failed" — telling the user nothing was saved when a secret is
       // now in the vault is the worse of the two lies.
       const problems: string[] = []
+
+      if (deviceCredentialId) {
+        // The sign-in created the row (§10.3: the device status names it).
+        // What is left is the name the person typed; the value never came
+        // through this browser.
+        credentialId = deviceCredentialId
+        try {
+          const pr = await apiFetch(
+            `/api/v1/credentials/${encodeURIComponent(credentialId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: name.trim(), tags }),
+            },
+          )
+          if (!pr.ok) problems.push(`name (HTTP ${pr.status})`)
+        } catch {
+          problems.push("name")
+        }
+      } else {
+        const body: Record<string, unknown> = {
+          name: name.trim(),
+          value: primaryValue,
+          type: login ? providerLoginCredentialType(loginMode) : itemType.credentialType,
+          provider,
+          scope,
+          tags,
+        }
+        if (login) {
+          // Contract §10.2: PROVIDER_LOGIN with the mode as its own field and
+          // the value exactly as pasted — the server splits it into parts and
+          // seals the refresh token. The owner is §5.1's `owner_user_id`.
+          body.mode = loginMode
+          if (ownerId) body.owner_user_id = ownerId
+        }
+        body.security_level = securityLevel
+        if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
+        if (accountLabel.trim()) body.account_label = accountLabel.trim()
+        // Only when set — an absent key leaves the column NULL, which is what a
+        // brand-new row with no expiry should be. `internal/api/credentials_mutate.go`
+        // writes this straight into `credentials.token_expires_at` (createCredentialRequest.TokenExpires,
+        // json tag "token_expires_at"), same column and same ISO-string shape
+        // EditCredentialDialog already sends on PATCH.
+        if (expiresAt) body.token_expires_at = new Date(expiresAt).toISOString()
+        if (scope === "CREW") body.crew_ids = crewIds
+
+        const res = await apiFetch(`/api/v1/credentials?workspace_id=${encodeURIComponent(workspaceId)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          setError(typeof data.error === "string" ? data.error : `Couldn't save the credential (HTTP ${res.status}).`)
+          return
+        }
+        const created = (await res.json().catch(() => ({}))) as { id?: string }
+        credentialId = created?.id
+      }
+
       const fields = extraFieldsFor(itemTypeKey, extras, custom)
       if (credentialId && fields.length > 0) {
         for (const field of fields) {
@@ -437,7 +532,7 @@ export function AddCredentialWizard({
       void submit()
       return
     }
-    if (step === "values" && blocker) return
+    if (step === "values" && (blocker || deviceBusy)) return
     setStep(step === "type" ? "values" : "scope")
   }
 
@@ -576,19 +671,102 @@ export function AddCredentialWizard({
                         </button>
                       ))}
                     </div>
-                    {login.hint && <CardNote>{login.hint}</CardNote>}
+                    {deviceFlowAvailable && (
+                      <div className="space-y-2">
+                        <Label className="type-section text-muted-foreground">Sign in</Label>
+                        <div role="group" aria-label="Sign in" className="grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              { key: "paste", title: "Import from Codex CLI", blurb: "Paste ~/.codex/auth.json from a machine where codex login succeeded" },
+                              { key: "device", title: "Sign in with a code", blurb: "Open chatgpt.com, enter a one-time code — no CLI needed" },
+                            ] as const
+                          ).map((m) => (
+                            <button
+                              key={m.key}
+                              type="button"
+                              aria-pressed={signIn === m.key}
+                              onClick={() => setSignIn(m.key)}
+                              className={cn(
+                                "flex min-h-10 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
+                                signIn === m.key
+                                  ? "border-primary/60 bg-primary/10"
+                                  : "border-border/60 bg-card hover:border-border hover:bg-surface-raised",
+                              )}
+                            >
+                              <span className="type-row font-medium text-foreground">{m.title}</span>
+                              <span className="type-meta text-muted-foreground">{m.blurb}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {login.hint && !usingDevice && <CardNote>{login.hint}</CardNote>}
                   </div>
                 )}
-                <SecretField
-                  id="cred-primary"
-                  label={login?.label ?? itemType.primary.label}
-                  required
-                  multiline={login?.multiline ?? itemType.primary.multiline}
-                  placeholder={login?.placeholder ?? itemType.primary.placeholder}
-                  value={primaryValue}
-                  onChange={setPrimaryValue}
-                />
-                {detected && (
+                {usingDevice ? (
+                  <>
+                    <DeviceSignIn
+                      key={`${provider}:${loginMode}`}
+                      workspaceId={workspaceId}
+                      provider={provider}
+                      mode={loginMode}
+                      pollIntervalMs={devicePollMs}
+                      onComplete={setDeviceCredentialId}
+                      onStateChange={(s) => setDeviceBusy(s === "starting" || s === "pending")}
+                    />
+                    <CardNote>
+                      The refresh token is stored sealed and never delivered to any container or shown again.
+                      Crewship refreshes the seat itself; agents only ever receive a short-lived access token in{" "}
+                      <span className="font-mono">$CODEX_HOME/auth.json</span>.
+                    </CardNote>
+                  </>
+                ) : (
+                  <SecretField
+                    id="cred-primary"
+                    label={login?.label ?? itemType.primary.label}
+                    required
+                    multiline={login?.multiline ?? itemType.primary.multiline}
+                    placeholder={login?.placeholder ?? itemType.primary.placeholder}
+                    value={primaryValue}
+                    onChange={setPrimaryValue}
+                  />
+                )}
+                {login && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="cred-owner" className="type-section text-muted-foreground">Owner</Label>
+                    {members.length > 0 ? (
+                      <select
+                        id="cred-owner"
+                        value={ownerId}
+                        onChange={(e) => setOwnerId(e.target.value)}
+                        className={cn(
+                          FIELD,
+                          "w-full rounded-md border border-border/60 bg-background px-2.5 text-sm text-foreground outline-none focus:border-primary",
+                        )}
+                      >
+                        {!members.some((m) => m.user.id === ownerId) && ownerId && (
+                          <option value={ownerId}>{sessionUserEmail || ownerId}</option>
+                        )}
+                        {members.map((m) => (
+                          <option key={m.user.id} value={m.user.id}>
+                            {m.user.email}{m.user.id === sessionUserId ? " (you)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <Input
+                        id="cred-owner"
+                        readOnly
+                        value={sessionUserEmail || (ownerId ? ownerId : "you")}
+                        className={cn(FIELD, "text-muted-foreground")}
+                      />
+                    )}
+                    <p className="type-meta text-muted-foreground">
+                      The person whose seat this is. Seats are per person under both providers&apos; terms.
+                    </p>
+                  </div>
+                )}
+                {detected && !usingDevice && (
                   <p className="flex items-start gap-1.5 type-meta text-success">
                     <BrandIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: brandColor(brand) }} aria-hidden="true" />
                     <span className="min-w-0 break-words">
@@ -681,7 +859,7 @@ export function AddCredentialWizard({
                   </div>
                   <Input
                     id="cred-name"
-                    placeholder="e.g. github-acme"
+                    placeholder={login ? "e.g. ChatGPT Plus · jana" : "e.g. github-acme"}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className={cn(FIELD, "font-mono")}
@@ -740,8 +918,9 @@ export function AddCredentialWizard({
                 </CreateSurfaceField>
               </div>
               <CardNote>
-                The name is a human label for the account. It does not have to be the variable name —
-                that is the slot, on the next step.
+                {login
+                  ? "How it shows in the Providers list and on agents. It does not have to be the variable name — that is the slot, on the next step."
+                  : "The name is a human label for the account. It does not have to be the variable name — that is the slot, on the next step."}
               </CardNote>
             </CreateSurfaceSection>
 
@@ -977,9 +1156,9 @@ export function AddCredentialWizard({
               </CreateSurfaceSecondaryAction>
             )
           }
-          primaryLabel={step === "scope" ? "Save secret" : "Continue"}
+          primaryLabel={step === "scope" ? (login ? "Save login" : "Save secret") : "Continue"}
           onPrimary={primaryAction}
-          primaryDisabled={step === "values" && Boolean(blocker)}
+          primaryDisabled={step === "values" && (Boolean(blocker) || deviceBusy)}
           busy={submitting}
         />
       </div>

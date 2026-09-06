@@ -48,7 +48,7 @@
 
 import * as React from "react"
 import { CreateSurface, CreateSurfaceHeader } from "@/components/layout/create-surface"
-import { AddCredentialWizard } from "./add-credential-wizard"
+import { AddCredentialWizard, type WizardInitial } from "./add-credential-wizard"
 
 interface AddSecretSheetProps {
   workspaceId: string
@@ -57,9 +57,12 @@ interface AddSecretSheetProps {
   onSuccess: () => void
   /** Tags already in use across the workspace, for the autocomplete in the form. */
   knownTags?: string[]
+  /** Where the wizard starts — the Providers tab opens it on its own shape,
+   *  Re-login on the sign-in step of one seat's provider. */
+  initial?: WizardInitial
 }
 
-export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags }: AddSecretSheetProps) {
+export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, knownTags, initial }: AddSecretSheetProps) {
   // The guard belongs to the shell, the input belongs to the wizard, so the
   // one bit that connects them travels up.
   const [dirty, setDirty] = React.useState(false)
@@ -84,7 +87,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
       <CreateSurfaceHeader
         concept="credentials"
         context="Credentials"
-        title="Add a credential"
+        title={initial?.step === "values" && initial.itemType === "PROVIDER_LOGIN" ? "Re-login" : "Add a credential"}
         description={
           <>
             Encrypted with AES-256-GCM and never shown again.
@@ -107,6 +110,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
           key="open"
           workspaceId={workspaceId}
           knownTags={knownTags}
+          initial={initial}
           onDirtyChange={setDirty}
           primaryRef={primaryRef}
           onCancel={() => onOpenChange(false)}
