@@ -3,7 +3,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderHook, waitFor, act } from "@testing-library/react"
 
-import { useInbox, InboxActError, type InboxItem } from "@/hooks/use-inbox"
+import { useInbox, useInboxItem, InboxActError, type InboxItem } from "@/hooks/use-inbox"
 
 // #2398 — acting on a run_needs_human card from the web inbox.
 //
@@ -142,8 +142,9 @@ describe("useInbox().actOnInboxItem", () => {
 
   it("flips the cached row to resolved with the receipt on it — no reload, no refetch", async () => {
     mockFetch.mockResolvedValueOnce(okJSON({ rows: [card()], count: 1, unread_count: 1 }))
-    const { result } = renderHook(() => useInbox("ws-1", "all"), { wrapper: makeWrapper(qc) })
-    await waitFor(() => expect(result.current.items).toHaveLength(1))
+    mockFetch.mockResolvedValueOnce(okJSON(card()))
+    const { result } = renderHook(() => ({ ...useInbox("ws-1", "all"), detail: useInboxItem("ws-1", card().id) }), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.detail.data?.state).toBe("unread"))
 
     mockFetch.mockResolvedValueOnce(
       okJSON({ id: "ibx_run_needs_human_asg_1", state: "resolved", action: "answer", receipt }),
@@ -153,6 +154,8 @@ describe("useInbox().actOnInboxItem", () => {
     })
 
     await waitFor(() => expect(result.current.items[0].state).toBe("resolved"))
+    expect(result.current.detail.data?.state).toBe("resolved")
+    expect(result.current.detail.data?.payload?.receipt).toMatchObject({ run_id: "asg_2", seq: 14 })
     const row = result.current.items[0]
     expect(row.resolved_action).toBe("answer")
     expect(row.resolved_at).toBe("2026-09-05T10:05:00Z")
@@ -161,8 +164,8 @@ describe("useInbox().actOnInboxItem", () => {
     expect(row.payload?.receipt).toMatchObject({ run_id: "asg_2", seq: 14 })
     expect(row.payload?.who_can_act).toEqual(["role:MANAGER"])
     expect(result.current.unreadCount).toBe(0)
-    // One list GET, one act POST — nothing refetched behind the flip.
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    // List/detail GETs, one act POST — nothing refetched behind the flip.
+    expect(mockFetch).toHaveBeenCalledTimes(3)
   })
 
   it("drops the row from a list whose filter it no longer matches (active view)", async () => {

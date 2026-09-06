@@ -392,6 +392,9 @@ export function useInbox(
       }
       return { ...prev, rows, unread_count: unread }
     })
+    // The canonical inbox reads a separate detail query for decision evidence.
+    // Keep its state/receipt in sync with the list even while realtime is offline.
+    qc.setQueryData<InboxItem>(inboxKeys.detail(workspaceId!, id), (prev) => prev ? update(prev) : prev)
     // Mark every other inbox entry (sibling state filters, the bell
     // count) stale without refetching now: the in-place edit above
     // keeps the current view instant, the WS broadcast usually
@@ -423,6 +426,9 @@ export function useInbox(
     InboxActError,
     { id: string; action: InboxAction; input?: string }
   >({
+    onMutate: async ({ id }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.detail(workspaceId!, id) })
+    },
     mutationFn: async ({ id, action, input }) => {
       const res = await apiFetch(
         `/api/v1/inbox/${encodeURIComponent(id)}/act?workspace_id=${encodeURIComponent(workspaceId!)}`,
