@@ -78,10 +78,10 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 	}
 	// A Gemini login is the same shape one directory over: rendered whole
 	// into ~/.gemini/oauth_creds.json by the orchestrator's AuthDelivery.
-	if geminiauth.IsLogin(credType, provider) || (credType == CredTypeProviderLogin && strings.EqualFold(provider, "GOOGLE") && mode == providerlogin.ModeSubscription) {
+	if geminiauth.IsLogin(credType, provider) || (credType == providerlogin.Type && strings.EqualFold(provider, "GOOGLE") && mode == providerlogin.ModeSubscription) {
 		return []string{"/crew/agents/" + agentSlug + "/" + geminiauth.FileRel}
 	}
-	if credType == CredTypeProviderLogin {
+	if credType == providerlogin.Type {
 		return nil
 	}
 	dir := "/secrets/" + agentSlug
@@ -115,7 +115,7 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 // orchestrator makes the same call from the delivered parts
 // (credentialOAuthKind); here the mode comes from the row's fields.
 func isCodexProviderLogin(credType, provider, mode string) bool {
-	return credType == CredTypeProviderLogin &&
+	return credType == providerlogin.Type &&
 		providerlogin.Canonical(provider) == codexauth.ProviderID &&
 		(mode == "" || mode == providerlogin.ModeSubscription)
 }
