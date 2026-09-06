@@ -15,6 +15,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { AddCredentialWizard } from "../add-credential-wizard"
+import { LOGIN_PROVIDERS } from "@/lib/credentials/login-providers"
+import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
@@ -244,26 +246,56 @@ describe("provider login (#2428)", () => {
   }
 
   function pickShape(_label: RegExp) {
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    // Provider selection advances directly; retained for older scenarios.
   }
+
+  it.each(LOGIN_PROVIDERS)("prepares $key with its own key instructions and account name", (p) => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${p.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }))
+    if (p.key === "OPENAI") fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
+    if (p.key === "OPENAI" || p.key === "ANTHROPIC") fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue(p.label)
+    expect(screen.getByRole("link", { name: /get api key/i })).toHaveAttribute("href", providerConnectionGuide(p.key)!.url)
+    expect(screen.getByText(providerConnectionGuide(p.key)!.instruction)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
+  })
+
+  it("keeps a draft when returning to the same provider, but clears the key for another", () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
+    fireEvent.change(screen.getByLabelText(/^API key$/), { target: { value: "fixture-key" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "My production account" } })
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
+    expect(screen.getByLabelText(/^API key$/)).toHaveValue("fixture-key")
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Groq / }))
+    expect(screen.getByLabelText(/^API key$/)).toHaveValue("")
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("My production account")
+  })
 
   it("starts directly with a provider, without using a decorative brand picker", () => {
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
-    expect(screen.getByLabelText(/^provider$/i)).toHaveValue("OPENAI")
-    expect(screen.getByLabelText(/codex login \(auth.json\)/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
+    expect(screen.getByText("Connect ChatGPT / OpenAI")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
     expect(screen.queryByRole("button", { name: /provider: openai/i })).not.toBeInTheDocument()
   })
 
   it("gives Gemini its own file import and clears the token when switching to Grok", () => {
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^Gemini \/ Google/i }))
+    expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^Google account/i }))
     fireEvent.change(screen.getByLabelText(/Gemini login/), { target: { value: "old-google-token" } })
-    fireEvent.change(screen.getByLabelText(/^provider$/i), { target: { value: "XAI" } })
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/i }))
     expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
     expect(screen.queryByRole("button", { name: /^Subscription/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Sign in with a code/i })).not.toBeInTheDocument()
-    expect(screen.getByText("API key · via OpenCode")).toBeInTheDocument()
+    expect(screen.getByText(/Uses Grok through OpenCode/)).toBeInTheDocument()
   })
 
   it("saves a Grok account with the xAI provider and API-key mode", async () => {
@@ -281,16 +313,14 @@ describe("provider login (#2428)", () => {
   })
 
   function pickOpenAI() {
-    fireEvent.change(screen.getByLabelText(/^provider$/i), { target: { value: "OPENAI" } })
+    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
+    fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
   }
 
   it("will not continue without a provider — the server routes by it", () => {
     renderWizard()
     pickShape(/provider login/i)
-    fireEvent.change(screen.getByLabelText(/^login$/i), { target: { value: "{}" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "x" } })
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    expect(screen.getByRole("button", { name: /^continue$/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
     expect(screen.queryByRole("button", { name: /save secret/i })).not.toBeInTheDocument()
   })
 
@@ -300,7 +330,7 @@ describe("provider login (#2428)", () => {
     pickOpenAI()
     const box = screen.getByLabelText(/codex login \(auth\.json\)/i)
     expect(box.tagName).toBe("TEXTAREA")
-    expect(screen.getByText(/paste the whole contents of ~\/\.codex\/auth\.json/i)).toBeInTheDocument()
+    expect(screen.getByText(/paste the contents of ~\/\.codex\/auth\.json/i)).toBeInTheDocument()
     fireEvent.change(box, { target: { value: '{"tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"x"}}' } })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
@@ -343,7 +373,7 @@ describe("provider login (#2428)", () => {
   it("keeps the setup-token paste for Anthropic — there is no device flow to offer", () => {
     renderWizard()
     pickShape(/provider login/i)
-    fireEvent.change(screen.getByLabelText(/^provider$/i), { target: { value: "ANTHROPIC" } })
+    fireEvent.click(screen.getByRole("button", { name: /^Claude \/ Anthropic/i }))
     expect(screen.getByLabelText(/^setup token$/i)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
   })
@@ -381,7 +411,14 @@ describe("provider login (#2428)", () => {
     // The step is held until the sign-in lands.
     expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
 
-    await waitFor(() => expect(screen.getByTestId("device-sign-in")).toHaveAttribute("data-phase", "complete"))
+    await screen.findByText("Signed in. Continue to choose access for this account.")
+    const starts = () => h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/provider-logins/device?") && init?.method === "POST").length
+    const startsBeforeBack = starts()
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    expect(screen.getByRole("button", { name: /^Claude \/ Anthropic/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
+    expect(screen.getByText("Signed in. Continue to choose access for this account.")).toBeInTheDocument()
+    expect(starts()).toBe(startsBeforeBack)
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     fireEvent.click(screen.getByRole("button", { name: /save login/i }))

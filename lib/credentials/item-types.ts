@@ -366,7 +366,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
         label: "Setup token",
         placeholder: "sk-ant-oat01-…",
         multiline: false,
-        hint: "Run `claude setup-token` on your computer and paste the whole output. Delivered to Claude Code as CLAUDE_CODE_OAUTH_TOKEN.",
+        hint: "Run `claude setup-token` on your computer, then paste the generated token below.",
         slot: "CLAUDE_CODE_OAUTH_TOKEN",
         supported: true,
       }
@@ -375,7 +375,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
         label: "Gemini login (oauth_creds.json)",
         placeholder: '{ "access_token": "…", "refresh_token": "…", "expiry_date": 0 }',
         multiline: true,
-        hint: "Sign in with Gemini CLI and paste ~/.gemini/oauth_creds.json. Crewship stores the refresh token securely and renews the access token.",
+        hint: "Run `gemini`, choose Sign in with Google, then paste the contents of ~/.gemini/oauth_creds.json below. For company accounts requiring a Cloud project, use an API key here.",
         slot: "GEMINI_API_KEY",
         supported: true,
       }
@@ -384,7 +384,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
         label: "Codex login (auth.json)",
         placeholder: '{ "auth_mode": "chatgpt", "tokens": { … } }  — the whole ~/.codex/auth.json',
         multiline: true,
-        hint: "Run `codex login` on your computer, then paste the whole contents of ~/.codex/auth.json. The refresh token stays on the server; agents only ever get a short-lived access token, so one login can pay for any number of them.",
+        hint: "Run `codex login` on your computer, then paste the contents of ~/.codex/auth.json below.",
         slot: "OPENAI_API_KEY",
         supported: true,
       }

@@ -78,7 +78,8 @@ import {
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
-import { LOGIN_PROVIDERS, loginProvider } from "@/lib/credentials/login-providers"
+import { loginProvider } from "@/lib/credentials/login-providers"
+import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
 import {
   brandColor, detectBrandFromName, detectBrandFromValue, getBrand,
@@ -241,6 +242,7 @@ export function AddCredentialWizard({
   const [extras, setExtras] = React.useState<Record<string, string>>({})
   const [custom, setCustom] = React.useState<CustomFieldDraft[]>([])
   const [name, setName] = React.useState(initial?.name ?? "")
+  const nameTouched = React.useRef(Boolean(initial?.name))
   const [username, setUsername] = React.useState("")
   const [accountLabel, setAccountLabel] = React.useState("")
   const [tags, setTags] = React.useState<string[]>([])
@@ -283,6 +285,7 @@ export function AddCredentialWizard({
   // A provider login knows its own slot from the brand and the mode; detection
   // is the fallback for every other shape.
   const login = itemTypeKey === "PROVIDER_LOGIN" ? providerLoginPresentation(provider, loginMode) : null
+  const connectionGuide = providerConnectionGuide(provider)
   const suggestedSlot = login?.slot ?? (detected ? defaultEnvVarName(detected) : null)
   // Which providers can sign in with a code — the server runs the device flow
   // (PRD §5.6 v2, §10.3). Anthropic has no device flow: `claude setup-token`
@@ -323,14 +326,17 @@ export function AddCredentialWizard({
   const BrandIcon = brand.Icon
 
   const selectLoginProvider = (key: string) => {
+    if (key === provider) return
     if (key !== provider && deviceCredentialId) return
     providerTouched.current = true
     setProvider(key)
     setItemTypeKey("PROVIDER_LOGIN")
-    setLoginMode(loginProvider(key)?.subscription ? "subscription" : "api_key")
+    if (!nameTouched.current) setName(loginProvider(key)?.label ?? key)
+    setLoginMode(loginProvider(key)?.subscription && key !== "GOOGLE" ? "subscription" : "api_key")
     setPrimaryValue("")
     setExtras({})
-    setSignIn("paste")
+    setDeviceBusy(false)
+    setSignIn(key === "OPENAI" ? "device" : "paste")
   }
 
   // Without a binding the credential is delivered under its own NAME (the
@@ -543,6 +549,7 @@ export function AddCredentialWizard({
    */
   function primaryAction() {
     if (submitting) return
+    if (step === "type" && login && !loginProvider(provider)) return
     if (step === "scope") {
       void submit()
       return
@@ -583,7 +590,7 @@ export function AddCredentialWizard({
                 <CreateSurfaceSection title="Connect an AI provider" icon={KeyRound} accent="blue">
                   <p className="type-meta text-muted-foreground">Choose your provider. We will guide you through its supported sign-in methods.</p>
                 </CreateSurfaceSection>
-                <LoginProviderPicker value={provider} onChange={(key) => {
+                <LoginProviderPicker value={provider} locked={Boolean(deviceCredentialId)} onChange={(key) => {
                   selectLoginProvider(key)
                   setStep("values")
                 }} />
@@ -665,34 +672,20 @@ export function AddCredentialWizard({
 
         {step === "values" && (
           <>
-            <CreateSurfaceSection title="The secret" hint={itemType.label.toLowerCase()} icon={ItemIcon} accent="amber">
+            <CreateSurfaceSection title={login ? `Connect ${loginProvider(provider)?.label ?? "your provider"}` : "The secret"} hint={login ? undefined : itemType.label.toLowerCase()} icon={login ? BrandIcon : ItemIcon} accent="amber">
               <div className="space-y-3">
                 {login && (
                   <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="login-provider">Provider</Label>
-                      <select id="login-provider" value={provider} disabled={deviceBusy || Boolean(deviceCredentialId)}
-                        onChange={(e) => selectLoginProvider(e.target.value)}
-                        className={cn(FIELD, "w-full rounded-md border border-border/60 bg-background px-2.5 text-sm")}>
-                        <option value="NONE" disabled>Choose your AI provider</option>
-                        {LOGIN_PROVIDERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-                      </select>
-                      {loginProvider(provider) && <CardNote>{loginProvider(provider)?.detail}</CardNote>}
-                    </div>
-                    {/* The brand is a hint for every other shape; for a
-                        provider login it is the thing itself — the server
-                        picks the delivery path (env var vs. $CODEX_HOME file)
-                        and the route by the provider column. It is set on
-                        step 1 or with the "Icon" picker beside the name below;
-                        missingRequired holds the step until it is. */}
-                    <div role="group" aria-label="How does this seat pay" className="grid grid-cols-2 gap-2">
+                    {/* Provider identity is fixed by step 1; only supported
+                        connection methods belong on the Connect step. */}
+                    {loginProvider(provider)?.subscription && <div role="group" aria-label="How does this seat pay" className="grid grid-cols-2 gap-2">
                       {(["subscription", "api_key"] as const).filter((m) => m === "api_key" || loginProvider(provider)?.subscription).map((m) => (
                         <button
                           key={m}
                           type="button"
                           aria-pressed={loginMode === m}
                           disabled={deviceBusy || Boolean(deviceCredentialId)}
-                          onClick={() => { setLoginMode(m); setPrimaryValue(""); setSignIn("paste") }}
+                          onClick={() => { if (m === loginMode) return; setLoginMode(m); setPrimaryValue(""); setSignIn(provider === "OPENAI" && m === "subscription" ? "device" : "paste") }}
                           className={cn(
                             "flex min-h-10 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
                             loginMode === m
@@ -701,29 +694,30 @@ export function AddCredentialWizard({
                           )}
                         >
                           <span className="type-row font-medium text-foreground">
-                            {m === "subscription" ? "Subscription" : "API key"}
+                            {m === "subscription" ? (provider === "GOOGLE" ? "Google account" : "Subscription") : "API key"}
                           </span>
                           <span className="type-meta text-muted-foreground">
                             {m === "subscription" ? "Use your existing provider account" : "Use a key from your provider account"}
                           </span>
                         </button>
                       ))}
-                    </div>
+                    </div>}
                     {deviceFlowAvailable && (
                       <div className="space-y-2">
                         <Label className="type-section text-muted-foreground">Sign in</Label>
                         <div role="group" aria-label="Sign in" className="grid grid-cols-2 gap-2">
                           {(
                             [
-                              { key: "paste", title: "Import from Codex CLI", blurb: "Paste ~/.codex/auth.json from a machine where codex login succeeded" },
-                              { key: "device", title: "Sign in with a code", blurb: "Open chatgpt.com, enter a one-time code — no CLI needed" },
+                              { key: "device", title: "Sign in with a code" },
+                              { key: "paste", title: "Import from Codex CLI" },
                             ] as const
                           ).map((m) => (
                             <button
                               key={m.key}
                               type="button"
                               aria-pressed={signIn === m.key}
-                              onClick={() => setSignIn(m.key)}
+                              disabled={Boolean(deviceCredentialId)}
+                              onClick={() => { if (m.key === signIn) return; setDeviceBusy(false); setSignIn(m.key) }}
                               className={cn(
                                 "flex min-h-10 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
                                 signIn === m.key
@@ -732,16 +726,21 @@ export function AddCredentialWizard({
                               )}
                             >
                               <span className="type-row font-medium text-foreground">{m.title}</span>
-                              <span className="type-meta text-muted-foreground">{m.blurb}</span>
                             </button>
                           ))}
                         </div>
                       </div>
                     )}
-                    {login.hint && !usingDevice && <CardNote>{login.hint}</CardNote>}
+                    {loginMode === "api_key" && connectionGuide ? <div className="space-y-2">
+                      <p className="type-meta text-muted-foreground">{connectionGuide.instruction}</p>
+                      <a href={connectionGuide.url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-10 items-center text-sm font-medium text-primary hover:underline">Get API key ↗</a>
+                      {connectionGuide.note && <p className="type-meta text-muted-foreground">{connectionGuide.note}</p>}
+                    </div> : login.hint && !usingDevice && <CardNote>{login.hint}</CardNote>}
                   </div>
                 )}
-                {usingDevice ? (
+                {usingDevice ? deviceCredentialId ? (
+                  <CardNote>Signed in. Continue to choose access for this account.</CardNote>
+                ) : (
                   <>
                     <DeviceSignIn
                       key={`${provider}:${loginMode}`}
@@ -749,14 +748,10 @@ export function AddCredentialWizard({
                       provider={provider}
                       mode={loginMode}
                       pollIntervalMs={devicePollMs}
-                      onComplete={setDeviceCredentialId}
+                      onComplete={(id) => { setDeviceBusy(false); setDeviceCredentialId(id) }}
                       onStateChange={(s) => setDeviceBusy(s === "starting" || s === "pending")}
                     />
-                    <CardNote>
-                      The refresh token is stored sealed and never delivered to any container or shown again.
-                      Crewship refreshes the seat itself; agents only ever receive a short-lived access token in{" "}
-                      <span className="font-mono">$CODEX_HOME/auth.json</span>.
-                    </CardNote>
+                    <CardNote>Device-code login must be enabled in your ChatGPT security settings. You can also import an existing Codex login.</CardNote>
                   </>
                 ) : (
                   <SecretField
@@ -770,7 +765,8 @@ export function AddCredentialWizard({
                   />
                 )}
                 {login && (
-                  <div className="space-y-1.5">
+                  <details className="space-y-1.5">
+                    <summary className="cursor-pointer py-2 type-meta text-muted-foreground">Account owner · {members.find((m) => m.user.id === ownerId)?.user.email || sessionUserEmail || "you"}</summary>
                     <Label htmlFor="cred-owner" className="type-section text-muted-foreground">Owner</Label>
                     {members.length > 0 ? (
                       <select
@@ -802,9 +798,9 @@ export function AddCredentialWizard({
                     <p className="type-meta text-muted-foreground">
                       The person responsible for this provider account.
                     </p>
-                  </div>
+                  </details>
                 )}
-                {detected && !usingDevice && (
+                {detected && !login && (
                   <p className="flex items-start gap-1.5 type-meta text-success">
                     <BrandIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: brandColor(brand) }} aria-hidden="true" />
                     <span className="min-w-0 break-words">
@@ -877,6 +873,8 @@ export function AddCredentialWizard({
               </div>
             </CreateSurfaceSection>
 
+            <details open={login ? undefined : true}>
+              <summary className={login ? "cursor-pointer py-2 text-sm text-muted-foreground" : "hidden"}>Name and labels · {name || "your account"}</summary>
             <CreateSurfaceSection title="Identity" icon={Tag} accent="blue">
               <div className="space-y-3">
                 <div className="space-y-1.5">
@@ -899,7 +897,7 @@ export function AddCredentialWizard({
                     id="cred-name"
                     placeholder={login ? `e.g. ${loginProvider(provider)?.label ?? "Provider"} · my account` : "e.g. github-acme"}
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => { nameTouched.current = true; setName(e.target.value) }}
                     className={cn(FIELD, "font-mono")}
                   />
                 </div>
@@ -962,13 +960,14 @@ export function AddCredentialWizard({
               </CardNote>
             </CreateSurfaceSection>
 
-            <CreateSurfaceSection title="Extra fields" hint="optional" icon={Plus} accent="slate">
+            </details>
+            {!login && <CreateSurfaceSection title="Extra fields" hint="optional" icon={Plus} accent="slate">
               <CustomFields fields={custom} onChange={setCustom} />
               <CardNote>
                 Anything else that travels with this credential — a tenant id, an endpoint. Each part is
                 stored separately and can be secret or plain.
               </CardNote>
-            </CreateSurfaceSection>
+            </CreateSurfaceSection>}
           </>
         )}
 
@@ -1041,7 +1040,7 @@ export function AddCredentialWizard({
                 would put the tier behind another click nobody takes. */}
             {login && <CreateSurfaceSection title="Account protection" icon={ShieldCheck} accent="green">
               <p className="type-meta text-muted-foreground">
-                Your login is encrypted. Agents use it through assignments; saving an account does not grant every agent access.
+                Your login is encrypted. Access follows the workspace or crews you select above.
               </p>
             </CreateSurfaceSection>}
             {!login && <CreateSurfaceSection
@@ -1104,6 +1103,8 @@ export function AddCredentialWizard({
               </div>
             </CreateSurfaceSection>}
 
+            <details open={login ? undefined : true}>
+              <summary className={login ? "cursor-pointer py-2 text-sm text-muted-foreground" : "hidden"}>Advanced delivery settings · {slot || "not assigned"}</summary>
             <CreateSurfaceSection title="Env var slot" icon={Braces} accent="gold">
               {canBind ? (
                 <CreateSurfaceField
@@ -1150,6 +1151,7 @@ export function AddCredentialWizard({
                 </CardNote>
               )}
             </CreateSurfaceSection>
+            </details>
           </>
         )}
       </CreateSurfaceBody>
@@ -1163,7 +1165,9 @@ export function AddCredentialWizard({
       <div data-testid="wizard-footer" className="shrink-0">
         {step === "values" && blocker && (
           <p className="border-t border-hairline px-4 py-2 type-meta text-muted-foreground sm:px-5">
-            <span className="font-medium text-foreground/80">{blocker}</span> is still empty.
+            {usingDevice
+              ? (deviceBusy ? "Waiting for approval in your browser." : "Complete sign-in above, or import a Codex login.")
+              : <><span className="font-medium text-foreground/80">{blocker}</span> is still empty.</>}
           </p>
         )}
 
@@ -1201,7 +1205,7 @@ export function AddCredentialWizard({
           }
           primaryLabel={step === "scope" ? (login ? "Save login" : "Save secret") : "Continue"}
           onPrimary={primaryAction}
-          primaryDisabled={step === "values" && (Boolean(blocker) || deviceBusy)}
+          primaryDisabled={(step === "type" && Boolean(login) && !loginProvider(provider)) || (step === "values" && (Boolean(blocker) || deviceBusy))}
           busy={submitting}
         />
       </div>

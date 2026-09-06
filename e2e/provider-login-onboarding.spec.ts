@@ -10,6 +10,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       let body: unknown = []
       if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
       else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
+      else if (path === "/api/v1/provider-logins/device") body = { device_id: "fixture-device", user_code: "TEST-CODE", verification_url: "https://auth.openai.com/device", interval_s: 30, expires_at: new Date(Date.now() + 600_000).toISOString() }
+      else if (path === "/api/v1/provider-logins/device/fixture-device") body = { status: "pending" }
       else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
@@ -28,17 +30,26 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     }
     await page.getByRole("button", { name: "Add provider", exact: true }).first().click()
     await page.getByRole("button", { name: /^ChatGPT \/ OpenAI/ }).click()
+    await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0)
+    await expect(page.getByTestId("device-user-code")).toHaveText("TEST-CODE")
+    await page.screenshot({ path: `/tmp/provider-guided-chatgpt-${viewport.width}.png` })
+    await page.getByRole("button", { name: /Import from Codex CLI/ }).click()
     await expect(page.getByLabel(/Codex login \(auth.json\)/)).toBeVisible()
-    await page.getByLabel("Provider", { exact: true }).selectOption("GOOGLE")
+    await page.getByRole("button", { name: "Back", exact: true }).click()
+    await page.getByRole("button", { name: /^Gemini \/ Google/ }).click()
+    await expect(page.getByRole("link", { name: "Get API key" })).toHaveAttribute("href", "https://aistudio.google.com/apikey")
+    await page.getByRole("button", { name: /^Google account/ }).click()
     await expect(page.getByLabel(/Gemini login/)).toBeVisible()
     await page.getByLabel(/Gemini login/).fill("fixture-only-not-a-token")
-    await page.getByLabel("Provider", { exact: true }).selectOption("XAI")
+    await page.getByRole("button", { name: "Back", exact: true }).click()
+    await page.getByRole("button", { name: /^Grok \/ xAI/ }).click()
     await expect(page.getByLabel("API key", { exact: true })).toHaveValue("")
     await expect(page.getByRole("button", { name: /^Subscription/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: /Sign in with a code/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible()
     await page.getByLabel("API key", { exact: true }).fill("fixture-xai-key")
-    await page.getByLabel("Name (which account)").fill("Fixture account")
+    await expect(page.getByText("Name and labels · Grok / xAI", { exact: true })).toBeVisible()
+    await page.screenshot({ path: `/tmp/provider-guided-grok-${viewport.width}.png` })
     await page.getByRole("button", { name: "Continue", exact: true }).click()
     await expect(page.getByText("Account protection", { exact: true })).toBeVisible()
     await expect(page.getByRole("group", { name: "How closely Keeper guards it" })).toHaveCount(0)

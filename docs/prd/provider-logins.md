@@ -431,6 +431,16 @@ Kliknutí otevře jeho konkrétní formulář: jen podporované metody, vstup po
 Změna providera/metody smaže rozepsaný token. Po dokončeném device přihlášení
 nelze identitu účtu zaměnit za jiného providera.
 
+Další zpřesnění průvodce (2026-09-06): Connect již neopakuje výběr providera;
+značka je v nadpisu, změna je přes Back. Výběr stejné značky zachová draft,
+jiná značka smaže klíč. Název se předvyplní podle značky, ruční název se nepřepisuje.
+ChatGPT předvolí device code (s importem jako alternativou), Gemini API key
+(s importem osobního Google přihlášení jako alternativou), Claude setup token.
+API-only provider nevyžaduje potvrzovat jedinou dostupnou metodu. Každý má
+konkrétní krátký návod a odkaz na vytvoření klíče. Owner, název/štítky a technický
+slot jsou upravitelné pod rozbalením. Zdroje a hranice podpory viz
+[`reports/provider-onboarding-guidance-2026-09-06.md`](reports/provider-onboarding-guidance-2026-09-06.md).
+
 Filtr **Providers** je přímo v levé liště Overview i Providers, včetně nulových
 počtů a volby „All providers". Výběr v Overview přepne do Providers. Nulový počet
 nesmí skrýt celou lištu. Počty vycházejí z login metadat API, ne z názvu secretu.
