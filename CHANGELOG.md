@@ -25,6 +25,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Gemini refresh configuration** (#2428) — remove bundled OAuth client credentials. Operators configure the matching client through server-only environment variables; missing configuration disables refresh without invalidating a stored user grant and is explicitly reported in account details.
+
 - **Credential review hardening** (#2428) — reject oversized piped values even when the limit is followed by a newline; device-code sign-in no longer offers an owner change that is not saved; failed provider-account swaps attempt to restore the previous binding, refresh actual assignment state, and report failed recovery explicitly.
 - **Provider account administration** (#2428) — provider accounts, including legacy provider API keys and CLI logins, are restricted to workspace owners/admins in both the API and console. Other roles see only the agent's provider brand. Agent credential/binding lists now respect credential visibility, tenant boundaries and deleted rows without exposing hidden binding winners in warning messages.
 

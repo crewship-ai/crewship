@@ -51,6 +51,8 @@ var ErrRefreshInFlight = errors.New("a refresh of this login is already in fligh
 // API key) or no sealed refresh token to run it with.
 var ErrRefreshUnsupported = errors.New("this login has no refresh flow")
 
+var errRefreshConfiguration = errors.New(providerlogin.GoogleOAuthConfigurationRequired)
+
 var errRefreshSuperseded = errors.New("login changed while refresh was in flight; retry with the current login")
 
 // errNeedsRelogin: the login is past repair by refresh.
@@ -75,14 +77,17 @@ func NewProviderLoginRefresher(db *sql.DB, logger *slog.Logger, ctr provider.Con
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ProviderLoginRefresher{
+	refresher := &ProviderLoginRefresher{
 		db: db, logger: logger, container: ctr, now: func() time.Time { return time.Now().UTC() },
 		refresh: map[string]providerlogin.TokenRefresher{
 			"OPENAI": providerlogin.NewOpenAIRefresher(nil),
-			"GOOGLE": providerlogin.NewGoogleRefresher(nil),
 		},
 		interval: time.Minute,
 	}
+	if google := providerlogin.NewGoogleRefresher(nil); google != nil {
+		refresher.refresh["GOOGLE"] = google
+	}
+	return refresher
 }
 
 // SetTokenRefresher replaces the endpoint for one provider — tests point it
@@ -269,6 +274,9 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	}
 	tr, ok := r.refresherFor(provider)
 	if !ok {
+		if providerlogin.Canonical(provider) == "GOOGLE" {
+			return "", errRefreshConfiguration
+		}
 		return "", ErrRefreshUnsupported
 	}
 
@@ -678,6 +686,9 @@ func (h *CredentialHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 	case errors.Is(err, ErrRefreshInFlight), errors.Is(err, errRefreshSuperseded):
 		replyError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, errRefreshConfiguration):
+		replyError(w, http.StatusServiceUnavailable, errRefreshConfiguration.Error())
 		return
 	case errors.Is(err, ErrRefreshUnsupported):
 		replyError(w, http.StatusBadRequest, "this login has no refresh flow: only a supported subscription login with a stored refresh token can be refreshed")

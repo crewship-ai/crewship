@@ -215,6 +215,11 @@ func buildLoginView(src loginSource, parts map[string]string, state *refreshStat
 	v.Delivery = providerlogin.DeliveryFor(provider, v.Mode)
 
 	v.Refresh = loginRefreshView{Status: providerlogin.StatusNone}
+	if provider == "GOOGLE" && v.Mode == providerlogin.ModeSubscription && hasRefreshToken && !providerlogin.GoogleRefreshConfigured() {
+		message := providerlogin.GoogleOAuthConfigurationRequired
+		v.Refresh.Error = &message
+		return v
+	}
 	if src.Type == CredTypeProviderLogin && v.Mode == providerlogin.ModeSubscription && hasRefreshToken {
 		v.Refresh.Supported = true
 		v.Refresh.Status = providerlogin.StatusOK

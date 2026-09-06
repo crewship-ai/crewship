@@ -9,6 +9,8 @@ import (
 )
 
 func TestGoogleLoginRefresh(t *testing.T) {
+	t.Setenv("CREWSHIP_GEMINI_OAUTH_CLIENT_ID", "test-client-id")
+	t.Setenv("CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET", "test-client-secret")
 	l, err := Split("GOOGLE", "", `{"access_token":"access-old","refresh_token":"refresh-private","expiry_date":1800000000000,"scope":"custom-scope"}`)
 	if err != nil || l.Mode != ModeSubscription || l.Scope != "custom-scope" || !l.RefreshSupported() {
 		t.Fatalf("import failed: %+v %v", l, err)
@@ -17,7 +19,7 @@ func TestGoogleLoginRefresh(t *testing.T) {
 		if err := req.ParseForm(); err != nil {
 			t.Error(err)
 		}
-		if req.Form.Get("refresh_token") != l.RefreshToken || req.Form.Get("client_secret") == "" || req.Form.Get("grant_type") != "refresh_token" {
+		if req.Form.Get("refresh_token") != l.RefreshToken || req.Form.Get("client_secret") != "test-client-secret" || req.Form.Get("client_id") != "test-client-id" || req.Form.Get("grant_type") != "refresh_token" {
 			t.Error("incomplete refresh request")
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -33,5 +35,15 @@ func TestGoogleLoginRefresh(t *testing.T) {
 	}
 	if Due(result.ExpiresAt, before, RefreshLeadFor("GOOGLE")) {
 		t.Fatal("fresh Google token immediately due")
+	}
+}
+
+func TestGoogleRefreshRequiresOperatorConfiguration(t *testing.T) {
+	for _, tc := range []struct{ id, secret string }{{"", ""}, {"test-id", ""}, {"", "test-secret"}, {" ", "test-secret"}} {
+		t.Setenv("CREWSHIP_GEMINI_OAUTH_CLIENT_ID", tc.id)
+		t.Setenv("CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET", tc.secret)
+		if GoogleRefreshConfigured() || NewGoogleRefresher(nil) != nil {
+			t.Fatal("incomplete configuration enabled Google token exchange")
+		}
 	}
 }

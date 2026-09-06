@@ -1,5 +1,18 @@
 # PRD — Provider logins: jedno přihlášení, N agentů
 
+## Provozní doplnění: Google OAuth klient (2026-09-06)
+
+Obnovování importovaných Gemini přihlášení vyžaduje serverové proměnné
+`CREWSHIP_GEMINI_OAUTH_CLIENT_ID` a `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` a restart.
+Klient musí odpovídat tomu, který vydal importovaný grant; náhodně založený nový
+OAuth klient existující grant nepřevezme. Konfiguraci spravuje provozovatel mimo
+Git a mimo kontejnery agentů. Není to Google klient pro přihlášení do Crewship.
+Bez obou hodnot se refresher neregistruje, detail uvádí chybějící konfiguraci,
+ruční refresh vrací 503 a nemění počet selhání uživatelského grantu. Import a
+API-klíčová cesta zůstávají dostupné; import sám nezaručuje obnovování tokenu.
+Žádné upstream klientské hodnoty se nedodávají ani automaticky nestahují.
+Kontext protokolu: [Google OAuth pro instalované aplikace](https://developers.google.com/identity/protocols/oauth2/native-app#offline).
+
 **Status:** analýza k odsouhlasení · **Datum:** 2026-09-06
 **Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), `PRD-CREDENTIALS-V2-2026.md`
 (P2 fanout, P3 bindings), `PRD-MODEL-SCOPED-CREDENTIALS-2026.md` (model policy na
