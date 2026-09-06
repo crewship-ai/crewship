@@ -344,6 +344,15 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Snapshot the two fields the rebuild hook compares, before the UPDATE.
+	var beforeCrewID, beforeAdapter string
+	{
+		var c, a sql.NullString
+		_ = h.db.QueryRowContext(r.Context(),
+			"SELECT crew_id, cli_adapter FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+			agentID, workspaceID).Scan(&c, &a)
+		beforeCrewID, beforeAdapter = c.String, a.String
+	}
 	query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		replyInternalError(w, h.logger, "update agent", err)
@@ -358,6 +367,19 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteAuditLog(r.Context(), h.db, h.journal, "update", "AGENT", agentID, userID, workspaceID, changes)
+	// An adapter change, or a move into another crew, may land the agent on
+	// an image never verified for its CLI: rebuild (agents_adapter_rebuild.go).
+	// Compared against the row as it was before the UPDATE, so a PATCH that
+	// resends the same adapter does not enqueue a build.
+	if _, adapterInBody := body["cli_adapter"]; adapterInBody || body["crew_id"] != nil {
+		var crewID, adapter sql.NullString
+		if err := h.db.QueryRowContext(r.Context(),
+			"SELECT crew_id, cli_adapter FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+			agentID, workspaceID).Scan(&crewID, &adapter); err == nil && crewID.Valid && adapter.Valid &&
+			(crewID.String != beforeCrewID || adapter.String != beforeAdapter) {
+			h.ensureCrewImageHasAdapter(r.Context(), crewID.String, workspaceID, adapter.String)
+		}
+	}
 
 	// Notify scheduler of schedule changes
 	if h.scheduleUpdater != nil {

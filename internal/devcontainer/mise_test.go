@@ -408,10 +408,10 @@ func TestInstallMiseTools_PreparesAgentOwnedXDGDirs(t *testing.T) {
 	// creation must happen as root (the agent user cannot mkdir under a
 	// root-owned home).
 	wantDirs := []string{
-		"/home/agent/.config/mise",
-		"/home/agent/.local/share/mise",
-		"/home/agent/.local/state/mise",
-		"/home/agent/.cache/mise",
+		"/opt/mise/config",
+		"/opt/mise/data",
+		"/opt/mise/state",
+		"/opt/mise/cache",
 	}
 	var mkdirIdx, chownIdx, installIdx = -1, -1, -1
 	for i, c := range calls {
@@ -449,10 +449,11 @@ func TestInstallMiseTools_PreparesAgentOwnedXDGDirs(t *testing.T) {
 	// Both agent-side mise invocations must pin the XDG roots.
 	wantEnv := []string{
 		"HOME=/home/agent",
-		"XDG_CONFIG_HOME=/home/agent/.config",
-		"XDG_DATA_HOME=/home/agent/.local/share",
-		"XDG_STATE_HOME=/home/agent/.local/state",
-		"XDG_CACHE_HOME=/home/agent/.cache",
+		"MISE_CONFIG_DIR=/opt/mise/config",
+		"MISE_DATA_DIR=/opt/mise/data",
+		"MISE_STATE_DIR=/opt/mise/state",
+		"MISE_CACHE_DIR=/opt/mise/cache",
+		"MISE_GLOBAL_CONFIG_FILE=/opt/mise/config/config.toml",
 	}
 	for _, c := range calls {
 		if c.user != "1001:1001" {
