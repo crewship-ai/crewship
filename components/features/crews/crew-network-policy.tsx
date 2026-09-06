@@ -16,6 +16,8 @@ const DEFAULT_DOMAINS = [
   "api.openai.com",
   "auth.openai.com",
   "chatgpt.com",
+  "ab.chatgpt.com",
+  "*.oaiusercontent.com",
   "generativelanguage.googleapis.com",
   "oauth2.googleapis.com",
   "accounts.google.com",

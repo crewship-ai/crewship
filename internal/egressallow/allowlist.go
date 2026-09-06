@@ -39,6 +39,16 @@ var DefaultAllowedDomains = []string{
 	"api.openai.com",  // Codex CLI (API key)
 	"auth.openai.com", // Codex CLI ChatGPT-subscription login flow
 	"chatgpt.com",     // Codex CLI subscription routing
+	// Two more hosts a subscription run reaches, both OpenAI's own and both
+	// observed being refused on a restricted crew (#2428): ab.chatgpt.com is
+	// the feature-flag service Codex calls at startup, and *.oaiusercontent.com
+	// is where it fetches session content. Neither is fatal — the run
+	// completes — but each refusal prints a proxy warning and a CLI error, so
+	// a working agent looks broken in its own transcript. `chatgpt.com` is
+	// already allowed and the allowlist is exact-match, so the subdomain
+	// needed saying out loud.
+	"ab.chatgpt.com",
+	"*.oaiusercontent.com",
 
 	// Google / Gemini
 	"generativelanguage.googleapis.com", // Gemini CLI (AI Studio path)
