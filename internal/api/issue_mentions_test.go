@@ -1293,3 +1293,46 @@ func TestMentions_AgentAuthoredOverflowIsNotBroadcast(t *testing.T) {
 		t.Errorf("mention rows = %d, want %d", n, mentionMaxPerComment)
 	}
 }
+
+// Force the ordering behind the ARM64 failure: the run reaches its terminal
+// state before persist attaches the delivery. A running or queued turn must
+// never be consumed by this catch-up.
+func TestMentionPersist_LateClaimAfterRunFinished(t *testing.T) {
+	for _, tc := range []struct{ status, dispatch, want string }{
+		{"COMPLETED", mentionDispatchDispatched, "consumed"},
+		{"FAILED", mentionDispatchDispatched, "consumed"},
+		{"CANCELLED", mentionDispatchDispatched, "consumed"},
+		{"RUNNING", mentionDispatchDispatched, "claimed"},
+		{"COMPLETED", mentionDispatchQueued, "pending"},
+	} {
+		t.Run(tc.status+"/"+tc.dispatch, func(t *testing.T) {
+			f := setupMentionFixture(t)
+			f.comment(t, mentionToken("lead", f.target)+" please continue")
+			var id, commentID, eventID, runID string
+			if err := f.db.QueryRow(`SELECT id, comment_id, event_id, assignment_id FROM mission_comment_mentions`).Scan(&id, &commentID, &eventID, &runID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.db.Exec(`UPDATE assignments SET status = ? WHERE id = ?`, tc.status, runID); err != nil {
+				t.Fatal(err)
+			}
+			initial := "claimed"
+			if tc.dispatch == mentionDispatchQueued {
+				initial = "pending"
+			}
+			if _, err := f.db.Exec(`UPDATE mission_comment_mentions SET state = ?, claimed_by_run_id = NULL WHERE id = ?`, initial, id); err != nil {
+				t.Fatal(err)
+			}
+			recorder := mentionRecorder{db: f.db}
+			if err := recorder.persist(context.Background(), mentionContext{WorkspaceID: f.wsID, MissionID: f.missionID, CommentID: commentID}, resolvedMention{AgentID: f.target}, eventID, tc.dispatch, runID, ""); err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			if err := f.db.QueryRow(`SELECT state FROM mission_comment_mentions WHERE id = ?`, id).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("delivery = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}

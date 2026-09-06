@@ -696,6 +696,17 @@ func (m mentionRecorder) persist(ctx context.Context, mc mentionContext, mention
 		generateCUID(), mc.WorkspaceID, mc.MissionID, commentVal, eventVal, mention.AgentID,
 		mention.Position, state, assignmentVal, detailVal, resolvedState,
 		time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return err
+	}
+	// A fast run can finish before this upsert attaches its delivery. Recheck
+	// after attaching so finishAssignment cannot leave a late claim stranded.
+	// Queued deliveries belong to a future run and must remain pending.
+	if assignmentID != "" && state == mentionDispatchDispatched {
+		_, err = m.db.ExecContext(ctx, `UPDATE mission_comment_mentions SET state = 'consumed'
+			WHERE claimed_by_run_id = ? AND state = 'claimed'
+			AND EXISTS (SELECT 1 FROM assignments WHERE id = ? AND status IN ('COMPLETED', 'FAILED', 'CANCELLED'))`, assignmentID, assignmentID)
+	}
 	return err
 }
 

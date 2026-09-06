@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { motion, useReducedMotion } from "motion/react"
-import { Bot, ChevronRight } from "lucide-react"
+import { Users, ChevronRight } from "lucide-react"
 
 import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
 import { crewColor, formatCost } from "@/app/(dashboard)/dashboard-helpers"
@@ -82,6 +82,15 @@ const AGENT_DOT: Record<string, string> = {
   ACTIVE: "bg-success",
 }
 
+export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string {
+  if (agents.length === 0) return "no agents yet"
+  const running = agents.filter((agent) => agent.status === "RUNNING").length
+  const ready = agents.filter((agent) => agent.status === "IDLE" || agent.status === "ACTIVE").length
+  const errors = agents.filter((agent) => agent.status === "ERROR").length
+  const other = agents.length - running - ready - errors
+  return [running && `${running} running`, ready && `${ready} ready`, errors && `${errors} in error`, other && `${other} unavailable`].filter(Boolean).join(" · ")
+}
+
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
   const reduce = useReducedMotion()
   const [showAll, setShowAll] = React.useState(false)
@@ -91,10 +100,10 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
   const rest = cards.slice(FLEET_CARD_LIMIT)
   const restNeedingAttention = rest.filter((c) => c.row.tone === "danger" || c.row.tone === "warn").length
   return (
-    <section aria-label="Fleet" data-testid="dashboard-fleet-board" className="flex flex-col gap-2.5">
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="flex flex-col gap-2.5">
       <div className="flex items-center justify-between px-0.5">
         <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
-          <Bot className="h-3.5 w-3.5 text-muted-foreground-soft" /> Fleet · {cards.length} {cards.length === 1 ? "crew" : "crews"}
+          <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews · {cards.length} {cards.length === 1 ? "crew" : "crews"}
         </h2>
         <Link href="/crews" className="font-mono text-[10px] text-primary-hover hover:underline">Crews →</Link>
       </div>
@@ -105,15 +114,14 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
           return (
             <motion.div
               key={row.crew.id}
-              initial={reduce ? false : { opacity: 0, y: 10 }}
+              initial={reduce ? false : { opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.34, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : index * 0.05 }}
-              whileHover={reduce ? undefined : { y: -2 }}
-              className="group flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-border"
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : Math.min(index * 0.03, 0.1) }}
+              className="group flex flex-col gap-3 rounded-xl border border-t-[3px] border-border/60 bg-card p-4 transition-colors hover:border-border"
               data-testid="dashboard-fleet-card"
             >
               <div className="flex items-center gap-3">
-                <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="md" />
+                <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="lg" />
                 <span className="min-w-0 flex-1">
                   <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="block truncate text-body font-semibold tracking-tight text-foreground hover:underline">
                     {row.crew.name}
@@ -129,14 +137,14 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                 <span className="flex items-center gap-1.5">
                   {card.agents.slice(0, 6).map((agent) => (
                     <Link key={agent.id} href={entityHref({ kind: "chat", agentSlug: agent.slug })} title={`${agent.name} · ${formatStatus(agent.status).label}`} className="relative">
-                      <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-7 w-7 rounded-lg bg-muted ring-1 ring-border" />
+                      <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-9 w-9 rounded-xl bg-muted ring-1 ring-border" />
                       <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card", AGENT_DOT[agent.status] ?? "bg-muted-foreground")} aria-hidden />
                     </Link>
                   ))}
                   {card.agents.length > 6 && <span className="text-micro text-muted-foreground">+{card.agents.length - 6}</span>}
                 </span>
                 <span className="ml-1 truncate text-label text-muted-foreground">
-                  {row.runningAgents > 0 ? `${row.runningAgents} running · ${Math.max(0, card.agents.length - row.runningAgents)} idle` : card.agents.length > 0 ? "all idle" : "no agents yet"}
+                  {fleetAgentStatus(card.agents)}
                 </span>
               </div>
 
@@ -147,7 +155,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                     {card.spendUsd == null ? `${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}` : `${formatCost(card.spendUsd)} · ${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}`}
                   </span>
                   <span className="block truncate text-label text-muted-foreground">
-                    {row.services.checked ? `${row.services.running}/${row.services.total} services` : "services unchecked"}
+                    {row.services.checked ? row.services.total > 0 ? `${row.services.running}/${row.services.total} services` : "No extra services" : "services unchecked"}
                   </span>
                 </span>
                 <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
