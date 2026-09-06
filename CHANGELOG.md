@@ -9,6 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- **Demo use cases, one script each** (`scripts/demo/`, #2424) — the second version of the demo scripts. `scripts/walkthrough.sh` was one `set -e` checklist that stopped at its first failing line and could not run step six without steps one to five; it is now twelve self-contained use cases (`uc-NN-<slug>.sh`) run alone or all in order by `scripts/demo/run.sh`, each narrated for an audience, verified by assertions and honest about what it could not run: a use case whose need is missing (a model, a GitHub token) exits with the reason and the runner prints **SKIP**, never a green row. Memory recall, delegation, ephemeral hire with its approval, credential escalation answered by `crewship escalation supply`, the approval gate, a token-zero routine landing in the inbox, a wake-gated schedule holding on a real scheduler tick, eval tiers, GitHub token injection, and the three demo packs through `seed verify --pack`. `scripts/demo-test.sh` (CI `shell` job) ShellChecks the suite and drives the runner against stubs. Guide: `docs/guides/demo-use-cases.mdx`.
+- **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
+
+- **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)
+
+- **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.
+- **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
+
 ### Fixed
 
 - **`crewship run` and `crewship ask` no longer hang forever against a busy
@@ -40,17 +50,116 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   types are no longer swallowed in silence: under `--verbose` both loops name
   what arrived, which is how this was found.
 
-### Added
+- **The docs-drift pack turned its own graceful degrade into a hard failure.**
+  `docs_audit.sh` deliberately exits zero when the scan cannot run, so the
+  status page keeps a meaningful panel — but its two `fail()` paths wrote a
+  panel with only `state` and `label`, while the routine projects
+  `.panel.sha_label` out of that document with a `transform`. A transform whose
+  field is missing does not degrade; it fails the run and takes the agent review
+  and both page panels with it. So every recoverable scan failure destroyed the
+  audit. The other two packs were immune because each builds its panel in one
+  function used by every exit path; docs-drift had duplicated the literal and
+  drifted. Every exit path now leaves through one `panel_for()`, and
+  `sha_label` says `@ not checked out` rather than inventing a SHA or emitting
+  an empty string the page would render as a blank row.
+  `TestPacks_FailureOutputCarriesEveryProjectedField` derives the projected
+  fields from the routine definitions and drives every pack's script down its
+  failure paths, so the next pack cannot repeat it.
+- **`crewship seed verify` reported a broken pack as green.** Without
+  `SEED_GITHUB_TOKEN` it said `env SKIP — the pack is seeded but cannot run`
+  and exited 0, while the seeded schedule had already fired that pack's routine
+  and it had hard-failed, plainly visible as `FAILED` in `crewship routine
+  list`. Verify never looked at what the workspace had already done. A `history`
+  check now runs before the env gate — so a skip cannot hide it — and names the
+  routine, run id, failed step and error. A transport failure reading the
+  history is a `SKIP` with its reason, not a false green. The row is scoped
+  to the current seed generation by the crew's `created_at`: `seed --nuke`
+  recreates the crews but upserts the pipelines, so run history outlives the
+  nuke, and without that scope a freshly seeded workspace verified red on
+  failures belonging to a workspace that no longer existed. What the scope
+  drops is stated in the PASS detail rather than filtered in silence, and an
+  unparseable timestamp never buys a pass.
 
-- **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
+- **Every routine run was recorded as `FAILED`.** `DeriveOutcome` treats a clean
+  completion that reports no §9.6 hand-off as `FAILED` with "no outcome
+  reported" — right for an agent, which was asked for one, and impossible for a
+  routine built from `script`, `transform`, `notify` and `crewship` steps, where
+  nothing can ever report anything. Every routine run in a seeded workspace read
+  `status=completed, outcome=FAILED`, `crewship routine logs` printed `Error: no
+  outcome reported` on the happy path, and both `crewshipd_successful_runs_total`
+  and the digest's `pipeline_runs WHERE outcome='SUCCEEDED'` counted zero
+  routines forever. The strict default now applies only when the run actually
+  contained a step that could report (`agent_run`, or `call_pipeline`, which
+  fails closed); anything else settles `SUCCEEDED` with an empty reason. A
+  routine that *does* carry an agent step and still says nothing is unchanged —
+  that remains a real missing hand-off. Existing rows are not backfilled.
+- **§12's violation counter could not see the violation it was written for.**
+  `crewshipd_inbox_items_on_successful_runs` joined `pipeline_runs.id =
+  inbox_items.source_id`, and its comment claimed "no other producer keys an
+  item by a run id". A `notify` step keys its item `<run_id>:<step_id>`, so the
+  join never matched and the numerator was structurally always zero. It now
+  compares the run id against the prefix before the separator — equality on the
+  extracted prefix, never a `LIKE`, so a run whose id merely prefixes another's
+  is not miscounted. With this and the outcome fix in place the series reports a
+  real, non-zero ratio on a seeded workspace, because the shipped packs *do*
+  post an inbox message from a successful run. That contradiction between the
+  packs and §12 is now measured rather than hidden, and is left for a decision.
 
-- **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)
+- **`-f json` printed English prose on the commands that mint an identifier.**
+  `--format` is a persistent flag, so every command in the tree advertises it,
+  and the premise of this CLI is that agents drive it. `crewship issue create
+  -f json` answered `Created issue ENG-14: ZZ fmt probe` — an agent had to
+  regex its own identifier out of a sentence. None of the offenders was in
+  `formatContractExempt`, and none would have qualified; the existing guard
+  simply could not see them, because it only exercises commands it can invoke
+  without arguments. A new guard covers every `create` in the tree plus a named
+  ratchet of six issue mutations, and all 21 violations it found are fixed —
+  `issue create -f json` now emits the object `issue get -f json` emits, so one
+  parser handles both, and the human output is byte-identical. The wider
+  population of mutating commands still off-contract is left to its own
+  ratcheting programme rather than papered over.
+- **Internal ids where a name belongs.** `routine list` printed a crew cuid in
+  its AUTHOR CREW column, `cost` and `paymaster` printed `agent/<cuid>`, and
+  `history` showed `?` for every routine run with a blank trigger. Slugs are
+  resolved for the human formats; machine formats keep the ids a script joins
+  on. An entity deleted since the run still shows its id, which is the honest
+  answer rather than a guess.
+- **`crewship issue activity` was unordered** — `created` could appear last —
+  while `issue events` on the same issue was correctly seq-ordered.
+- **Refusals that named no way out.** `keeper ask --credential` matched only a
+  credential's env-var slot and answered "credential not found for name" for a
+  credential plainly present in `credential list`; it now resolves slot, name
+  or id and, when the credential exists but the agent cannot reach it, says
+  exactly that and gives the `credential assign` command. A DONE issue refused
+  both deletion and cancellation with no hint that `DONE → BACKLOG → delete`
+  was open all along; both refusals now name the allowed targets and the
+  shortest route. And `crewship inbox resolve` on a live waitpoint — correctly
+  refused, because the decision has to reach the run — now prints the
+  `routine waitpoints approve/reject` commands with the real token.
+- **`crewship routine active` hid runs paused at a waitpoint**, though a run
+  waiting for a human is in flight in every sense that matters. It now lists
+  queued, running and waiting runs, with the state in a STATUS column.
 
-- **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.
-- **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
-
-### Fixed
-
+- **The one documentation page the deployed index could never carry.** The
+  scheduled `Documentation surface` job had been red on a count —
+  "llms.txt lists 306 pages, docs.json declares 307" — which read as Mintlify
+  lag and was not. `docs/manifest/README.md` was declared in the navigation and
+  404 on the live site, because Mintlify does not publish a `README` basename;
+  each merge that added a page moved both numbers and preserved the off-by-one.
+  Renamed to `manifest/overview`, matching `cli/overview` and
+  `api-reference/overview`. `checkServed` now names the pages it cannot find
+  instead of only counting them — it had both sets in memory and threw the
+  difference away, which is why one page hid behind a number for days.
+- **The runtime-conformance harness ignored the gap registry it fills.**
+  `KnownRuntimeGaps` records that podman below 5 drops supplementary GIDs and
+  that upgrading is the only remedy; the harness failed the nightly build over
+  exactly that, on a runner where it could not be otherwise. `ClassifyConformance`
+  joins them: a documented gap is reported in full with its operator-facing
+  detail but no longer reddens the build, an undocumented drop still does, and a
+  control the runtime *honours* while the registry still calls it broken now
+  fails as a stale entry — that registry feeds `doctor` and `/system/runtime`,
+  so leaving it to rot tells operators their agents cannot read crew memory
+  when they can.
 - **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
 
 - **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
