@@ -1,5 +1,7 @@
 "use client"
 
+import { MarkdownContent } from "@/components/features/issues/markdown-content"
+
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
@@ -351,7 +353,7 @@ function GroupedIncident({ entry, onArchive }: { entry: InboxV2Entry; onArchive:
           <details className="border-t border-border/60 pt-3">
             <summary className="cursor-pointer text-body">View {entry.groupedItems?.length ?? 0} related updates</summary>
             <ul className="mt-3 divide-y divide-border/60">
-              {entry.groupedItems?.map((item) => <li key={item.id} className="py-3"><p className="text-body font-medium">{item.title}</p><p className="text-micro text-muted-foreground">{since(item.created_at)}</p>{item.body_md && <p className="mt-1 whitespace-pre-wrap text-body text-muted-foreground">{item.body_md}</p>}</li>)}
+              {entry.groupedItems?.map((item) => <li key={item.id} className="py-3"><p className="text-body font-medium">{item.title}</p><p className="text-micro text-muted-foreground">{since(item.created_at)}</p>{item.body_md && <div className="mt-1 text-body text-muted-foreground"><MarkdownContent>{item.body_md}</MarkdownContent></div>}</li>)}
             </ul>
           </details>
           <div className="flex flex-wrap gap-2">

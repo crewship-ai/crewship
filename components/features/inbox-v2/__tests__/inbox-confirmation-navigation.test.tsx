@@ -20,6 +20,13 @@ describe("confirmation navigation", () => {
     expect(onOpen).toHaveBeenCalledOnce()
     expect(screen.getByRole("button", { name: "View record" })).toBeVisible()
   })
+  it("renders grouped incident bodies as readable Markdown", () => {
+    render(<InboxV2Detail {...base} confirmation={null} entry={{ ...entry, source: "group", groupedItems: [{ id: "incident", title: "Service update", created_at: entry.createdAt, body_md: "## Recovery steps\n\n[Open issue](/issues/ENG-7)\n\n```text\nservice restarted\n```" } as import("@/hooks/use-inbox").InboxItem] }} />)
+    fireEvent.click(screen.getByText("View 1 related updates"))
+    expect(screen.getByRole("heading", { name: "Recovery steps" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Open issue" })).toBeEnabled()
+    expect(screen.getByText("service restarted").closest("pre")).toBeTruthy()
+  })
   it("has no dead next button when the queue is empty", () => {
     render(<InboxV2Detail {...base} />)
     expect(screen.queryByRole("button", { name: /Next to review/ })).toBeNull()

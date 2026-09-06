@@ -145,7 +145,7 @@ export function InboxV2() {
   })
   useRealtimeEvent("issue.updated", () => { void issues.refetch() })
   useRealtimeEvent("issue.created", () => { void issues.refetch() })
-  useRealtimeEvent("mission.updated", () => { void issues.refetch() })
+  useRealtimeEvent("mission.updated", () => { void missions.refetch(); void issues.refetch() })
 
   const lookup = useMemo(() => ({
     ...roster,
