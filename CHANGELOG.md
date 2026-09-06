@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
+
 - **A routine `script` step ran against a sidecar nobody had started.** Every
   script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
   crew egress allowlist is enforced — but crewship-sidecar was only ever
@@ -41,6 +43,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   and an agent run replaces it unconditionally rather than inheriting a sidecar
   that would inject nothing into its model traffic. The reverse never happens:
   a healthy agent-started sidecar is reused, never downgraded.
+- **A crew can always run its agents** (#2429) — two defects behind "stdbuf: failed to run command 'claude': No such file or directory" on every wizard-built crew. mise now installs under `/opt/mise` instead of the agent's home — `/home/agent` is a per-crew named volume at runtime and hid every tool the image had put there — and the build puts the agent's tool directories (`/home/agent/.local/bin`, `/opt/mise/data/shims`) plus the matching `MISE_*` variables into the image `ENV`, `/etc/environment` and the runtime container env, so mise-installed tools resolve from the non-login exec the agent runs in; the runtime merges the aggregated PATH, the captured login PATH and the well-known tool directories into one instead of letting a captured login PATH replace the rest. And the adapter CLI is no longer the operator's job: every build reads the crew's agents' `cli_adapter`s, adds a mise tool (or an installer, for `droid`) for each CLI no declared feature provides, and runs `command -v` for every required binary as the agent user before the image is called ready — a miss fails the build with the binary named. The verified binaries are stored with the image and read by the dispatch gate (chat, issues, routines, container start): an image that is missing or not verified for a live agent's adapter is rebuilt before the agent runs, whichever path created the agent, and a plain base image with no features still gets the build its agents need; creating or moving an agent onto an uncovered adapter enqueues the rebuild immediately. A cache hit now returns the runtime contract instead of an empty one that was stored as NULL (which dropped the privileged flag, mounts and env of the previous build). `droid` installs into the image-resident `/opt/crewship/bin`. Cache keys changed (schema v3), so existing crews rebuild once.
 
 <!--
   Backfill (#2086). The twenty-four entries between this marker and the next

@@ -176,7 +176,7 @@ A pin takes effect because the image puts mise's shim directory on `PATH`
 installed:
 
 ```text
-PATH=…:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:…
+PATH=…:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:…
 ```
 
 That ordering is load-bearing. A shim that does not resolve is skipped

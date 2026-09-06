@@ -6,15 +6,34 @@ import (
 )
 
 // TestApplyAgentLoginPath_UsesCapturedPath: when a login PATH was captured at
-// provision, it is used verbatim — it already contains the feature bin dirs.
+// provision, it is the base of the result; the well-known dirs it lacks are
+// prepended (a login shell does not see mise's shims either).
 func TestApplyAgentLoginPath_UsesCapturedPath(t *testing.T) {
 	login := "/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/bin:/usr/bin:/bin"
 	env := []string{"CREWSHIP_CREW_ID=c1"}
 
 	got := applyAgentLoginPath(env, login, map[string]string{"PATH": "/usr/local/bin:/usr/bin:/bin"})
 
-	if v := envValue(got, "PATH"); v != login {
-		t.Fatalf("PATH = %q, want captured login path %q", v, login)
+	// The captured PATH is the base, kept intact at the end; the well-known
+	// dirs it lacks (npm-global, mise shims) are put in front, the ones it
+	// already has (~/.local/bin, py-utils) are not duplicated.
+	// Every captured dir is present, each dir exactly once, the well-known
+	// dirs first.
+	v := envValue(got, "PATH")
+	for _, d := range strings.Split(login, ":") {
+		if !strings.Contains(":"+v+":", ":"+d+":") {
+			t.Fatalf("PATH = %q lacks captured dir %q", v, d)
+		}
+	}
+	seen := map[string]int{}
+	for _, d := range strings.Split(v, ":") {
+		seen[d]++
+		if seen[d] > 1 {
+			t.Errorf("PATH = %q repeats %q", v, d)
+		}
+	}
+	if !strings.HasPrefix(v, "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:") {
+		t.Errorf("PATH = %q: well-known dirs must lead", v)
 	}
 	if !strings.Contains(envValue(got, "PATH"), "/usr/local/py-utils/bin") {
 		t.Error("resulting PATH must include /usr/local/py-utils/bin")
@@ -58,10 +77,11 @@ func TestApplyAgentLoginPath_FallbackNilImageEnv(t *testing.T) {
 	}
 }
 
-// TestApplyAgentLoginPath_ReplacesExistingPath: an existing containerEnv PATH
-// entry is replaced (not duplicated) by the captured login PATH.
-func TestApplyAgentLoginPath_ReplacesExistingPath(t *testing.T) {
-	env := []string{"PATH=/old/bin", "FOO=bar"}
+// TestApplyAgentLoginPath_MergesExistingPath: the containerEnv PATH already in
+// env (the build's aggregated PATH: tool dirs, feature dirs, the image's) is
+// kept, exactly once, ahead of the captured login PATH's extra dirs.
+func TestApplyAgentLoginPath_MergesExistingPath(t *testing.T) {
+	env := []string{"PATH=/opt/feature/bin:/usr/bin", "FOO=bar"}
 	login := "/usr/local/py-utils/bin:/usr/bin:/bin"
 
 	got := applyAgentLoginPath(env, login, nil)
@@ -75,8 +95,9 @@ func TestApplyAgentLoginPath_ReplacesExistingPath(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly one PATH entry, got %d: %v", n, got)
 	}
-	if envValue(got, "PATH") != login {
-		t.Errorf("PATH = %q, want %q", envValue(got, "PATH"), login)
+	want := "/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/feature/bin:/usr/bin:/bin"
+	if v := envValue(got, "PATH"); v != want {
+		t.Errorf("PATH = %q\n   want %q", v, want)
 	}
 	if envValue(got, "FOO") != "bar" {
 		t.Error("unrelated env entries must be preserved")

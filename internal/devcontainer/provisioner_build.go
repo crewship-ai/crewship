@@ -188,10 +188,12 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// Same hash the commit path computes, so an image built here is found by
 	// the same cache lookup and a machine that later gains Docker does not
 	// rebuild what it already has.
-	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg))
+	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := cacheImageTag(hash)
 
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
+	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
+	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)
 	requirements.PostStartCommands = append(
 		requirements.PostStartCommands,
 		cfg.NormalizedPostStartCommands()...,
@@ -258,11 +260,14 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	}
 
 	rec := &dockerfileRecorder{}
-	if err := p.recordProvisionSteps(ctx, rec, resolvedFeatures, cfg, miseConfig, requirements.ContainerEnv); err != nil {
+	if err := p.recordProvisionSteps(ctx, rec, resolvedFeatures, cfg, miseConfig, requirements.ContainerEnv, o.requiredBinaries); err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
 
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, rec.steps(), tag)
+	// The image ENV carries the aggregated env — the operator's containerEnv
+	// plus the agent tool PATH and MISE_* variables (ensureAgentToolPath) —
+	// so the image is usable on its own, not only through the runtime env.
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
@@ -339,6 +344,7 @@ func (p *Provisioner) recordProvisionSteps(
 	cfg *Config,
 	miseConfig string,
 	containerEnv map[string]string,
+	requiredBinaries []string,
 ) error {
 	const noContainer = "" // there is no container yet; the recorder ignores it
 
@@ -355,6 +361,11 @@ func (p *Provisioner) recordProvisionSteps(
 	}
 	if err := p.runPostCreateCommands(ctx, noContainer, cfg, rec.exec); err != nil {
 		return fmt.Errorf("postCreate: %w", err)
+	}
+	// Recorded as a RUN layer: a missing adapter CLI fails the build here,
+	// with the binary named, rather than the first chat message.
+	if err := p.verifyRequiredBinaries(ctx, noContainer, requiredBinaries, containerEnv["PATH"], rec.exec); err != nil {
+		return fmt.Errorf("verify adapter binaries: %w", err)
 	}
 	if err := p.writeAggregatedContainerEnv(ctx, noContainer, containerEnv, rec.exec); err != nil {
 		return fmt.Errorf("containerEnv: %w", err)

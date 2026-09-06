@@ -30,6 +30,10 @@ Adding another vendor is intentionally small: one new `case` in `BuildCLICommand
 
 The default fallback when `cli_adapter` is empty or unknown is `claude --print <message>` — minimal flags, no streaming, lowest-risk degradation.
 
+## The adapter's CLI is installed for you
+
+Each adapter execs one binary in the crew container (`claude`, `codex`, `gemini`, `opencode`, `cursor-agent`, `droid`). The crew image build derives the set from the crew's agents, installs what no feature already provides, and verifies every binary resolves for the agent user before the image is called ready; an agent created on, or moved to, an adapter the image was not verified for triggers a rebuild. See [Devcontainers → Adapter CLIs are installed and verified](/guides/devcontainers#adapter-clis-are-installed-and-verified).
+
 ## Tool profiles & the built-in tool allowlist
 
 An agent's `tool_profile` (`FULL` | `CODING` | `MINIMAL`, default `CODING`) curates which of the CLI's **built-in** tools the agent may use. This is an **allowlist**, not a denylist: tools not on the list are removed from the model's context entirely.

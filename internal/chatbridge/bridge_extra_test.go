@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -345,7 +346,10 @@ func TestHandleChatMessage_ReprovisionsWhenCachedImageMissing(t *testing.T) {
 // gate without enqueueing a build).
 func TestHandleChatMessage_NoReprovisionWhenCachedImagePresent(t *testing.T) {
 	t.Parallel()
-	resolver := &mockResolver{info: cacheMissingInfo("crewship-cache:0d08da4b8ac3")}
+	info := cacheMissingInfo("crewship-cache:0d08da4b8ac3")
+	// Present AND verified for this agent's adapter CLI: nothing to rebuild.
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+	resolver := &mockResolver{info: info}
 	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: true})
 	enq := &stubEnqueuer{resStarted: true}
 	b.SetProvisioningEnqueuer(enq)
@@ -364,6 +368,36 @@ func TestHandleChatMessage_NoReprovisionWhenCachedImagePresent(t *testing.T) {
 		if e.Type == "crew_provisioning" {
 			t.Errorf("must not emit crew_provisioning when image present: %+v", e)
 		}
+	}
+}
+
+// A cached image that is present but was never verified for the agent's
+// adapter CLI (a build from before verification, or an agent added after the
+// last build) is rebuilt like a missing one — the message waits for the
+// build instead of the agent dying on "claude: No such file or directory".
+func TestHandleChatMessage_ReprovisionWhenImageNotVerifiedForAdapter(t *testing.T) {
+	t.Parallel()
+	info := cacheMissingInfo("crewship-cache:0d08da4b8ac3")
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"codex"}}
+	resolver := &mockResolver{info: info}
+	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: true})
+	enq := &stubEnqueuer{resStarted: true}
+	b.SetProvisioningEnqueuer(enq)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+	if !enq.called {
+		t.Fatal("an image not verified for CLAUDE_CODE must be rebuilt before the agent runs")
+	}
+	saw := false
+	for _, e := range events {
+		if e.Type == "crew_provisioning" {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Error("the caller must be told the crew is being provisioned")
 	}
 }
 
