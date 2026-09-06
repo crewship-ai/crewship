@@ -7,6 +7,8 @@ import * as React from "react"
 import { CreateSurface, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { CredentialForm, type CredentialFormValues, type CredentialType } from "./credential-form"
 import { apiFetch } from "@/lib/api-fetch"
+import { toast } from "sonner"
+import { CredentialExtraFieldsEditor, type EditableCredentialField } from "./credential-extra-fields-editor"
 
 export interface CredentialData {
   id: string
@@ -23,6 +25,7 @@ export interface CredentialData {
    *  the column's default. */
   security_level?: number
   isProviderLogin?: boolean
+  username?: string | null
 }
 
 interface EditCredentialDialogProps {
@@ -39,6 +42,21 @@ export function EditCredentialDialog({
   workspaceId, credential, open, onOpenChange, onSuccess, knownTags,
 }: EditCredentialDialogProps) {
   const [dirty, setDirty] = React.useState(false)
+  const [fieldsDirty, setFieldsDirty] = React.useState(false)
+  const [fields, setFields] = React.useState<EditableCredentialField[]>([])
+  const [fieldsError, setFieldsError] = React.useState(false)
+  const [fieldsVersion, setFieldsVersion] = React.useState(0)
+  React.useEffect(() => { setFields([]); setFieldsDirty(false) }, [open, credential.id])
+  React.useEffect(() => {
+    if (!open || credential.isProviderLogin) return
+    let cancelled = false
+    setFieldsError(false)
+    apiFetch(`/api/v1/credentials/${encodeURIComponent(credential.id)}/fields?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then(async (r) => { if (!r.ok) throw new Error(); const rows = await r.json(); if (!Array.isArray(rows)) throw new Error(); return rows })
+      .then((rows) => { if (!cancelled) setFields(rows) })
+      .catch(() => { if (!cancelled) setFieldsError(true) })
+    return () => { cancelled = true }
+  }, [open, credential.id, credential.isProviderLogin, workspaceId, fieldsVersion])
   React.useEffect(() => { if (!open) setDirty(false) }, [open])
   const initial = React.useMemo<Partial<CredentialFormValues>>(() => ({
     name: credential.name,
@@ -54,9 +72,11 @@ export function EditCredentialDialog({
       ? credential.token_expires_at.slice(0, 10)
       : "",
     securityLevel: credential.security_level ?? 1,
+    username: credential.username ?? "",
   }), [credential])
 
   const handleSubmit = async (values: CredentialFormValues) => {
+    if (fieldsDirty) return "Save or cancel your Additional fields changes first. Those fields are saved separately."
     const body: Record<string, unknown> = {
       name: values.name,
       description: values.description,
@@ -64,6 +84,7 @@ export function EditCredentialDialog({
       tags: values.tags,
     }
     if (!credential.isProviderLogin) body.provider = values.provider
+    if (credential.type === "USERPASS" && values.username !== initial.username) body.username = values.username?.trim()
     // Older API responses may omit the tier. A metadata-only save must not
     // turn an unknown tier into L1 just because the form needs a display default.
     if (credential.security_level != null || values.securityLevel !== 1) {
@@ -87,6 +108,7 @@ export function EditCredentialDialog({
         return typeof data.error === "string" ? data.error : "Failed to update credential"
       }
       onSuccess()
+      toast.success("Changes saved")
       onOpenChange(false)
       return null
     } catch {
@@ -99,7 +121,7 @@ export function EditCredentialDialog({
   // the detail view stopped doing it — the name hid the inconsistency from
   // anyone grepping for it.
   return (
-    <CreateSurface open={open} onOpenChange={onOpenChange} dirty={dirty} discardLabel="these credential changes" size="md">
+    <CreateSurface open={open} onOpenChange={onOpenChange} dirty={dirty || fieldsDirty} discardLabel="these credential changes" size="md">
         <CreateSurfaceHeader concept="credentials" context={credential.name}
           title={credential.isProviderLogin ? "Edit provider" : "Edit credential"}
           description={credential.isProviderLogin ? "Update the name, tags and access. To change the connected account, use Re-login in its detail." : "Update its details and access. Your existing secret stays unchanged unless you enter a replacement."}
@@ -110,6 +132,11 @@ export function EditCredentialDialog({
             surface
             hideValue={credential.isProviderLogin}
             lockProvider={credential.isProviderLogin}
+            fieldKeys={fields.map((f) => f.key)}
+            additionalFields={!credential.isProviderLogin && <>
+              {fieldsError && <p role="alert" className="text-xs text-warn">Additional fields could not be refreshed. Previously loaded fields may be out of date.</p>}
+              <CredentialExtraFieldsEditor fields={fields} credentialId={credential.id} workspaceId={workspaceId} onDirtyChange={setFieldsDirty} onSaved={() => { setFieldsVersion((v) => v + 1); onSuccess() }} />
+            </>}
             onDirtyChange={setDirty}
             workspaceId={workspaceId}
             mode="edit"

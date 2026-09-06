@@ -341,6 +341,7 @@ export default function CredentialsPage() {
       token_expires_at: credential.token_expires_at,
       security_level: credential.security_level,
       isProviderLogin: hasLogin(credential),
+      username: credential.username,
     })
     setEditOpen(true)
   }

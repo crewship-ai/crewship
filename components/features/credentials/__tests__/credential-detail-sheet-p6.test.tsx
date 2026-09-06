@@ -125,13 +125,13 @@ beforeEach(() => {
 describe("rotate is the primary path, reveal the secondary one (§2.6 L8)", () => {
   it("offers rotation on Overview to a rotate-capable role", () => {
     renderSheet()
-    expect(screen.getByRole("button", { name: /rotate and show the new value/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /replace with grace period/i })).toBeInTheDocument()
   })
 
   it("hands the current credential to the rotation flow", () => {
     const onRotate = vi.fn()
     renderSheet({}, onRotate)
-    fireEvent.click(screen.getByRole("button", { name: /rotate and show the new value/i }))
+    fireEvent.click(screen.getByRole("button", { name: /replace with grace period/i }))
     expect(onRotate).toHaveBeenCalledWith(expect.objectContaining({ id: "cred_1" }))
   })
 

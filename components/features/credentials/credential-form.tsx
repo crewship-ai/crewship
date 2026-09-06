@@ -35,8 +35,9 @@ import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { CreateSurfaceBody, CreateSurfaceFooter } from "@/components/layout/create-surface"
+import { credentialEditPresentation } from "@/lib/credentials/edit-presentation"
 
-export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
+export type CredentialType = string
 export type CredentialScope = "WORKSPACE" | "CREW"
 
 export interface CredentialFormValues {
@@ -51,6 +52,7 @@ export interface CredentialFormValues {
   expiresAt: string // YYYY-MM-DD or ""
   /** Keeper tier, 1–4. See CREDENTIAL_TIERS. */
   securityLevel: number
+  username?: string
 }
 
 /**
@@ -84,6 +86,8 @@ export interface CredentialFormProps {
   hideValue?: boolean
   /** A provider identity cannot be changed by picking a decorative brand. */
   lockProvider?: boolean
+  fieldKeys?: string[]
+  additionalFields?: React.ReactNode
   /** Submit handler — return a string error message to surface, or null on success. */
   onSubmit: (values: CredentialFormValues) => Promise<string | null>
   onCancel: () => void
@@ -103,6 +107,8 @@ export function CredentialForm({
   initial,
   hideValue,
   lockProvider = false,
+  fieldKeys = [],
+  additionalFields,
   onSubmit,
   onCancel,
   submitLabel,
@@ -142,6 +148,7 @@ export function CredentialForm({
   // invalid name is tolerated (warn, don't block) so legacy
   // credentials stay editable — we only hard-block newly typed ones.
   const initialName = React.useRef((initial?.name ?? "").trim())
+  const presentation = credentialEditPresentation(values.type, fieldKeys)
 
   const trimmedName = values.name.trim()
   const nameIsLegacy = mode === "edit" && trimmedName === initialName.current
@@ -249,6 +256,10 @@ export function CredentialForm({
           ? `Name must be a valid env var name — try ${nameSuggestion}`
           : "Name must be a valid env var name (uppercase letters, digits, underscores; can't start with a digit)",
       )
+      return
+    }
+    if (values.type === "USERPASS" && !values.username?.trim()) {
+      setError("Username is required")
       return
     }
     if (mode === "create" && !hideValue && !values.value.trim()) {
@@ -398,6 +409,10 @@ export function CredentialForm({
       </div>
 
       {/* Value */}
+      {surface && values.type === "USERPASS" && <div className="space-y-1.5">
+        <Label htmlFor="cred-username" className="text-xs">Username</Label>
+        <Input id="cred-username" autoComplete="off" value={values.username ?? ""} onChange={(e) => setField("username", e.target.value)} required />
+      </div>}
       {surface && <div className="space-y-1.5">
         <Label htmlFor="cred-description" className="text-xs"><FileText className="h-3.5 w-3.5" /> Description</Label>
         <Textarea id="cred-description" placeholder="What is this secret used for?"
@@ -417,7 +432,7 @@ export function CredentialForm({
       {!hideValue && (!surface || mode !== "edit" || replaceValue) && (
         <div className={cn("space-y-1.5", surface && "rounded-xl border border-warn/30 bg-card p-4")}>
           <Label htmlFor="cred-value" className="text-xs">
-            {mode === "edit" ? "Replace secret value" : "Value"}
+            {mode === "edit" && surface ? `Replace ${presentation.label.toLowerCase()}` : mode === "edit" ? "Replace secret value" : "Value"}
             {mode === "edit" && (
               <span className="ml-1 text-[10px] font-normal text-muted-foreground">
                 (leave empty to keep existing)
@@ -425,7 +440,12 @@ export function CredentialForm({
             )}
           </Label>
           <div className="relative">
-            <Input
+            {surface && presentation.multiline ? <Textarea
+              id="cred-value" rows={6} placeholder={presentation.label}
+              autoComplete="off" spellCheck={false}
+              value={values.value} onChange={(e) => handleValueChange(e.target.value)}
+              className={cn("font-mono text-xs pr-10", !showValue && "[-webkit-text-security:disc]")}
+            /> : <Input
               id="cred-value"
               type={showValue ? "text" : "password"}
               placeholder={mode === "edit" ? "Paste a new value only to replace the existing secret" : "Paste secret value"}
@@ -433,7 +453,7 @@ export function CredentialForm({
               value={values.value}
               onChange={(e) => handleValueChange(e.target.value)}
               className="pr-10 font-mono text-sm"
-            />
+            />}
             <Button
               type="button"
               variant="ghost"
@@ -445,6 +465,7 @@ export function CredentialForm({
               {showValue ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
             </Button>
           </div>
+          {surface && <p className="text-xs text-muted-foreground">{presentation.hint}</p>}
           {/* Test button only where the server maintains a real upstream probe.
               For passive secrets (Notion, Stripe, Linear, …) the agent talks to
               the API directly and we have nothing to check against, so a "Test
@@ -482,6 +503,7 @@ export function CredentialForm({
         </div>
       )}
 
+      {additionalFields}
       {/* Tags row — promoted out of "Advanced" because tagging is the
           primary organisation tool now that grouping is gone. */}
       <div className="space-y-1.5">
@@ -557,6 +579,8 @@ export function CredentialForm({
 
       {advancedOpen && (
         <div className="space-y-3 pl-4 border-l border-white/10">
+          {surface && (values.scope !== initial?.scope || JSON.stringify(values.crewIds) !== JSON.stringify(initial?.crewIds ?? [])) &&
+            <p role="status" className="rounded-lg border border-warn/30 p-3 text-xs text-warn">Access will change to {values.scope === "WORKSPACE" ? "workspace scope" : `${values.crewIds.length} selected crews`}. Agents relying on inherited access may gain or lose this credential. Existing direct grants and delivery bindings must be reviewed separately.</p>}
           {/* Description */}
           {!surface && <div className="space-y-1">
             <Label htmlFor="cred-desc" className="text-xs">Description</Label>

@@ -18,6 +18,18 @@ function patchBody() {
   return JSON.parse(call![1].body)
 }
 describe("credential edit safety", () => {
+  it("edits a USERPASS username without requiring a password replacement", async () => {
+    render(<EditCredentialDialog workspaceId="ws1" credential={{ id: "login1", name: "Database", description: null, provider: "NONE", type: "USERPASS", username: "old-user", scope: "WORKSPACE", crew_id: null, crew_ids: [] }} open onOpenChange={() => {}} onSuccess={() => {}} />)
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-user" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(patchBody()).toHaveProperty("username", "new-user"))
+    expect(patchBody()).not.toHaveProperty("value")
+  })
+  it.each([["SSH_KEY", /Replace private key/i], ["CERTIFICATE", /Replace certificate/i], ["GENERIC_SECRET", /Replace file or secret contents/i]] as const)("uses a multiline replacement for %s", (type, label) => {
+    render(<EditCredentialDialog workspaceId="ws1" credential={{ id: "c1", name: "Fixture", description: null, provider: "NONE", type, scope: "WORKSPACE", crew_id: null, crew_ids: [] }} open onOpenChange={() => {}} onSuccess={() => {}} />)
+    fireEvent.click(screen.getByRole("checkbox", { name: "Replace the stored secret" }))
+    expect(screen.getByLabelText(label)).toHaveProperty("tagName", "TEXTAREA")
+  })
   it("includes a pending tag on save and guards a tag-only draft", async () => {
     const onSuccess = setup()
     fireEvent.change(screen.getByLabelText(/Tags/), { target: { value: " Production " } })

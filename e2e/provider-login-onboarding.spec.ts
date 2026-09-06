@@ -102,6 +102,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
   test(`credential metadata editing at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     const credential = { id: "fixture-secret", name: "Example certificate", description: "Browser fixture — not a real secret", type: "CERT", provider: "NONE", scope: "WORKSPACE", status: "ACTIVE", crew_id: null, crew_ids: [], tags: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", last_used_ips: [], agent_names: [], _count_agent_credentials: 0, security_level: 3 }
+    const fields = [{ key: "ca_pem", value: "old-public-fixture", is_secret: false }, { key: "key_pem", value: null, is_secret: true }]
     let patch: Record<string, unknown> | undefined
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url())
@@ -110,6 +111,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
       else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
       else if (path === "/api/v1/credentials") body = url.searchParams.has("kind") ? [] : [credential]
+      else if (path === "/api/v1/credentials/fixture-secret/fields") body = fields
+      else if (path === "/api/v1/credentials/fixture-secret/fields/ca_pem" && route.request().method() === "PUT") {
+        fields[0].value = route.request().postDataJSON().value
+        body = fields[0]
+      }
       else if (path === "/api/v1/credentials/fixture-secret" && route.request().method() === "PATCH") {
         patch = route.request().postDataJSON()
         Object.assign(credential, patch)
@@ -124,18 +130,27 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     // the canonical list. At mobile width, open it through the explorer toggle.
     if (viewport.width < 640) await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
     await page.getByText("Example certificate", { exact: true }).first().click()
+    await expect(page.getByTestId("connection-verification")).toContainText("Connection not verified")
+    await expect(page.getByTestId("credential-access-summary")).toContainText("Your access:")
     await expect(page.getByText("Properties & protection", { exact: true })).toBeVisible()
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/credential-detail-${viewport.width}.png` })
     await page.getByRole("button", { name: "Edit", exact: true }).first().click()
     await expect(page.getByRole("dialog", { name: "Edit credential" })).toBeVisible()
-    await expect(page.getByLabel(/^Replace secret value/)).toHaveCount(0)
+    await expect(page.getByLabel(/^Replace certificate/)).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Renamed certificate")
     await page.getByLabel("Description", { exact: true }).fill("Metadata only")
     await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
-    await page.getByLabel(/^Replace secret value/).fill("discarded-fixture-only")
+    await page.getByLabel(/^Replace certificate/).fill("discarded-fixture-only\nsecond-line")
     await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
-    await expect(page.getByLabel(/^Replace secret value/)).toHaveCount(0)
+    await expect(page.getByLabel(/^Replace certificate/)).toHaveCount(0)
+    await page.getByRole("button", { name: "Edit CA chain (PEM)", exact: true }).click()
+    await page.getByLabel("CA chain (PEM)", { exact: true }).fill("new-public-fixture\nsecond-line")
+    await page.getByRole("button", { name: "Save CA chain (PEM)", exact: true }).click()
+    await expect.poll(() => fields[0].value).toBe("new-public-fixture\nsecond-line")
+    await page.getByRole("button", { name: "Edit Private key (PEM)", exact: true }).click()
+    await expect(page.getByLabel("Private key (PEM)", { exact: true })).toHaveValue("")
+    await page.getByRole("button", { name: "Cancel Private key (PEM)", exact: true }).click()
     const tags = page.getByLabel(/^Tags/)
     await tags.fill("Demo")
     await tags.press("Enter")
