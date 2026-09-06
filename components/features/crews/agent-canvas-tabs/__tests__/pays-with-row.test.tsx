@@ -146,6 +146,30 @@ describe("the picker", () => {
 })
 
 describe("choosing a seat", () => {
+  it.each([true, false])("failed swap restores the previous binding when possible (restore=%s)", async (restore) => {
+    let bound = true
+    const changed = vi.fn()
+    h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string; body?: string }) => {
+      const u = String(url)
+      if (u.includes("kind=provider_login")) return ok([chatgpt, openaiKey])
+      if (init?.method === "DELETE") { bound = false; return ok({}) }
+      if (init?.method === "POST") {
+        const payload = JSON.parse(init.body!)
+        if (payload.credential_id === "c_gpt" && restore) { bound = true; return ok({id:"restored"},201) }
+        return {ok:false,status:500,json:async()=>({error:"Assignment failed"})}
+      }
+      return ok({bindings:bound ? [{id:"old",credential_id:"c_gpt",scope:"AGENT",agent_id:"a1",slot:"OPENAI_API_KEY"}] : []})
+    })
+    renderRow({ paysWith: {credential_id:"c_gpt",name:chatgpt.name,login:chatgpt.login!}, onChanged:changed })
+    fireEvent.click(screen.getByRole("button",{name:/pays with/i}))
+    const options = await screen.findAllByRole("option")
+    fireEvent.click(options.find(o=>o.textContent?.includes(openaiKey.name))!)
+    await waitFor(()=>expect(changed).toHaveBeenCalled())
+    expect(h.toast.success).not.toHaveBeenCalled()
+    expect(h.apiFetch.mock.calls.filter(([,init])=>init?.method === "POST")).toHaveLength(2)
+    await waitFor(()=>expect(screen.getByRole("button",{name:/pays with/i}).textContent?.includes(chatgpt.name)).toBe(restore))
+    if (!restore) expect(h.toast.error).toHaveBeenCalledWith(expect.stringContaining("could not be restored"))
+  })
   it("writes an AGENT binding under the seat's slot", async () => {
     serve([chatgpt, openaiKey])
     renderRow()

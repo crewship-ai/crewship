@@ -471,6 +471,7 @@ describe("provider login (#2428)", () => {
     expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("ChatGPT Plus · jana")
     expect(screen.getByTestId("device-sign-in")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^owner$/i)).not.toBeInTheDocument()
   })
 })
 

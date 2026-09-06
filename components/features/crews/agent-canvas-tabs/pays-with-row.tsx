@@ -72,6 +72,9 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [open, setOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [snapshotStale, setSnapshotStale] = React.useState(false)
+  React.useEffect(() => { setSnapshotStale(false) }, [paysWith])
+  const snapshot = snapshotStale ? null : paysWith
 
   const provider = adapterProvider(cliAdapter)
   const ws = encodeURIComponent(workspaceId)
@@ -110,16 +113,16 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
   // AGENT binding that points at a seat (an older server, or right after a
   // change here and before the agent is re-read).
   const seatById = React.useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats])
-  const boundSeat = bindings.find((b) => seatById.has(b.credential_id)) ?? null
-  const currentId = loaded ? boundSeat?.credential_id ?? paysWith?.credential_id ?? null : paysWith?.credential_id ?? null
+  const boundSeat = snapshotStale && loadError ? null : bindings.find((b) => seatById.has(b.credential_id)) ?? null
+  const currentId = loaded ? boundSeat?.credential_id ?? snapshot?.credential_id ?? null : snapshot?.credential_id ?? null
   const current = currentId ? seatById.get(currentId) ?? null : null
-  const currentLogin: ProviderLogin | null = current?.login ?? paysWith?.login ?? null
-  const currentName = current?.name ?? paysWith?.name ?? null
+  const currentLogin: ProviderLogin | null = current?.login ?? snapshot?.login ?? null
+  const currentName = current?.name ?? snapshot?.name ?? null
 
   // The seat as a row, for the status ladder — from the list when loaded,
   // else from what the agent carries.
   const currentRow: LoginCredential | null =
-    current ?? (paysWith?.login && paysWith.credential_id && paysWith.name ? { id: paysWith.credential_id, name: paysWith.name, provider: paysWith.login.provider, status: "ACTIVE", login: paysWith.login } : null)
+    current ?? (snapshot?.login && snapshot.credential_id && snapshot.name ? { id: snapshot.credential_id, name: snapshot.name, provider: snapshot.login.provider, status: "ACTIVE", login: snapshot.login } : null)
   const partners = currentRow
     ? seats.filter((s) => s.id !== currentRow.id && (s.login?.provider ?? s.provider) === (currentRow.login?.provider ?? currentRow.provider))
     : []
@@ -143,15 +146,19 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
       return
     }
     setSaving(true)
+    let released: BindingRow | null = null
     try {
       // No PATCH on a binding — the row IS the slot claim. Swapping seats is
       // delete-then-create; the delete goes first so the create cannot 409 on
       // the slot the old seat still holds.
       const slot = loginBindingSlot(seat.login, boundSeat?.slot ?? null) ?? "PROVIDER_LOGIN"
       if (boundSeat) {
+        setSnapshotStale(true)
         const del = await apiFetch(`/api/v1/credentials/bindings/${encodeURIComponent(boundSeat.id)}?workspace_id=${ws}`, { method: "DELETE" })
         if (!del.ok && del.status !== 404) throw new Error(`Couldn't release the current seat (HTTP ${del.status}).`)
+        if (del.ok) released = boundSeat
       }
+      setSnapshotStale(true)
       const res = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -166,7 +173,19 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
       void load()
       onChanged?.()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not save")
+      const message = err instanceof Error ? err.message : "Could not save"
+      let restored = true
+      if (released) {
+        const back = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential_id: released.credential_id, scope: "AGENT", crew_id: "", agent_id: agentId, slot: released.slot }),
+        }).catch(() => null)
+        restored = Boolean(back?.ok)
+      }
+      toast.error(restored ? message : `${message} The previous seat was released and could not be restored. Check the agent's assignment before running it.`)
+      await load()
+      onChanged?.()
     } finally {
       setSaving(false)
     }
@@ -214,7 +233,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
                 <>
                   <CreditCard className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    Inherits from the crew or workspace
+                    {snapshotStale ? "Assignment changed — inherited account not verified" : "Inherits from the crew or workspace"}
                   </span>
                 </>
               )}

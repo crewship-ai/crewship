@@ -18,15 +18,22 @@ import (
 // the value's own.
 //
 // Bounded to the server's own cap (internal/api/credentials_types.go
-// maxCredentialValueLen) plus one byte: a value the server would refuse is
+// maxCredentialValueLen), one optional line ending and a sentinel byte:
+// a value the server would refuse is
 // refused here without buffering an unbounded pipe first.
 func readValueStdin() (string, error) {
 	const maxValueStdinBytes = 64 * 1024
-	b, err := io.ReadAll(io.LimitReader(os.Stdin, maxValueStdinBytes+1))
+	b, err := io.ReadAll(io.LimitReader(os.Stdin, maxValueStdinBytes+3))
 	if err != nil {
 		return "", fmt.Errorf("read value from stdin: %w", err)
 	}
-	value := strings.TrimRight(string(b), "\r\n")
+	if len(b) > maxValueStdinBytes+2 {
+		return "", fmt.Errorf("stdin value is too long (max %d bytes)", maxValueStdinBytes)
+	}
+	value := string(b)
+	if strings.HasSuffix(value, "\n") {
+		value = strings.TrimSuffix(strings.TrimSuffix(value, "\n"), "\r")
+	}
 	if len(value) > maxValueStdinBytes {
 		return "", fmt.Errorf("stdin value is too long (max %d bytes)", maxValueStdinBytes)
 	}

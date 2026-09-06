@@ -764,7 +764,7 @@ export function AddCredentialWizard({
                     onChange={setPrimaryValue}
                   />
                 )}
-                {login && (
+                {login && !usingDevice && (
                   <details className="space-y-1.5">
                     <summary className="cursor-pointer py-2 type-meta text-muted-foreground">Account owner · {members.find((m) => m.user.id === ownerId)?.user.email || sessionUserEmail || "you"}</summary>
                     <Label htmlFor="cred-owner" className="type-section text-muted-foreground">Owner</Label>
