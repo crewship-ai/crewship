@@ -488,3 +488,72 @@ oken k loginu, „at limit" v UI, opt-in pool přes vlastníky.
 - Cursor headless — cursor.com/docs/cli/headless · Gemini auth — geminicli.com/docs/get-started/authentication · OpenCode — opencode.ai/docs/cli, issue #5423 · Copilot CLI — docs.github.com authenticate-copilot-cli · Factory — docs.factory.ai/droid-cli/cli-reference · Perplexity — docs.perplexity.ai/docs/cli/overview · Grok Build — github.com/xai-org/grok-build
 - Orchestrátory jedné instance — vibekanban.com, Conductor, Sculptor, Multica (awesome-agent-orchestrators)
 - Interní: `codex-auth-is-a-file-not-a-token` (memory), PRD-CREDENTIALS-V2 §1.2 (fanout), §1.5 V2 (HOME na svazku), PRD-MODEL-SCOPED §2 (CONNECT tunel nevynutitelný)
+
+---
+
+## 10. API kontrakt v1 (závazný pro paralelní implementaci)
+
+Backend (P-A2/P-D) a frontend (P-B) se staví souběžně proti tomuto tvaru.
+Cokoli mimo něj se dohaduje v PR, ne mlčky.
+
+### 10.1 `login` objekt na credential rows
+
+`GET /api/v1/credentials` a `GET /api/v1/credentials/{id}` vrací u každé řádky,
+jejíž `type` je `PROVIDER_LOGIN`, nebo `AI_CLI_TOKEN` / `API_KEY` s AI
+providerem (registry `cli: true` — ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY),
+navíc pole `login`:
+
+```json
+{
+  "login": {
+    "mode": "subscription",              // "subscription" | "api_key"
+    "provider": "OPENAI",
+    "plan": "plus",                      // string | null
+    "plan_label": "ChatGPT Plus",        // string | null
+    "owner_user_id": "…", "owner_email": "jana@unify.cz",
+    "expires_at": "2026-09-16T08:40:00Z",// access token / setup-token expiry, null = unknown/never
+    "refresh": {
+      "supported": true,                 // false: Anthropic setup-token, API keys
+      "status": "ok",                    // "ok" | "pending" | "failed" | "needs_relogin" | "none"
+      "last_at": "…", "next_at": "…", "error": null
+    },
+    "quota": null,                       // P-D: {"window_5h_pct":62,"window_weekly_pct":31,"resets_at":"…"} | null
+    "delivery": { "kind": "file", "target": ".codex/auth.json" },   // "env" | "file"
+    "pays_for": { "agents": 3, "crews": 1 }
+  }
+}
+```
+
+`GET /api/v1/credentials?kind=provider_login` vrací jen řádky s `login`.
+Existující `AI_CLI_TOKEN`/`API_KEY` řádky dostávají `login` odvozeně (mode z
+typu, plan z tokenu kde jde, refresh.supported=false) — bez migrace.
+
+### 10.2 Typ `PROVIDER_LOGIN`
+
+`credentials.type = PROVIDER_LOGIN`, `encrypted_value` = access token (u
+Anthropic celý setup-token, u API-key módu klíč). Části v `credential_fields`:
+`refresh_token` (secret, **SEALED**), `id_token` (secret), `account_id`,
+`plan`, `expires_at`, `mode`. Vytvoření: `POST /api/v1/credentials` s
+`type: PROVIDER_LOGIN`, `provider`, `mode`, a **`value` = to, co uživatel
+vložil** (celý `auth.json`, setup-token, nebo klíč) — server rozparsuje a
+rozloží do částí sám (`internal/codexauth` pro OpenAI). Orchestrátor přijímá
+při doručení obě podoby (`PROVIDER_LOGIN` části i starší `AI_CLI_TOKEN` blob).
+
+### 10.3 Nové endpointy (každý má CLI příkaz)
+
+| Endpoint | CLI | Účel |
+|---|---|---|
+| `POST /api/v1/credentials/{id}/refresh` → `{login}` | `crewship credential refresh <id>` | vynutit refresh teď; 409 když už běží (single-flight) |
+| `POST /api/v1/provider-logins/device` `{provider, mode?}` → `{device_id, user_code, verification_url, expires_at, interval_s}` | `crewship credential login --provider OPENAI` | začít device-code přihlášení; server polluje providera |
+| `GET /api/v1/provider-logins/device/{device_id}` → `{status: pending\|complete\|expired\|denied, credential_id?}` | (totéž CLI čeká a vypíše výsledek) | stav |
+| `GET /api/v1/agents/{id}` … pole `pays_with: {credential_id, name, login}` | `crewship agent get` | co agentovi platí model (odvozeno z bindingů + adaptéru) |
+
+### 10.4 Chování refreshe
+
+Codex: `POST https://auth.openai.com/oauth/token`, `grant_type=refresh_token`,
+`client_id app_EMoamEEZ73f0CkXaXp7hrann`; nový access + refresh + `expires_at`
+zpět do částí; single-flight per credential (`refresh_in_progress_until`);
+backoff 5 min po chybě, 1 min pending; po 3 chybách `needs_relogin` + notifikace
+vlastníkovi. Běží v `CredentialMonitor` (interval) **a** před startem běhu,
+když zbývá < 48 h. Po úspěchu přepsat soubor v běžících kontejnerech daného
+loginu.
