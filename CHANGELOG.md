@@ -18,6 +18,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
+
 - **A routine `script` step ran against a sidecar nobody had started.** Every
   script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
   crew egress allowlist is enforced — but crewship-sidecar was only ever
