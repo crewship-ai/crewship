@@ -70,14 +70,18 @@ func isLoginRow(credType, provider string) bool {
 // loginRowsSQL is the WHERE fragment for ?kind=provider_login — the SQL
 // twin of isLoginRow, on the aliased credentials table `c`.
 func loginRowsSQL() (string, []any) {
+	// SQLite's default TRIM removes only ASCII spaces. Match Canonical's
+	// strings.TrimSpace so padded legacy rows cannot bypass list RBAC while
+	// the credential-ID guard correctly recognizes them as provider accounts.
+	const whitespace = "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
 	ps := providerlogin.Providers()
 	marks := strings.TrimSuffix(strings.Repeat("?,", len(ps)), ",")
-	args := make([]any, 0, len(ps)+1)
-	args = append(args, CredTypeProviderLogin)
+	args := make([]any, 0, len(ps)+2)
+	args = append(args, CredTypeProviderLogin, whitespace)
 	for _, p := range ps {
 		args = append(args, p)
 	}
-	return " AND (c.type = ? OR (c.type IN ('AI_CLI_TOKEN','API_KEY') AND UPPER(c.provider) IN (" + marks + ")))", args
+	return " AND (c.type = ? OR (c.type IN ('AI_CLI_TOKEN','API_KEY') AND UPPER(TRIM(c.provider, ?)) IN (" + marks + ")))", args
 }
 
 // loginSource is what the batch loader needs per row to build a loginView.

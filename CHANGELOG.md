@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Legacy provider visibility** (#2428) — list filters use the same whitespace normalization as the credential-ID permission guard, so padded legacy provider names cannot expose admin-only account metadata in lists.
+
 - **Provider-account notification privacy** (#2428) — refresh-failure alerts are addressed to current workspace administrators, not personally to a creator who may later be demoted. An upgrade backfill also restricts previously stored alerts, without deleting their history or changing unrelated inbox messages.
 
 - **Provider-login API and CLI** (#2428) — normalized account storage, server-driven device sign-in, centralized refresh with stale-write protection, provider-specific account status, and usage attribution. `credential login`, status and refresh commands use the same server contract; bounded stdin imports accept complete auth files without truncation.
