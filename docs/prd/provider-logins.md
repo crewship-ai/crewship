@@ -408,13 +408,21 @@ Rail vlevo: **Provider** (brand), **Mode** (subscription / api key), **Status**
 Overview zůstává pro secrety; provider loginy se v něm **nepočítají** do „12 secrets"
 (mají vlastní počítadlo „5 provider logins"), jinak KPI nedávají smysl.
 
-### 6.2 Dialog *Add a credential* — sedmá karta
+### 6.2 Dialog *Add a credential* — provider jako první volba
 
-`Provider login · Subscription or API key that pays for a model`. Po výběru: brand
-(jen `cli: true` značky), pak **mode** (Subscription / API key), pak vstup podle
-§5.6 (token / vložený JSON / klíč), pak **owner** (předvyplněn přihlášený), pak
-Delivery krok beze změny (scope + slot, slot předvyplněn z `AuthDelivery.Env`
-nebo „file" u tvaru B). Stejný wizard, stejné tři kroky.
+Upřesnění uživatele 2026-09-06: nahoře přímo karty ChatGPT/OpenAI,
+Claude/Anthropic, Gemini/Google, Grok/xAI a dalších providerů přijímaných API,
+se značkovými ikonami. Provider není volitelná dekorace v „Brand icon".
+Kliknutí otevře jeho konkrétní formulář: jen podporované metody, vstup podle
+§5.6, vlastník, potom přiřazení. Kroky pro provider login se jmenují
+**Provider → Connect → Access**; ostatní typy tajných údajů zůstávají dostupné.
+Změna providera/metody smaže rozepsaný token. Po dokončeném device přihlášení
+nelze identitu účtu zaměnit za jiného providera.
+
+Filtr **Providers** je přímo v levé liště Overview i Providers, včetně nulových
+počtů a volby „All providers". Výběr v Overview přepne do Providers. Nulový počet
+nesmí skrýt celou lištu. Počty vycházejí z login metadat API, ne z názvu secretu.
+Grok/Groq karta uvádí API-key cestu přes OpenCode; neznamená hotový nativní adaptér.
 
 ### 6.3 Agent
 

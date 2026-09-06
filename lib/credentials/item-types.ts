@@ -357,7 +357,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
       multiline: false,
       hint: "",
       slot: k?.slot ?? null,
-      supported: true,
+      supported: Boolean(k),
     }
   }
   switch (p) {
@@ -395,7 +395,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
         multiline: false,
         hint: p && p !== "NONE"
           ? "This provider has no subscription login Crewship can deliver yet — switch to API key."
-          : "Pick the provider first: Anthropic (Claude Max) and OpenAI (ChatGPT plan) have a subscription login; the others take an API key.",
+          : "Choose your AI provider above to see its sign-in instructions.",
         slot: null,
         supported: false,
       }

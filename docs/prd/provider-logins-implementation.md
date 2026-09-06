@@ -5,6 +5,24 @@ the session report and PR #2430. The session report remains untracked.
 
 ## Acceptance scope
 
+### Provider-first UI follow-up
+
+User's 2026-09-06 screenshots exposed provider selection hidden in the decorative
+brand picker and a disappearing empty Providers rail. The active wizard now
+offers 12 API-supported provider cards first, then provider-specific inputs and
+supported methods. Brand SVGs for Grok/Groq/Kimi/Z.AI/MiniMax use attributed MIT
+LobeHub paths. The overview and Providers rails expose counts including zeroes,
+plus an all-providers reset. No account is inferred from a secret's display name.
+
+Verification: 520 Vitest tests across 20 files, two isolated Playwright browser
+flows at 1280px and 390px (API mocked, no real credentials created), production
+build and lint (33 existing warnings, no errors). The browser test pins global
+navigation before clicking the vault rail, since its hover overlay can cover it.
+Full Go verification: `/tmp/provider-first-go.log`; vet: `/tmp/provider-first-vet.log`.
+Deployment status is recorded after the dev3 restart, not inferred from hot reload.
+
+### Original implementation checklist
+
 - [x] Integrate backend and device branches; reconcile split credentials with AuthDelivery.
 - [ ] Codex: structured failures, API sidecar routing, auth file, refresh and expiry checks.
 - [ ] Providers: real data, create/import, owner, assignment, refresh, device sign-in, Pays with.

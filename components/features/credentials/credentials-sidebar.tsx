@@ -60,6 +60,7 @@ import type { CredentialFacetOption, CredentialFilters } from "@/lib/credentials
 import { EMPTY_CREDENTIAL_FILTERS } from "@/lib/credentials/facets"
 import { UNCLASSIFIED_TIER, tierMeta, type CredentialTierLevel } from "@/lib/credentials/tiers"
 import { CredentialTierBadge } from "./credential-tier-badge"
+import { ProviderFilterSection } from "./provider-filter-section"
 import { cn } from "@/lib/utils"
 
 /** What the rail needs from a credential. Deliberately narrow: the rail
@@ -77,6 +78,8 @@ export interface SidebarCredential {
 }
 
 export interface CredentialsSidebarProps {
+  loginProviders?: CredentialFacetOption[]
+  onSelectProvider?: (key: string) => void
   filters: CredentialFilters
   onFiltersChange: (next: CredentialFilters) => void
   counts: { all: number; attention: number; missingTool: number }
@@ -161,6 +164,8 @@ const dropdownAnim = {
 }
 
 export function CredentialsSidebar({
+  loginProviders = [],
+  onSelectProvider,
   filters,
   onFiltersChange,
   counts,
@@ -396,6 +401,8 @@ export function CredentialsSidebar({
             )
           })}
       </SidebarSection>
+
+      {onSelectProvider && <ProviderFilterSection providers={loginProviders} selected={[]} onSelect={onSelectProvider} />}
 
       {/* ── Tier ── (single-select, and the one section that prints zeroes)
        *

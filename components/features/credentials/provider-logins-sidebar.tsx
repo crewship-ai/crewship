@@ -29,7 +29,7 @@ import {
   SidebarSection,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
-import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { ProviderFilterSection } from "./provider-filter-section"
 import {
   UNOWNED,
   type LoginFacetOption,
@@ -116,25 +116,7 @@ export function ProviderLoginsSidebar({
       </SidebarSection>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {providers.length > 0 && (
-          <SidebarSection label="Provider" count={providers.length} className="border-b border-white/[0.06]">
-            {providers.map((opt) => {
-              const brand = getBrand(opt.value)
-              const Icon = brand.Icon
-              return (
-                <SidebarRow
-                  key={opt.value}
-                  selected={filters.provider.includes(opt.value)}
-                  onSelect={() => set({ provider: toggle(filters.provider, opt.value) })}
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: brandColor(brand) }} aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                  <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{opt.count}</span>
-                </SidebarRow>
-              )
-            })}
-          </SidebarSection>
-        )}
+        <ProviderFilterSection providers={providers} selected={filters.provider} onSelect={(key) => set({ provider: key ? toggle(filters.provider, key) : [] })} />
 
         {modes.length > 0 && (
           <SidebarSection label="Mode" count={modes.length} className="border-b border-white/[0.06]">

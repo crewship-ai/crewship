@@ -78,6 +78,8 @@ import {
 import { useAbilities } from "@/hooks/use-abilities"
 import { apiFetch } from "@/lib/api-fetch"
 import { defaultEnvVarName } from "@/lib/credential-provider"
+import { LOGIN_PROVIDERS, loginProvider } from "@/lib/credentials/login-providers"
+import { LoginProviderPicker } from "./login-provider-picker"
 import {
   brandColor, detectBrandFromName, detectBrandFromValue, getBrand,
 } from "@/lib/credential-providers/registry"
@@ -320,6 +322,17 @@ export function AddCredentialWizard({
   const brand = getBrand(provider)
   const BrandIcon = brand.Icon
 
+  const selectLoginProvider = (key: string) => {
+    if (key !== provider && deviceCredentialId) return
+    providerTouched.current = true
+    setProvider(key)
+    setItemTypeKey("PROVIDER_LOGIN")
+    setLoginMode(loginProvider(key)?.subscription ? "subscription" : "api_key")
+    setPrimaryValue("")
+    setExtras({})
+    setSignIn("paste")
+  }
+
   // Without a binding the credential is delivered under its own NAME (the
   // pre-P3 behaviour the backend still honours), so the name has to be a legal
   // env var in that case — and is free-form when a slot is set. We warn rather
@@ -553,7 +566,7 @@ export function AddCredentialWizard({
           renders the nav itself now, so the wrapper was a nested landmark. */}
       <CreateSurfaceSteps
         ariaLabel="Add credential steps"
-        steps={STEPS}
+        steps={login ? [{ id: "type", label: "Provider" }, { id: "values", label: "Connect" }, { id: "scope", label: "Access" }] : STEPS}
         current={stepIndex}
         onJump={(i) => setStep(STEP_ORDER[i])}
       />
@@ -563,6 +576,13 @@ export function AddCredentialWizard({
       <CreateSurfaceBody data-testid="wizard-body" className="space-y-3">
         {step === "type" && (
           <>
+            <CreateSurfaceSection title="Connect an AI provider" icon={KeyRound} accent="blue">
+              <p className="type-meta text-muted-foreground">Choose your provider. We will guide you through its supported sign-in methods.</p>
+            </CreateSurfaceSection>
+            <LoginProviderPicker value={itemTypeKey === "PROVIDER_LOGIN" ? provider : "NONE"} onChange={(key) => {
+              selectLoginProvider(key)
+              setStep("values")
+            }} />
             <CreateSurfaceSection title="What shape is it?" icon={KeyRound} accent="amber">
               <p className="type-meta leading-relaxed text-muted-foreground">
                 The shape decides which boxes you fill next. Every brand fits one of these.
@@ -618,7 +638,7 @@ export function AddCredentialWizard({
                 It is offered here, next to the shape, and it gates nothing —
                 the icon is what the rail and the list draw, not a category the
                 flow makes you choose. */}
-            <CreateSurfaceSection title="Brand icon" hint="optional" icon={Palette} accent="purple">
+            {itemTypeKey !== "PROVIDER_LOGIN" && <CreateSurfaceSection title="Brand icon" hint="optional" icon={Palette} accent="purple">
               <div className="flex flex-wrap items-center gap-3">
                 <BrandPicker
                   value={provider}
@@ -632,7 +652,7 @@ export function AddCredentialWizard({
                 Pasting the secret on the next step usually recognises the brand on its own. Setting it
                 here just wins the tie.
               </CardNote>
-            </CreateSurfaceSection>
+            </CreateSurfaceSection>}
           </>
         )}
 
@@ -642,6 +662,16 @@ export function AddCredentialWizard({
               <div className="space-y-3">
                 {login && (
                   <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="login-provider">Provider</Label>
+                      <select id="login-provider" value={provider} disabled={deviceBusy || Boolean(deviceCredentialId)}
+                        onChange={(e) => selectLoginProvider(e.target.value)}
+                        className={cn(FIELD, "w-full rounded-md border border-border/60 bg-background px-2.5 text-sm")}>
+                        <option value="NONE" disabled>Choose your AI provider</option>
+                        {LOGIN_PROVIDERS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+                      </select>
+                      {loginProvider(provider) && <CardNote>{loginProvider(provider)?.detail}</CardNote>}
+                    </div>
                     {/* The brand is a hint for every other shape; for a
                         provider login it is the thing itself — the server
                         picks the delivery path (env var vs. $CODEX_HOME file)
@@ -649,12 +679,13 @@ export function AddCredentialWizard({
                         step 1 or with the "Icon" picker beside the name below;
                         missingRequired holds the step until it is. */}
                     <div role="group" aria-label="How does this seat pay" className="grid grid-cols-2 gap-2">
-                      {(["subscription", "api_key"] as const).map((m) => (
+                      {(["subscription", "api_key"] as const).filter((m) => m === "api_key" || loginProvider(provider)?.subscription).map((m) => (
                         <button
                           key={m}
                           type="button"
                           aria-pressed={loginMode === m}
-                          onClick={() => setLoginMode(m)}
+                          disabled={deviceBusy || Boolean(deviceCredentialId)}
+                          onClick={() => { setLoginMode(m); setPrimaryValue(""); setSignIn("paste") }}
                           className={cn(
                             "flex min-h-10 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
                             loginMode === m
@@ -666,7 +697,7 @@ export function AddCredentialWizard({
                             {m === "subscription" ? "Subscription" : "API key"}
                           </span>
                           <span className="type-meta text-muted-foreground">
-                            {m === "subscription" ? "Claude Max, ChatGPT plan — flat-rate" : "Metered, billed per token"}
+                            {m === "subscription" ? "Use your existing provider account" : "Use a key from your provider account"}
                           </span>
                         </button>
                       ))}
@@ -762,7 +793,7 @@ export function AddCredentialWizard({
                       />
                     )}
                     <p className="type-meta text-muted-foreground">
-                      The person whose seat this is. Seats are per person under both providers&apos; terms.
+                      The person responsible for this provider account.
                     </p>
                   </div>
                 )}
@@ -849,17 +880,17 @@ export function AddCredentialWizard({
                     <Label htmlFor="cred-name" className="type-section text-muted-foreground">
                       Name (which account)
                     </Label>
-                    <span className="flex items-center gap-1.5">
+                    {!login && <span className="flex items-center gap-1.5">
                       <span className="type-meta text-muted-foreground-soft">Icon</span>
                       <BrandPicker
                         value={provider}
                         onChange={(key) => { providerTouched.current = true; setProvider(key) }}
                       />
-                    </span>
+                    </span>}
                   </div>
                   <Input
                     id="cred-name"
-                    placeholder={login ? "e.g. ChatGPT Plus · jana" : "e.g. github-acme"}
+                    placeholder={login ? `e.g. ${loginProvider(provider)?.label ?? "Provider"} · my account` : "e.g. github-acme"}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className={cn(FIELD, "font-mono")}

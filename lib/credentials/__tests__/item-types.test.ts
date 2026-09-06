@@ -196,5 +196,7 @@ describe("provider login", () => {
     expect(cursor.supported).toBe(false)
     expect(providerLoginPresentation("CURSOR", "api_key")).toMatchObject({ supported: true, slot: "CURSOR_API_KEY" })
     expect(providerLoginPresentation("", "subscription").supported).toBe(false)
+    expect(providerLoginPresentation("NONE", "api_key").supported).toBe(false)
+    expect(providerLoginPresentation("NOTION", "api_key").supported).toBe(false)
   })
 })

@@ -544,7 +544,7 @@ export default function CredentialsPage() {
   // The rail is a filter surface. With nothing to filter (empty vault) or
   // nothing loaded (error), it would be a column of zeroes next to a message
   // asking the user to do something else.
-  const showSidebar = !loadError && (tab === "providers" ? providerLogins.length > 0 : credentials.length > 0)
+  const showSidebar = !loadError
 
   /** Re-login: the wizard on the sign-in step, this seat's provider and mode chosen. */
   const relogin = (cred: Credential) => {
@@ -601,6 +601,11 @@ export default function CredentialsPage() {
               />
             ) : (
               <CredentialsSidebar
+                loginProviders={loginProviders}
+                onSelectProvider={(key) => {
+                  setLoginFilters({ ...EMPTY_LOGIN_FILTERS, provider: key ? [key] : [] })
+                  selectTab("providers")
+                }}
                 filters={filters}
                 onFiltersChange={setFilters}
                 counts={{

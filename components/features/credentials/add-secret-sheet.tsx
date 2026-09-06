@@ -94,8 +94,7 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
             {/* The steps say what the steps are; on a phone that sentence is
                 three lines of chrome above the first control. */}
             <span className="hidden sm:inline">
-              {" "}Pick the shape, fill what it asks for, then say who gets it and under which
-              variable name.
+              {" "}Choose an AI provider or another credential type, connect your account, then choose who can use it.
             </span>
           </>
         }

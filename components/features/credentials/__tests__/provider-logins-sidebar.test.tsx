@@ -48,6 +48,16 @@ describe("status", () => {
 })
 
 describe("provider, mode and owner", () => {
+  it("keeps providers visible and selectable when no accounts exist", () => {
+    const change = vi.fn()
+    render(<ProviderLoginsSidebar filters={EMPTY_LOGIN_FILTERS} onFiltersChange={change}
+      counts={{ all: 0, at_limit: 0, expiring: 0, needs_relogin: 0, unassigned: 0 }}
+      providers={[]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
+    fireEvent.click(screen.getByText("Grok / xAI"))
+    expect(change).toHaveBeenCalledWith({ ...EMPTY_LOGIN_FILTERS, provider: ["XAI"] })
+    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(12)
+  })
+
   it("toggle values in and out of a list without touching the other facets", () => {
     const { onFiltersChange } = renderRail({ ...EMPTY_LOGIN_FILTERS, provider: ["ANTHROPIC"], search: "jana" })
     fireEvent.click(screen.getByText("OpenAI"))
