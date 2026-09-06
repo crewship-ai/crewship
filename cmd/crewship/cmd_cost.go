@@ -77,12 +77,13 @@ type topSpenderRow struct {
 }
 
 type subUsageRow struct {
-	Plan       string  `json:"subscription_plan"`
-	Provider   string  `json:"provider"`
-	CallCount  int64   `json:"call_count"`
-	InTokens   int64   `json:"input_tokens"`
-	OutTokens  int64   `json:"output_tokens"`
-	LastUsedAt *string `json:"last_used_at"`
+	CredentialID string  `json:"credential_id,omitempty"`
+	Plan         string  `json:"subscription_plan"`
+	Provider     string  `json:"provider"`
+	CallCount    int64   `json:"call_count"`
+	InTokens     int64   `json:"input_tokens"`
+	OutTokens    int64   `json:"output_tokens"`
+	LastUsedAt   *string `json:"last_used_at"`
 }
 
 func fetchTopSpenders(c *cli.Client, rng string, limit int) ([]topSpenderRow, error) {
