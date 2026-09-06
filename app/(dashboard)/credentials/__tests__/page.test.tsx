@@ -363,17 +363,15 @@ describe("separate secret and provider entry points", () => {
     expect(screen.queryByTestId("connect-oauth-dialog")).not.toBeInTheDocument()
   })
 
-  it("MEMBER with an explicit credential.create grant sees the create actions", async () => {
-    // Backend honors credential.create for lower roles
-    // (requireRoleOrCapabilityOrForbid) — the UI must not hide what
-    // the API would accept.
+  it("MEMBER with credential.create can add secrets but not admin-only providers", async () => {
+    // The capability permits ordinary secrets, not provider-account management.
     h.role = "MEMBER"
     h.capabilities = ["chat", "credential.create"]
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add provider/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
   })
 
