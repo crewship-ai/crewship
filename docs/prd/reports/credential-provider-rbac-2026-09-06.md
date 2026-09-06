@@ -62,3 +62,17 @@ Verification logs are `/tmp/provider-rbac-*.log`.
   lower roles and administrator desktop/mobile flows, with intercepted APIs.
 - Additional full `go test ./internal/api -count=1 -timeout 15m` after the
   delivery-warning change and extra regression cases: passed (475.700s).
+
+## Deployment
+
+Feature commit `b369c8dd` deployed only to dev3 via
+`sudo systemctl reload crewship-ws@3`, completed 20:42:09 UTC. The running binary
+is `/tmp/crewship-3-dev` (not the older `./crewship` file); its version reports
+`b369c8ddfa406b2cd5db36b740f8a60dd064f6bb`, built 20:41:59 UTC. It is marked dirty
+because unrelated workspace WIP was intentionally preserved.
+
+`GET /api/health` returned `{"status":"ok"}` and public `/credentials` returned
+HTTP 200. The public fixture-based browser run passed all 9 scenarios (15.5s):
+`CREDENTIALS_TEST_URL=https://crewship-dev3.unifylab.cz pnpm exec playwright test --config=/tmp/crewship-provider-first.config.mjs`.
+Log: `/tmp/provider-rbac-public-e2e.log`. No real credentials were mutated by
+these tests. No push, PR merge or deployment to another instance was performed.
