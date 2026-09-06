@@ -1,13 +1,10 @@
 "use client"
 
-// EditCredentialDialog — uses the same CredentialForm as Add. Same
-// fields, same layout, same keyboard behaviour. The only behavioural
-// difference is "leave Value empty to preserve the existing secret".
+// Metadata-first editing in the shared Routines create/edit shell.
+// Secret replacement is explicit; an empty replacement never reaches PATCH.
 
 import * as React from "react"
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { CredentialForm, type CredentialFormValues, type CredentialType } from "./credential-form"
 import { apiFetch } from "@/lib/api-fetch"
 
@@ -40,6 +37,8 @@ interface EditCredentialDialogProps {
 export function EditCredentialDialog({
   workspaceId, credential, open, onOpenChange, onSuccess, knownTags,
 }: EditCredentialDialogProps) {
+  const [dirty, setDirty] = React.useState(false)
+  React.useEffect(() => { if (!open) setDirty(false) }, [open])
   const initial = React.useMemo<Partial<CredentialFormValues>>(() => ({
     name: credential.name,
     description: credential.description ?? "",
@@ -63,7 +62,11 @@ export function EditCredentialDialog({
       provider: values.provider,
       scope: values.scope,
       tags: values.tags,
-      security_level: values.securityLevel,
+    }
+    // Older API responses may omit the tier. A metadata-only save must not
+    // turn an unknown tier into L1 just because the form needs a display default.
+    if (credential.security_level != null || values.securityLevel !== 1) {
+      body.security_level = values.securityLevel
     }
     if (values.value) body.value = values.value
     body.crew_ids = values.scope === "CREW" ? values.crewIds : []
@@ -94,17 +97,16 @@ export function EditCredentialDialog({
   // the detail view stopped doing it — the name hid the inconsistency from
   // anyone grepping for it.
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] max-h-[85vh] p-0 overflow-hidden flex flex-col">
-        <DialogHeader className="px-5 pt-4 pb-3 border-b border-white/10">
-          <DialogTitle className="text-base font-mono">{credential.name}</DialogTitle>
-          <DialogDescription className="text-xs">
-            Update metadata or paste a new value to rotate the secret.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+    <CreateSurface open={open} onOpenChange={onOpenChange} dirty={dirty} discardLabel="these credential changes" size="md">
+        <CreateSurfaceHeader concept="credentials" context={credential.name}
+          title="Edit credential"
+          description="Update its details and access. Your existing secret stays unchanged unless you enter a replacement."
+          onClose={() => onOpenChange(false)} />
+        {open && (
           <CredentialForm
+            key={credential.id}
+            surface
+            onDirtyChange={setDirty}
             workspaceId={workspaceId}
             mode="edit"
             initial={initial}
@@ -113,8 +115,7 @@ export function EditCredentialDialog({
             submitLabel="Save changes"
             knownTags={knownTags}
           />
-        </div>
-      </DialogContent>
-    </Dialog>
+        )}
+    </CreateSurface>
   )
 }

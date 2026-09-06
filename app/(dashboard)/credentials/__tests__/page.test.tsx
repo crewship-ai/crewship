@@ -351,16 +351,16 @@ describe("RBAC-gated list actions (C2)", () => {
   })
 })
 
-describe("OAuth connect entry point (#1034)", () => {
-  it("shows Connect via OAuth next to Add secret and opens the dialog", async () => {
+describe("separate secret and provider entry points", () => {
+  it("offers both create flows without mounting legacy OAuth", async () => {
     routeApi([makeCredential()])
     render(<CredentialsPage />)
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    const btn = screen.getByRole("button", { name: /connect via oauth/i })
-    expect(screen.getByTestId("connect-oauth-dialog")).toHaveAttribute("data-open", "false")
-    fireEvent.click(btn)
-    expect(screen.getByTestId("connect-oauth-dialog")).toHaveAttribute("data-open", "true")
+    expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("connect-oauth-dialog")).not.toBeInTheDocument()
   })
 
   it("MEMBER with an explicit credential.create grant sees the create actions", async () => {
@@ -373,7 +373,7 @@ describe("OAuth connect entry point (#1034)", () => {
     render(<CredentialsPage />)
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /connect via oauth/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add provider/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add secret/i })).toBeInTheDocument()
   })
 
@@ -385,6 +385,7 @@ describe("OAuth connect entry point (#1034)", () => {
 
     expect(await inList("STRIPE_API_KEY")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /connect via oauth/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add provider/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /add secret/i })).not.toBeInTheDocument()
   })
 })

@@ -408,7 +408,19 @@ Rail vlevo: **Provider** (brand), **Mode** (subscription / api key), **Status**
 Overview zůstává pro secrety; provider loginy se v něm **nepočítají** do „12 secrets"
 (mají vlastní počítadlo „5 provider logins"), jinak KPI nedávají smysl.
 
-### 6.2 Dialog *Add a credential* — provider jako první volba
+### 6.2 Oddělené vstupy *Add secret* a *Add provider*
+
+Další upřesnění uživatele 2026-09-06: hlavička nabízí oba vstupy současně.
+**Add secret** obsahuje jen šest běžných typů tajemství; **Add provider** začíná
+katalogem AI providerů níže. Legacy vstup **Connect via OAuth** se v Credentials
+nezobrazuje. To neruší provider-specific device-code přihlášení ani obnovu tokenů
+a neodstraňuje OAuth endpointy používané jinými integracemi.
+
+Provider krok Access nevyžaduje ruční volbu Keeper L1–L4 ani uživatelskou expiraci;
+create nepřepisuje dosavadní serverový výchozí stupeň (aktuálně L1), stejně jako
+device-code flow. Jde o zjednodušení formuláře, nikoli novou ochrannou politiku.
+Návrh omezit správu a metadata provider účtů na OWNER/ADMIN vyžaduje samostatné
+potvrzení a serverové vynucení; dosavadní RBAC tímto UI krokem změněn není.
 
 Upřesnění uživatele 2026-09-06: nahoře přímo karty ChatGPT/OpenAI,
 Claude/Anthropic, Gemini/Google, Grok/xAI a dalších providerů přijímaných API,

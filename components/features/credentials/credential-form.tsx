@@ -33,6 +33,7 @@ import { CREDENTIAL_TIERS } from "@/lib/credentials/tiers"
 import { BrandPicker } from "./brand-picker"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { CreateSurfaceBody, CreateSurfaceFooter } from "@/components/layout/create-surface"
 
 export type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
 export type CredentialScope = "WORKSPACE" | "CREW"
@@ -88,6 +89,9 @@ export interface CredentialFormProps {
   onTest?: (values: CredentialFormValues) => Promise<{ valid: boolean; error?: string }>
   /** Existing tag list in the workspace — drives the tag autocomplete. */
   knownTags?: string[]
+  /** Use the shared create/edit shell's scroll region and fixed action bar. */
+  surface?: boolean
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 export function CredentialForm({
@@ -100,12 +104,20 @@ export function CredentialForm({
   submitLabel,
   onTest,
   knownTags,
+  surface = false,
+  onDirtyChange,
 }: CredentialFormProps) {
   const [values, setValues] = React.useState<CredentialFormValues>(() => ({
     ...EMPTY_FORM,
     ...initial,
   }))
   const [showValue, setShowValue] = React.useState(false)
+  const [replaceValue, setReplaceValue] = React.useState(false)
+  const formRef = React.useRef<HTMLFormElement>(null)
+  const originalValues = React.useRef(values)
+  React.useEffect(() => {
+    onDirtyChange?.(JSON.stringify(values) !== JSON.stringify(originalValues.current))
+  }, [values, onDirtyChange])
   const [advancedOpen, setAdvancedOpen] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -225,7 +237,7 @@ export function CredentialForm({
       setError("Name is required")
       return
     }
-    if (nameInvalid && !nameIsLegacy) {
+    if (nameInvalid && !nameIsLegacy && !surface) {
       // Legacy names that were already invalid stay submittable (see
       // nameIsLegacy above) — blocking them would make old credentials
       // uneditable. Anything newly typed must be a valid env var name.
@@ -298,7 +310,8 @@ export function CredentialForm({
   }, [values.provider, values.type])
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form ref={formRef} onSubmit={handleSubmit} className={surface ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "space-y-4"}>
+      <CreateSurfaceBody padded={surface} scroll={surface} className={surface ? "space-y-4" : "contents"}>
       {/* Name + brand picker. The picker doubles as auto-detection
           preview: typing "notion" suggests Notion automatically; user
           can click the chip to override or pick a different brand
@@ -330,9 +343,9 @@ export function CredentialForm({
             onBlur={() => setNameBlurred(true)}
             className={cn(
               "font-mono text-sm pr-9",
-              nameBlurred && nameInvalid && !nameIsLegacy && "border-destructive/50",
+              !surface && nameBlurred && nameInvalid && !nameIsLegacy && "border-destructive/50",
             )}
-            aria-invalid={nameBlurred && nameInvalid && !nameIsLegacy}
+            aria-invalid={!surface && nameBlurred && nameInvalid && !nameIsLegacy}
             autoFocus={mode === "create"}
             required
           />
@@ -346,7 +359,12 @@ export function CredentialForm({
             </div>
           )}
         </div>
-        {nameBlurred && nameInvalid && !nameIsLegacy ? (
+        {surface ? (
+          <p className="text-xs text-muted-foreground">
+            A name to recognise this secret. If an agent uses the name as an environment variable,
+            keep that name unchanged or update its binding too.
+          </p>
+        ) : nameBlurred && nameInvalid && !nameIsLegacy ? (
           <div className="flex items-center gap-2 flex-wrap text-[11px] text-destructive">
             <span>
               Must be a valid env var name — uppercase letters, digits and underscores,
@@ -377,10 +395,25 @@ export function CredentialForm({
       </div>
 
       {/* Value */}
-      {!hideValue && (
-        <div className="space-y-1.5">
+      {surface && <div className="space-y-1.5">
+        <Label htmlFor="cred-description" className="text-xs">Description</Label>
+        <Textarea id="cred-description" placeholder="What is this secret used for?"
+          value={values.description} onChange={(e) => setField("description", e.target.value)} />
+      </div>}
+      {!hideValue && surface && mode === "edit" && <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={replaceValue} onChange={(e) => {
+            setReplaceValue(e.target.checked)
+            if (!e.target.checked) { setField("value", ""); setShowValue(false) }
+          }} />
+          Replace the stored secret
+        </label>
+        <p className="text-xs text-muted-foreground">Keep this off to edit details only. Replacing a secret updates Crewship, not the external service that issued it.</p>
+      </div>}
+      {!hideValue && (!surface || mode !== "edit" || replaceValue) && (
+        <div className={cn("space-y-1.5", surface && "rounded-xl border border-warn/30 bg-card p-4")}>
           <Label htmlFor="cred-value" className="text-xs">
-            Value
+            {mode === "edit" ? "Replace secret value" : "Value"}
             {mode === "edit" && (
               <span className="ml-1 text-[10px] font-normal text-muted-foreground">
                 (leave empty to keep existing)
@@ -391,7 +424,8 @@ export function CredentialForm({
             <Input
               id="cred-value"
               type={showValue ? "text" : "password"}
-              placeholder={mode === "edit" ? "•••••••••••••••" : "Paste secret value"}
+              placeholder={mode === "edit" ? "Paste a new value only to replace the existing secret" : "Paste secret value"}
+              autoComplete="new-password"
               value={values.value}
               onChange={(e) => handleValueChange(e.target.value)}
               className="pr-10 font-mono text-sm"
@@ -506,16 +540,16 @@ export function CredentialForm({
         className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
       >
         {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        Advanced
+        Access & security
         <span className="text-muted-foreground">
-          (description, expiry, scope, provider override)
+          {surface ? "(expiry, Keeper protection, visibility)" : "(description, expiry, scope, provider override)"}
         </span>
       </button>
 
       {advancedOpen && (
         <div className="space-y-3 pl-4 border-l border-white/10">
           {/* Description */}
-          <div className="space-y-1">
+          {!surface && <div className="space-y-1">
             <Label htmlFor="cred-desc" className="text-xs">Description</Label>
             <Textarea
               id="cred-desc"
@@ -525,7 +559,7 @@ export function CredentialForm({
               rows={2}
               className="text-sm"
             />
-          </div>
+          </div>}
 
           {/* Expires */}
           <div className="space-y-1">
@@ -679,7 +713,15 @@ export function CredentialForm({
         </div>
       )}
 
-      <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+      </CreateSurfaceBody>
+      {surface ? <CreateSurfaceFooter
+        onCancel={onCancel}
+        hint="Changes to access affect agents using this credential."
+        primaryLabel={submitLabel ?? "Save changes"}
+        primaryDisabled={submitting}
+        busy={submitting}
+        onPrimary={() => formRef.current?.requestSubmit()}
+      /> : <div className="flex items-center gap-2 pt-2 border-t border-white/10">
         <Button type="button" variant="outline" onClick={onCancel} disabled={submitting} size="sm">
           Cancel
         </Button>
@@ -698,7 +740,7 @@ export function CredentialForm({
             {submitLabel ?? (mode === "create" ? "Save secret" : "Save changes")}
           </Button>
         </div>
-      </div>
+      </div>}
     </form>
   )
 }

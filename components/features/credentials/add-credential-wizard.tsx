@@ -443,7 +443,9 @@ export function AddCredentialWizard({
           body.mode = loginMode
           if (ownerId) body.owner_user_id = ownerId
         }
-        body.security_level = securityLevel
+        // Provider accounts use server policy, like device-code-created accounts.
+        // Ordinary secrets retain the explicitly selected Keeper tier.
+        if (!login) body.security_level = securityLevel
         if (itemType.usernameOnRow && username.trim()) body.username = username.trim()
         if (accountLabel.trim()) body.account_label = accountLabel.trim()
         // Only when set — an absent key leaves the column NULL, which is what a
@@ -576,13 +578,17 @@ export function AddCredentialWizard({
       <CreateSurfaceBody data-testid="wizard-body" className="space-y-3">
         {step === "type" && (
           <>
-            <CreateSurfaceSection title="Connect an AI provider" icon={KeyRound} accent="blue">
-              <p className="type-meta text-muted-foreground">Choose your provider. We will guide you through its supported sign-in methods.</p>
-            </CreateSurfaceSection>
-            <LoginProviderPicker value={itemTypeKey === "PROVIDER_LOGIN" ? provider : "NONE"} onChange={(key) => {
-              selectLoginProvider(key)
-              setStep("values")
-            }} />
+            {login ? (
+              <>
+                <CreateSurfaceSection title="Connect an AI provider" icon={KeyRound} accent="blue">
+                  <p className="type-meta text-muted-foreground">Choose your provider. We will guide you through its supported sign-in methods.</p>
+                </CreateSurfaceSection>
+                <LoginProviderPicker value={provider} onChange={(key) => {
+                  selectLoginProvider(key)
+                  setStep("values")
+                }} />
+              </>
+            ) : <>
             <CreateSurfaceSection title="What shape is it?" icon={KeyRound} accent="amber">
               <p className="type-meta leading-relaxed text-muted-foreground">
                 The shape decides which boxes you fill next. Every brand fits one of these.
@@ -592,7 +598,7 @@ export function AddCredentialWizard({
                 to reach Certificate, and three-up leaves 110px of tile for a
                 label plus a blurb. */}
             <div data-testid="shape-grid" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {CREDENTIAL_ITEM_TYPES.map((t) => {
+              {CREDENTIAL_ITEM_TYPES.filter((t) => t.key !== "PROVIDER_LOGIN").map((t) => {
                 const Icon = TYPE_ICON[t.key]
                 const selected = t.key === itemTypeKey
                 const tone = SHAPE_ACCENT[t.key] ?? ACCENT.slate
@@ -633,6 +639,7 @@ export function AddCredentialWizard({
                 )
               })}
             </div>
+            </>}
 
             {/* "I just want to give an icon, which brand it is, and that's it."
                 It is offered here, next to the shape, and it gates nothing —
@@ -1032,7 +1039,12 @@ export function AddCredentialWizard({
             {/* Keeper tier. On this step rather than a fourth one: "who gets it" and
                 "how hard is it to get" are the same decision, and splitting them
                 would put the tier behind another click nobody takes. */}
-            <CreateSurfaceSection
+            {login && <CreateSurfaceSection title="Account protection" icon={ShieldCheck} accent="green">
+              <p className="type-meta text-muted-foreground">
+                Your login is encrypted. Agents use it through assignments; saving an account does not grant every agent access.
+              </p>
+            </CreateSurfaceSection>}
+            {!login && <CreateSurfaceSection
               title="Keeper tier"
               icon={ShieldCheck}
               accent={securityLevel >= 4 ? "amber" : "green"}
@@ -1090,7 +1102,7 @@ export function AddCredentialWizard({
                   />
                 </CreateSurfaceField>
               </div>
-            </CreateSurfaceSection>
+            </CreateSurfaceSection>}
 
             <CreateSurfaceSection title="Env var slot" icon={Braces} accent="gold">
               {canBind ? (

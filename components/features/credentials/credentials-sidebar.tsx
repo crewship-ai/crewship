@@ -402,7 +402,7 @@ export function CredentialsSidebar({
           })}
       </SidebarSection>
 
-      {onSelectProvider && <ProviderFilterSection providers={loginProviders} selected={[]} onSelect={onSelectProvider} />}
+      {onSelectProvider && <ProviderFilterSection providers={loginProviders} selected={[]} active={false} onSelect={onSelectProvider} />}
 
       {/* ── Tier ── (single-select, and the one section that prints zeroes)
        *

@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { AlertTriangle, CreditCard, Key, LayoutDashboard, Link2, Plus, RefreshCw } from "lucide-react"
+import { AlertTriangle, CreditCard, Key, LayoutDashboard, Plus, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -14,7 +14,6 @@ import {
 import { Card } from "@/components/ui/card"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { AddSecretSheet } from "@/components/features/credentials/add-secret-sheet"
-import { ConnectOAuthDialog } from "@/components/features/credentials/connect-oauth-dialog"
 import { CredentialDetailSheet } from "@/components/features/credentials/credential-detail-sheet"
 import { CredentialsSidebar } from "@/components/features/credentials/credentials-sidebar"
 import {
@@ -126,13 +125,11 @@ export default function CredentialsPage() {
   // Re-login on one seat's sign-in step. Cleared on close so the next plain
   // "Add secret" starts at the shape grid.
   const [addInitial, setAddInitial] = React.useState<WizardInitial | undefined>(undefined)
-  const [oauthOpen, setOauthOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
   // Layered like the backend (requireRoleOrCapabilityOrForbid): MANAGER+
   // via role, or any member holding an explicit credential.create grant
-  // (#1034). Gates both the raw Add-secret sheet and the OAuth connect
-  // flow — the OAuth routes are aligned to the same tier server-side.
+  // (#1034). Gates the separate secret and provider onboarding flows.
   const canManage = abilities.can("create", "Credential") || hasCapability(Capability.CredentialCreate)
   // Bulk delete mirrors the backend: DELETE is OWNER/ADMIN only ("manage" →
   // CASL "delete"). Hiding the checkbox beats letting a MEMBER tick rows and
@@ -335,6 +332,7 @@ export default function CredentialsPage() {
       crew_ids: credential.crew_ids?.length > 0 ? credential.crew_ids : (credential.crew_id ? [credential.crew_id] : []),
       tags: credential.tags,
       token_expires_at: credential.token_expires_at,
+      security_level: credential.security_level,
     })
     setEditOpen(true)
   }
@@ -471,18 +469,12 @@ export default function CredentialsPage() {
 
   const headerActions = canManage ? (
     <>
-      <SubBarSecondary icon={Link2} onClick={() => setOauthOpen(true)}>
-        Connect via OAuth
+      <SubBarSecondary icon={Plus} onClick={() => openAdd()}>
+        Add secret
       </SubBarSecondary>
-      {tab === "providers" ? (
         <SubBarPrimary icon={Plus} onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
-          Add provider login
+          Add provider
         </SubBarPrimary>
-      ) : (
-        <SubBarPrimary icon={Plus} onClick={() => openAdd()}>
-          Add secret
-        </SubBarPrimary>
-      )}
     </>
   ) : null
 
@@ -609,7 +601,7 @@ export default function CredentialsPage() {
                 filters={filters}
                 onFiltersChange={setFilters}
                 counts={{
-                  all: credentials.length,
+                  all: secrets.length,
                   attention: attentionList.length,
                   missingTool: missingToolCount,
                 }}
@@ -753,9 +745,9 @@ export default function CredentialsPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 Add first secret
               </Button>
-              <Button variant="outline" onClick={() => setOauthOpen(true)}>
-                <Link2 className="mr-2 h-4 w-4" />
-                Connect via OAuth
+              <Button variant="outline" onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add provider
               </Button>
             </div>
           )}
@@ -797,15 +789,6 @@ export default function CredentialsPage() {
           onSuccess={handleRefresh}
           knownTags={tagsInUse}
           initial={addInitial}
-        />
-      )}
-
-      {workspaceId && (
-        <ConnectOAuthDialog
-          workspaceId={workspaceId}
-          open={oauthOpen}
-          onOpenChange={setOauthOpen}
-          onSuccess={handleRefresh}
         />
       )}
 

@@ -9,7 +9,7 @@
 // fail here.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
 
 const h = vi.hoisted(() => ({
@@ -243,10 +243,10 @@ describe("Fields tab", () => {
     expect(within(fieldsCard).queryByText(/•/)).not.toBeInTheDocument()
   })
 
-  it("says the credential is a single value when it has no extra parts", async () => {
-    renderSheet()
+  it("does not add an empty Fields card for a single-value credential", async () => {
+    await act(async () => { renderSheet() })
     openTab(/fields/i)
-    expect(await screen.findByText(/single value — no extra parts/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/single value — no extra parts/i)).not.toBeInTheDocument())
   })
 
   it("degrades to the empty state when the fields request fails", async () => {
@@ -254,9 +254,9 @@ describe("Fields tab", () => {
       if (String(url).includes("/fields")) throw new TypeError("offline")
       return ok([])
     })
-    renderSheet()
+    await act(async () => { renderSheet() })
     openTab(/fields/i)
-    expect(await screen.findByText(/single value — no extra parts/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText(/single value — no extra parts/i)).not.toBeInTheDocument())
   })
 })
 

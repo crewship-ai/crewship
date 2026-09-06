@@ -87,14 +87,16 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
       <CreateSurfaceHeader
         concept="credentials"
         context="Credentials"
-        title={initial?.step === "values" && initial.itemType === "PROVIDER_LOGIN" ? "Re-login" : "Add a credential"}
+        title={initial?.itemType === "PROVIDER_LOGIN" ? (initial.step === "values" ? "Re-login" : "Add provider") : "Add secret"}
         description={
           <>
-            Encrypted with AES-256-GCM and never shown again.
+            Encrypted at rest. Secret values stay hidden by default.
             {/* The steps say what the steps are; on a phone that sentence is
                 three lines of chrome above the first control. */}
             <span className="hidden sm:inline">
-              {" "}Choose an AI provider or another credential type, connect your account, then choose who can use it.
+              {initial?.itemType === "PROVIDER_LOGIN"
+                ? " Choose your AI provider, connect your account, then assign access."
+                : " Choose a secret type, enter its value, then choose who can use it."}
             </span>
           </>
         }

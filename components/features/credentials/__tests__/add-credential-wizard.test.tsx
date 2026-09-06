@@ -71,9 +71,11 @@ beforeEach(() => {
 })
 
 describe("step 1 — the shape decides the form, not the brand", () => {
-  it("offers the six item types the PRD scoped, plus the provider login (#2428)", () => {
+  it("offers six secret types, with provider onboarding in its own flow", () => {
     renderWizard()
-    for (const label of ["Provider login", "Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
+    expect(screen.queryByRole("button", { name: /^provider login/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: /choose.*provider/i })).not.toBeInTheDocument()
+    for (const label of ["Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
       // Anchored: "Login" must not also match the "Provider login" tile.
       expect(screen.getByRole("button", { name: new RegExp("^" + label, "i") })).toBeInTheDocument()
     }
@@ -235,6 +237,16 @@ describe("the brand icon is offered up front", () => {
 })
 
 describe("provider login (#2428)", () => {
+  function renderWizard() {
+    const onSuccess = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" initial={{ itemType: "PROVIDER_LOGIN" }} onSuccess={onSuccess} onCancel={() => {}} />)
+    return { onSuccess }
+  }
+
+  function pickShape(_label: RegExp) {
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  }
+
   it("starts directly with a provider, without using a decorative brand picker", () => {
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
@@ -260,6 +272,8 @@ describe("provider login (#2428)", () => {
     fireEvent.change(screen.getByLabelText(/^API key$/i), { target: { value: "fixture-xai-key" } })
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "Grok account" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.queryByRole("group", { name: "How closely Keeper guards it" })).not.toBeInTheDocument()
+    expect(screen.getByText("Account protection")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /save login/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -354,7 +368,7 @@ describe("provider login (#2428)", () => {
     })
     const polls = { count: 0 }
     const onSuccess = vi.fn()
-    render(<AddCredentialWizard workspaceId="ws1" onSuccess={onSuccess} onCancel={() => {}} devicePollMs={5} />)
+    render(<AddCredentialWizard workspaceId="ws1" initial={{ itemType: "PROVIDER_LOGIN" }} onSuccess={onSuccess} onCancel={() => {}} devicePollMs={5} />)
     pickShape(/provider login/i)
     pickOpenAI()
     fireEvent.click(screen.getByRole("button", { name: /sign in with a code/i }))

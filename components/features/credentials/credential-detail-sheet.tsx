@@ -862,7 +862,7 @@ export function CredentialDetailSheet({
 
                     {canRotate && (
                       <div className="mt-2.5 space-y-1.5">
-                        <Button size="sm" className="w-full justify-start" onClick={() => onRotate(credential)}>
+                        <Button size="sm" variant="outline" onClick={() => onRotate(credential)}>
                           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                           Rotate and show the new value
                         </Button>
@@ -940,7 +940,7 @@ export function CredentialDetailSheet({
                   (region, account id) ARE shown, which is the entire reason
                   they are stored in the clear.
                 */}
-                <Appear order={4}>
+                {(fieldsLoading || fields.length > 0) && <Appear order={4}>
                   <DetailCard
                     title="Fields"
                     icon={ListTree}
@@ -981,7 +981,7 @@ export function CredentialDetailSheet({
                       </dl>
                     )}
                   </DetailCard>
-                </Appear>
+                </Appear>}
 
                 <Appear order={5}>
                   <DetailCard
@@ -1338,6 +1338,7 @@ export function CredentialDetailSheet({
                         </div>
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           Every crew that can use this credential also has the CLI that reads it.
+                          {" "}This checks tool availability, not whether the secret or the external connection works.
                         </p>
                       </>
                     ) : (
