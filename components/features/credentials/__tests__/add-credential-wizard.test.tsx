@@ -71,10 +71,11 @@ beforeEach(() => {
 })
 
 describe("step 1 — the shape decides the form, not the brand", () => {
-  it("offers exactly the six item types the PRD scoped", () => {
+  it("offers the six item types the PRD scoped, plus the provider login (#2428)", () => {
     renderWizard()
-    for (const label of ["Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument()
+    for (const label of ["Provider login", "Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
+      // Anchored: "Login" must not also match the "Provider login" tile.
+      expect(screen.getByRole("button", { name: new RegExp("^" + label, "i") })).toBeInTheDocument()
     }
   })
 
@@ -152,7 +153,7 @@ describe("the step bar", () => {
 // decide whether it is usable are: the tiles reflow, the body scrolls without
 // taking the actions with it, and the actions are big enough to hit.
 describe("layout on a phone", () => {
-  it("reflows the six shapes two-up, and three-up once there is room", () => {
+  it("reflows the shapes two-up, and three-up once there is room", () => {
     renderWizard()
     const grid = screen.getByTestId("shape-grid")
     expect(grid.className).toContain("grid-cols-2")
@@ -230,6 +231,56 @@ describe("the brand icon is offered up front", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
     expect(bodyOf(createCall)).toMatchObject({ provider: "NOTION" })
+  })
+})
+
+describe("provider login (#2428)", () => {
+  function pickOpenAI() {
+    fireEvent.click(screen.getByRole("button", { name: /provider: generic secret/i }))
+    fireEvent.change(screen.getByPlaceholderText("Search brands…"), { target: { value: "openai" } })
+    fireEvent.click(screen.getByTitle("OpenAI"))
+  }
+
+  it("will not continue without a provider — the server routes by it", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    fireEvent.change(screen.getByLabelText(/^login$/i), { target: { value: "{}" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "x" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /save secret/i })).not.toBeInTheDocument()
+  })
+
+  it("stores a ChatGPT login as AI_CLI_TOKEN · OPENAI and asks for the whole auth.json", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    const box = screen.getByLabelText(/codex login \(auth\.json\)/i)
+    expect(box.tagName).toBe("TEXTAREA")
+    expect(screen.getByText(/paste the whole contents of ~\/\.codex\/auth\.json/i)).toBeInTheDocument()
+    fireEvent.change(box, { target: { value: '{"tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"x"}}' } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ type: "AI_CLI_TOKEN", provider: "OPENAI" })
+  })
+
+  it("stores the same seat as API_KEY when the operator picks a metered key", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    fireEvent.change(screen.getByLabelText(/^api key$/i), { target: { value: "sk-proj-abc" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "OpenAI API" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ type: "API_KEY", provider: "OPENAI" })
   })
 })
 

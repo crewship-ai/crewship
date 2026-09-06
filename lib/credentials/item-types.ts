@@ -70,7 +70,7 @@ export function credentialTypeLabel(type: string): string {
   return CREDENTIAL_TYPE_LABELS[type] ?? type.toLowerCase().replace(/_/g, " ")
 }
 
-export type ItemTypeKey = "TOKEN" | "LOGIN" | "KEYPAIR" | "SSH_KEY" | "FILE" | "CERTIFICATE"
+export type ItemTypeKey = "PROVIDER_LOGIN" | "TOKEN" | "LOGIN" | "KEYPAIR" | "SSH_KEY" | "FILE" | "CERTIFICATE"
 
 export interface CredentialItemField {
   /** Field key. Must satisfy credential_fields.go: `^[a-z][a-z0-9_]{0,63}$`. */
@@ -102,6 +102,31 @@ export interface CredentialItemType {
 }
 
 export const CREDENTIAL_ITEM_TYPES: CredentialItemType[] = [
+  {
+    // The seventh shape (#2428, docs/prd/provider-logins.md §5–6). A provider
+    // login is not a secret the agent USES but a seat the agent PAYS WITH —
+    // it has an owner, a plan and an expiry, and Crewship keeps it valid. The
+    // six shapes could not express it: "Token" stores CLI_TOKEN, which lands
+    // in /secrets as a file no model CLI reads, so until this tile there was
+    // no way to create an AI_CLI_TOKEN or an API_KEY from the console at all.
+    //
+    // credentialType here is the SUBSCRIPTION answer; the wizard swaps it for
+    // API_KEY in api-key mode (providerLoginCredentialType). Presentation —
+    // label, placeholder, hint, suggested slot — depends on the brand and the
+    // mode and lives in providerLoginPresentation, not in a static field.
+    key: "PROVIDER_LOGIN",
+    label: "Provider login",
+    blurb: "Subscription or API key that pays for a model",
+    credentialType: "AI_CLI_TOKEN",
+    primary: {
+      key: "value",
+      label: "Login",
+      secret: true,
+      required: true,
+      placeholder: "Paste the login",
+    },
+    extra: [],
+  },
   {
     key: "TOKEN",
     label: "Token",
@@ -255,6 +280,8 @@ export function getItemType(key: ItemTypeKey | string): CredentialItemType {
  */
 export function itemTypeForCredentialType(credentialType: string): ItemTypeKey {
   switch (credentialType) {
+    case "AI_CLI_TOKEN":
+      return "PROVIDER_LOGIN"
     case "USERPASS":
       return "LOGIN"
     case "SSH_KEY":
@@ -263,6 +290,89 @@ export function itemTypeForCredentialType(credentialType: string): ItemTypeKey {
       return "CERTIFICATE"
     default:
       return "TOKEN"
+  }
+}
+
+/** How a provider login pays: a flat-rate seat, or a metered key. */
+export type ProviderLoginMode = "subscription" | "api_key"
+
+/** The server type a provider login is stored as, by mode. */
+export function providerLoginCredentialType(mode: ProviderLoginMode): ServerCredentialType {
+  return mode === "api_key" ? "API_KEY" : "AI_CLI_TOKEN"
+}
+
+export interface ProviderLoginPresentation {
+  /** Label over the secret box. */
+  label: string
+  placeholder: string
+  /** A Codex login is a whole JSON file; everything else is one line. */
+  multiline: boolean
+  /** How to obtain the value, in the user's words. Empty when nothing needs saying. */
+  hint: string
+  /** The binding slot to suggest. For a subscription it is a NAME, never a variable the CLI reads. */
+  slot: string | null
+  /** False when Crewship cannot deliver a subscription login for this brand (yet). */
+  supported: boolean
+}
+
+/**
+ * What the value box asks for, per brand and mode. The table is small on
+ * purpose and every row states a fact about the CLI it names (measured, not
+ * assumed — docs/guides/cli/*.mdx): Claude Code takes a setup-token in an env
+ * var; Codex reads its ChatGPT login only from $CODEX_HOME/auth.json, so the
+ * WHOLE file is the value and the refresh token in it never leaves the
+ * server; the rest have no subscription login Crewship can deliver, only a key.
+ */
+export function providerLoginPresentation(provider: string, mode: ProviderLoginMode): ProviderLoginPresentation {
+  const p = (provider ?? "").toUpperCase()
+  if (mode === "api_key") {
+    const keyOf: Record<string, { placeholder: string; slot: string }> = {
+      ANTHROPIC: { placeholder: "sk-ant-api03-…", slot: "ANTHROPIC_API_KEY" },
+      OPENAI: { placeholder: "sk-proj-… or sk-svcacct-…", slot: "OPENAI_API_KEY" },
+      GOOGLE: { placeholder: "AIza…", slot: "GOOGLE_API_KEY" },
+      CURSOR: { placeholder: "key_…", slot: "CURSOR_API_KEY" },
+      FACTORY: { placeholder: "fk-…", slot: "FACTORY_API_KEY" },
+    }
+    const k = keyOf[p]
+    return {
+      label: "API key",
+      placeholder: k?.placeholder ?? "Paste the API key",
+      multiline: false,
+      hint: "",
+      slot: k?.slot ?? null,
+      supported: true,
+    }
+  }
+  switch (p) {
+    case "ANTHROPIC":
+      return {
+        label: "Setup token",
+        placeholder: "sk-ant-oat01-…",
+        multiline: false,
+        hint: "Run `claude setup-token` on your computer and paste the whole output. Delivered to Claude Code as CLAUDE_CODE_OAUTH_TOKEN.",
+        slot: "CLAUDE_CODE_OAUTH_TOKEN",
+        supported: true,
+      }
+    case "OPENAI":
+      return {
+        label: "Codex login (auth.json)",
+        placeholder: '{ "auth_mode": "chatgpt", "tokens": { … } }  — the whole ~/.codex/auth.json',
+        multiline: true,
+        hint: "Run `codex login` on your computer, then paste the whole contents of ~/.codex/auth.json. The refresh token stays on the server; agents only ever get a short-lived access token, so one login can pay for any number of them.",
+        slot: "OPENAI_API_KEY",
+        supported: true,
+      }
+    default:
+      return {
+        label: "Login",
+        placeholder: "",
+        multiline: false,
+        hint: p && p !== "NONE"
+          ? "This provider has no subscription login Crewship can deliver yet — switch to API key."
+          : "Pick the provider first: Anthropic (Claude Max) and OpenAI (ChatGPT plan) have a subscription login; the others take an API key.",
+        slot: null,
+        supported: false,
+      }
   }
 }
 

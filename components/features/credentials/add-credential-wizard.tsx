@@ -50,7 +50,7 @@
 
 import * as React from "react"
 import {
-  Braces, Check, ChevronLeft, ChevronsUpDown, FileText, KeyRound,
+  Braces, Check, ChevronLeft, ChevronsUpDown, CreditCard, FileText, KeyRound,
   Palette, Plus, ShieldCheck, Tag, Terminal, User, Users, X,
 } from "lucide-react"
 
@@ -83,6 +83,9 @@ import {
   type CustomFieldDraft, type ItemTypeKey,
 } from "@/lib/credentials/item-types"
 import { isValidEnvVarName, suggestEnvVarName } from "@/lib/env-var-name"
+import {
+  providerLoginCredentialType, providerLoginPresentation, type ProviderLoginMode,
+} from "@/lib/credentials/item-types"
 import { cn } from "@/lib/utils"
 import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { BrandPicker } from "./brand-picker"
@@ -99,6 +102,7 @@ import { CREDENTIAL_TIERS } from "./credential-form"
  * declares — see lib/concept-accents.ts for why none of them is a new one.
  */
 const SHAPE_ACCENT: Partial<Record<ItemTypeKey, Accent>> = {
+  PROVIDER_LOGIN: ACCENT.sky,
   TOKEN: ACCENT.amber,
   LOGIN: ACCENT.purple,
   KEYPAIR: ACCENT.gold,
@@ -108,6 +112,7 @@ const SHAPE_ACCENT: Partial<Record<ItemTypeKey, Accent>> = {
 }
 
 const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>> = {
+  PROVIDER_LOGIN: CreditCard,
   TOKEN: KeyRound,
   LOGIN: User,
   KEYPAIR: Terminal,
@@ -188,6 +193,9 @@ export function AddCredentialWizard({
   // ignores this control behaves exactly as it did before the control existed.
   const [securityLevel, setSecurityLevel] = React.useState(1)
   const [itemTypeKey, setItemTypeKey] = React.useState<ItemTypeKey>("TOKEN")
+  // Provider login only: a flat-rate seat or a metered key (#2428). Decides
+  // the server type at save time and what the value box asks for.
+  const [loginMode, setLoginMode] = React.useState<ProviderLoginMode>("subscription")
   const [primaryValue, setPrimaryValue] = React.useState("")
   const [extras, setExtras] = React.useState<Record<string, string>>({})
   const [custom, setCustom] = React.useState<CustomFieldDraft[]>([])
@@ -231,7 +239,10 @@ export function AddCredentialWizard({
     () => detectBrandFromValue(primaryValue) ?? detectBrandFromName(name),
     [primaryValue, name],
   )
-  const suggestedSlot = detected ? defaultEnvVarName(detected) : null
+  // A provider login knows its own slot from the brand and the mode; detection
+  // is the fallback for every other shape.
+  const login = itemTypeKey === "PROVIDER_LOGIN" ? providerLoginPresentation(provider, loginMode) : null
+  const suggestedSlot = login?.slot ?? (detected ? defaultEnvVarName(detected) : null)
 
   React.useEffect(() => {
     if (!detected || providerTouched.current) return
@@ -257,13 +268,17 @@ export function AddCredentialWizard({
   const nameSuggestion = nameIsEnvVar ? null : suggestEnvVarName(name.trim())
 
   const missingRequired = React.useMemo(() => {
-    if (!primaryValue.trim()) return itemType.primary.label
+    // A provider login without a provider cannot be delivered anywhere — the
+    // server routes and renders it by the provider column — and a brand with
+    // no subscription login is a save that would only fail at run time.
+    if (login && !login.supported) return "Provider"
+    if (!primaryValue.trim()) return login?.label ?? itemType.primary.label
     if (itemType.usernameOnRow && !username.trim()) return "Username"
     for (const f of itemType.extra) {
       if (f.required && !(extras[f.key] ?? "").trim()) return f.label
     }
     return null
-  }, [itemType, primaryValue, username, extras])
+  }, [itemType, login, primaryValue, username, extras])
 
   // What is holding step 2 back, in the order the boxes are on screen. The
   // Continue button being dead is not an explanation; naming the box is.
@@ -311,7 +326,7 @@ export function AddCredentialWizard({
       const body: Record<string, unknown> = {
         name: name.trim(),
         value: primaryValue,
-        type: itemType.credentialType,
+        type: login ? providerLoginCredentialType(loginMode) : itemType.credentialType,
         provider,
         scope,
         tags,
@@ -530,12 +545,46 @@ export function AddCredentialWizard({
           <>
             <CreateSurfaceSection title="The secret" hint={itemType.label.toLowerCase()} icon={ItemIcon} accent="amber">
               <div className="space-y-3">
+                {login && (
+                  <div className="space-y-3">
+                    {/* The brand is a hint for every other shape; for a
+                        provider login it is the thing itself — the server
+                        picks the delivery path (env var vs. $CODEX_HOME file)
+                        and the route by the provider column. It is set on
+                        step 1 or with the "Icon" picker beside the name below;
+                        missingRequired holds the step until it is. */}
+                    <div role="group" aria-label="How does this seat pay" className="grid grid-cols-2 gap-2">
+                      {(["subscription", "api_key"] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          aria-pressed={loginMode === m}
+                          onClick={() => setLoginMode(m)}
+                          className={cn(
+                            "flex min-h-10 flex-col items-start rounded-lg border px-3 py-2 text-left transition-colors",
+                            loginMode === m
+                              ? "border-primary/60 bg-primary/10"
+                              : "border-border/60 bg-card hover:border-border hover:bg-surface-raised",
+                          )}
+                        >
+                          <span className="type-row font-medium text-foreground">
+                            {m === "subscription" ? "Subscription" : "API key"}
+                          </span>
+                          <span className="type-meta text-muted-foreground">
+                            {m === "subscription" ? "Claude Max, ChatGPT plan — flat-rate" : "Metered, billed per token"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {login.hint && <CardNote>{login.hint}</CardNote>}
+                  </div>
+                )}
                 <SecretField
                   id="cred-primary"
-                  label={itemType.primary.label}
+                  label={login?.label ?? itemType.primary.label}
                   required
-                  multiline={itemType.primary.multiline}
-                  placeholder={itemType.primary.placeholder}
+                  multiline={login?.multiline ?? itemType.primary.multiline}
+                  placeholder={login?.placeholder ?? itemType.primary.placeholder}
                   value={primaryValue}
                   onChange={setPrimaryValue}
                 />

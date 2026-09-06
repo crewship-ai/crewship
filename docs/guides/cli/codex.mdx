@@ -59,8 +59,9 @@ crewship credential assign "ChatGPT Plus · jana" codex-reviewer --env-var-name 
 The slot name on `assign` is the binding's identity, not something Codex
 reads — the login is never exported as a variable.
 
-The dashboard's *Add secret* dialog accepts the same file under **Token →
-AI CLI token → OpenAI**. A bare access token is refused at submit time: Codex
+In the dashboard, *Add secret* → shape **Provider login** → brand **OpenAI**
+→ **Subscription** takes the same file; **API key** on the same tile stores a
+metered key instead. A bare access token is refused at submit time: Codex
 insists on `id_token`, `access_token`, `refresh_token` and `account_id` all
 being present, so only the file `codex login` writes can be delivered.
 
