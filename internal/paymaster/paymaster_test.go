@@ -19,6 +19,7 @@ import (
 // quota_*, rate_*, cost_confidence, subscription_plan) are reflected here.
 const schemaSQL = `
 CREATE TABLE cost_ledger (
+	credential_id TEXT,
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     crew_id TEXT,

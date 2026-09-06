@@ -38,7 +38,8 @@ type codexEnvelope struct {
 	ThreadID string          `json:"thread_id,omitempty"`
 	Item     *codexItem      `json:"item,omitempty"`
 	Usage    json.RawMessage `json:"usage,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Error    json.RawMessage `json:"error,omitempty"`
+	Message  string          `json:"message,omitempty"`
 	Model    string          `json:"model,omitempty"`
 }
 
@@ -144,7 +145,7 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 		}
 		handler(AgentEvent{
 			Type:    "result",
-			Content: msg.Error,
+			Content: codexErrorMessage(msg),
 			Metadata: map[string]interface{}{
 				"subtype":  "turn.failed",
 				"usage":    usage,
@@ -162,7 +163,7 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 	case "error":
 		handler(AgentEvent{
 			Type:      "error",
-			Content:   msg.Error,
+			Content:   codexErrorMessage(msg),
 			Timestamp: time.Now(),
 		})
 
@@ -171,6 +172,23 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 		// in the journal even before we parse them.
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 	}
+}
+
+func codexErrorMessage(msg codexEnvelope) string {
+	var plain string
+	if json.Unmarshal(msg.Error, &plain) == nil && plain != "" {
+		return plain
+	}
+	var nested struct {
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(msg.Error, &nested) == nil && nested.Message != "" {
+		return nested.Message
+	}
+	if msg.Message != "" {
+		return msg.Message
+	}
+	return "Codex run failed"
 }
 
 // handleCodexItem fans the nested item out by item.type, mapping each into

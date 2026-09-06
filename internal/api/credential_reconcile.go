@@ -27,8 +27,12 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credname"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // Defensive validator — an agent slug comes from our own DB (validated at
@@ -61,7 +65,25 @@ var credSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // interpolated: delivery refused to write that file for the same reason, so
 // there is nothing to remove, and the one outcome that matters is that it never
 // reaches the shell.
-func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []string {
+func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKeys []string) []string {
+	// A Codex login (#2428) is the one credential written OUTSIDE /secrets:
+	// Codex reads it only from $CODEX_HOME, which is the agent's HOME. The
+	// file carries no parts — it is rendered from the credential as a whole
+	// (codexauth.Render) — so the field loop below has nothing to add. Both
+	// shapes of the login (the legacy blob and the PROVIDER_LOGIN in
+	// subscription mode) write that one file; a login in api_key mode and
+	// an Anthropic login never touch disk.
+	if codexauth.IsLogin(credType, provider) || isCodexProviderLogin(credType, provider, mode) {
+		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+	}
+	// A Gemini login is the same shape one directory over: rendered whole
+	// into ~/.gemini/oauth_creds.json by the orchestrator's AuthDelivery.
+	if geminiauth.IsLogin(credType, provider) || (credType == providerlogin.Type && strings.EqualFold(provider, "GOOGLE") && mode == providerlogin.ModeSubscription) {
+		return []string{"/crew/agents/" + agentSlug + "/" + geminiauth.FileRel}
+	}
+	if credType == providerlogin.Type {
+		return nil
+	}
 	dir := "/secrets/" + agentSlug
 	var paths []string
 	switch credType {
@@ -88,6 +110,16 @@ func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []s
 	return paths
 }
 
+// isCodexProviderLogin reports whether a PROVIDER_LOGIN row is a ChatGPT
+// subscription — the one login shape that lives on disk in a container. The
+// orchestrator makes the same call from the delivered parts
+// (credentialOAuthKind); here the mode comes from the row's fields.
+func isCodexProviderLogin(credType, provider, mode string) bool {
+	return credType == providerlogin.Type &&
+		providerlogin.Canonical(provider) == codexauth.ProviderID &&
+		mode == providerlogin.ModeSubscription
+}
+
 // buildCredRemoveScript emits the `sh -c` body that removes a credential's
 // file(s) from a running container. Paths are single-quoted (the segments are
 // validated safe by the caller). Returns "" when the type has no on-disk form.
@@ -96,8 +128,8 @@ func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []s
 // reads secrets by path and .env is advisory, so a now-dangling entry is inert
 // (the file it points at is gone) and rewriting a 0400 file adds shell/portability
 // risk for no security gain. It clears on the next container boot.
-func buildCredRemoveScript(agentSlug, envVar, credType string, fieldKeys []string) string {
-	paths := credSecretPaths(agentSlug, envVar, credType, fieldKeys)
+func buildCredRemoveScript(agentSlug, envVar, credType, provider, mode string, fieldKeys []string) string {
+	paths := credSecretPaths(agentSlug, envVar, credType, provider, mode, fieldKeys)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -145,24 +177,41 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	// fall out below when credSecretPaths returns no paths. Only live agents
 	// in live crews have a running container to reach.
 	rows, err := db.QueryContext(ctx, `
-		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type
+		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type, c.provider, a.cli_adapter
 		FROM agent_credentials ac
 		JOIN agents a       ON a.id = ac.agent_id AND a.deleted_at IS NULL
 		JOIN credentials c  ON c.id = ac.credential_id
 		JOIN crews cr       ON cr.id = a.crew_id AND cr.deleted_at IS NULL
-		WHERE ac.credential_id = ? AND c.workspace_id = ?`,
-		credentialID, workspaceID)
+		WHERE ac.credential_id = ? AND c.workspace_id = ?
+		UNION
+		SELECT a.slug, cr.id, cr.slug, b.slot, c.type, c.provider, a.cli_adapter
+		FROM credential_bindings b
+		JOIN credentials c ON c.id = b.credential_id
+		JOIN agents a ON a.workspace_id = b.workspace_id AND a.deleted_at IS NULL
+		  AND ((b.scope = 'AGENT' AND b.agent_id = a.id)
+		    OR (b.scope = 'CREW' AND b.crew_id = a.crew_id)
+		    OR b.scope = 'WORKSPACE')
+		JOIN crews cr ON cr.id = a.crew_id AND cr.deleted_at IS NULL
+		WHERE b.credential_id = ? AND c.workspace_id = ?
+		UNION
+		SELECT a.slug, cr.id, cr.slug, c.name, c.type, c.provider, a.cli_adapter
+		FROM credential_crews cc
+		JOIN credentials c ON c.id = cc.credential_id
+		JOIN agents a ON a.crew_id = cc.crew_id AND a.workspace_id = c.workspace_id AND a.deleted_at IS NULL
+		JOIN crews cr ON cr.id = a.crew_id AND cr.deleted_at IS NULL
+		WHERE cc.credential_id = ? AND c.workspace_id = ?`,
+		credentialID, workspaceID, credentialID, workspaceID, credentialID, workspaceID)
 	if err != nil {
 		logger.Warn("revoke reconcile: query file mounts", "credential_id", credentialID, "error", err)
 		return
 	}
 	defer rows.Close()
 
-	type target struct{ agentSlug, crewID, crewSlug, envVar, credType string }
+	type target struct{ agentSlug, crewID, crewSlug, envVar, credType, provider, adapter string }
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType); err != nil {
+		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType, &t.provider, &t.adapter); err != nil {
 			logger.Warn("revoke reconcile: scan", "error", err)
 			return
 		}
@@ -172,6 +221,7 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 		logger.Warn("revoke reconcile: rows", "error", err)
 		return
 	}
+	rows.Close()
 
 	// The credential's multi-part field keys (PRD §2.2), read once for all
 	// targets — they belong to the credential, not to the grant, so the same
@@ -183,20 +233,29 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	// must be loud: it is the difference between "the secret is gone from the
 	// container" and "the operator believes it is". The primary file is still
 	// removed below — a partial revoke beats none.
+	//
+	// The cleartext value column rides along for ONE key: a provider login's
+	// mode part decides whether the login is the Codex file on disk or an
+	// env-only key. Secret parts have NULL there by the table's CHECK, so no
+	// ciphertext is read.
 	var fieldKeys []string
+	var loginMode string
 	if fieldRows, ferr := db.QueryContext(ctx,
-		`SELECT key FROM credential_fields WHERE credential_id = ? ORDER BY ordinal ASC, key ASC`,
+		`SELECT key, COALESCE(value, '') FROM credential_fields WHERE credential_id = ? ORDER BY ordinal ASC, key ASC`,
 		credentialID); ferr != nil {
 		logger.Warn("revoke reconcile: field keys — multi-part files may survive in running containers",
 			"credential_id", credentialID, "error", ferr)
 	} else {
 		for fieldRows.Next() {
-			var key string
-			if serr := fieldRows.Scan(&key); serr != nil {
+			var key, value string
+			if serr := fieldRows.Scan(&key, &value); serr != nil {
 				logger.Warn("revoke reconcile: scan field key", "credential_id", credentialID, "error", serr)
 				break
 			}
 			fieldKeys = append(fieldKeys, key)
+			if key == providerlogin.PartMode {
+				loginMode = value
+			}
 		}
 		if ierr := fieldRows.Err(); ierr != nil {
 			logger.Warn("revoke reconcile: iterate field keys", "credential_id", credentialID, "error", ierr)
@@ -218,7 +277,16 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 			continue
 		}
 		t.envVar = envVar
-		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, fieldKeys)
+		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, t.provider, loginMode, fieldKeys)
+		if t.adapter == "OPENCODE" {
+			// This file is a complete per-run projection of authorized keys.
+			// Removing it is conservative when one grant is revoked; the next
+			// run reconstructs it from the remaining grants, never stale disk.
+			if script != "" {
+				script += "\n"
+			}
+			script += "rm -f '/crew/agents/" + t.agentSlug + "/" + orchestrator.OpenCodeAuthFileRel + "'"
+		}
 		if script == "" {
 			continue // type has no on-disk form
 		}

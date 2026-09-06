@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
@@ -285,6 +286,13 @@ type Credential struct {
 // internal/api/credential_field_delivery.go). Nothing in this package derives
 // or rewrites the name; it is the delivery contract, not a suggestion.
 type CredentialField struct {
+	// Key is the part's name in credential_fields (lower_snake_case). It is
+	// how a delivery step that renders a file from a credential's parts —
+	// the Codex auth.json from a PROVIDER_LOGIN's id_token and account_id
+	// (codex_auth_file.go) — finds the part it needs; EnvVar is derived from
+	// the slot and cannot be matched on. Empty on payloads from an API tier
+	// that predates it, which only means no file can be rendered from them.
+	Key    string `json:"key,omitempty"`
 	EnvVar string `json:"env_var"`
 	Value  string `json:"value"`
 	// IsSecret says whether this part is credential material (encrypted at
@@ -293,6 +301,33 @@ type CredentialField struct {
 	// its credential's channel exactly, an identifier is delivered as an env
 	// var regardless, because no channel here can carry an identifier for us.
 	IsSecret bool `json:"is_secret"`
+}
+
+// part returns the value of the credential's part named key, or "" when it
+// has none. Parts are keyed by name, never by their delivered variable.
+func (c Credential) part(key string) string {
+	for _, f := range c.Fields {
+		if f.Key == key {
+			return f.Value
+		}
+	}
+	return ""
+}
+
+// isProviderLogin reports whether this is a PROVIDER_LOGIN row (PRD
+// provider-logins §10.2) — a seat that pays for a model, delivered as a
+// derivative (an env var or a rendered file) and never as its parts.
+func (c Credential) isProviderLogin() bool { return c.Type == providerlogin.Type }
+
+// loginMode is the PROVIDER_LOGIN's mode part, defaulting to subscription:
+// the API tier always stores the part, so a missing one is a hand-edited
+// row, and a seat is the safer reading — an api_key reading would put a JWT
+// into the sidecar CredStore as a bearer.
+func (c Credential) loginMode() string {
+	if m := c.part(providerlogin.PartMode); m != "" {
+		return m
+	}
+	return providerlogin.ModeSubscription
 }
 
 // RunState tracks the runtime state of an active agent run, persisted in the
@@ -522,7 +557,8 @@ type Orchestrator struct {
 	// replaces it with a no-op. Used to record one agent.run.* row per
 	// terminal run outcome (completed/error/cancelled) so `crewship audit`
 	// surfaces agent-run activity (#1207) — previously invisible to it.
-	auditLog AuditEmitter
+	auditLog                  AuditEmitter
+	subscriptionUsageRecorder func(context.Context, SubscriptionUsage) error
 
 	// hooks + approvalGate + episodicRecall are optional integration
 	// points. Each is nil-safe: callers always exercise them through the

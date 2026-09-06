@@ -62,7 +62,7 @@ func mockContainerForMemory(files map[string]string) *mockContainer {
 	// buildMemoryContext calls readContainerFile 3 times (AGENT.md, today, yesterday),
 	// then RunAgent calls mkdir (2x), manifest pre-create, setupClaudeConfig, and the agent exec.
 	// We need to map cat calls to file contents.
-	mc := &mockContainer{}
+	mc := &mockContainer{preflightSucceeds: true}
 	mc.execFn = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 		// Handle cat commands — return file content or empty for missing
 		if len(cfg.Cmd) == 2 && cfg.Cmd[0] == "cat" {
@@ -514,6 +514,9 @@ func TestRunAgentWithMemoryEnabled(t *testing.T) {
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			callCount++
 			// Cat calls for memory reading
+			if len(cfg.Cmd) == 1 && cfg.Cmd[0] == "sh" && cfg.Stdin != nil {
+				return &provider.ExecResult{ExecID: "preflight", Reader: io.NopCloser(strings.NewReader(preflightDoneMarker + "\n"))}, nil
+			}
 			if len(cfg.Cmd) == 2 && cfg.Cmd[0] == "cat" {
 				if strings.Contains(cfg.Cmd[1], "AGENT.md") {
 					return &provider.ExecResult{
@@ -594,6 +597,9 @@ func TestRunAgentMemoryDisabledNoExtraCalls(t *testing.T) {
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			callCount++
 			// Should NOT get cat calls when memory is disabled
+			if len(cfg.Cmd) == 1 && cfg.Cmd[0] == "sh" && cfg.Stdin != nil {
+				return &provider.ExecResult{ExecID: "preflight", Reader: io.NopCloser(strings.NewReader(preflightDoneMarker + "\n"))}, nil
+			}
 			if len(cfg.Cmd) == 2 && cfg.Cmd[0] == "cat" {
 				t.Errorf("unexpected cat call with memory disabled: %v", cfg.Cmd)
 			}
@@ -640,6 +646,7 @@ func TestRunAgentMemoryDirCreation(t *testing.T) {
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			if stdin := covStdin(cfg); stdin != "" {
 				memorySteps = append(memorySteps, preflightStepBody(stdin, preflightStepMemoryDirs))
+				return &provider.ExecResult{ExecID: "preflight", Reader: io.NopCloser(strings.NewReader(preflightDoneMarker + "\n"))}, nil
 			}
 			if len(cfg.Cmd) >= 2 && cfg.Cmd[0] == "cat" {
 				return &provider.ExecResult{ExecID: "cat", Reader: io.NopCloser(strings.NewReader(""))}, nil

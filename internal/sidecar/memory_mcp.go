@@ -214,9 +214,19 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 	case "tools/call":
 		s.respondMemoryMCPToolsCall(w, r, req, ac, effectiveSlug)
 	case "notifications/initialized", "notifications/cancelled":
-		// Spec-compliant notification: no response body, ack with 200.
-		// Clients that send these MUST NOT wait for a JSON-RPC response.
-		w.WriteHeader(http.StatusOK)
+		// A notification carries no id, so there is nothing to answer with —
+		// the streamable-HTTP transport says the server MUST reply 202
+		// Accepted with an EMPTY body.
+		//
+		// This used to be 200. An empty 200 has no Content-Type either, and
+		// that is exactly what a strict Rust MCP client refuses: it logs
+		// `Unexpected content type: Some("missing-content-type; body: ")`,
+		// kills the transport worker and drops the server — so every
+		// crewship-hosted tool (memory, routines, notify) vanished from a
+		// run right after a successful initialize. A more permissive
+		// TypeScript client tolerates the empty 200, which is why the two
+		// adapters silently disagreed about whether our tools exist (#2428).
+		w.WriteHeader(http.StatusAccepted)
 	default:
 		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 			JSONRPC: "2.0",

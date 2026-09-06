@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"net/url"
+
+	"github.com/crewship-ai/crewship/internal/egressallow"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -93,10 +96,42 @@ func normaliseMCPInputs(req AgentRunRequest) ([]mcpSpec, error) {
 
 	out := make([]mcpSpec, 0, len(specs))
 	for _, s := range specs {
+		if host, blocked := mcpEndpointBlocked(req, s); blocked {
+			// The sidecar already refuses this server ("MCP server endpoint
+			// blocked by crew network policy, not connecting"), so writing it
+			// into the CLI's config only tells the CLI to dial a host the
+			// container proxy will refuse. Codex retries three times per run
+			// and logs a fatal transport error each time, which reads in the
+			// agent's output like a Crewship failure rather than a crew
+			// network policy doing its job (#2428). Dropping it here fixes
+			// that for every adapter at once.
+			slog.Default().Info("MCP server omitted from the agent config: its endpoint host is not on the crew allowlist",
+				"agent_slug", req.AgentSlug, "server", s.Name, "host", host,
+				"hint", "add the host to the crew's allowed domains, or remove the server from the crew")
+			continue
+		}
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// mcpEndpointBlocked mirrors the sidecar gateway's endpointAllowed
+// (internal/sidecar/mcp_gateway.go) on the orchestrator side, so the config we
+// write and the connections the sidecar makes agree about which servers exist.
+// A stdio server has no endpoint to check; free mode gates nothing.
+func mcpEndpointBlocked(req AgentRunRequest, s mcpSpec) (string, bool) {
+	if s.URL == "" || req.NetworkMode != "restricted" {
+		return "", false
+	}
+	u, err := url.Parse(s.URL)
+	if err != nil || u.Host == "" {
+		return s.URL, true
+	}
+	if egressallow.NewDomainAllowlist(req.AllowedDomains).IsAllowed(u.Host) {
+		return "", false
+	}
+	return u.Host, true
 }
 
 // parseMCPServerJSON extracts our canonical form from one Claude-style

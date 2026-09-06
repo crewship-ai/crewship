@@ -120,10 +120,11 @@ func (s *Server) buildLLMCallObserver() LLMCallObserver {
 // change on either side surfaces as a compile error during build instead
 // of silent serialization drift at runtime.
 type sidecarCostRecord struct {
-	WorkspaceID string `json:"workspace_id"`
-	CrewID      string `json:"crew_id"`
-	AgentID     string `json:"agent_id"`
-	MissionID   string `json:"mission_id,omitempty"`
+	WorkspaceID  string `json:"workspace_id"`
+	CrewID       string `json:"crew_id"`
+	AgentID      string `json:"agent_id"`
+	MissionID    string `json:"mission_id,omitempty"`
+	CredentialID string `json:"credential_id,omitempty"`
 
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
@@ -158,6 +159,7 @@ func (s *Server) postCostRecord(ctx context.Context, usage LLMUsage, quota Quota
 		WorkspaceID:         s.ipc.WorkspaceID,
 		CrewID:              s.ipc.CrewID,
 		AgentID:             agentID,
+		CredentialID:        usage.CredentialID,
 		Provider:            usage.Provider,
 		Model:               usage.Model,
 		InputTokens:         usage.InputTokens,

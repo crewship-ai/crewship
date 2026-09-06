@@ -11,6 +11,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider-login runtime foundations** (#2428) — adapter-specific Codex and Gemini auth-file delivery with server-retained refresh tokens, normalized login parsing and refresh clients, and credential-attributed usage storage. Generated auth files are withheld from the Files API. Google refresh requires an operator-supplied OAuth client matching the imported grant.
+
+- **Codex runtime compatibility** (#2428) — route metered keys through the sidecar-backed model provider, recognize structured terminal errors, acknowledge MCP notifications with HTTP 202, and omit MCP endpoints blocked by crew network policy. OAuth refresh and device-flow libraries are included here; public onboarding and administration arrive in the dependent API/UI changes.
+
 - **Demo use cases, one script each** (`scripts/demo/`, #2424) — the second version of the demo scripts. `scripts/walkthrough.sh` was one `set -e` checklist that stopped at its first failing line and could not run step six without steps one to five; it is now twelve self-contained use cases (`uc-NN-<slug>.sh`) run alone or all in order by `scripts/demo/run.sh`, each narrated for an audience, verified by assertions and honest about what it could not run: a use case whose need is missing (a model, a GitHub token) exits with the reason and the runner prints **SKIP**, never a green row. Memory recall, delegation, ephemeral hire with its approval, credential escalation answered by `crewship escalation supply`, the approval gate, a token-zero routine landing in the inbox, a wake-gated schedule holding on a real scheduler tick, eval tiers, GitHub token injection, and the three demo packs through `seed verify --pack`. `scripts/demo-test.sh` (CI `shell` job) ShellChecks the suite and drives the runner against stubs. Guide: `docs/guides/demo-use-cases.mdx`.
 - **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
 

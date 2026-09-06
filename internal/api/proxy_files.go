@@ -136,7 +136,7 @@ func resolveAgentFilePath(crewID, slug, cleanPath string) (string, bool) {
 // This is the ONE list. isProtectedAgentConfigPath (the agent door, which
 // knows a single slug) and IsProtectedCrewConfigPath (the crew door, which
 // does not) both resolve their candidate path to this same relative form and
-// check it here, so the two doors can never independently drift on which six
+// check it here, so the two doors can never independently drift on which eight
 // files are denied — which is exactly the shape of the defect (#2142) that
 // let the crew door serve what the agent door refused.
 var protectedAgentConfigRelPaths = map[string]bool{
@@ -146,6 +146,11 @@ var protectedAgentConfigRelPaths = map[string]bool{
 	".gemini/settings.json": true,
 	"opencode.json":         true,
 	".codex/config.toml":    true,
+	// The Codex and Gemini logins (#2428): a short-lived access token each.
+	// Written 0600 by the orchestrator's syncLoginFile; must not be
+	// readable back over HTTP.
+	".codex/auth.json":         true,
+	".gemini/oauth_creds.json": true,
 }
 
 // isProtectedAgentConfigPath identifies the exact per-agent files Crewship
@@ -175,7 +180,7 @@ func isProtectedAgentConfigPath(crewID, slug, cleanPath string) bool {
 // whatever it is, and checks the remainder against the same
 // protectedAgentConfigRelPaths list. A crew-root file (no further segment)
 // and a deeper nested file (matches no relative entry) both correctly fall
-// through as unprotected — this only denies the exact six generated files,
+// through as unprotected — this only denies the exact eight generated files,
 // under any agent.
 //
 // Exported because internal/server (the crewshipd sidecar, reached over the
@@ -409,7 +414,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	// #2142: this door has no single agent in context, so a path can name
 	// ANY agent's generated MCP config — isProtectedAgentConfigPath (built
 	// for the agent-scoped door, which knows one slug) cannot be used
-	// directly here. IsProtectedCrewConfigPath is the same six-path list,
+	// directly here. IsProtectedCrewConfigPath is the same eight-path list,
 	// generalized to discover the slug from the path itself.
 	if IsProtectedCrewConfigPath(crewID, cleanPath) {
 		replyError(w, http.StatusForbidden, "File contains protected agent configuration")
