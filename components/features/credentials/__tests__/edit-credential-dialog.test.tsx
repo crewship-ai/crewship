@@ -18,6 +18,57 @@ function patchBody() {
   return JSON.parse(call![1].body)
 }
 describe("credential edit safety", () => {
+  it("includes a pending tag on save and guards a tag-only draft", async () => {
+    const onSuccess = setup()
+    fireEvent.change(screen.getByLabelText(/Tags/), { target: { value: " Production " } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    // Submit directly: keyboard/programmatic submission need not blur the tag input.
+    fireEvent.submit(screen.getByLabelText("Name").closest("form")!)
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    expect(patchBody().tags).toEqual(["production"])
+  })
+  it("adds, deduplicates and removes tags without submitting the form", async () => {
+    const onSuccess = setup()
+    const tags = screen.getByLabelText(/Tags/)
+    for (const draft of ["Demo", "demo", "infra"]) {
+      fireEvent.change(tags, { target: { value: draft } })
+      fireEvent.keyDown(tags, { key: "Enter" })
+    }
+    expect(onSuccess).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Remove tag demo" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    expect(patchBody().tags).toEqual(["infra"])
+  })
+  it("keeps provider identity, authentication and expiry out of metadata PATCH", async () => {
+    render(<EditCredentialDialog workspaceId="ws1" credential={{ id: "login1", name: "ChatGPT", description: null, provider: "OPENAI", type: "AI_CLI_TOKEN", scope: "WORKSPACE", crew_id: null, crew_ids: [], isProviderLogin: true, token_expires_at: "2026-09-08T16:47:22Z" }} open onOpenChange={() => {}} onSuccess={() => {}} />)
+    expect(screen.getByRole("dialog", { name: /Edit provider/ })).toBeInTheDocument()
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
+    expect(patchBody()).not.toHaveProperty("provider")
+    expect(patchBody()).not.toHaveProperty("value")
+    expect(patchBody()).not.toHaveProperty("token_expires_at")
+  })
+  it("does not truncate an existing expiry timestamp on a name-only edit", async () => {
+    render(<EditCredentialDialog workspaceId="ws1" credential={{ id: "secret1", name: "SECRET", description: null, provider: "NONE", type: "SECRET", scope: "WORKSPACE", crew_id: null, crew_ids: [], token_expires_at: "2026-09-08T16:47:22Z" }} open onOpenChange={() => {}} onSuccess={() => {}} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
+    expect(patchBody()).not.toHaveProperty("token_expires_at")
+  })
+  it.each([
+    ["2026-10-01", "2026-10-01T00:00:00.000Z"],
+    ["", null],
+  ])("still allows explicitly changing or clearing expiry: %s", async (date, expected) => {
+    render(<EditCredentialDialog workspaceId="ws1" credential={{ id: "secret1", name: "SECRET", description: null, provider: "NONE", type: "SECRET", scope: "WORKSPACE", crew_id: null, crew_ids: [], token_expires_at: "2026-09-08T16:47:22Z" }} open onOpenChange={() => {}} onSuccess={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /Access & security/ }))
+    fireEvent.change(screen.getByLabelText("Expires on"), { target: { value: date } })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
+    expect(patchBody().token_expires_at).toBe(expected)
+  })
   it("does not overwrite an unknown server tier with the display default", async () => {
     const onSuccess = setup(null)
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))

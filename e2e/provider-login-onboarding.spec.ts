@@ -3,6 +3,44 @@ import { test, expect } from "@playwright/test"
 // Isolated UI acceptance: no real token, account creation or provider traffic.
 // The real page and wizard render against an empty workspace API fixture.
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`provider detail and metadata-only editing at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    const credential = { id: "fixture-provider", name: "Example ChatGPT", description: "Test account — no live credentials", type: "AI_CLI_TOKEN", provider: "OPENAI", scope: "WORKSPACE", status: "ACTIVE", crew_id: null, crew_ids: [], tags: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", last_used_ips: [], agent_names: [], _count_agent_credentials: 0, security_level: 1,
+      login: { mode: "subscription", provider: "OPENAI", plan: "plus", plan_label: "ChatGPT Plus", owner_user_id: "ui-test", owner_email: "ui@example.test", expires_at: "2026-09-08T16:47:22Z", refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 } } }
+    let patch: Record<string, unknown> | undefined
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname
+      let body: unknown = []
+      if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
+      else if (path === "/api/v1/credentials") body = [credential]
+      else if (path === "/api/v1/credentials/fixture-provider" && route.request().method() === "PATCH") { patch = route.request().postDataJSON(); Object.assign(credential, patch); body = credential }
+      else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/credentials?tab=providers")
+    if (viewport.width > 640) await page.getByRole("button", { name: "Sidebar: hover", exact: true }).click()
+    await page.getByText("Example ChatGPT", { exact: true }).first().click()
+    await expect(page.getByText("Connection health", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: /Rotate/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Re-login", exact: true })).toBeVisible()
+    await expect(page.getByText("Delivered to the agent as", { exact: true })).not.toBeVisible()
+    await page.getByText("Connection details", { exact: true }).click()
+    await expect(page.getByText("Delivered to the agent as", { exact: true })).toBeVisible()
+    await page.getByText("Connection details", { exact: true }).click()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: `/tmp/provider-detail-${viewport.width}.png` })
+    await page.getByRole("button", { name: "Edit", exact: true }).first().click()
+    await expect(page.getByRole("dialog", { name: /Edit provider/ })).toBeVisible()
+    await expect(page.getByRole("checkbox", { name: "Replace the stored secret" })).toHaveCount(0)
+    await page.getByLabel("Name", { exact: true }).fill("Work ChatGPT")
+    await page.getByRole("button", { name: "Save changes", exact: true }).click()
+    await expect.poll(() => patch?.name).toBe("Work ChatGPT")
+    await expect(page.getByRole("heading", { name: "Work ChatGPT", exact: true })).toBeVisible()
+    expect(patch).not.toHaveProperty("value")
+    expect(patch).not.toHaveProperty("provider")
+    expect(patch).not.toHaveProperty("token_expires_at")
+  })
   test(`provider-first onboarding and zero-account filters at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.route("**/api/**", async (route) => {
@@ -74,6 +112,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       else if (path === "/api/v1/credentials") body = url.searchParams.has("kind") ? [] : [credential]
       else if (path === "/api/v1/credentials/fixture-secret" && route.request().method() === "PATCH") {
         patch = route.request().postDataJSON()
+        Object.assign(credential, patch)
         body = credential
       }
       else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
@@ -85,16 +124,34 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     // the canonical list. At mobile width, open it through the explorer toggle.
     if (viewport.width < 640) await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
     await page.getByText("Example certificate", { exact: true }).first().click()
+    await expect(page.getByText("Properties & protection", { exact: true })).toBeVisible()
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: `/tmp/credential-detail-${viewport.width}.png` })
     await page.getByRole("button", { name: "Edit", exact: true }).first().click()
     await expect(page.getByRole("dialog", { name: "Edit credential" })).toBeVisible()
     await expect(page.getByLabel(/^Replace secret value/)).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Renamed certificate")
     await page.getByLabel("Description", { exact: true }).fill("Metadata only")
+    await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
+    await page.getByLabel(/^Replace secret value/).fill("discarded-fixture-only")
+    await page.getByRole("checkbox", { name: "Replace the stored secret", exact: true }).click()
+    await expect(page.getByLabel(/^Replace secret value/)).toHaveCount(0)
+    const tags = page.getByLabel(/^Tags/)
+    await tags.fill("Demo")
+    await tags.press("Enter")
+    await tags.fill("demo")
+    await tags.press(",")
+    await expect(page.getByRole("button", { name: "Remove tag demo" })).toHaveCount(1)
+    await page.getByRole("button", { name: "Remove tag demo" }).click()
+    await tags.fill("production")
     await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeInViewport()
     await page.screenshot({ path: `/tmp/credentials-edit-${viewport.width}.png` })
     await page.getByRole("button", { name: "Save changes", exact: true }).click()
     await expect.poll(() => patch?.name).toBe("Renamed certificate")
+    await expect(page.getByRole("heading", { name: "Renamed certificate", exact: true })).toBeVisible()
+    await expect(page.getByText("production", { exact: true })).toBeVisible()
     expect(patch).not.toHaveProperty("value")
     expect(patch?.security_level).toBe(3)
+    expect(patch?.tags).toEqual(["production"])
   })
 }

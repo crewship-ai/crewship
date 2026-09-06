@@ -22,6 +22,7 @@ export interface CredentialData {
   /** Keeper tier, 1–4. Absent on an older API response → treated as L1, which is
    *  the column's default. */
   security_level?: number
+  isProviderLogin?: boolean
 }
 
 interface EditCredentialDialogProps {
@@ -59,20 +60,21 @@ export function EditCredentialDialog({
     const body: Record<string, unknown> = {
       name: values.name,
       description: values.description,
-      provider: values.provider,
       scope: values.scope,
       tags: values.tags,
     }
+    if (!credential.isProviderLogin) body.provider = values.provider
     // Older API responses may omit the tier. A metadata-only save must not
     // turn an unknown tier into L1 just because the form needs a display default.
     if (credential.security_level != null || values.securityLevel !== 1) {
       body.security_level = values.securityLevel
     }
-    if (values.value) body.value = values.value
+    if (values.value && !credential.isProviderLogin) body.value = values.value
     body.crew_ids = values.scope === "CREW" ? values.crewIds : []
-    body.token_expires_at = values.expiresAt
-      ? new Date(values.expiresAt).toISOString()
-      : null
+    // Preserve the full token timestamp when its date was not edited.
+    if (!credential.isProviderLogin && values.expiresAt !== initial.expiresAt) {
+      body.token_expires_at = values.expiresAt ? new Date(values.expiresAt).toISOString() : null
+    }
 
     try {
       const res = await apiFetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
@@ -99,13 +101,15 @@ export function EditCredentialDialog({
   return (
     <CreateSurface open={open} onOpenChange={onOpenChange} dirty={dirty} discardLabel="these credential changes" size="md">
         <CreateSurfaceHeader concept="credentials" context={credential.name}
-          title="Edit credential"
-          description="Update its details and access. Your existing secret stays unchanged unless you enter a replacement."
+          title={credential.isProviderLogin ? "Edit provider" : "Edit credential"}
+          description={credential.isProviderLogin ? "Update the name, tags and access. To change the connected account, use Re-login in its detail." : "Update its details and access. Your existing secret stays unchanged unless you enter a replacement."}
           onClose={() => onOpenChange(false)} />
         {open && (
           <CredentialForm
             key={credential.id}
             surface
+            hideValue={credential.isProviderLogin}
+            lockProvider={credential.isProviderLogin}
             onDirtyChange={setDirty}
             workspaceId={workspaceId}
             mode="edit"

@@ -35,6 +35,7 @@ import {
 } from "@/lib/credentials/provider-logins"
 import { getBrand } from "@/lib/credential-providers/registry"
 import { LoginStatusPill, QuotaBar } from "./provider-login-bits"
+import { DetailDisclosure } from "./detail-disclosure"
 
 export interface ProviderLoginActionsProps {
   credential: LoginCredential & { login: ProviderLogin }
@@ -142,7 +143,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
     <>
       {/* ── Seat ────────────────────────────────────────────────────── */}
       <Appear order={appearFrom}>
-        <DetailCard title="Seat" icon={CreditCard} subtitle={modeLabel(login.mode)}>
+        <DetailCard title="Account" icon={CreditCard} subtitle={modeLabel(login.mode)}>
           <dl className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2">
             <Fact label="Owner">
               {login.owner_email ?? login.owner_user_id ?? <span className="text-muted-foreground-soft">workspace · no owner</span>}
@@ -164,14 +165,14 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
       </Appear>
 
       {/* ── Quota ───────────────────────────────────────────────────── */}
-      <Appear order={appearFrom + 1}>
+      {login.quota && <Appear order={appearFrom + 1}>
         <DetailCard
           title="Quota"
           icon={Gauge}
           tone={atLimit ? "warn" : "default"}
           footer={
             login.quota
-              ? "Read from the provider's 429 responses and rate-limit headers. A seat at its limit is skipped per run, not per request — the CLI reads its login at start."
+              ? "Reported usage. Automatic switching to another account is not available yet."
               : undefined
           }
         >
@@ -188,24 +189,22 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
               )}
               {atLimit && (login.pays_for.agents > 0 || login.pays_for.crews > 0) && (
                 <p className="type-meta text-warn">
-                  What pays with this seat is paused until the window resets. A second {brand.label} seat on the same
-                  scope becomes a pool and takes over.
+                  {brand.label} reports a usage limit. Wait for the reset or assign a different account before retrying.
                 </p>
               )}
             </div>
           ) : (
             <p className="text-[12px] text-muted-foreground">
-              Quota is not readable for this provider. {brand.label} does not expose its windows in a way Crewship
-              can read yet; a 429 still parks the seat for the cooldown.
+              Usage limits are not reported for this account.
             </p>
           )}
         </DetailCard>
-      </Appear>
+      </Appear>}
 
       {/* ── Validity & refresh ──────────────────────────────────────── */}
       <Appear order={appearFrom + 2}>
         <DetailCard
-          title="Validity & refresh"
+          title="Connection health"
           icon={RefreshCw}
           tone={status === "needs_relogin" || status === "expired" ? "destructive" : status === "expiring" ? "warn" : "default"}
           action={
@@ -221,7 +220,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
           }
           footer={
             login.refresh.supported
-              ? "Crewship refreshes this seat centrally, one refresh at a time. Containers get a short-lived access token only, so any number of agents can share the seat without breaking each other's login."
+              ? "Crewship refreshes the login on the server. Agents do not receive the refresh token."
               : undefined
           }
         >
@@ -282,7 +281,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
           )}
           {status === "needs_relogin" && (
             <p className="mt-3 type-meta text-destructive">
-              The refresh failed repeatedly and the seat left its pool. Re-login to mint a new one; the bindings stay.
+              This account needs attention. Use Re-login to reconnect it; existing assignments stay unchanged.
             </p>
           )}
         </DetailCard>
@@ -290,6 +289,8 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
 
       {/* ── Delivered to the agent as ───────────────────────────────── */}
       <Appear order={appearFrom + 3}>
+        <DetailDisclosure title="Connection details" icon={FileText}>
+        {!login.quota && <p className="text-xs text-muted-foreground">Usage limits are not reported for this account. Check your provider dashboard.</p>}
         <DetailCard
           title="Delivered to the agent as"
           icon={login.delivery.kind === "file" ? FileText : Wallet}
@@ -322,6 +323,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
             </>
           )}
         </DetailCard>
+        </DetailDisclosure>
       </Appear>
     </>
   )

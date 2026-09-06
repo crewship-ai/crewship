@@ -150,7 +150,14 @@ export default function CredentialsPage() {
     if (isMobile) setSidebarCollapsed(true)
   }, [isMobile])
   const [sortKey, setSortKey] = React.useState<SortKey>("last_used")
-  const [detailCredential, setDetailCredential] = React.useState<Credential | null>(null)
+  const [selectedDetailCredential, setDetailCredential] = React.useState<Credential | null>(null)
+  // Selection identifies the row; refreshed lists own its current metadata.
+  // Keeping only the original object made a successful Edit appear not to save.
+  const detailCredential = selectedDetailCredential
+    ? providerLogins.find((c) => c.id === selectedDetailCredential.id)
+      ?? credentials.find((c) => c.id === selectedDetailCredential.id)
+      ?? selectedDetailCredential
+    : null
   const [detailOpen, setDetailOpen] = React.useState(false)
   // The Providers list's Assign button: open the seat with its dialog up.
   const [assignOnOpen, setAssignOnOpen] = React.useState(false)
@@ -333,6 +340,7 @@ export default function CredentialsPage() {
       tags: credential.tags,
       token_expires_at: credential.token_expires_at,
       security_level: credential.security_level,
+      isProviderLogin: hasLogin(credential),
     })
     setEditOpen(true)
   }

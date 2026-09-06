@@ -12,7 +12,8 @@
 // "paste a secret" path Doppler/Vercel are built around.
 
 import * as React from "react"
-import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle } from "lucide-react"
+import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle, Tag, KeyRound, FileText, ShieldCheck } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -81,6 +82,8 @@ export interface CredentialFormProps {
   initial?: Partial<CredentialFormValues>
   /** Hide the value input entirely (e.g. metadata-only edit). */
   hideValue?: boolean
+  /** A provider identity cannot be changed by picking a decorative brand. */
+  lockProvider?: boolean
   /** Submit handler — return a string error message to surface, or null on success. */
   onSubmit: (values: CredentialFormValues) => Promise<string | null>
   onCancel: () => void
@@ -99,6 +102,7 @@ export function CredentialForm({
   mode,
   initial,
   hideValue,
+  lockProvider = false,
   onSubmit,
   onCancel,
   submitLabel,
@@ -115,15 +119,15 @@ export function CredentialForm({
   const [replaceValue, setReplaceValue] = React.useState(false)
   const formRef = React.useRef<HTMLFormElement>(null)
   const originalValues = React.useRef(values)
+  const [tagDraft, setTagDraft] = React.useState("")
   React.useEffect(() => {
-    onDirtyChange?.(JSON.stringify(values) !== JSON.stringify(originalValues.current))
-  }, [values, onDirtyChange])
+    onDirtyChange?.(!!tagDraft.trim() || JSON.stringify(values) !== JSON.stringify(originalValues.current))
+  }, [values, tagDraft, onDirtyChange])
   const [advancedOpen, setAdvancedOpen] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
-  const [tagDraft, setTagDraft] = React.useState("")
   const [crews, setCrews] = React.useState<Crew[]>([])
   const [crewsLoading, setCrewsLoading] = React.useState(false)
   const [crewPopoverOpen, setCrewPopoverOpen] = React.useState(false)
@@ -209,9 +213,7 @@ export function CredentialForm({
   const addTag = (raw: string) => {
     const t = raw.trim().toLowerCase()
     if (!t) return
-    if (values.tags.includes(t)) return
-    if (values.tags.length >= 8) return
-    setField("tags", [...values.tags, t])
+    setValues((prev) => prev.tags.includes(t) || prev.tags.length >= 8 ? prev : { ...prev, tags: [...prev.tags, t] })
   }
 
   const removeTag = (t: string) => {
@@ -261,6 +263,7 @@ export function CredentialForm({
     try {
       const result = await onSubmit({
         ...values,
+        tags: [...new Set([...values.tags, tagDraft.trim().toLowerCase()].filter(Boolean))].slice(0, 8),
         name: values.name.trim(),
         description: values.description.trim(),
         value: values.value.trim(),
@@ -323,7 +326,7 @@ export function CredentialForm({
               credential's own page draw. It sat here unlabelled, which made
               the one control that changes a credential's face read as a
               read-only badge. */}
-          <span className="flex items-center gap-1.5">
+          {!lockProvider && <span className="flex items-center gap-1.5">
             <Label className="text-[11px] text-muted-foreground">Icon</Label>
             <BrandPicker
               value={values.provider}
@@ -332,7 +335,7 @@ export function CredentialForm({
                 setField("provider", key)
               }}
             />
-          </span>
+          </span>}
         </div>
         <div className="relative">
           <Input
@@ -396,15 +399,16 @@ export function CredentialForm({
 
       {/* Value */}
       {surface && <div className="space-y-1.5">
-        <Label htmlFor="cred-description" className="text-xs">Description</Label>
+        <Label htmlFor="cred-description" className="text-xs"><FileText className="h-3.5 w-3.5" /> Description</Label>
         <Textarea id="cred-description" placeholder="What is this secret used for?"
           value={values.description} onChange={(e) => setField("description", e.target.value)} />
       </div>}
       {!hideValue && surface && mode === "edit" && <div className="rounded-xl border border-border bg-card p-4 space-y-2">
         <label className="flex items-center gap-2 text-sm font-medium">
-          <input type="checkbox" checked={replaceValue} onChange={(e) => {
-            setReplaceValue(e.target.checked)
-            if (!e.target.checked) { setField("value", ""); setShowValue(false) }
+          <KeyRound aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
+          <Checkbox checked={replaceValue} onCheckedChange={(checked) => {
+            setReplaceValue(checked === true)
+            if (checked !== true) { setField("value", ""); setShowValue(false) }
           }} />
           Replace the stored secret
         </label>
@@ -481,7 +485,7 @@ export function CredentialForm({
       {/* Tags row — promoted out of "Advanced" because tagging is the
           primary organisation tool now that grouping is gone. */}
       <div className="space-y-1.5">
-        <Label className="text-xs">Tags</Label>
+        <Label htmlFor="cred-tags" className="text-xs"><Tag className="h-3.5 w-3.5" /> Tags <span className="ml-auto text-muted-foreground font-normal">{values.tags.length}/8</span></Label>
         <div className="flex items-center flex-wrap gap-1.5 rounded-md border border-white/10 bg-background px-2 py-1.5 min-h-[34px]">
           {values.tags.map((t) => (
             <Badge
@@ -501,6 +505,9 @@ export function CredentialForm({
             </Badge>
           ))}
           <input
+            id="cred-tags"
+            aria-label="Tags"
+            aria-describedby="cred-tags-hint"
             type="text"
             list="cred-tag-suggestions"
             value={tagDraft}
@@ -531,16 +538,18 @@ export function CredentialForm({
             </datalist>
           )}
         </div>
+        <p id="cred-tags-hint" className="text-[11px] text-muted-foreground">Enter or comma to add · × to remove. Unsaved text is included when you save.</p>
       </div>
 
       {/* Advanced toggle */}
       <button
         type="button"
+        aria-expanded={advancedOpen}
         onClick={() => setAdvancedOpen((o) => !o)}
         className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
       >
         {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        Access & security
+        <ShieldCheck className="h-3.5 w-3.5" /> Access & security
         <span className="text-muted-foreground">
           {surface ? "(expiry, Keeper protection, visibility)" : "(description, expiry, scope, provider override)"}
         </span>
@@ -562,7 +571,7 @@ export function CredentialForm({
           </div>}
 
           {/* Expires */}
-          <div className="space-y-1">
+          {!lockProvider && <div className="space-y-1">
             <Label htmlFor="cred-expires" className="text-xs">Expires on</Label>
             <Input
               id="cred-expires"
@@ -574,7 +583,7 @@ export function CredentialForm({
             <p className="text-[10px] text-muted-foreground">
               Optional — drives the &quot;Expiring&quot; KPI and the 30-day warning banner.
             </p>
-          </div>
+          </div>}
 
           {/* Keeper tier */}
           <div className="space-y-1">

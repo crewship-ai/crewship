@@ -63,6 +63,7 @@ import { hasLogin, paysForLabel, type ProviderLogin } from "@/lib/credentials/pr
 import { RevealDialog } from "./reveal-dialog"
 import { AssignLoginDialog } from "./assign-login-dialog"
 import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
+import { DetailDisclosure } from "./detail-disclosure"
 
 interface CredentialSummary {
   id: string
@@ -452,11 +453,9 @@ export function CredentialDetailSheet({
         ? "Ready"
         : "Readiness unknown"
 
-  // The figures band. Same six-slot shape as the issue's, answering the
-  // questions a vault gets asked instead of the ones a tracker does.
-  const expiryDays = daysUntilExpiry(credential)
+  // Keep the summary aligned with the provider's refreshed login metadata.
+  const expiryDays = daysUntilExpiry(seat ? { ...credential, token_expires_at: seat.login.expires_at } : credential)
   const facts: StatItem[] = [
-    { label: "Created", value: formatRelativeTime(credential.created_at) },
     {
       label: "Last used",
       value: credential.last_used_at ? formatRelativeTime(credential.last_used_at) : "never",
@@ -475,7 +474,6 @@ export function CredentialDetailSheet({
               : "default",
     },
     { label: "Used by", value: credential._count_agent_credentials || "—" },
-    { label: "Fields", value: fields.length || "—" },
     {
       label: "Readiness",
       value: readinessLabel,
@@ -593,23 +591,9 @@ export function CredentialDetailSheet({
             </span>
           </div>
         )}
-        {/* One page, no tabs.
-         *
-         * It had five: Overview, Fields, Used by, Audit, Settings. Tabs are a
-         * way of admitting a screen holds more than fits, and this one does
-         * not — a credential is a value, its parts, who can read it, how hard
-         * it is guarded, and what has happened to it. Five of those five are
-         * things you want to see AT ONCE when you are deciding whether to
-         * rotate something, and behind a tab each of them costs a click plus
-         * the memory of what the other tab said.
-         *
-         * The shape is the issue detail's, deliberately and to the pixel where
-         * the content allows: identity card, figures band, then a wide column
-         * of the substance beside a narrow column of properties. Two screens in
-         * one product that both mean "here is one thing in full" should not
-         * look like two products. Everything is built from the same
-         * components/ui/detail kit, so they cannot drift apart by accident.
-         */}
+        {/* One reading column: identity, health and usage first. Secondary
+            history and protection stay accessible through disclosures, using
+            the same detail kit as the rest of the product. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-4 p-4">
             {/* ── Identity ─────────────────────────────────────────────── */}
@@ -770,9 +754,9 @@ export function CredentialDetailSheet({
               <StatStrip items={facts} />
             </Appear>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="flex flex-col gap-4">
               {/* ── The substance ─────────────────────────────────────── */}
-              <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
+              <div className="flex flex-col gap-4">
                 {credential.last_error && (
                   <Appear order={2}>
                     <DetailCard title="Last error" icon={AlertTriangle} tone="destructive">
@@ -811,7 +795,7 @@ export function CredentialDetailSheet({
                   is what keeps the reveal count low enough that each one is
                   worth investigating.
                 */}
-                <Appear order={3}>
+                {!seat && <Appear order={3}>
                   <DetailCard
                     title="Value"
                     icon={KeyRound}
@@ -929,7 +913,7 @@ export function CredentialDetailSheet({
                       </p>
                     )}
                   </DetailCard>
-                </Appear>
+                </Appear>}
 
                 {/*
                   Fields. A secret part is listed by KEY and marked "secret" —
@@ -1003,7 +987,7 @@ export function CredentialDetailSheet({
                     }
                     footer={
                       seat
-                        ? `Add a second ${brand.label} seat to the same scope and it becomes a pool — priority order, then round-robin, rate-limited seats skipped per run.`
+                        ? "Assignments below determine which agents can use this account. Automatic account failover is not available yet."
                         : undefined
                     }
                   >
@@ -1139,6 +1123,7 @@ export function CredentialDetailSheet({
                     and false statement. */}
                 {canUpdate && (
                   <Appear order={6}>
+                    <DetailDisclosure title="Activity history" icon={Activity}>
                     <DetailCard
                       title="Audit"
                       icon={Activity}
@@ -1196,12 +1181,14 @@ export function CredentialDetailSheet({
                         </ul>
                       )}
                     </DetailCard>
+                    </DetailDisclosure>
                   </Appear>
                 )}
               </div>
 
               {/* ── Properties ────────────────────────────────────────── */}
               <div className="flex flex-col gap-4">
+                <DetailDisclosure title="Properties & protection" icon={ShieldCheck}>
                 <Appear order={7}>
                   <DetailCard title="Properties">
                     <dl className="space-y-0.5">
@@ -1417,7 +1404,7 @@ export function CredentialDetailSheet({
                     lets an oncall MEMBER replace a leaked token without blanket
                     vault reach. Nesting it hid the action from precisely that
                     tier. */}
-                {canRotate && (
+                {canRotate && !seat && (
                   <Appear order={11}>
                     <DetailCard
                       title="Rotation"
@@ -1489,7 +1476,7 @@ export function CredentialDetailSheet({
                   </Appear>
                 )}
 
-                {canDelete && (
+                {canDelete && !seat && (
                   <Appear order={13}>
                     <DetailCard
                       title="Danger zone"
@@ -1509,6 +1496,7 @@ export function CredentialDetailSheet({
                     </DetailCard>
                   </Appear>
                 )}
+                </DetailDisclosure>
               </div>
             </div>
           </div>

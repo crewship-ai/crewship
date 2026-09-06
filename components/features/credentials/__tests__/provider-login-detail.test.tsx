@@ -82,12 +82,12 @@ describe("Quota", () => {
     expect(screen.getByRole("progressbar", { name: /5-hour window/i })).toHaveAttribute("aria-valuenow", "100")
     expect(screen.getByRole("progressbar", { name: /weekly window/i })).toHaveAttribute("aria-valuenow", "71")
     expect(screen.getByText(/At limit — resets \d{1,2}:\d{2}/)).toBeInTheDocument()
-    expect(screen.getByText(/paused until the window resets/i)).toBeInTheDocument()
+    expect(screen.getByText(/Wait for the reset or assign a different account/i)).toBeInTheDocument()
   })
 
   it("says 'not readable for this provider' when the server sent null — no bar, no number", () => {
     renderCards(seat({ quota: null }))
-    expect(screen.getByText(/quota is not readable for this provider/i)).toBeInTheDocument()
+    expect(screen.getByText(/Usage limits are not reported/i)).toBeInTheDocument()
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument()
   })
 })
@@ -120,7 +120,7 @@ describe("Validity & refresh", () => {
   it("needs re-login: the error, the sentence, the red tone", () => {
     renderCards(seat({ refresh: { supported: true, status: "needs_relogin", last_at: null, next_at: null, error: "invalid_grant" } }))
     expect(screen.getByText("invalid_grant")).toBeInTheDocument()
-    expect(screen.getByText(/re-login to mint a new one; the bindings stay/i)).toBeInTheDocument()
+    expect(screen.getByText(/Use Re-login to reconnect it; existing assignments stay unchanged/i)).toBeInTheDocument()
     expect(screen.getByTestId("login-status-needs_relogin")).toBeInTheDocument()
   })
 

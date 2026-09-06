@@ -101,6 +101,22 @@ beforeEach(() => {
 })
 
 describe("write affordances gated by role", () => {
+  it("provider accounts never offer generic secret rotation or reveal", () => {
+    renderSheet({
+      type: "AI_CLI_TOKEN", provider: "OPENAI",
+      login: {
+        mode: "subscription", provider: "OPENAI", plan: "plus", plan_label: "ChatGPT Plus",
+        owner_user_id: "u1", owner_email: "fixture@example.test", expires_at: null,
+        refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
+        quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 },
+      },
+    })
+    expect(screen.queryByRole("button", { name: /rotate/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument()
+    expect(screen.getByText("Connection health")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
+    expect(screen.getByText("Properties & protection").closest("details")).not.toHaveAttribute("open")
+  })
   it("OWNER sees rotate and delete", () => {
     h.role = "OWNER"
     renderSheet()
