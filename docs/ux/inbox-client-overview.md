@@ -67,3 +67,19 @@ Validation: 311 frontend tests, full Go test/vet, lint and production export.
 Browser fixtures cover all ten inbox kinds with long Markdown/code/context,
 plus pending and completed queue approvals at desktop, tablet and phone sizes.
 Public real-data smoke checks are run separately after deployment.
+
+
+## Remove redundant controls
+
+The toolbar contains identity, counts and connection status only. History is
+in the left navigation; the duplicate toolbar History and Review next actions
+are removed. Next to review (with remaining count) is offered only on a
+completed actionable item's confirmation, when another decision is available
+and all sources are healthy. It never advances automatically. That screen
+uses its own Back to inbox button instead of a second sticky back bar.
+
+The overview no longer repeats Live or Saved in History captions. Decision
+forms omit redundant permission-success text while retaining explanations for
+users who cannot decide. Crew navigation lives in the byline, without duplicate
+links below the same message. Source navigation, archival guards, evidence and
+all supported action handlers remain intact.

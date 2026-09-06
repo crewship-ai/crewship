@@ -15,14 +15,13 @@ import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
 import type { InboxLookup, InboxV2Entry } from "./inbox-v2-types"
 
 /** Overview without an open item: actual requests first, followed by readable updates. */
-export function InboxTriage({ action, updates, history, lookup, live, onOpen, onCrew, incomplete = false, loading = false }: {
+export function InboxTriage({ action, updates, history, lookup, onOpen, onCrew, incomplete = false, loading = false }: {
   incomplete?: boolean
   loading?: boolean
   action: InboxV2Entry[]
   updates: InboxV2Entry[]
   history: InboxV2Entry[]
   lookup: InboxLookup
-  live: boolean
   onOpen: (entry: InboxV2Entry) => void
   onCrew: (crewId: string) => void
 }) {
@@ -51,7 +50,7 @@ export function InboxTriage({ action, updates, history, lookup, live, onOpen, on
       </Appear>
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
         <Appear order={1} className="min-w-0">
-          <DashboardCard title="Updates" icon={Bell} hint={`${updates.length} available`} className="border-primary/20" action={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} />}>
+          <DashboardCard title="Updates" icon={Bell} hint={`${updates.length} available`} className="border-primary/20">
             <p className="mb-3 text-label text-muted-foreground">Agent replies, work ready for review and routine results.</p>
             {updates.length ? <div className="flex flex-col divide-y divide-border/50">{sortEntries(updates).slice(0, 6).map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <InlineEmpty icon={Bell} text="No updates yet. New results will appear here." />}
           </DashboardCard>
@@ -63,7 +62,7 @@ export function InboxTriage({ action, updates, history, lookup, live, onOpen, on
         </Appear>
       </div>
       <Appear order={2}>
-        <DashboardCard title="Recent history" icon={History} hint="Saved in History">
+        <DashboardCard title="Recent history" icon={History}>
           {recent.length ? <div className="flex flex-col divide-y divide-border/50">{recent.map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <p className="text-label text-muted-foreground">Nothing has been decided yet. Decisions and archived notices stay here as the record.</p>}
         </DashboardCard>
       </Appear>

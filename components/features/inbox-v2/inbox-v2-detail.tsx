@@ -36,6 +36,7 @@ interface Props {
   detailedInboxItem?: InboxItem
   detailLoading?: boolean
   confirmation: InboxV2Confirmation | null
+  nextReview?: { count: number; onOpen: () => void }
   onClearConfirmation: () => void
   onViewReceipt: (entry: InboxV2Entry) => void
   onInboxResolve: (item: InboxItem, action: string) => Promise<void>
@@ -57,7 +58,6 @@ interface Props {
     action: InboxV2Entry[]
     updates: InboxV2Entry[]
     history: InboxV2Entry[]
-    live: boolean
     onOpen: (entry: InboxV2Entry) => void
     onCrew: (crewName: string) => void
   }
@@ -123,7 +123,7 @@ export function InboxV2Detail(props: Props) {
 }
 
 function DecisionConfirmation({
-  confirmation, onClearConfirmation, onViewReceipt,
+  confirmation, onClearConfirmation, onViewReceipt, nextReview,
 }: Props & { confirmation: InboxV2Confirmation }) {
   const positive = !["denied", "rejected", "cancelled"].includes(confirmation.action)
   const label = outcomeLabel(confirmation.action)
@@ -143,7 +143,8 @@ function DecisionConfirmation({
             <p className="mt-2 text-xs text-muted-foreground-soft">Saved {since(confirmation.at)} · the record stays in History</p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button onClick={() => onViewReceipt(confirmation.entry)} className="gap-2">
+            {nextReview && <Button onClick={nextReview.onOpen}>Next to review · {nextReview.count}</Button>}
+            <Button variant={nextReview ? "outline" : "default"} onClick={() => onViewReceipt(confirmation.entry)} className="gap-2">
               View record <ExternalLink className="h-3.5 w-3.5" />
             </Button>
             <Button variant="outline" onClick={onClearConfirmation}>Back to inbox</Button>
@@ -241,7 +242,7 @@ function ApprovalDetail({
                 <Button disabled={!allowed || busy !== null} variant="outline" onClick={() => void decide("denied")} className="gap-2">
                   <X className="h-4 w-4" /> {busy === "denied" ? "Denying…" : "Deny"}
                 </Button>
-                <span className="self-center text-xs text-muted-foreground">{deciderCopy("manage")}{allowed ? " · you can" : ""}</span>
+                {!allowed && <span className="self-center text-xs text-muted-foreground">{deciderCopy("manage")}</span>}
               </div>
             </>
           )}
@@ -257,12 +258,11 @@ function ApprovalDetail({
       </section>
 
 
-      {(crew || agent || row.mission_id) && (
+      {(agent || row.mission_id) && (
         <section className={messageDivider}>
           <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground-soft">Where this came from</span>
             {agent && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "chat", agentSlug: agent.slug })}>Chat with {agent.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
-            {crew && <Button asChild size="xs" variant="outline"><Link href={entityHref({ kind: "crew", slug: crew.slug })}>Open {crew.name} <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
             {row.mission_id && <Button asChild size="xs" variant="outline"><Link href={`/missions/${encodeURIComponent(row.mission_id)}/timeline`}>Open mission <ArrowUpRight className="ml-1 h-3 w-3" /></Link></Button>}
           </div>
         </section>

@@ -46,7 +46,7 @@ describe("canonical client inbox", () => {
     expect(selectEntry([entry], "request:missing")).toBeNull()
   })
   it("does not claim all caught up when a source is unavailable", () => {
-    render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} live={false} incomplete onOpen={() => {}} onCrew={() => {}} />)
+    render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} incomplete onOpen={() => {}} onCrew={() => {}} />)
     expect(screen.queryByText("All caught up")).toBeNull()
     expect(screen.getByText("Partial information")).toBeTruthy()
   })

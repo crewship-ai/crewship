@@ -35,7 +35,7 @@ describe("InboxTriage", () => {
   it("says what waits, by crew, and narrows to a crew by id", () => {
     const onCrew = vi.fn()
     const action = [inboxEntry(item("1", "c-ops")), inboxEntry(item("2", "c-ops")), inboxEntry(item("3", null))]
-    render(<InboxTriage action={action} updates={[]} history={[]} lookup={lookup} live={false} onOpen={() => {}} onCrew={onCrew} />)
+    render(<InboxTriage action={action} updates={[]} history={[]} lookup={lookup} onOpen={() => {}} onCrew={onCrew} />)
     expect(screen.getByText("Waiting for you")).toBeInTheDocument()
     expect(screen.getByText("Ops")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Filter inbox by Ops" }))
@@ -46,7 +46,7 @@ describe("InboxTriage", () => {
   })
 
   it("is never blank: the zero form says what lands here", () => {
-    render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} live={false} onOpen={() => {}} onCrew={() => {}} />)
+    render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} onOpen={() => {}} onCrew={() => {}} />)
     expect(screen.getByText(/questions from agents, failed runs and missed schedules land here/)).toBeInTheDocument()
     expect(screen.getByText(/Nothing has been decided yet/)).toBeInTheDocument()
   })
@@ -56,7 +56,7 @@ describe("InboxTriage", () => {
     const old = inboxEntry(item("old", "c-ops", { created_at: "2026-09-01T10:00:00Z" }))
     const fresh = inboxEntry(item("new", "c-ops"))
     const decided = inboxEntry(item("d", "c-ops", { state: "resolved", resolved_action: "reject", resolved_at: "2026-09-03T11:00:00Z" }))
-    render(<InboxTriage action={[fresh, old]} updates={[]} history={[decided]} lookup={lookup} live={true} onOpen={onOpen} onCrew={() => {}} />)
+    render(<InboxTriage action={[fresh, old]} updates={[]} history={[decided]} lookup={lookup} onOpen={onOpen} onCrew={() => {}} />)
     fireEvent.click(screen.getByRole("button", { name: /Open oldest/ }))
     expect(onOpen).toHaveBeenCalledWith(old)
     expect(screen.getByText("Rejected")).toBeInTheDocument()

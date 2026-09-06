@@ -370,12 +370,6 @@ export function DecisionCard({
         {!isResolved && !allowed && (
           <p className="type-meta text-muted-foreground">
             {deciderCopy(meta.requires)}
-
-          </p>
-        )}
-        {allowed && !isResolved && (
-          <p className="type-meta text-muted-foreground">
-            {deciderCopy(meta.requires)} · you can
           </p>
         )}
         {meta.missingEndpoint && (
@@ -556,7 +550,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
   const crewName = crew?.name ?? agent?.crew?.name ?? null
   const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
   const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
-  const links = originLinks(item, lookup)
+  const links = originLinks(item, lookup).filter((link) => link.href !== crewHref)
   // Message navigation is rendered once here, alongside the existing Dismiss action.
   const messageLinks = item.kind === "message" ? links : []
   const relatedLinks = item.kind === "message" ? [] : links
