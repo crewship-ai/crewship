@@ -60,6 +60,12 @@ func TestSplit(t *testing.T) {
 		wantSupports bool
 	}{
 		{
+			name: "legacy access-only import is explicitly not renewable", provider: "OPENAI", mode: "subscription",
+			value:    strings.ReplaceAll(codexAuthJSON(t, "plus"), `"refresh_token":"rt.REAL-SECRET",`, ""),
+			wantMode: "subscription", wantAccess: chatgptToken(t, "plus", 1789000000),
+			wantIDToken: "id.tok.en", wantAccount: "acct-1", wantPlan: "plus", wantExpires: "2026-09-10T00:26:40Z", wantSupports: false,
+		},
+		{
 			name: "codex auth.json becomes parts", provider: "OPENAI", mode: "subscription", value: codexAuthJSON(t, "plus"),
 			wantMode: "subscription", wantAccess: chatgptToken(t, "plus", 1789000000), wantRefresh: "rt.REAL-SECRET",
 			wantIDToken: "id.tok.en", wantAccount: "acct-1", wantPlan: "plus", wantExpires: "2026-09-10T00:26:40Z", wantSupports: true,

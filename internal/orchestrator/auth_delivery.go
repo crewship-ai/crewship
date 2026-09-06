@@ -152,6 +152,14 @@ func fileLogin(req AgentRunRequest) (AuthDelivery, Credential, bool) {
 	if !d.FileDelivered() {
 		return d, Credential{}, false
 	}
+	// The routed model's API key wins over a concurrently assigned login.
+	// File delivery, billing and subscription attribution must all use this
+	// same decision; otherwise a metered run is recorded as flat-rate.
+	if req.CLIAdapter == "CODEX_CLI" {
+		if _, routed := resolveRoutedProvider(req, req.sidecarActive); routed {
+			return d, Credential{}, false
+		}
+	}
 	cred, ok := loginCredentialFor(req, d.Kind)
 	return d, cred, ok
 }
@@ -263,7 +271,7 @@ func removeLoginFile(
 ) error {
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "rm -f " + shellEscape(fileRel)},
+		Cmd:         []string{"sh", "-c", "rm -f " + shellJoin(fileRel)},
 		WorkingDir:  agentHomeDir(agentSlug),
 		User:        "1001:1001",
 	}

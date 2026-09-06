@@ -32,8 +32,8 @@
 // containers holding a copy of one login are ten clients refreshing
 // independently, and whichever refreshes last breaks the others. A container
 // that holds no real refresh token cannot rotate anything, so one login can
-// fan out to any number of agents. Hermes refuses to share OAuth state with
-// Codex CLI for precisely this reason; OpenClaw re-derives a per-agent cache.
+// fan out to any number of agents. Each agent receives a derivative cache
+// without the server's rotating OAuth state.
 // Refreshing centrally, from the sealed copy the server keeps, is a separate
 // increment (PRD §5.3).
 package codexauth
