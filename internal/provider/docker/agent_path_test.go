@@ -6,15 +6,22 @@ import (
 )
 
 // TestApplyAgentLoginPath_UsesCapturedPath: when a login PATH was captured at
-// provision, it is used verbatim — it already contains the feature bin dirs.
+// provision, it is the base of the result; the well-known dirs it lacks are
+// prepended (a login shell does not see mise's shims either).
 func TestApplyAgentLoginPath_UsesCapturedPath(t *testing.T) {
 	login := "/home/agent/.local/bin:/usr/local/py-utils/bin:/usr/local/bin:/usr/bin:/bin"
 	env := []string{"CREWSHIP_CREW_ID=c1"}
 
 	got := applyAgentLoginPath(env, login, map[string]string{"PATH": "/usr/local/bin:/usr/bin:/bin"})
 
-	if v := envValue(got, "PATH"); v != login {
-		t.Fatalf("PATH = %q, want captured login path %q", v, login)
+	// The captured PATH is the base, kept intact at the end; the well-known
+	// dirs it lacks (npm-global, mise shims) are put in front, the ones it
+	// already has (~/.local/bin, py-utils) are not duplicated.
+	if v := envValue(got, "PATH"); !strings.HasSuffix(v, login) {
+		t.Fatalf("PATH = %q, want it to end with the captured login path %q", v, login)
+	}
+	if v := envValue(got, "PATH"); v != "/usr/local/share/npm-global/bin:/opt/mise/data/shims:"+login {
+		t.Errorf("PATH = %q: missing well-known dirs must be prepended exactly once", v)
 	}
 	if !strings.Contains(envValue(got, "PATH"), "/usr/local/py-utils/bin") {
 		t.Error("resulting PATH must include /usr/local/py-utils/bin")
@@ -75,8 +82,8 @@ func TestApplyAgentLoginPath_ReplacesExistingPath(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected exactly one PATH entry, got %d: %v", n, got)
 	}
-	if envValue(got, "PATH") != login {
-		t.Errorf("PATH = %q, want %q", envValue(got, "PATH"), login)
+	if v := envValue(got, "PATH"); !strings.HasSuffix(v, login) || strings.Contains(v, "/old/bin") {
+		t.Errorf("PATH = %q, want the captured login path (with the well-known dirs in front) and no trace of /old/bin", v)
 	}
 	if envValue(got, "FOO") != "bar" {
 		t.Error("unrelated env entries must be preserved")

@@ -194,7 +194,19 @@ Parser lives in `internal/devcontainer/config.go`:
 }
 ```
 
-mise is installed as the `agent` user (UID 1001), so tools land under `/home/agent/.local/share/mise`. This survives cache rebuilds because the cache image freezes the post-mise state.
+mise tools are installed as the `agent` user (UID 1001) under `/opt/mise` — data and shims in `/opt/mise/data`, the global config in `/opt/mise/config/config.toml` — and the runtime container carries the matching `MISE_*` variables (cache and state, the two mise writes to on every call, point under `/home/agent`, the writable volume: the container's root filesystem is read-only). Not under `/home/agent` for the tools themselves: that directory is a per-crew named volume at runtime, and a volume hides whatever the image has at its mount point, so tools installed into the home inside the image were absent from the running container. `/opt/mise` is image-resident and survives cache rebuilds.
+
+### The agent's PATH
+
+The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. The runtime prepends the same directories even when a login PATH was captured at build time: a login shell does not see mise's shims either. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
+
+### Adapter CLIs are installed and verified
+
+An agent on `CLAUDE_CODE` needs `claude` in the image; `CODEX_CLI` needs `codex`, `GEMINI_CLI` `gemini`, `OPENCODE` `opencode`, `CURSOR_CLI` `cursor-agent`, `FACTORY_DROID` `droid`. Nobody has to remember that: every build reads the crew's agents and adds what is missing — a mise tool for each CLI no declared feature already provides (`claude`, `codex`, `gemini-cli`, `opencode`, `cursor-agent`), an install command for `droid`. Your own choices are kept: a pinned `claude` version in the mise config, or the `claude-code` feature, is used as-is.
+
+After the install steps the build runs `command -v` for every required binary as the agent user, with the agent's PATH. A binary that did not land fails the build with its name — `adapter CLI not installed in this image: claude` — instead of the first chat message failing with "No such file or directory".
+
+The verified binaries are recorded with the image. Creating an agent on an adapter the image was not verified for, or moving an agent to one, enqueues a rebuild; a message sent meanwhile waits for the build and is delivered when it is ready.
 
 ---
 

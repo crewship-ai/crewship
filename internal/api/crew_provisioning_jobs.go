@@ -980,10 +980,32 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	// Ensure the config hash reflects the resolved base image.
 	cfg.Image = baseImage
 
+	// The image must run every agent in the crew. Fold the adapter CLIs the
+	// crew's agents need into the build (a mise tool or an installer for
+	// each one no feature provides) and have the build verify they resolve
+	// before the image is called ready. See devcontainer/adapter_clis.go.
+	adapters, err := crewAgentAdapters(ctx, h.db, crewID)
+	if err != nil {
+		h.markJobFailed(job, workspaceID, fmt.Errorf("read crew agents: %w", err))
+		return
+	}
+	cliPlan, err := devcontainer.EnsureAdapterCLIs(cfg, miseJSON, adapters)
+	if err != nil {
+		h.markJobFailed(job, workspaceID, err)
+		return
+	}
+	miseJSON = cliPlan.MiseConfig
+	if len(cliPlan.AddedTools) > 0 || len(cliPlan.AddedCommands) > 0 {
+		h.logger.Info("adapter CLIs added to the build",
+			"crew_id", crewID, "adapters", adapters,
+			"mise_tools", cliPlan.AddedTools, "install_commands", len(cliPlan.AddedCommands))
+	}
+
 	h.logger.Info("starting provisioning",
 		"crew_id", crewID,
 		"base_image", baseImage,
 		"features", len(cfg.Features),
+		"adapter_binaries", cliPlan.Binaries,
 	)
 
 	plan := func(steps []string) {
@@ -1064,6 +1086,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		devcontainer.WithPlan(plan),
 		devcontainer.WithProgress(progress),
 		devcontainer.WithProvisionSink(provisionEventSink),
+		devcontainer.WithRequiredBinaries(cliPlan.Binaries),
 	)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, fmt.Errorf("provision: %w", err))
@@ -1261,6 +1284,7 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 		len(r.CapAdd) == 0 &&
 		len(r.SecurityOpt) == 0 &&
 		len(r.PostStartCommands) == 0 &&
+		len(r.AdapterBinaries) == 0 &&
 		r.LoginPath == ""
 }
 

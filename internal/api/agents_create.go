@@ -275,6 +275,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	WriteAuditLog(r.Context(), h.db, h.journal, "create", "AGENT", agentID, callerUserID, workspaceID, map[string]interface{}{
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
+	// The crew's image must be able to run this agent: rebuild it when it
+	// was not verified for the adapter's CLI (agents_adapter_rebuild.go).
+	if req.CrewID != nil && *req.CrewID != "" {
+		h.ensureCrewImageHasAdapter(r.Context(), *req.CrewID, workspaceID, req.CLIAdapter)
+	}
 
 	// CLI/UI-created agents require explicit credential assignment per
 	// CLAUDE.md policy ("Agents created via CLI/UI assign credentials

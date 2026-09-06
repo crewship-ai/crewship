@@ -102,6 +102,9 @@ const ProvisionPhase = "provision"
 const (
 	ProvStepStart           = "provision.start"
 	ProvStepResolveFeatures = "resolve_features"
+	// ProvStepVerifyBinaries is the post-install check that every adapter
+	// CLI the crew's agents need resolves for the agent user.
+	ProvStepVerifyBinaries  = "verify_binaries"
 	ProvStepImageBuildStart = "image_build_start"
 	// ProvStepImageResolved records the runtime image the container is about
 	// to be created from, together with the manifest digest it resolved to and
@@ -178,6 +181,19 @@ type provisionOpts struct {
 	onProgress  ProgressCallback
 	onPlan      PlanCallback
 	onProvision ProvisionSink
+	// requiredBinaries are the executables that must resolve for the agent
+	// user from a non-login shell once everything is installed — the CLIs of
+	// the crew's adapters (adapter_clis.go). Checked by verifyRequiredBinaries
+	// in both provisioning paths; a miss fails the build with the binary's
+	// name instead of surfacing as "No such file or directory" in a chat.
+	requiredBinaries []string
+}
+
+// WithRequiredBinaries names the executables the finished image must be able
+// to run as the agent user. Recorded on the result's Requirements so the API
+// can tell whether a crew's cached image covers a new agent's adapter.
+func WithRequiredBinaries(bins []string) ProvisionOption {
+	return func(o *provisionOpts) { o.requiredBinaries = append([]string(nil), bins...) }
 }
 
 // WithProvisionSink attaches a structured event sink to a Provision call. Every
@@ -305,6 +321,10 @@ type AggregatedRequirements struct {
 	// provisioned; the runtime then falls back to prepending the well-known
 	// devcontainer bin dirs. NOT part of configHash — a pure runtime value.
 	LoginPath string `json:"loginPath,omitempty"`
+	// AdapterBinaries are the adapter CLIs this image was verified to run
+	// (sorted). The agent handlers compare a new agent's adapter against it
+	// to decide whether the crew must be rebuilt.
+	AdapterBinaries []string `json:"adapterBinaries,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
@@ -328,6 +348,26 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 		logger:         logger,
 		digestResolver: dockerutil.NewDigestResolver(0, 0), // package defaults
 	}
+}
+
+// cacheHitRequirements recomputes the runtime requirements for an image that
+// is being reused, exactly as a fresh build would (feature metadata, the
+// agent tool env, the verified adapter CLIs, start hooks). Feature resolution
+// is served from the catalog cache; if it fails, the feature-declared parts
+// are missing and the log says so, but the parts this build knows without
+// the features are still returned.
+func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord) {
+	resolved, _, err := p.resolveFeatures(ctx, cfg)
+	if err != nil {
+		p.logger.Warn("cache hit: could not resolve features for the runtime requirements; feature-declared mounts and flags are absent",
+			"error", err)
+		resolved = nil
+	}
+	req := p.aggregateFeatureRequirements(resolved, cfg.ContainerEnv)
+	req.ContainerEnv = ensureAgentToolPath(req.ContainerEnv)
+	req.AdapterBinaries = SortedBinaries(o.requiredBinaries)
+	req.PostStartCommands = append(req.PostStartCommands, cfg.NormalizedPostStartCommands()...)
+	return req, featureRecords(resolved)
 }
 
 // SetImageBuilder overrides the image builder (tests inject a fake; callers can
@@ -422,7 +462,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return p.provisionByBuild(ctx, baseImage, cfg, miseConfig, o, runStart)
 	}
 
-	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg))
+	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := cacheImageTag(hash)
 
 	// 1. Check cache.
@@ -438,7 +478,13 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// Even a no-build provision is audited: cache_hit → ready.
 		emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
 		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
-		return &ProvisionResult{CachedImage: tag, ConfigHash: hash}, nil
+		// The requirements are part of the result even when the image is
+		// reused: the caller stores them as the crew's runtime contract, and
+		// an empty set here used to be written back as NULL — a cache hit
+		// silently dropped the privileged flag, the mounts, the env and the
+		// verified adapter CLIs of the build before it.
+		req, feats := p.cacheHitRequirements(ctx, cfg, o)
+		return &ProvisionResult{CachedImage: tag, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
@@ -590,9 +636,18 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return fail("post_create", err)
 	}
 
+	// 6c. Every adapter CLI the crew's agents need must resolve now, from the
+	// PATH the agent will actually get (tool dirs first, then the image's).
+	if err := p.verifyRequiredBinaries(ctx, containerID, o.requiredBinaries, p.installer.execInContainerAsUser); err != nil {
+		return fail(ProvStepVerifyBinaries, err)
+	}
+
 	// 7. Write containerEnv (aggregated from features + root-level) to
-	// /etc/environment. Root-level wins on key conflict.
+	// /etc/environment. Root-level wins on key conflict. The agent's own tool
+	// dirs (mise shims, ~/.local/bin) go first — see tool_path.go.
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
+	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
+	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)
 	// Append root-level postStartCommand hooks after feature hooks — user
 	// intent wins over feature defaults.
 	requirements.PostStartCommands = append(
@@ -622,8 +677,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	// 9. Commit the container as a cached image.
 	emit(commitStepLabel)
+	// The aggregated env goes into the image config too (`docker commit
+	// --change 'ENV …'`), not only into /etc/environment: a non-login exec
+	// never reads /etc/environment, and the image must be usable on its own.
 	_, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
+		Changes:   imageEnvChanges(requirements.ContainerEnv),
 	})
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))

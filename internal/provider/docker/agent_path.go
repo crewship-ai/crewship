@@ -11,10 +11,16 @@ import "strings"
 //   - /usr/local/py-utils/bin    — pipx venv shims (ansible, poetry, …)
 //   - /usr/local/share/npm-global/bin — global npm CLIs
 //   - /home/agent/.local/bin     — pip --user / agent-installed tools
+//   - /opt/mise/data/shims       — every mise-installed tool, including the
+//     adapter CLIs (claude, codex, gemini-cli, …); outside the home volume
+//     on purpose (internal/devcontainer/mise.go). Missing from this list
+//     until 2026-09-06: a wizard-built crew whose only `claude` came from
+//     mise answered every chat with "No such file or directory".
 var wellKnownDevcontainerBinDirs = []string{
 	"/usr/local/py-utils/bin",
 	"/usr/local/share/npm-global/bin",
 	"/home/agent/.local/bin",
+	"/opt/mise/data/shims",
 }
 
 // defaultAgentPath is the last-resort PATH used when neither a captured login
@@ -25,13 +31,15 @@ const defaultAgentPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbi
 // applyAgentLoginPath ensures the container's env carries a PATH that a
 // non-login `docker exec` can use to reach devcontainer-feature tools.
 //
-//   - loginPath set (captured at provision via `bash -lc`): used verbatim — it
-//     already reflects every /etc/profile.d contribution (py-utils, npm-global,
-//     mise shims, …).
-//   - loginPath empty (crew unprovisioned or capture failed): fall back to
-//     prepending wellKnownDevcontainerBinDirs to the best base PATH we have
-//     (an existing PATH already in env, else the image ENV PATH, else
-//     defaultAgentPath), skipping dirs already present.
+//   - loginPath set (captured at provision via `bash -lc`): the base — it
+//     reflects the /etc/profile.d contributions (py-utils, npm-global, …).
+//   - loginPath empty (crew unprovisioned or capture failed): the base is
+//     an existing PATH already in env, else the image ENV PATH, else
+//     defaultAgentPath.
+//
+// In both cases wellKnownDevcontainerBinDirs are prepended, skipping dirs
+// already present: a login shell does not see mise's shims either, so a
+// captured PATH is not proof that the agent's tools are reachable.
 //
 // The resolved value replaces any existing PATH entry in env (or is appended),
 // so subsequent execs that don't set their own PATH inherit it from the
@@ -44,10 +52,20 @@ func applyAgentLoginPath(env []string, loginPath string, imageEnv map[string]str
 	// stdcopy frame header (\x01\x00\x00…) still embedded. Stripping control
 	// bytes here means an already-stored corrupt value can't brick container
 	// start — a re-provision isn't required to recover.
-	desired := sanitizeEnvValue(strings.TrimSpace(loginPath))
-	if desired == "" {
-		desired = fallbackAgentPath(envValue(env, "PATH"), imageEnv["PATH"])
+	base := sanitizeEnvValue(strings.TrimSpace(loginPath))
+	if base == "" {
+		base = envValue(env, "PATH")
+		if strings.TrimSpace(base) == "" {
+			base = imageEnv["PATH"]
+		}
 	}
+	// A captured login PATH is the best base, not the whole answer: on
+	// 2026-09-06 a BuildKit-built crew captured the bare image PATH (mise
+	// puts nothing in /etc/profile.d), and using it verbatim threw away the
+	// mise shims the build had just put on the containerEnv PATH — every
+	// chat answered "claude: No such file or directory". The well-known
+	// dirs are therefore always in front, captured PATH or not.
+	desired := fallbackAgentPath(base, imageEnv["PATH"])
 	return replaceOrAppendEnv(env, "PATH", desired)
 }
 

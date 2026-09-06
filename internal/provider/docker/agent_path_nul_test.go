@@ -26,8 +26,10 @@ func TestApplyAgentLoginPath_StripsPersistedNul(t *testing.T) {
 	if strings.ContainsRune(pathVal, 0x00) {
 		t.Fatalf("PATH still contains a NUL byte: %q", pathVal)
 	}
-	if pathVal != clean {
-		t.Fatalf("PATH = %q, want %q", pathVal, clean)
+	// The sanitized captured PATH is the base (kept intact at the end); the
+	// well-known dirs it lacks are prepended, none of them with a NUL.
+	if !strings.HasSuffix(pathVal, clean) {
+		t.Fatalf("PATH = %q, want it to end with the sanitized login path %q", pathVal, clean)
 	}
 }
 

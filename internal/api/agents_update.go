@@ -358,6 +358,16 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteAuditLog(r.Context(), h.db, h.journal, "update", "AGENT", agentID, userID, workspaceID, changes)
+	// An adapter change, or a move into another crew, may land the agent on
+	// an image never verified for its CLI: rebuild (agents_adapter_rebuild.go).
+	if _, adapterChanged := body["cli_adapter"]; adapterChanged || body["crew_id"] != nil {
+		var crewID, adapter sql.NullString
+		if err := h.db.QueryRowContext(r.Context(),
+			"SELECT crew_id, cli_adapter FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+			agentID, workspaceID).Scan(&crewID, &adapter); err == nil && crewID.Valid && adapter.Valid {
+			h.ensureCrewImageHasAdapter(r.Context(), crewID.String, workspaceID, adapter.String)
+		}
+	}
 
 	// Notify scheduler of schedule changes
 	if h.scheduleUpdater != nil {

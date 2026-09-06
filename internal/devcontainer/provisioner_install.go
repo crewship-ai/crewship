@@ -340,6 +340,44 @@ func (p *Provisioner) installMise(ctx context.Context, containerID string, miseC
 
 // runPostCreateCommands executes postCreateCommand entries as the agent user.
 
+// verifyRequiredBinaries runs `command -v` for every required binary as the
+// agent user with the PATH the agent will get at runtime (the tool dirs of
+// tool_path.go in front of the shell's own). In the commit path this is a real
+// exec; in the build path the recorder turns it into a RUN layer, so a build
+// whose adapter CLI did not land stops right there. The failure names the
+// binary and where it looked — the line an operator needs, and the line the
+// chat used to hide behind "No such file or directory".
+func (p *Provisioner) verifyRequiredBinaries(ctx context.Context, containerID string, bins []string, exec ExecFunc) error {
+	return VerifyBinariesResolve(ctx, containerID, bins, exec)
+}
+
+// VerifyBinariesResolve is verifyRequiredBinaries without the receiver, shared
+// with the tests that drive the Dockerfile recorder directly.
+func VerifyBinariesResolve(ctx context.Context, containerID string, bins []string, exec ExecFunc) error {
+	if len(bins) == 0 {
+		return nil
+	}
+	quoted := make([]string, 0, len(bins))
+	for _, b := range bins {
+		quoted = append(quoted, shellQuote(b))
+	}
+	script := `export PATH="` + strings.Join(AgentToolPathDirs, ":") + `:$PATH"; ` +
+		`missing=""; for b in ` + strings.Join(quoted, " ") + `; do command -v "$b" >/dev/null 2>&1 || missing="$missing $b"; done; ` +
+		`[ -z "$missing" ] || { echo "crewship: adapter CLI not installed in this image:$missing (PATH=$PATH)" >&2; exit 1; }`
+	output, exitCode, err := exec(ctx, containerID,
+		[]string{"sh", "-c", script},
+		"1001:1001",
+		[]string{"HOME=/home/agent", "USER=agent"},
+	)
+	if err != nil {
+		return fmt.Errorf("verify adapter binaries %v: %w", bins, err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("adapter CLI missing from the image (%v): %s", bins, strings.TrimSpace(output))
+	}
+	return nil
+}
+
 func (p *Provisioner) runPostCreateCommands(ctx context.Context, containerID string, cfg *Config, exec ExecFunc) error {
 	cmds := cfg.NormalizedPostCreateCommands()
 	if len(cmds) == 0 {
