@@ -660,26 +660,68 @@ func (h *PipelineHandler) ListWorkspaceRuns(w http.ResponseWriter, r *http.Reque
 // now" with cancel buttons. Single-instance scope: a multi-replica
 // deployment would only see runs on the queried replica until we
 // add a leader-elected shared registry.
+//
+// IN-FLIGHT INCLUDES WAITING. This used to read the in-process registry and
+// nothing else, and a run that parks on an approval waitpoint RELEASES its
+// registry entry and its concurrency slot by design (executor.go: "Return
+// WAITING promptly so the caller — and the slot — is released"). So a run
+// that was very much in flight, and that resumed and completed the moment
+// somebody approved it, reported "No active runs."
+//
+// The two sources answer different halves and neither is redundant: the
+// registry knows what is executing on THIS replica right now, including a
+// cancel request that has not been persisted yet; the store knows every
+// queued/running/waiting row, including the parked ones nothing is holding.
+// RunStore.ListActive and the workspace feed's ?status=active already agree
+// on that definition (queued/running/waiting) — this endpoint was the
+// odd one out.
 func (h *PipelineHandler) ListActiveRuns(w http.ResponseWriter, r *http.Request) {
-	if h.runs == nil {
-		// Empty list when the registry isn't wired — the UI should
-		// degrade gracefully rather than show an error banner.
-		writeJSON(w, http.StatusOK, []map[string]any{})
-		return
-	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	out := h.runs.Active(workspaceID)
-	resp := make([]map[string]any, 0, len(out))
-	for _, info := range out {
-		resp = append(resp, map[string]any{
-			"run_id":           info.RunID,
-			"workspace_id":     info.WorkspaceID,
-			"pipeline_id":      info.PipelineID,
-			"pipeline_slug":    info.PipelineSlug,
-			"concurrency_key":  info.ConcurrencyKey,
-			"started_at":       info.StartedAt.UTC().Format(time.RFC3339Nano),
-			"cancel_requested": info.CancelRequested,
-		})
+	resp := make([]map[string]any, 0, 8)
+	seen := map[string]struct{}{}
+
+	if h.runs != nil {
+		for _, info := range h.runs.Active(workspaceID) {
+			seen[info.RunID] = struct{}{}
+			resp = append(resp, map[string]any{
+				"run_id":        info.RunID,
+				"workspace_id":  info.WorkspaceID,
+				"pipeline_id":   info.PipelineID,
+				"pipeline_slug": info.PipelineSlug,
+				// The registry holds executing runs; a persisted status is
+				// not part of its record, so this is the honest label for
+				// what it knows. The store rows below carry their real one.
+				"status":           string(pipeline.RunStatusRunning),
+				"concurrency_key":  info.ConcurrencyKey,
+				"started_at":       info.StartedAt.UTC().Format(time.RFC3339Nano),
+				"cancel_requested": info.CancelRequested,
+			})
+		}
+	}
+
+	// Best-effort: a store read that fails must not empty a list the registry
+	// already answered. The registry half is the one the cancel buttons need.
+	if h.runStore != nil {
+		rows, err := h.runStore.ListActive(r.Context(), workspaceID)
+		if err != nil {
+			h.logger.Warn("list active runs: store read failed", "error", err)
+		} else {
+			for _, rec := range rows {
+				if _, dup := seen[rec.ID]; dup {
+					continue
+				}
+				resp = append(resp, map[string]any{
+					"run_id":           rec.ID,
+					"workspace_id":     rec.WorkspaceID,
+					"pipeline_id":      rec.PipelineID,
+					"pipeline_slug":    rec.PipelineSlug,
+					"status":           string(rec.Status),
+					"concurrency_key":  rec.ConcurrencyKey,
+					"started_at":       rec.StartedAt.UTC().Format(time.RFC3339Nano),
+					"cancel_requested": false,
+				})
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

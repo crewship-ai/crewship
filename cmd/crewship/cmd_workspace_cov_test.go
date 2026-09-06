@@ -482,13 +482,13 @@ func TestSendWorkspaceInvitation(t *testing.T) {
 	// Auth/workspace guards first.
 	saveCLIState(t)
 	cliCfg = &cli.CLIConfig{}
-	if err := sendWorkspaceInvitation("a@b.c", ""); err == nil || !strings.Contains(err.Error(), "not logged in") {
+	if err := sendWorkspaceInvitation(workspaceInviteCreateCmd, "a@b.c", ""); err == nil || !strings.Contains(err.Error(), "not logged in") {
 		t.Errorf("no auth: got %v", err)
 	}
 	cliCfg = &cli.CLIConfig{Token: "tok"}
 	flagWorkspace = ""
 	t.Setenv("CREWSHIP_WORKSPACE", "")
-	if err := sendWorkspaceInvitation("a@b.c", ""); err == nil || !strings.Contains(err.Error(), "workspace") {
+	if err := sendWorkspaceInvitation(workspaceInviteCreateCmd, "a@b.c", ""); err == nil || !strings.Contains(err.Error(), "workspace") {
 		t.Errorf("no workspace: got %v", err)
 	}
 
@@ -500,7 +500,7 @@ func TestSendWorkspaceInvitation(t *testing.T) {
 	setStubCLI(t, stub.URL())
 
 	out := captureStdoutCovCli2(t, func() {
-		if err := sendWorkspaceInvitation("a@b.c", "ADMIN"); err != nil {
+		if err := sendWorkspaceInvitation(workspaceInviteCreateCmd, "a@b.c", "ADMIN"); err != nil {
 			t.Errorf("send: %v", err)
 		}
 	})
@@ -525,7 +525,7 @@ func TestSendWorkspaceInvitation(t *testing.T) {
 
 	// Default role + API error path.
 	stub.OnPost("/api/v1/workspaces/"+covWS+"/invitations", clitest.ErrorResponse(403, "viewers cannot invite"))
-	if err := sendWorkspaceInvitation("b@b.c", ""); err == nil || !strings.Contains(err.Error(), "viewers cannot invite") {
+	if err := sendWorkspaceInvitation(workspaceInviteCreateCmd, "b@b.c", ""); err == nil || !strings.Contains(err.Error(), "viewers cannot invite") {
 		t.Errorf("API error: got %v", err)
 	}
 }
@@ -748,7 +748,7 @@ func TestWorkspaceCmds_GuardsAndTransport(t *testing.T) {
 			return workspaceMemberRemoveCmd.RunE(c, []string{"u1"})
 		}},
 		{"invite list", true, func() error { return workspaceInviteListCmd.RunE(workspaceInviteListCmd, nil) }},
-		{"invite send", true, func() error { return sendWorkspaceInvitation("a@b.c", "") }},
+		{"invite send", true, func() error { return sendWorkspaceInvitation(workspaceInviteCreateCmd, "a@b.c", "") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name+"/no auth", func(t *testing.T) {
@@ -798,7 +798,7 @@ func TestWorkspaceCmds_MalformedJSONResponses(t *testing.T) {
 		}},
 		{"member list", func() error { return workspaceMemberListCmd.RunE(workspaceMemberListCmd, nil) }},
 		{"invite list", func() error { return workspaceInviteListCmd.RunE(workspaceInviteListCmd, nil) }},
-		{"invite send", func() error { return sendWorkspaceInvitation("a@b.c", "") }},
+		{"invite send", func() error { return sendWorkspaceInvitation(workspaceInviteCreateCmd, "a@b.c", "") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

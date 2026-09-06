@@ -78,7 +78,7 @@ var paymasterByCrewCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
 		}
-		return printSpendTable("Crew", body.Rows)
+		return printSpendTable("Crew", body.Rows, fetchWorkspaceSlugs(client))
 	},
 }
 
@@ -116,7 +116,7 @@ var paymasterByAgentCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
 		}
-		return printSpendTable("Agent", body.Rows)
+		return printSpendTable("Agent", body.Rows, fetchWorkspaceSlugs(client))
 	},
 }
 
@@ -164,8 +164,9 @@ var paymasterTopCmd = &cobra.Command{
 		}
 		f := newFormatter()
 		return f.AutoHuman(body.Rows, func() {
+			slugs := fetchWorkspaceSlugs(client)
 			for i, row := range body.Rows {
-				scope := fmt.Sprintf("%s/%s", row.ScopeKind, row.ScopeID)
+				scope := scopeLabel(topSpenderRow{ScopeKind: row.ScopeKind, ScopeID: row.ScopeID}, slugs)
 				fmt.Printf("%2d. %s%-40s%s  %s$%8.4f%s  %d calls\n",
 					i+1, cli.Bold, truncateString(scope, 40), cli.Reset,
 					cli.Yellow, row.CostUSD, cli.Reset, row.CallCount)
@@ -180,7 +181,12 @@ var paymasterTopCmd = &cobra.Command{
 // cheaper than a generic interface. Unsupported row types fall through
 // to an error so call sites see a loud failure instead of silent
 // empty output.
-func printSpendTable(scopeLabel string, rows any) error {
+//
+// slugs resolves the id columns to slugs for the HUMAN table only; the
+// machine formats keep the ids the ledger is keyed by. `cost` fixed the same
+// defect in its own two sections, and these rollups are the same rows — a
+// half-fixed pair is how two surfaces drift apart again.
+func printSpendTable(scopeLabel string, rows any, slugs workspaceSlugs) error {
 	f := newFormatter()
 	// humanErr carries the unsupported-type failure out of the human
 	// closure — AutoHuman's human func can't return, so latch it and
@@ -195,12 +201,12 @@ func printSpendTable(scopeLabel string, rows any) error {
 		case []crewSpendRow:
 			for _, r := range typed {
 				fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-					truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
+					truncateString(slugs.crew(r.CrewID), 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
 			}
 		case []agentSpendRow:
 			for _, r := range typed {
 				fmt.Printf("%-30s  %s$%8.4f%s  %6d  %12d\n",
-					truncateString(r.AgentID, 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
+					truncateString(slugs.agent(r.AgentID), 30), cli.Yellow, r.CostUSD, cli.Reset, r.CallCount, r.InTokens+r.OutTokens)
 			}
 		default:
 			humanErr = fmt.Errorf("printSpendTable: unsupported rows type %T", rows)

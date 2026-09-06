@@ -489,16 +489,34 @@ external integrations are doing real work.`,
 
 var metricsCmd = &cobra.Command{
 	Use:   "metrics",
-	Short: "Mission performance metrics + timeseries",
+	Short: "MISSION performance metrics + timeseries (not workspace-wide spend — see 'crewship cost')",
 	Long: `Fetch mission metrics (success rate, p50/p99 duration) or a metric
 timeseries. Defaults to mission metrics; pass --series <name> for a
 timeseries window.
+
+THESE ARE MISSION METRICS, AND THE MONEY FIELDS ARE TOO.
+
+total_cost_24h and total_tokens_24h sum MISSION TASKS — the work recorded
+against a mission in the last 24 hours — and nothing else. A workspace that
+spends money outside a mission (chats, ad-hoc agent runs, routine runs)
+reports 0 here while 'crewship cost' shows real spend. Both are right: they
+answer different questions, and this one is scoped to missions by design.
+
+  crewship metrics   → what MISSIONS did: counts, durations, and the token
+                       and cost totals of their tasks
+  crewship cost      → what the WORKSPACE spent: the cost_ledger, every
+                       LLM call, whatever produced it
+  crewship paymaster → the same ledger rolled up per crew / agent / mission
+
+So a 0 here next to a non-zero 'cost' is not a broken query — it means no
+mission task was recorded in the window.
 
 Examples:
   crewship metrics                       # mission summary
   crewship metrics --series active_runs  # timeseries
   crewship metrics --series active_runs --range 24h
-  crewship metrics --format json | jq`,
+  crewship metrics --format json | jq
+  crewship cost                          # workspace-wide spend instead`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
 		if err != nil {

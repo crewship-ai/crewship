@@ -651,20 +651,30 @@ Example:
 			return err
 		}
 
-		if printOnly {
-			fmt.Println(result.Content)
-			return nil
-		}
-
-		cli.PrintSuccess(fmt.Sprintf("Generated skill: %s (%s)", result.Slug, result.SkillID))
-		if result.Quality != "" {
-			fmt.Fprintf(os.Stderr, "Description quality: %s\n", result.Quality)
-		}
-		if result.ScanStatus == "FLAGGED" {
-			fmt.Fprintf(os.Stderr, "Scan status: FLAGGED — %s\n", result.ScanReason)
-			fmt.Fprintf(os.Stderr, "Review the skill body before assigning to an agent.\n")
-		}
-		return nil
+		// The scan verdict is the reason this result has to be machine-
+		// readable: a FLAGGED skill is created anyway and the caller is
+		// expected to look before assigning it. On stderr in English, an
+		// agent pipeline never sees it.
+		//
+		// --print asks for the raw SKILL.md instead of the summary, and that
+		// is a HUMAN rendering choice: the generated content is already a
+		// field of the machine document, so `-f json --print` emits the
+		// document (content included) rather than dumping markdown in front
+		// of it and breaking the parse.
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			if printOnly {
+				fmt.Println(result.Content)
+				return
+			}
+			cli.PrintSuccess(fmt.Sprintf("Generated skill: %s (%s)", result.Slug, result.SkillID))
+			if result.Quality != "" {
+				fmt.Fprintf(os.Stderr, "Description quality: %s\n", result.Quality)
+			}
+			if result.ScanStatus == "FLAGGED" {
+				fmt.Fprintf(os.Stderr, "Scan status: FLAGGED — %s\n", result.ScanReason)
+				fmt.Fprintf(os.Stderr, "Review the skill body before assigning to an agent.\n")
+			}
+		})
 	},
 }
 

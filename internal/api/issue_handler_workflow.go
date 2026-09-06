@@ -158,7 +158,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		"status": toStatus, "from": fromStatus, "to": toStatus,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
+	// The status the transition produced (DONE / TODO), not a bare "ok": a
+	// pipeline branching on `.status` must not need a second `issue get`.
+	writeJSON(w, http.StatusOK, map[string]string{"status": toStatus, "action": req.Action, "identifier": ident})
 }
 
 // ── ListActivity — GET /api/v1/crews/{crewId}/issues/{identifier}/activity
@@ -174,17 +176,36 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ordered by seq, not created_at.
+	//
+	// created_at is a second-granularity string, and the rows this endpoint
+	// reads are written in bursts — a status change stamps its own row plus
+	// the ones its side effects emit, all inside the same second. Ties then
+	// broke arbitrarily, so the ORDER BY was decorative: an issue's `created`
+	// row could surface AFTER three status_changed rows written later. Two
+	// calls could disagree with each other.
+	//
+	// mission_activity.seq is the monotonic per-mission cursor B11 added, and
+	// it is what GET .../events already orders by. Using it here makes the
+	// two endpoints agree — they read the same table, and a caller comparing
+	// them should not have to reconcile two different histories.
+	//
+	// The inner query keeps taking the LAST 50 rows (seq DESC) so a busy
+	// issue still shows its recent history rather than its first hour; the
+	// outer one presents them oldest-first, matching /events.
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT a.id, a.mission_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
-			CASE
-				WHEN a.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = a.actor_id)
-				WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
-				ELSE 'System'
-			END AS actor_name
-		FROM mission_activity a
-		WHERE a.mission_id = ?
-		ORDER BY a.created_at DESC
-		LIMIT 50`, missionID)
+		SELECT id, mission_id, actor_type, actor_id, action, details, created_at, actor_name FROM (
+			SELECT a.id, a.mission_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at, a.seq,
+				CASE
+					WHEN a.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = a.actor_id)
+					WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
+					ELSE 'System'
+				END AS actor_name
+			FROM mission_activity a
+			WHERE a.mission_id = ?
+			ORDER BY a.seq DESC
+			LIMIT 50
+		) ORDER BY seq ASC`, missionID)
 	if err != nil {
 		internalError(w, r, h.logger, "list activity", err)
 		return

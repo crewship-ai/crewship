@@ -635,7 +635,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			}
 		}
 		if !valid {
-			writeProblem(w, r, http.StatusBadRequest, "Invalid status transition from "+currentStatus+" to "+req.Status)
+			writeProblem(w, r, http.StatusBadRequest, issueTransitionRefusal(currentStatus, req.Status))
 			return
 		}
 		ub.Set("status", req.Status)
