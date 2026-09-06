@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider-account notification privacy** (#2428) — refresh-failure alerts are addressed to current workspace administrators, not personally to a creator who may later be demoted. An upgrade backfill also restricts previously stored alerts, without deleting their history or changing unrelated inbox messages.
+
 - **Provider-login API and CLI** (#2428) — normalized account storage, server-driven device sign-in, centralized refresh with stale-write protection, provider-specific account status, and usage attribution. `credential login`, status and refresh commands use the same server contract; bounded stdin imports accept complete auth files without truncation.
 
 - ⚠️ **Behaviour change: provider account administration** (#2428) — only workspace owners/admins may administer provider accounts, including legacy provider API keys and CLI logins. Ordinary-secret capabilities remain separate. Agent credential/binding reads omit inaccessible metadata after delivery resolution; lower roles see only a provider brand in payer summaries. Imported Gemini refresh requires matching server-side OAuth client configuration and reports configuration-required status when unavailable.

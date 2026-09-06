@@ -13,6 +13,14 @@ API-klíčová cesta zůstávají dostupné; import sám nezaručuje obnovován�
 Žádné upstream klientské hodnoty se nedodávají ani automaticky nestahují.
 Kontext protokolu: [Google OAuth pro instalované aplikace](https://developers.google.com/identity/protocols/oauth2/native-app#offline).
 
+## Doplnění RBAC: upozornění v inboxu (2026-09-06)
+
+Správa provider účtů i jejich metadata jsou pouze pro OWNER/ADMIN. Upozornění
+na neobnovitelné přihlášení proto cílí na roli ADMIN (včetně OWNER), nikoli
+osobně na původního zakladatele: osobní cíl by zpřístupnil účet i po snížení
+jeho role. Migrace upravuje také dříve uložená systémová upozornění těchto
+přihlášení, včetně historie; ostatní zprávy ani jejich stav nemění.
+
 **Status:** analýza k odsouhlasení · **Datum:** 2026-09-06
 **Navazuje na:** `CREDENTIALS-VAULT.md` (typy, mount), `PRD-CREDENTIALS-V2-2026.md`
 (P2 fanout, P3 bindings), `PRD-MODEL-SCOPED-CREDENTIALS-2026.md` (model policy na

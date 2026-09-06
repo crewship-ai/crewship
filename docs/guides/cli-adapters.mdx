@@ -90,6 +90,13 @@ The default is `medium` because the API normalises an empty `ToolProfile` to `CO
 
 ## OpenCode (`OPENCODE`)
 
+Crewship renders the run's API-key grants into
+`~/.local/share/opencode/auth.json` (mode `0600`) and pins `XDG_DATA_HOME` to
+the agent's own home. The file is replaced on each run, so unassigned keys do
+not survive there. For providers routed through the sidecar it contains a
+dummy, not the real key. Subscription tokens are not converted into API keys.
+Revocation removes the file; the next run rebuilds it from remaining grants.
+
 `opencode run --format json` is OpenCode's non-interactive mode. Output is JSONL — one flat event envelope per line. The adapter maps them as follows:
 
 - `text` / `reasoning` events carry the part's **accumulated** text so far (not deltas); the parser emits only the new suffix per part, so chat output never double-appends.
@@ -290,7 +297,30 @@ Crewship always passes a turn cap to Claude Code (`--max-turns`): 50 for interac
 The orchestrator stamps two environment variables on the **container env** (visible to every process running inside that crew container — both the agent CLI and the sidecar process). The sidecar reads them once at startup and tags every `POST /api/v1/internal/cost/record` it sends to the server:
 
 - `CREWSHIP_BILLING_MODE` — `metered` for API-key credentials, `flat_rate` for subscription credentials (Claude Max, ChatGPT Plus, Cursor, Copilot).
-- `CREWSHIP_SUBSCRIPTION_PLAN` — display label, currently `"Anthropic Max"` for the OAuth Claude Code path. Only set when `CREWSHIP_BILLING_MODE=flat_rate`.
+- `CREWSHIP_SUBSCRIPTION_PLAN` — display label: `"Anthropic Max"` for the OAuth Claude Code path, the plan read from the token for a ChatGPT login (`"ChatGPT Plus"`), `"Google AI Pro"` / `"Google AI Ultra"` / `"Google AI"` for a Google login. Only set when `CREWSHIP_BILLING_MODE=flat_rate`.
+
+## How a login reaches each CLI
+
+Every adapter declares where its binary reads the account that pays for the
+model — an environment variable, a file under the agent's HOME, or both
+(`AuthDelivery` in `internal/orchestrator/auth_delivery.go`). The delivery
+code reads the declaration; nothing switches on the adapter name.
+
+| Adapter | Environment variable | File under HOME | Subscription login |
+|---|---|---|---|
+| `CLAUDE_CODE` | `CLAUDE_CODE_OAUTH_TOKEN` | — | Claude setup-token (`AI_CLI_TOKEN` · `ANTHROPIC`) |
+| `CODEX_CLI` | — (API key goes through the sidecar route) | `.codex/auth.json` | ChatGPT `auth.json` (`AI_CLI_TOKEN` · `OPENAI`) |
+| `GEMINI_CLI` | `GEMINI_API_KEY` (API key) | `.gemini/oauth_creds.json` | Google `oauth_creds.json` (`AI_CLI_TOKEN` · `GOOGLE`) |
+| `CURSOR_CLI` | `CURSOR_API_KEY` | — | — |
+| `FACTORY_DROID` | `FACTORY_API_KEY` | — | — |
+| `OPENCODE` | provider env vars | — | — |
+
+A file is rendered — never copied — with a **placeholder refresh token**, so
+no container can rotate (and thereby invalidate) a login shared with other
+containers. It is written 0600 before the CLI starts, removed at the next run
+start when the login is no longer assigned, removed from running containers on
+revoke, and withheld from the Files API. See [Codex CLI](/guides/cli/codex#auth)
+and [Gemini CLI](/guides/cli/gemini#auth) for what each file holds.
 
 The agent CLI process technically inherits the same env (containers don't isolate env vars between sibling exec sessions), but the agent has no reason to read them — the variables are interpreted by the sidecar, which is the one code path that knows what to do with billing mode.
 

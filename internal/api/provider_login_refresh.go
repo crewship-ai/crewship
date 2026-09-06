@@ -17,7 +17,7 @@ package api
 //     refreshes at < 48 h so a 10-day token never expires mid-run.
 //   - backoff: 5 min after a failure, 1 min pending. After MaxFailures
 //     consecutive failures — or one the provider calls permanent — the login
-//     is needs_relogin, leaves the due scan, and the owner is told through
+//     is needs_relogin, leaves the due scan, and admins are told through
 //     the inbox. The credential row stays ACTIVE and assigned: the verdict
 //     is on the login's refresh state, and a re-import clears it.
 //   - after a success the file is re-rendered into every running container
@@ -256,16 +256,16 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	defer cancel()
 	now := r.now()
 
-	var provider, createdBy, wsID, name string
+	var provider, wsID, name string
 	var refreshEnc sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-		SELECT c.provider, COALESCE(c.created_by,''), c.workspace_id, c.name,
+		SELECT c.provider, c.workspace_id, c.name,
 		       (SELECT encrypted_value FROM credential_fields f WHERE f.credential_id = c.id AND f.key = ?)
 		FROM credentials c
 		WHERE c.id = ? AND c.type = ? AND c.deleted_at IS NULL
 		  AND EXISTS (SELECT 1 FROM credential_fields m WHERE m.credential_id = c.id AND m.key = ? AND m.value = ?)`,
 		providerlogin.PartRefreshToken, credID, CredTypeProviderLogin, providerlogin.PartMode, providerlogin.ModeSubscription).
-		Scan(&provider, &createdBy, &wsID, &name, &refreshEnc)
+		Scan(&provider, &wsID, &name, &refreshEnc)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!refreshEnc.Valid || refreshEnc.String == "")) {
 		return "", ErrRefreshUnsupported
 	}
@@ -338,7 +338,7 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	}
 	result, rerr := tr.Refresh(ctx, refreshToken)
 	if rerr != nil {
-		r.recordFailure(ctx, credID, wsID, name, createdBy, refreshEnc.String, rerr, now)
+		r.recordFailure(ctx, credID, wsID, name, refreshEnc.String, rerr, now)
 		release()
 		return "", rerr
 	}
@@ -451,8 +451,8 @@ func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID, expec
 
 // recordFailure bumps the failure count, sets the backoff, and after
 // MaxFailures — or a permanent error — marks the login needs_relogin and
-// tells the owner.
-func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID, name, ownerID, expectedRefreshEnc string, rerr error, now time.Time) {
+// tells the workspace administrators.
+func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID, name, expectedRefreshEnc string, rerr error, now time.Time) {
 	msg := rerr.Error()
 	if len(msg) > 500 {
 		msg = msg[:500]
@@ -486,10 +486,13 @@ func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID
 	}
 	r.logger.Warn("provider login needs a re-login", "credential_id", credID, "failures", failures, "error", msg)
 	item := inbox.Item{
-		WorkspaceID:    wsID,
-		Kind:           inbox.KindMessage,
-		SourceID:       "provider-login-relogin:" + credID,
-		TargetUserID:   ownerID,
+		WorkspaceID: wsID,
+		Kind:        inbox.KindMessage,
+		SourceID:    "provider-login-relogin:" + credID,
+		// Role-only targeting keeps the persisted message admin-only even
+		// after its creator is demoted. A personal target bypasses role
+		// restrictions in the inbox's OR-based audience predicate.
+		TargetRole:     "ADMIN",
 		Title:          "Provider login \"" + name + "\" needs a re-login",
 		BodyMD:         "Crewship could not renew the access token of **" + name + "** (" + msg + "). Agents paying with this login will stop authenticating when the current token expires. Re-import the login under Credentials → Providers.",
 		SenderType:     "system",
@@ -498,11 +501,8 @@ func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID
 		AttentionClass: inbox.AttentionRepair,
 		Payload:        map[string]interface{}{"credential_id": credID, "action": "relogin"},
 	}
-	if ownerID == "" {
-		item.TargetRole = "MANAGER"
-	}
 	if err := inbox.Upsert(ctx, r.db, r.logger, item); err != nil {
-		r.logger.Warn("provider login: notify owner", "credential_id", credID, "error", err)
+		r.logger.Warn("provider login: notify administrators", "credential_id", credID, "error", err)
 	}
 }
 
