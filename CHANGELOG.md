@@ -14,6 +14,30 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.
 - **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
 
+### Fixed
+
+- **A routine `script` step ran against a sidecar nobody had started.** Every
+  script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
+  crew egress allowlist is enforced — but crewship-sidecar was only ever
+  started by the *agent* run path, which needs an agent. So on a crew whose
+  container had not yet served an agent run, every script step that touched the
+  network died on `connect to 127.0.0.1 port 9119: Connection refused`. #1473
+  gave script steps the proxy (the security half) and left the liveness half
+  open. It was deterministic on a fresh install, and it hit the demo first: the
+  `ci-nightly-triage` pack runs its `script` probe *before* its `agent_run`, so
+  a new workspace's very first nightly probe failed, and the probe's
+  fail-loud-on-error rule (correct in itself) raised "Nightly CI — something to
+  handle" about the platform's own bug — the exact inverse of the pack's
+  "costs nothing on a quiet night" claim. The crew-agnostic half of
+  `ensureSidecar` is now `settleSidecar`, with `EnsureCrewSidecar` as a second
+  door onto the same check/reuse/restart sequence and the same #1220 lifecycle
+  lock, and `RunScript` calls it before exec. A crew-started sidecar carries the
+  full network policy and *no* credentials — a script step authenticates
+  through its own `script.env` — so it is stamped `crew-only-no-credentials`
+  and an agent run replaces it unconditionally rather than inheriting a sidecar
+  that would inject nothing into its model traffic. The reverse never happens:
+  a healthy agent-started sidecar is reused, never downgraded.
+
 <!--
   Backfill (#2086). The twenty-four entries between this marker and the next
   one chronicle eighteen PRs that merged with no changelog trace anywhere —
