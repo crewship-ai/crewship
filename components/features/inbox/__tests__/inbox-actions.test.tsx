@@ -161,7 +161,8 @@ describe("dismiss and archive", () => {
     render(<InboxList />)
     open("Atlas replied")
 
-    fireEvent.click(screen.getByRole("button", { name: /^Archive$/ }))
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Archive$/ }))
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith("msg", "resolved", "archived"))
   })
@@ -170,7 +171,8 @@ describe("dismiss and archive", () => {
     render(<InboxList />)
     open("Atlas replied")
 
-    fireEvent.click(screen.getByRole("button", { name: /Mark unread/ }))
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    fireEvent.click(screen.getByRole("menuitem", { name: /Mark unread/ }))
 
     await waitFor(() => expect(patch).toHaveBeenCalledWith("msg", "unread"))
   })
@@ -183,7 +185,8 @@ describe("dismiss and archive", () => {
     // PATCH 409s on anything but "read", so an Archive button could only ever
     // fail. The server says so on the detail read via source_missing, which is
     // absent here.
-    expect(screen.queryByRole("button", { name: /^Archive$/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    expect(screen.queryByRole("menuitem", { name: /^Archive$/ })).not.toBeInTheDocument()
   })
 })
 

@@ -131,7 +131,7 @@ describe("the popover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Open inbox/ }))
 
-    expect(push).toHaveBeenCalledWith("/inbox-v2")
+    expect(push).toHaveBeenCalledWith("/inbox")
     // AnimatePresence keeps the node mounted through its exit transition.
     await waitFor(() => expect(screen.queryByTestId("bell-popover")).not.toBeInTheDocument())
   })
@@ -142,9 +142,9 @@ describe("the popover", () => {
 
     fireEvent.click(screen.getByTestId("bell-row-msg"))
 
-    // Deep-link, not just "/inbox-v2": acting on what the popover showed must not
+    // Deep-link, not just "/inbox": acting on what the popover showed must not
     // start with finding it again.
-    expect(push).toHaveBeenCalledWith("/inbox-v2?item=msg")
+    expect(push).toHaveBeenCalledWith("/inbox?item=msg")
   })
 
   it("closes when the trigger is clicked again", async () => {

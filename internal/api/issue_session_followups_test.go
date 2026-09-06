@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -329,4 +330,29 @@ func onlyNewRunForSession(t *testing.T, f *mentionFixture, sessionID, excludeID 
 		t.Fatalf("new runs for session %s = %d (%v), want exactly 1", sessionID, len(ids), ids)
 	}
 	return ids[0]
+}
+
+// Concurrent completion callbacks must not select the same pending batch,
+// even when the dispatched run immediately fails in the fixture executor.
+func TestDispatchQueuedFollowUps_ConcurrentCallbacksDispatchOnce(t *testing.T) {
+	f := setupMentionFixture(t)
+	ctx := context.Background()
+	if err := ensureMissionChat(ctx, f.db, f.missionID, f.wsID, f.target, "Test issue"); err != nil {
+		t.Fatal(err)
+	}
+	seedFollowUpFixture(t, f, "sess_concurrent", "asg_concurrent_winner", "COMPLETED", 2)
+	start := make(chan struct{})
+	var callers sync.WaitGroup
+	for range 20 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			<-start
+			f.assign.dispatchQueuedFollowUpsForSession(ctx, "asg_concurrent_winner", f.wsID)
+		}()
+	}
+	close(start)
+	callers.Wait()
+	f.assign.WaitDispatches()
+	onlyNewRunForSession(t, f, "sess_concurrent", "asg_concurrent_winner")
 }

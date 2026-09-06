@@ -20,8 +20,8 @@ import type { InboxAgentRef, InboxCrewRef, InboxLookup } from "@/components/feat
  * missing would be worse than the ids it replaces.
  */
 export function useInboxLookup(workspaceId: string | null | undefined): InboxLookup {
-  const [crews, setCrews] = useState<InboxCrewRef[] | null>(null)
-  const [agents, setAgents] = useState<InboxAgentRef[] | null>(null)
+  const [crews, setCrews] = useState<{ workspaceId: string; rows: InboxCrewRef[] } | null>(null)
+  const [agents, setAgents] = useState<{ workspaceId: string; rows: InboxAgentRef[] } | null>(null)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -29,21 +29,21 @@ export function useInboxLookup(workspaceId: string | null | undefined): InboxLoo
     const ws = encodeURIComponent(workspaceId)
     apiFetch(`/api/v1/crews?workspace_id=${ws}&limit=500`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((rows: { id: string; name: string; slug: string; color?: string | null }[]) => {
+      .then((rows: { id: string; name: string; slug: string; color?: string | null; icon?: string | null }[]) => {
         if (cancelled) return
-        setCrews((Array.isArray(rows) ? rows : []).map((c) => ({ id: c.id, name: c.name, slug: c.slug, color: c.color ?? null })))
+        setCrews({ workspaceId, rows: (Array.isArray(rows) ? rows : []).map((c) => ({ id: c.id, name: c.name, slug: c.slug, color: c.color ?? null, icon: c.icon ?? null })) })
       })
       .catch(() => {
-        if (!cancelled) setCrews([])
+        if (!cancelled) setCrews({ workspaceId, rows: [] })
       })
     apiFetch(`/api/v1/agents?workspace_id=${ws}&limit=500`)
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: InboxAgentRef[]) => {
         if (cancelled) return
-        setAgents(Array.isArray(rows) ? rows : [])
+        setAgents({ workspaceId, rows: Array.isArray(rows) ? rows : [] })
       })
       .catch(() => {
-        if (!cancelled) setAgents([])
+        if (!cancelled) setAgents({ workspaceId, rows: [] })
       })
     return () => {
       cancelled = true
@@ -51,9 +51,9 @@ export function useInboxLookup(workspaceId: string | null | undefined): InboxLoo
   }, [workspaceId])
 
   return useMemo(() => ({
-    crewById: new Map((crews ?? []).map((c) => [c.id, c])),
-    agentBySlug: new Map((agents ?? []).map((a) => [a.slug, a])),
-    agentById: new Map((agents ?? []).map((a) => [a.id, a])),
-    ready: crews !== null && agents !== null,
-  }), [crews, agents])
+    crewById: new Map((crews && crews.workspaceId === workspaceId ? crews.rows : []).map((c) => [c.id, c])),
+    agentBySlug: new Map((agents && agents.workspaceId === workspaceId ? agents.rows : []).map((a) => [a.slug, a])),
+    agentById: new Map((agents && agents.workspaceId === workspaceId ? agents.rows : []).map((a) => [a.id, a])),
+    ready: Boolean(workspaceId) && crews?.workspaceId === workspaceId && agents?.workspaceId === workspaceId,
+  }), [crews, agents, workspaceId])
 }

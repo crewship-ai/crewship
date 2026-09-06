@@ -29,7 +29,7 @@ describe("deriveCrewNeeds", () => {
     expect(rows[0].action).toEqual({ kind: "link", label: "Inspect", href: "/crews?agent=sam" })
     expect(rows[3].action).toEqual({ kind: "install", label: "Install gh", feature: "ghcr.io/devcontainers/features/gh:1", featureId: "gh", tool: "gh" })
     expect(rows[4].action).toEqual({ kind: "link", label: "Connect", href: "/integrations?tab=tools&section=crew-tools&server=i-linear" })
-    expect(rows[5].action).toEqual({ kind: "link", label: "Review", href: "/inbox-v2?agent=alex" })
+    expect(rows[5].action).toEqual({ kind: "link", label: "Review", href: "/inbox?agent=alex" })
   })
 
   it("folds credentials that wait on the same tool into one row", () => {

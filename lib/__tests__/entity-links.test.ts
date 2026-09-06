@@ -23,8 +23,8 @@ describe("entityHref", () => {
   })
 
   it("opens the inbox filtered to one agent — the decision banner's way out", () => {
-    expect(entityHref({ kind: "inbox", agentSlug: "alex" })).toBe("/inbox-v2?agent=alex")
-    expect(entityHref({ kind: "inbox" })).toBe("/inbox-v2")
+    expect(entityHref({ kind: "inbox", agentSlug: "alex" })).toBe("/inbox?agent=alex")
+    expect(entityHref({ kind: "inbox" })).toBe("/inbox")
   })
 
   it("opens a crew tool on the integrations page, where Connect lives", () => {

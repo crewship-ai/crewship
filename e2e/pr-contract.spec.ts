@@ -155,7 +155,7 @@ test("PR browser contract subset", async ({ page }) => {
     const resolvedCard = { ...card, state: "resolved", resolved_action: "answer", resolved_at: now, payload: { ...card.payload, receipt } }
 
     await page.route("**/api/v1/inbox?*", async (route) => {
-      const rows = acted ? [] : [card]
+      const rows = [acted ? resolvedCard : card]
       await route.fulfill({ json: { rows, count: rows.length, unread_count: acted ? 0 : 1, has_more: false } })
     })
     await page.route("**/api/v1/inbox/count?*", async (route) => {
@@ -175,8 +175,7 @@ test("PR browser contract subset", async ({ page }) => {
     })
 
     await page.goto(`/inbox?item=${cardID}`)
-    await expect(page.getByTestId(`row-${cardID}`)).toBeVisible()
-    const pane = page.getByTestId("reading-pane")
+    const pane = page.getByRole("main", { name: "Inbox detail" })
     await expect(pane.getByText("Casey needs your input on ENG-7")).toBeVisible()
     // The §12 badge, and the three actions the card carries.
     await expect(pane.getByTestId("attention-badge")).toHaveText("Input needed")
