@@ -1142,7 +1142,7 @@ crewship crew files list demo-crew --recursive --format json --filter '.[] | .na
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--path <subdir>` | string | (root) | Subdirectory under `/crew/shared` to list. Forwarded as `?subdir=`. |
+| `--path <subdir>` | string | (root) | Which tree to list: without it the crew's `/output` tree (what agents wrote to `/output/`); `--path shared` the `/crew/shared` bind mount (the inter-agent "Shared Ship", where a manifest's bundled files land), and `--path shared/<dir>` a subdirectory of it. Forwarded as `?subdir=`. |
 | `--recursive` | bool | `false` | Recurse into subdirectories. Forwarded as `?recursive=true`. |
 | `--filter <expr>` | string | | jq filter applied before rendering. |
 

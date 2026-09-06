@@ -323,29 +323,7 @@ func activityDedupKey(e ActivityRow) string {
 // empty map so the feed still renders (participant columns just fall back to
 // whatever the payload carried, or blank), rather than failing the command.
 func fetchAgentSlugs(client *cli.Client) map[string]string {
-	agents := map[string]string{}
-	resp, err := client.Get("/api/v1/journal/lookup")
-	if err != nil {
-		return agents
-	}
-	if err := cli.CheckError(resp); err != nil {
-		return agents
-	}
-	var body struct {
-		Agents []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"agents"`
-	}
-	if err := cli.ReadJSON(resp, &body); err != nil {
-		return agents
-	}
-	for _, a := range body.Agents {
-		if a.ID != "" && a.Slug != "" {
-			agents[a.ID] = a.Slug
-		}
-	}
-	return agents
+	return fetchWorkspaceSlugs(client).Agents
 }
 
 // activityTypeColor picks a colour by entry-type family so the feed scans

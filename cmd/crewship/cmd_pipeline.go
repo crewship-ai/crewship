@@ -190,6 +190,12 @@ var pipelineListCmd = &cobra.Command{
 			fmt.Println("Save one via: crewship routine save --name … --definition file.json --author-crew <crew-slug-or-id>")
 			return nil
 		}
+		// AUTHOR CREW is a human column and used to print the raw crew cuid,
+		// which is the one value nothing else in the CLI accepts — every
+		// crew-taking flag wants the slug. Resolved only for the human table:
+		// the machine formats above pass the API rows through untouched, and
+		// the id is the right thing there.
+		slugs := fetchWorkspaceSlugs(client)
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "SLUG\tSTATUS\tINVOC\tLAST STATUS\tAUTHOR CREW\tDESCRIPTION")
 		for _, p := range rows {
@@ -201,7 +207,7 @@ var pipelineListCmd = &cobra.Command{
 			if lastStatus == "" {
 				lastStatus = "—"
 			}
-			authorCrew := p.AuthorCrewID
+			authorCrew := slugs.crew(p.AuthorCrewID)
 			if authorCrew == "" {
 				authorCrew = "—"
 			}
@@ -250,6 +256,9 @@ var pipelineGetCmd = &cobra.Command{
 		// the value the old flag documented keeps working.
 		var flush tabFlush
 		if err := resolvedFormatter(cmd).AutoHuman(p, func() {
+			// Same as `routine list`: the human rows name the crew and agent
+			// by slug, the machine document keeps the ids.
+			slugs := fetchWorkspaceSlugs(client)
 			// Pretty-print: human header on top, full DSL JSON below.
 			// Tabwriter for the header keeps the layout aligned even when
 			// fields wrap.
@@ -258,8 +267,8 @@ var pipelineGetCmd = &cobra.Command{
 			fmt.Fprintf(w, "Name:\t%s\n", p.Name)
 			fmt.Fprintf(w, "Description:\t%s\n", p.Description)
 			fmt.Fprintf(w, "DSL version:\t%s\n", p.DSLVersion)
-			fmt.Fprintf(w, "Author crew:\t%s\n", p.AuthorCrewID)
-			fmt.Fprintf(w, "Author agent:\t%s\n", p.AuthorAgentID)
+			fmt.Fprintf(w, "Author crew:\t%s\n", slugs.crew(p.AuthorCrewID))
+			fmt.Fprintf(w, "Author agent:\t%s\n", slugs.agent(p.AuthorAgentID))
 			fmt.Fprintf(w, "Authored via:\t%s\n", p.AuthoredVia)
 			govStatus := p.Status
 			if govStatus == "" {

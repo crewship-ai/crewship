@@ -274,7 +274,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		newStatus := *req.Status
 		if !h.validateStatusTransition(currentStatus, newStatus) {
 			writeProblem(w, r, http.StatusBadRequest,
-				"Invalid status transition from "+currentStatus+" to "+newStatus)
+				issueTransitionRefusal(currentStatus, newStatus))
 			return
 		}
 
@@ -525,7 +525,17 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			internalError(w, r, h.logger, "delete issue follow-up query", qErr)
 			return
 		}
-		writeProblem(w, r, http.StatusBadRequest, "Only BACKLOG or CANCELLED issues can be deleted")
+		// The rule is deliberate: an issue that reached IN_PROGRESS or beyond
+		// has runs, comments and journal rows hanging off it, and deleting the
+		// row would orphan a history somebody may need. Only work that never
+		// started, or was explicitly abandoned, is disposable.
+		//
+		// But the refusal used to stop there, and that read as "there is no
+		// way to remove this" — which is not true. CANCELLED is reachable from
+		// most statuses, and DONE reaches it via BACKLOG, so a mistakenly
+		// created issue can always be got rid of; it just takes the status
+		// changes first. Say which ones.
+		writeProblem(w, r, http.StatusBadRequest, issueDeleteRefusal(ident, currentStatus))
 		return
 	}
 

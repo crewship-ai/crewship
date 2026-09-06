@@ -23,6 +23,9 @@
               "format": "date-time",
               "type": "string"
             },
+            "status": {
+              "type": "string"
+            },
             "workspace_id": {
               "type": "string"
             }

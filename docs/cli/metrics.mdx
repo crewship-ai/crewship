@@ -1,6 +1,6 @@
 ---
 title: "Metrics"
-description: "Mission performance summary (success rate, p50/p99 duration) or a metric timeseries over a window."
+description: "MISSION performance summary or a metric timeseries over a window. Not workspace-wide spend — that is crewship cost."
 icon: "chart-line"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,19 @@ tag: Experimental
 
 # crewship metrics
 
-Fetch mission performance metrics or pull a metric timeseries. Without flags, returns the mission summary — success rate, p50/p99 durations, total runs over the last default window. With `--series <name>`, switches to a timeseries endpoint and returns time-bucketed points.
+Fetch mission performance metrics or pull a metric timeseries. Without flags, returns the mission summary — mission counts, completion time, and the token and cost totals of mission tasks in the trailing 24 hours. With `--series <name>`, switches to a timeseries endpoint and returns time-bucketed points.
+
+<Warning>
+**These are MISSION metrics, and so are the money fields.** `total_cost_24h` and `total_tokens_24h` sum **mission tasks** and nothing else. Spend outside a mission — chats, ad-hoc agent runs, routine runs — is not counted, so this command can report `0` on both while the workspace is genuinely spending. That is the design, not a broken query.
+
+| Question | Command |
+| --- | --- |
+| What did **missions** do? | `crewship metrics` |
+| What did the **workspace** spend? | [`crewship cost`](/cli/cost) |
+| Same spend, per crew / agent / mission | [`crewship paymaster`](/cli/paymaster) |
+
+A `0` here next to a non-zero `crewship cost` means no mission task was recorded in the window.
+</Warning>
 
 ```bash
 crewship metrics [flags]
@@ -42,13 +54,19 @@ The global `--format` flag (`table` / `json` / `yaml` / `ndjson` / `quiet`) is h
 ```bash
 crewship metrics
 # {
-#   "total_runs": 142,
-#   "success_rate": 0.93,
-#   "duration_p50_ms": 4280,
-#   "duration_p99_ms": 28150,
-#   "cost_usd_total": 2.84
+#   "total_missions": 45,
+#   "active_missions": 3,
+#   "completed_24h": 8,
+#   "failed_24h": 1,
+#   "total_tokens_24h": 125000,
+#   "total_cost_24h": 3.75,
+#   "avg_completion_time_ms": 180000,
+#   "tasks_completed_24h": 24,
+#   "tasks_failed_24h": 2
 # }
 ```
+
+`total_tokens_24h` / `total_cost_24h` cover mission tasks only — see the warning above.
 
 ### Active-runs timeseries over the last hour
 
@@ -65,7 +83,7 @@ crewship metrics --series active_runs --range 7d
 ### Pull a single field via jq
 
 ```bash
-crewship metrics --filter '.success_rate'
+crewship metrics --filter '.completed_24h'
 ```
 
 ### YAML output
@@ -84,7 +102,8 @@ crewship metrics --series active_runs --range 24h --format json \
 
 ## See also
 
-- [`crewship paymaster`](/cli/paymaster) — cost-oriented view of the same underlying data.
+- [`crewship cost`](/cli/cost) — workspace-wide spend from the cost ledger. This is where the money is when `total_cost_24h` reads 0.
+- [`crewship paymaster`](/cli/paymaster) — the same ledger rolled up per crew, agent, or mission.
 - [`crewship telemetry`](/cli/telemetry) — distributed-trace observability across crews.
 - [`crewship journal`](/cli/journal) — per-agent execution events behind the metrics aggregation.
 - [`crewship history`](/cli/history) — individual run records that feed the success-rate and duration percentiles.

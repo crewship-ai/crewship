@@ -704,4 +704,115 @@ func TestFormatContractExemptionsAreAllReal(t *testing.T) {
 			t.Errorf("reportingCommands lists %q, which is not a runnable command", path)
 		}
 	}
+	for path := range mutatingResultCommands {
+		if !have[path] {
+			t.Errorf("mutatingResultCommands lists %q, which is not a runnable command — "+
+				"remove the entry or fix the path", path)
+		}
+	}
+}
+
+// ─── guard 5: mutations that hand back a result ──────────────────────────
+//
+// Guards 1–3 above split the tree into "reporting" (owes machine output) and
+// "mutation" (receipt only, budgeted). That split has a hole in the middle,
+// and the audit that opened #2086 walked straight past it: a mutation whose
+// stdout is a receipt can still OWE the caller a result.
+//
+//	crewship issue create --title X --crew engineering -f json
+//	→ Created issue ENG-14: ZZ fmt probe
+//
+// The identifier the server just minted is in that sentence and nowhere
+// else. The command advertises `-f json`, exits 0, and the only way an agent
+// can learn what it created is to regex an English sentence — precisely the
+// failure the format contract exists to prevent. Guard 1 does not see it
+// (`create` is not a reporting verb, and rightly so — it is a write). Guard 3
+// does not see it either: the receipt goes to STDERR via cli.PrintSuccess, so
+// there is no stdout write to count. `issue update` and `issue comment` sat
+// in the same blind spot, and so did every other `create` in the tree.
+//
+// mutatingResultVerbs is the leaf half. `create` is the sharp end of it:
+// every create MINTS AN IDENTIFIER, and an identifier the caller cannot read
+// back breaks the chain — the next command in the script is the one that
+// needs it.
+var mutatingResultVerbs = map[string]bool{
+	"create": true,
+}
+
+// mutatingResultCommands names the non-`create` mutations that have been
+// brought onto the contract and must stay on it.
+//
+// It is a NAMED ratchet rather than a count, unlike mutationReceiptBudget
+// above. The two populations differ in kind: that one is ~120 commands whose
+// fix is a mechanical one-liner and whose membership churns in unrelated PRs,
+// so a checked-in list of names would conflict with all of them. This one is
+// small and hand-picked, and each entry records a command whose result a
+// caller genuinely consumes — so reverting one should cost a reviewer an
+// argument by name rather than a silent arithmetic bump.
+//
+// An entry that stops naming a real command fails
+// TestFormatContractExemptionsAreAllReal above, so this table cannot rot into
+// a graveyard either.
+var mutatingResultCommands = map[string]bool{
+	// The three observed live on a dev server, all silent under `-f json`.
+	"crewship issue update":  true,
+	"crewship issue comment": true,
+	"crewship issue delete":  true,
+	// The rest of the issue write surface: an agent driving an issue through
+	// its lifecycle reads the resulting status off each of these.
+	"crewship issue start":  true,
+	"crewship issue stop":   true,
+	"crewship issue review": true,
+}
+
+// isMutatingResult reports whether s is a mutation that hands the caller back
+// a result they have to read, rather than a bare receipt whose real answer is
+// the exit code.
+func (s commandSite) isMutatingResult() bool {
+	if s.isReporting() {
+		return false
+	}
+	return mutatingResultVerbs[s.leaf] || mutatingResultCommands[s.path]
+}
+
+// TestMutatingCommandsReturnTheirResultMachineReadably is the guard for that
+// middle ground. Unlike TestMutationReceiptsOnStdoutDoNotGrow it is a hard
+// failure with no budget, because the population is closed and small: every
+// `create` in the tree, plus a named list.
+//
+// KNOWN LIMIT, stated so a pass is not over-read: this is the same static
+// analysis the rest of this file uses, so it proves a command RESOLVES the
+// format — not that the value it then renders is the right one. That second
+// half is per-command and belongs to the execution tests; for the commands
+// fixed alongside this guard it is cmd_issue_format_result_test.go.
+func TestMutatingCommandsReturnTheirResultMachineReadably(t *testing.T) {
+	sites, results := analyseAll(t)
+
+	var violations []string
+	for _, s := range sites {
+		res, ok := results[s.path]
+		if !ok || !s.isMutatingResult() {
+			continue
+		}
+		if _, exempt := formatContractExempt[s.path]; exempt {
+			continue
+		}
+		if !res.formatAware {
+			violations = append(violations, s.path+"  ("+filepath.Base(s.file)+":"+strconv.Itoa(s.line)+")")
+		}
+	}
+
+	if len(violations) > 0 {
+		sort.Strings(violations)
+		t.Errorf("%d mutating command(s) hand the caller a result — an identifier the next "+
+			"command needs, or the new state of the thing they changed — and never resolve "+
+			"the output format, so under `-f json` that result exists only inside an English "+
+			"sentence on stderr and the pipeline reading it gets nothing (#2086):\n  %s\n\n"+
+			"Fix: decode the server's response and render it through the shared formatter. "+
+			"resolvedFormatter(cmd).AutoHuman(result, func() { cli.PrintSuccess(…) }) keeps "+
+			"the human receipt byte-identical while making json/yaml/ndjson real. Match the "+
+			"shape the matching read command already emits — `issue create` emits what "+
+			"`issue get` emits — so one parser handles both.",
+			len(violations), strings.Join(violations, "\n  "))
+	}
 }

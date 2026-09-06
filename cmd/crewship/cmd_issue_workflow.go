@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -78,10 +79,18 @@ var issueCommentCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
+		// The 201 body is the created comment (api.commentResponse). Decoding
+		// it into issueComment — the same struct `issue comments` renders —
+		// means a caller reads the new comment's id back in exactly the shape
+		// the list command already emits.
+		var created issueComment
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return err
+		}
 
-		cli.PrintSuccess(fmt.Sprintf("Comment added to %s.", args[0]))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Comment added to %s.", args[0]))
+		})
 	},
 }
 
@@ -148,10 +157,43 @@ var issueStartCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
-		cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", identifier))
-		return nil
+		result, err := readIssueTransition(resp, identifier)
+		if err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", identifier))
+		})
 	},
+}
+
+// issueTransitionResult is what /start, /stop and /review answer with. The
+// three endpoints return slightly different objects — start has a status,
+// stop adds runs_stopped/hard, review reports the action — so the union is
+// carried in one struct with omitempty rather than three near-identical ones.
+// The status is the field a caller reads: it is the only place the CLI says
+// what the transition actually produced, as opposed to what was requested.
+type issueTransitionResult struct {
+	Identifier  string `json:"identifier" yaml:"identifier"`
+	Status      string `json:"status,omitempty" yaml:"status,omitempty"`
+	Action      string `json:"action,omitempty" yaml:"action,omitempty"`
+	RunsStopped *int   `json:"runs_stopped,omitempty" yaml:"runs_stopped,omitempty"`
+	Hard        *bool  `json:"hard,omitempty" yaml:"hard,omitempty"`
+}
+
+// readIssueTransition decodes one of those bodies, backfilling the identifier
+// the CLI already knows — `/review` does not echo one, and a result that
+// cannot say which issue it is about is not usable in a pipeline that acts on
+// several.
+func readIssueTransition(resp *http.Response, identifier string) (issueTransitionResult, error) {
+	var out issueTransitionResult
+	if err := cli.ReadJSON(resp, &out); err != nil {
+		return out, err
+	}
+	if out.Identifier == "" {
+		out.Identifier = identifier
+	}
+	return out, nil
 }
 
 var issueStopCmd = &cobra.Command{
@@ -187,13 +229,17 @@ var issueStopCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
-		if hard {
-			cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent process is being terminated (TERM, then KILL after a grace period)", identifier))
-			return nil
+		result, err := readIssueTransition(resp, identifier)
+		if err != nil {
+			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			if hard {
+				cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent process is being terminated (TERM, then KILL after a grace period)", identifier))
+				return
+			}
+			cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
+		})
 	},
 }
 
@@ -240,13 +286,17 @@ var issueReviewCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
-		if action == "approve" {
-			cli.PrintSuccess(fmt.Sprintf("Approved %s", identifier))
-		} else {
-			cli.PrintSuccess(fmt.Sprintf("Changes requested on %s", identifier))
+		result, err := readIssueTransition(resp, identifier)
+		if err != nil {
+			return err
 		}
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(result, func() {
+			if action == "approve" {
+				cli.PrintSuccess(fmt.Sprintf("Approved %s", identifier))
+			} else {
+				cli.PrintSuccess(fmt.Sprintf("Changes requested on %s", identifier))
+			}
+		})
 	},
 }
 
