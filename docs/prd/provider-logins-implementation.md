@@ -18,8 +18,15 @@ Verification: 520 Vitest tests across 20 files, two isolated Playwright browser
 flows at 1280px and 390px (API mocked, no real credentials created), production
 build and lint (33 existing warnings, no errors). The browser test pins global
 navigation before clicking the vault rail, since its hover overlay can cover it.
-Full Go verification: `/tmp/provider-first-go.log`; vet: `/tmp/provider-first-vet.log`.
-Deployment status is recorded after the dev3 restart, not inferred from hot reload.
+Full Go verification passed (exit 0): `/tmp/provider-first-go.log` (API 745.573s,
+database 778.035s); vet passed: `/tmp/provider-first-vet.log`.
+Deployed only dev3 using `systemctl reload crewship-ws@3`: build
+`97df97d7`, 2026-09-06T15:36:30Z. Service is active, `/api/health` says `ok`,
+and the public `/credentials` route returns HTTP 200. The binary reports dirty
+because the existing unrelated AGENTS.md/CODEX.md/session-report WIP is retained.
+No push, demo seeding or real credential creation was performed. Existing-account
+counts were not authenticated through the CLI (its session returned 401);
+the user's signed-in browser must confirm those data against the updated backend.
 
 ### Original implementation checklist
 
