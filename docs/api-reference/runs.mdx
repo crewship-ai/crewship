@@ -46,8 +46,10 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
 | `status` | string | Filter to one of `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT`. Invalid values → `400`. For a routine run, `FAILED`/`CANCELLED` are resolved from `payload.status` on its `pipeline.run.failed` terminal, since that entry type covers both outcomes. |
 | `agent_id` | string | Filter by agent. For a routine run this is the *invoking* agent (empty for a schedule/webhook-triggered run with no invoking agent), not necessarily who executed each step. |
 | `mission_id` | string | Only runs that worked on one issue — its mission id or its identifier (`ENG-4`), resolved per workspace. |
-| `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). Routine runs don't currently populate `trigger_type` and are excluded by this filter — use `kind` client-side to find them instead. |
+| `trigger` | string | Filter by `payload.trigger_type` on the `run.started` entry (e.g. `USER`, `WEBHOOK`, `CRON`). A routine run's `trigger_type` in the list is derived from its `triggered_via` in the same vocabulary (`manual` → `USER`, `schedule`/`wake_check` → `CRON`, `webhook` → `WEBHOOK`), but the filter reads the journal payload, which routine runs do not populate — they are still excluded by this filter; use `kind` client-side to find them instead. |
 | `tag` | string | Match a single tag inside `payload.metadata.tags` array on the `run.started` entry. |
+
+A `kind: "pipeline"` row also carries `pipeline_slug`, the routine it ran (empty for an agent run), and its `trigger_type` is derived from `pipeline_runs.triggered_via` in the same `USER` / `CRON` / `WEBHOOK` vocabulary as agent runs.
 | `page` | integer | 1-based page index, default `1`. Values below `1` become `1`; values above the server's maximum page are capped. |
 | `limit` | integer | Page size, 1-100, default `50`. Out-of-range values fall back to the default. |
 
@@ -88,8 +90,9 @@ Returns a paginated list of runs with KPI tiles (`stats`) and pagination metadat
       "crew_name": "Backend",
       "chat_id": null,
       "triggered_by": null,
-      "trigger_type": "",
+      "trigger_type": "CRON",
       "kind": "pipeline",
+      "pipeline_slug": "nightly-digest",
       "status": "COMPLETED",
       "started_at": "2026-04-30T09:00:00Z",
       "finished_at": "2026-04-30T09:01:12Z",

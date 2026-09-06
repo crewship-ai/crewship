@@ -690,7 +690,7 @@ crewship routine active
 
 Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/active` — the handler note in `internal/api/pipeline_runs.go` flags it as **single-replica scope**: in a multi-replica deployment the response only reflects runs hosted by the replica the request landed on.
 
-**Output columns:** RUN_ID (truncated), SLUG, STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
+**Output columns:** RUN_ID (truncated), SLUG, STATUS (`running`, or `waiting` for a run parked at a waitpoint), STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
 
 Pair with `routine cancel <run_id>` to terminate any of the listed runs.
 

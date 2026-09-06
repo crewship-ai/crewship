@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // newEmitCmd builds a bare command carrying the same secret-output
@@ -192,5 +194,44 @@ func TestSecTokenEmitFlagsWired(t *testing.T) {
 		if c.Flags().Lookup("quiet") == nil {
 			t.Errorf("%s missing --quiet flag", c.Name())
 		}
+	}
+}
+
+// A machine format that comes from the CLI config, not from a flag, must not
+// disable --output-file or --quiet: a CI job with `format: json` persisted
+// still gets its token file, and the bearer stays off stdout.
+func TestSecTokenEmit_ConfigJSONDoesNotOverrideOutputFile(t *testing.T) {
+	prevFormat, prevCfg := flagFormat, cliCfg
+	t.Cleanup(func() { flagFormat, cliCfg = prevFormat, prevCfg })
+	flagFormat = ""
+	cliCfg = &cli.CLIConfig{Format: "json"}
+
+	dir := t.TempDir()
+	outFile := dir + "/tok"
+	cmd, stdout, _ := newEmitCmd()
+	_ = cmd.Flags().Set("output-file", outFile)
+	if err := emitToken(cmd, "ci-runner", "tok_id_9", "secret-bearer-9"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("token file not written: %v", err)
+	}
+	if !strings.Contains(string(got), "secret-bearer-9") {
+		t.Errorf("token file lacks the bearer: %q", got)
+	}
+	if strings.Contains(stdout.String(), "secret-bearer-9") {
+		t.Errorf("bearer reached stdout despite --output-file: %q", stdout.String())
+	}
+
+	// --quiet with a config-default json format prints the bare token, not a
+	// JSON document.
+	cmd, stdout, _ = newEmitCmd()
+	_ = cmd.Flags().Set("quiet", "true")
+	if err := emitToken(cmd, "ci-runner", "tok_id_9", "secret-bearer-9"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(stdout.String()) != "secret-bearer-9" {
+		t.Errorf("--quiet must print the bare token, got %q", stdout.String())
 	}
 }

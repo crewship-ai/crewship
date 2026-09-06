@@ -48,7 +48,13 @@ func emitToken(cmd *cobra.Command, name, id, token string) error {
 	// stdout on request, so an explicitly-asked-for machine format doing the
 	// same is consistent rather than a new hole. The advisory stays on
 	// stderr, where it does not corrupt the document.
-	if f := resolvedFormatter(cmd); !f.RoutesToHuman() {
+	//
+	// --output-file and --quiet are explicit requests too, and they are the
+	// ones a CI job relies on: with `format: json` persisted in the CLI
+	// config, an unflagged `token create --output-file /run/tok` must still
+	// write the file and keep the bearer off stdout. So the machine branch
+	// applies only when neither of those was asked for.
+	if f := resolvedFormatter(cmd); outFile == "" && !quiet && !f.RoutesToHuman() {
 		fmt.Fprintf(errOut, "%sToken is sensitive — it won't be shown again. Avoid shell history / CI logs.%s\n", cli.Yellow, cli.Reset)
 		return f.Machine(struct {
 			ID    string `json:"id" yaml:"id"`

@@ -158,7 +158,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		"status": toStatus, "from": fromStatus, "to": toStatus,
 	})
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
+	// The status the transition produced (DONE / TODO), not a bare "ok": a
+	// pipeline branching on `.status` must not need a second `issue get`.
+	writeJSON(w, http.StatusOK, map[string]string{"status": toStatus, "action": req.Action, "identifier": ident})
 }
 
 // ── ListActivity — GET /api/v1/crews/{crewId}/issues/{identifier}/activity

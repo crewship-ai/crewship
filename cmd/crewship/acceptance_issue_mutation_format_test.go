@@ -91,7 +91,7 @@ func startIssueMutationStub(t *testing.T) *httptest.Server {
 			_, _ = w.Write([]byte(`{"status":"CANCELLED","identifier":"ENG-14","runs_stopped":2,"hard":false}`))
 
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/crews/crew_1/issues/ENG-14/review":
-			_, _ = w.Write([]byte(`{"status":"ok","action":"approve"}`))
+			_, _ = w.Write([]byte(`{"status":"DONE","action":"approve","identifier":"ENG-14"}`))
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -252,7 +252,7 @@ func TestAcceptance_IssueTransitions_JSON_ReportTheResultingStatus(t *testing.T)
 			// it resolved, so a result is never ambiguous about its subject.
 			name:       "review",
 			args:       []string{"issue", "review", "ENG-14", "--action", "approve", "-f", "json"},
-			wantStatus: "ok",
+			wantStatus: "DONE",
 			check: func(t *testing.T, got map[string]any) {
 				if got["action"] != "approve" {
 					t.Errorf("action = %v, want approve", got["action"])

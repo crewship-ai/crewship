@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -721,7 +722,7 @@ func (h *RunHandler) enrichRuns(ctx context.Context, workspaceID string, aggrega
 			// authoritative source where it carries one, and this is the
 			// fallback for the writer that never sets it.
 			if resp.TriggerType == "" && p.triggeredVia != "" {
-				resp.TriggerType = p.triggeredVia
+				resp.TriggerType = triggerTypeFromTriggeredVia(p.triggeredVia)
 			}
 		}
 		out = append(out, resp)
@@ -763,4 +764,23 @@ func formatRFC3339(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// triggerTypeFromTriggeredVia maps pipeline_runs.triggered_via (manual,
+// schedule, wake_check, webhook, …) onto the trigger_type vocabulary the
+// run.started journal payload and docs/api-reference/runs.mdx use (USER,
+// CRON, WEBHOOK, …), so one field does not carry two vocabularies.
+func triggerTypeFromTriggeredVia(via string) string {
+	switch strings.ToLower(strings.TrimSpace(via)) {
+	case "":
+		return ""
+	case "manual", "user", "cli", "api":
+		return "USER"
+	case "schedule", "scheduled", "cron", "wake_check", "wake-check":
+		return "CRON"
+	case "webhook":
+		return "WEBHOOK"
+	default:
+		return strings.ToUpper(strings.TrimSpace(via))
+	}
 }

@@ -195,12 +195,23 @@ func resolveKeeperCredential(client *cli.Client, agentID, agentRef, credRef stri
 		return "", nil
 	}
 
+	// Only an explicit per-agent grant is something the judge can rule on:
+	// the server's keeper lookup joins agent_credentials alone, so a row the
+	// agent reaches through its crew or a binding (grant_source crew /
+	// binding) answers 404 there. Those rows fall through to the "exists
+	// but is not assigned" hint below, which names the command that fixes it.
+	explicit := reachable[:0:0]
 	for _, c := range reachable {
+		if c.GrantSource == "" || c.GrantSource == "explicit" {
+			explicit = append(explicit, c)
+		}
+	}
+	for _, c := range explicit {
 		if c.EnvVarName == credRef {
 			return c.CredentialID, nil
 		}
 	}
-	for _, c := range reachable {
+	for _, c := range explicit {
 		if c.CredentialName == credRef || c.CredentialID == credRef {
 			return c.CredentialID, nil
 		}
