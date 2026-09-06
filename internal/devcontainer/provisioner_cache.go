@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/moby/moby/api/types/image"
@@ -23,7 +24,7 @@ type imageListCacheEntry struct {
 
 const imageListTTL = 60 * time.Second
 
-const provisionerSchemaVersion = "v2"
+const provisionerSchemaVersion = "v3"
 
 // cacheImageTag returns the Docker image tag for a given config hash.
 
@@ -110,6 +111,17 @@ func configHash(baseImage string, cfg *Config, miseConfig, dockerfile string) st
 // On the (unexpected) generation error the fingerprint degrades to an empty
 // string — the hash still includes provisionerSchemaVersion + cfg, so this
 // never makes cache correctness worse than the pre-fix behaviour.
+// requiredBinariesHashSalt makes the verified adapter CLIs part of the cache
+// key: an image built for a crew of CLAUDE_CODE agents is not the image a
+// CODEX_CLI agent needs, even when the operator's config is byte-identical —
+// the build adds a mise tool and a verification layer for the new binary.
+func requiredBinariesHashSalt(bins []string) string {
+	if len(bins) == 0 {
+		return ""
+	}
+	return "|adapter-binaries:" + strings.Join(SortedBinaries(bins), ",")
+}
+
 func dockerfileGenFingerprint(baseImage string, cfg *Config) string {
 	df, err := GenerateDockerfile(DockerfileBuild{
 		BaseImage: baseImage,

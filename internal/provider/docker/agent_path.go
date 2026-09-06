@@ -11,10 +11,17 @@ import "strings"
 //   - /usr/local/py-utils/bin    — pipx venv shims (ansible, poetry, …)
 //   - /usr/local/share/npm-global/bin — global npm CLIs
 //   - /home/agent/.local/bin     — pip --user / agent-installed tools
+//   - /opt/mise/data/shims       — every mise-installed tool, including the
+//     adapter CLIs (claude, codex, gemini-cli, …); outside the home volume
+//     on purpose (internal/devcontainer/mise.go). Missing from this list
+//     until 2026-09-06: a wizard-built crew whose only `claude` came from
+//     mise answered every chat with "No such file or directory".
 var wellKnownDevcontainerBinDirs = []string{
 	"/usr/local/py-utils/bin",
 	"/usr/local/share/npm-global/bin",
 	"/home/agent/.local/bin",
+	"/opt/crewship/bin",
+	"/opt/mise/data/shims",
 }
 
 // defaultAgentPath is the last-resort PATH used when neither a captured login
@@ -25,13 +32,8 @@ const defaultAgentPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbi
 // applyAgentLoginPath ensures the container's env carries a PATH that a
 // non-login `docker exec` can use to reach devcontainer-feature tools.
 //
-//   - loginPath set (captured at provision via `bash -lc`): used verbatim — it
-//     already reflects every /etc/profile.d contribution (py-utils, npm-global,
-//     mise shims, …).
-//   - loginPath empty (crew unprovisioned or capture failed): fall back to
-//     prepending wellKnownDevcontainerBinDirs to the best base PATH we have
-//     (an existing PATH already in env, else the image ENV PATH, else
-//     defaultAgentPath), skipping dirs already present.
+// The result is the union of the well-known dirs, the containerEnv PATH the
+// build aggregated, and the captured login PATH, in that order; see the body.
 //
 // The resolved value replaces any existing PATH entry in env (or is appended),
 // so subsequent execs that don't set their own PATH inherit it from the
@@ -44,11 +46,43 @@ func applyAgentLoginPath(env []string, loginPath string, imageEnv map[string]str
 	// stdcopy frame header (\x01\x00\x00…) still embedded. Stripping control
 	// bytes here means an already-stored corrupt value can't brick container
 	// start — a re-provision isn't required to recover.
-	desired := sanitizeEnvValue(strings.TrimSpace(loginPath))
-	if desired == "" {
-		desired = fallbackAgentPath(envValue(env, "PATH"), imageEnv["PATH"])
+	// Three sources, all kept, in this order, deduplicated:
+	//   1. wellKnownDevcontainerBinDirs — reachable no matter what;
+	//   2. the containerEnv PATH already in env — the build's aggregated
+	//      PATH (agent tool dirs, feature-declared dirs, the image's own,
+	//      expanded by expandContainerEnv before this runs);
+	//   3. the captured login PATH — /etc/profile.d contributions a feature
+	//      made without declaring containerEnv (pipx, nvm), then the image's.
+	// Nothing here is authoritative on its own: on 2026-09-06 a BuildKit-built
+	// crew's captured login PATH was the bare image PATH (mise writes nothing
+	// to profile.d) and, used verbatim, replaced the aggregated PATH the build
+	// had just written — every chat answered "claude: No such file or
+	// directory". With no PATH from any source, defaultAgentPath.
+	var parts []string
+	seen := map[string]bool{}
+	add := func(val string) {
+		for _, d := range strings.Split(sanitizeEnvValue(val), ":") {
+			d = strings.TrimSpace(d)
+			if d == "" || seen[d] {
+				continue
+			}
+			seen[d] = true
+			parts = append(parts, d)
+		}
 	}
-	return replaceOrAppendEnv(env, "PATH", desired)
+	for _, d := range wellKnownDevcontainerBinDirs {
+		add(d)
+	}
+	add(envValue(env, "PATH"))
+	add(loginPath)
+	if len(parts) == len(wellKnownDevcontainerBinDirs) {
+		if p := imageEnv["PATH"]; strings.TrimSpace(p) != "" {
+			add(p)
+		} else {
+			add(defaultAgentPath)
+		}
+	}
+	return replaceOrAppendEnv(env, "PATH", strings.Join(parts, ":"))
 }
 
 // sanitizeEnvValue drops control/NUL bytes and the U+FFFD replacement rune from

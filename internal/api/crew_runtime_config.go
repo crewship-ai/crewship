@@ -352,29 +352,22 @@ func (h *ProvisioningHandler) EnsureProvisioned(ctx context.Context, crewID, wor
 		return nil
 	}
 
-	var devcontainerCfg, miseCfg, cachedImage sql.NullString
-	err := h.db.QueryRowContext(ctx,
-		`SELECT devcontainer_config, mise_config, cached_image
-		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		crewID, workspaceID,
-	).Scan(&devcontainerCfg, &miseCfg, &cachedImage)
+	// One truth for "can this crew's image run its agents": the EFFECTIVE
+	// config (a NULL column defaults to an image with the agent CLI — the
+	// defect this chokepoint was first written for), the cached image
+	// present locally, and the image verified for every live agent's
+	// adapter CLI (agents_adapter_rebuild.go). An agent added by any path
+	// after the last build is caught here, before it is dispatched.
+	needsBuild, ready, reason, err := crewImageReady(ctx, h.db, crewID, workspaceID, func(img string) bool {
+		return h.imagePresentLocally(ctx, img)
+	})
 	if err != nil {
-		return fmt.Errorf("load crew for provisioning check: %w", err)
+		return err
 	}
-
-	// A NULL/empty column here is the exact defect this chokepoint exists
-	// for: crewNeedsProvision on the raw value said "nothing to build" for a
-	// crew that was about to fall through to bare debian:bookworm-slim with
-	// no agent CLI. Gate on the EFFECTIVE config so a defaulted crew is
-	// recognized as needing the build EnqueueForCrew below now knows how to
-	// do for it.
-	effectiveDevcontainerCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
-	if !crewNeedsProvision(effectiveDevcontainerCfg, miseCfg.String) {
+	if !needsBuild || ready {
 		return nil
 	}
-	if cachedImage.Valid && cachedImage.String != "" && h.imagePresentLocally(ctx, cachedImage.String) {
-		return nil
-	}
+	h.logger.Info("crew image not ready for dispatch; provisioning", "crew_id", crewID, "reason", reason)
 
 	// EnqueueForCrew returns AlreadyRunning (nil error) when a build is already
 	// in flight — we still want to wait for it below. A non-nil error means we

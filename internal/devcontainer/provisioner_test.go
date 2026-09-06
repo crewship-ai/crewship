@@ -252,6 +252,39 @@ func TestProvision_CacheHit(t *testing.T) {
 	}
 }
 
+// A reused image still answers with the runtime contract: the agent tool env
+// and the verified adapter CLIs. An empty result here was stored as NULL and
+// the crew lost its env — and its "verified for claude" mark — on every
+// cache hit.
+func TestProvision_CacheHitReturnsRequirements(t *testing.T) {
+	cfg := &Config{Image: "ubuntu:22.04", ContainerEnv: map[string]string{"TZ": "UTC"}}
+	hash := configHash("ubuntu:22.04", cfg, "", dockerfileGenFingerprint("ubuntu:22.04", cfg)+requiredBinariesHashSalt([]string{"claude"}))
+	tag := cacheImageTag(hash)
+	mock := &mockCommitClient{existingImages: []string{tag}}
+	p := NewProvisioner(mock, nil, nil, testLogger())
+
+	result, err := p.Provision(context.Background(), "ubuntu:22.04", cfg, "", WithRequiredBinaries([]string{"claude"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CachedImage != tag {
+		t.Fatalf("expected the cache hit, got %q", result.CachedImage)
+	}
+	req := result.Requirements
+	if req.ContainerEnv["TZ"] != "UTC" {
+		t.Errorf("operator env dropped: %v", req.ContainerEnv)
+	}
+	if !strings.HasPrefix(req.ContainerEnv["PATH"], "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:") {
+		t.Errorf("tool PATH missing: %q", req.ContainerEnv["PATH"])
+	}
+	if req.ContainerEnv["MISE_DATA_DIR"] != "/opt/mise/data" {
+		t.Errorf("mise runtime env missing: %v", req.ContainerEnv)
+	}
+	if len(req.AdapterBinaries) != 1 || req.AdapterBinaries[0] != "claude" {
+		t.Errorf("verified binaries missing: %v", req.AdapterBinaries)
+	}
+}
+
 func TestProvision_EmptyConfig(t *testing.T) {
 	cfg := &Config{Image: "ubuntu:22.04"}
 

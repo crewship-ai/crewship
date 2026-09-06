@@ -15,6 +15,12 @@ const agentHome = "/home/agent"
 // PATH by scripts/entrypoint.sh.
 const crewToolsDir = "/opt/crew-tools"
 
+// AgentBinDir is an image-resident, agent-owned directory for binaries the
+// build installs on the agent's behalf (the Factory droid CLI today). Not
+// under the home volume and not under the tools volume, both of which hide
+// image content at runtime; on the agent's PATH through AgentToolPathDirs.
+const AgentBinDir = "/opt/crewship/bin"
+
 // EnsureAgentHomeOwnership hands /home/agent to the agent user before any
 // step that runs as UID 1001.
 //
@@ -56,7 +62,7 @@ const crewToolsDir = "/opt/crew-tools"
 // build, so the cost is negligible. Idempotent.
 func EnsureAgentHomeOwnership(ctx context.Context, containerID string, exec ExecFunc) error {
 	var b strings.Builder
-	for i, dir := range []string{agentHome, crewToolsDir} {
+	for i, dir := range []string{agentHome, crewToolsDir, AgentBinDir} {
 		if i > 0 {
 			b.WriteString(" && ")
 		}
