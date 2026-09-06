@@ -138,6 +138,7 @@ For each pack it reports one row per step:
 | --- | --- |
 | `crew` | The pack's crew exists. |
 | `files` | Every delivered script is byte-identical to the one in the binary. A crew running an older script is a failure, not a warning — the apply path reports success even when a runtime-owned file could not be overwritten. |
+| `history` | No run of the pack's routines has already FAILED in this workspace. The seed also *schedules* the routines, and a scheduled run that hard-failed is a broken demo whatever a fresh run does — so this row is checked before the `env` gate, and a skipped pack can no longer hide it. A history that cannot be read (a server predating migration v83 answers 503) is a **SKIP**, never a quiet pass. |
 | `env` | The pack's requirement (`SEED_GITHUB_TOKEN`) is present. Otherwise the pack is **SKIP** with the reason and nothing runs. |
 | `probe` | The token-zero probe ran and its verdict matches an independent read of the same source — for the CI watch, GitHub's Actions API queried from the machine running `verify`, not from the container. |
 | `report` | The agent's report ends with a `COUNTS:` line whose numbers reconcile with the probe (regressions + flaky + infra + unclear = red runs; stale = stale), contains nothing that looks like a token, and — for the site replica — the acceptance check passed. A replica nobody has built yet is a **SKIP**. |
