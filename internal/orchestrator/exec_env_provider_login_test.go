@@ -100,7 +100,7 @@ func TestCredentialOAuthKind_ProviderLogin(t *testing.T) {
 		{"openai api key", "OPENAI", "api_key", "sk-proj-x", oauthNone},
 		{"anthropic subscription", "ANTHROPIC", "subscription", "sk-ant-oat01-x", oauthAnthropic},
 		{"anthropic api key", "ANTHROPIC", "api_key", "sk-ant-api03-x", oauthNone},
-		{"google subscription has no login shape yet", "GOOGLE", "subscription", "{}", oauthNone},
+		{"google subscription", "GOOGLE", "subscription", "{}", oauthGoogle},
 		{"cursor api key", "CURSOR", "api_key", "cur_x", oauthNone},
 	}
 	for _, c := range cases {
@@ -262,7 +262,7 @@ func TestProviderLoginAPIKey_BehavesLikeAPIKey(t *testing.T) {
 func TestSyncCodexAuthFile_RendersFromProviderLoginParts(t *testing.T) {
 	req := codexProviderLoginReq(t)
 	rc := &countingContainer{}
-	if err := syncCodexAuthFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
+	if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	scripts := scriptsOf(rc)
@@ -295,7 +295,7 @@ func TestSyncCodexAuthFile_ProviderLoginWithoutIDTokenFailsTheRun(t *testing.T) 
 	req := codexProviderLoginReq(t)
 	req.Credentials[0].Fields = providerLoginParts("OPENAI_API_KEY", "subscription", "rt.x", "", "acct-123", "plus")
 	rc := &countingContainer{}
-	if err := syncCodexAuthFile(context.Background(), rc, "ctr", req, slog.Default()); err == nil {
+	if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err == nil {
 		t.Fatal("expected an error: Codex refuses a file without id_token")
 	}
 	if len(scriptsOf(rc)) != 0 {

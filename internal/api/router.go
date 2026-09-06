@@ -151,19 +151,23 @@ type Router struct {
 	// use. Both doors share one write path on purpose — see
 	// issue_attachments_internal.go. nil when registerOrchestrationRoutes has
 	// not run (test routers); the internal routes then skip registration.
-	attachmentHandler      *AttachmentHandler
-	storagePath            string // base path for crew file storage
-	catalogFetcher         *devcontainer.CatalogFetcher
-	runtimeFetcher         *devcontainer.RuntimeFetcher
-	dockerClient           *dockerclient.Client
-	imageBuilder           devcontainer.ImageBuilder
-	featureCacheDir        string
-	portExposeRegistry     *PortExposeRegistry // closed via Shutdown() on server stop
-	portExposePublicURL    string              // e.g. http://crewship.example.com:8080, used to build capability URLs
-	portExposeNetwork      string              // Docker bridge name; falls back to handler default when empty
-	authRateLimitedMux     http.Handler        // mux wrapped with auth rate limiter
-	apiRateLimitedMux      http.Handler        // mux wrapped with general API rate limiter
-	credTestRateLimitedMux http.Handler        // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
+	attachmentHandler  *AttachmentHandler
+	storagePath        string // base path for crew file storage
+	catalogFetcher     *devcontainer.CatalogFetcher
+	runtimeFetcher     *devcontainer.RuntimeFetcher
+	dockerClient       *dockerclient.Client
+	imageBuilder       devcontainer.ImageBuilder
+	featureCacheDir    string
+	portExposeRegistry *PortExposeRegistry // closed via Shutdown() on server stop
+	// providerLogins owns the device-code sign-in pollers (#2428); stopped
+	// via Shutdown() so a pending sign-in is left for the next process to
+	// resume rather than polled by a goroutine outliving the listener.
+	providerLogins         *ProviderLoginHandler
+	portExposePublicURL    string       // e.g. http://crewship.example.com:8080, used to build capability URLs
+	portExposeNetwork      string       // Docker bridge name; falls back to handler default when empty
+	authRateLimitedMux     http.Handler // mux wrapped with auth rate limiter
+	apiRateLimitedMux      http.Handler // mux wrapped with general API rate limiter
+	credTestRateLimitedMux http.Handler // mux wrapped with /credentials/test limiter (defence against credential-validation oracle abuse)
 	// credRevealRateLimitedMux wraps the ONE route that returns a stored
 	// secret in plaintext (PRD-CREDENTIALS-V2-2026 §2.6 L6). Far tighter
 	// than every other bucket, and it must be selected BEFORE the general
@@ -916,6 +920,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) Shutdown() {
 	if r.provisioning != nil {
 		r.provisioning.Stop()
+	}
+	if r.providerLogins != nil {
+		r.providerLogins.Stop()
 	}
 	if r.portExposeRegistry != nil {
 		r.portExposeRegistry.Shutdown()

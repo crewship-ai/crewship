@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
 )
 
 const (
@@ -49,6 +50,7 @@ const (
 	PartPlan         = "plan"
 	PartExpiresAt    = "expires_at"
 	PartMode         = "mode"
+	PartScope        = "scope"
 
 	// RefreshLead is how far before expiry the monitor refreshes (§5.3:
 	// ≥ 24 h for a 10-day token).
@@ -85,6 +87,8 @@ const (
 // the brands the console registry marks cli: true.
 var providers = map[string]struct{}{
 	"ANTHROPIC": {}, "OPENAI": {}, "GOOGLE": {}, "CURSOR": {}, "FACTORY": {},
+	"XAI": {}, "GROQ": {}, "OPENROUTER": {}, "DEEPSEEK": {},
+	"MOONSHOT": {}, "ZAI": {}, "MINIMAX": {},
 }
 
 // Canonical folds a provider onto its stored spelling.
@@ -100,7 +104,7 @@ func IsProvider(provider string) bool {
 
 // Providers lists the accepted providers, for error messages and help text.
 func Providers() []string {
-	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY"}
+	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "XAI", "GROQ", "OPENROUTER", "DEEPSEEK", "MOONSHOT", "ZAI", "MINIMAX"}
 }
 
 // ValidMode reports whether mode is one of the two.
@@ -117,6 +121,7 @@ type Login struct {
 	IDToken      string // secret part; Codex only
 	AccountID    string
 	Plan         string
+	Scope        string
 	ExpiresAt    time.Time // zero when unknown / never
 }
 
@@ -154,6 +159,13 @@ func Split(provider, mode, value string) (Login, error) {
 		return l, nil
 	}
 	switch p {
+	case "GOOGLE":
+		f, err := geminiauth.Parse(v)
+		if err != nil {
+			return Login{}, fmt.Errorf("Google login: %w", err)
+		}
+		l.AccessToken, l.RefreshToken, l.IDToken = f.AccessToken, f.RefreshToken, f.IDToken
+		l.Scope, l.Plan, l.ExpiresAt = f.Scope, f.Plan, time.UnixMilli(f.ExpiryDate).UTC()
 	case "OPENAI":
 		f, err := codexauth.Parse(v)
 		if err != nil {
@@ -181,7 +193,7 @@ func Split(provider, mode, value string) (Login, error) {
 // inferMode guesses the mode from the value's shape.
 func inferMode(provider, value string) string {
 	switch provider {
-	case "OPENAI":
+	case "OPENAI", "GOOGLE":
 		if strings.HasPrefix(value, "{") {
 			return ModeSubscription
 		}
@@ -203,11 +215,18 @@ type Delivery struct {
 // from — the sidecar-injected dummy for the routed adapters, the real value
 // for those with no endpoint override (Cursor, Factory).
 var apiKeyEnvVar = map[string]string{
-	"ANTHROPIC": "ANTHROPIC_API_KEY",
-	"OPENAI":    "OPENAI_API_KEY",
-	"GOOGLE":    "GEMINI_API_KEY",
-	"CURSOR":    "CURSOR_API_KEY",
-	"FACTORY":   "FACTORY_API_KEY",
+	"ANTHROPIC":  "ANTHROPIC_API_KEY",
+	"OPENAI":     "OPENAI_API_KEY",
+	"GOOGLE":     "GEMINI_API_KEY",
+	"CURSOR":     "CURSOR_API_KEY",
+	"FACTORY":    "FACTORY_API_KEY",
+	"XAI":        "XAI_API_KEY",
+	"GROQ":       "GROQ_API_KEY",
+	"OPENROUTER": "OPENROUTER_API_KEY",
+	"DEEPSEEK":   "DEEPSEEK_API_KEY",
+	"MOONSHOT":   "MOONSHOT_API_KEY",
+	"ZAI":        "ZAI_API_KEY",
+	"MINIMAX":    "MINIMAX_API_KEY",
 }
 
 // DeliveryFor returns the delivery shape for a (provider, mode) pair.
@@ -217,6 +236,8 @@ func DeliveryFor(provider, mode string) Delivery {
 		switch p {
 		case "OPENAI":
 			return Delivery{Kind: "file", Target: codexauth.FileRel}
+		case "GOOGLE":
+			return Delivery{Kind: "file", Target: geminiauth.FileRel}
 		case "ANTHROPIC":
 			return Delivery{Kind: "env", Target: "CLAUDE_CODE_OAUTH_TOKEN"}
 		}
@@ -325,9 +346,10 @@ func IsPermanent(err error) bool {
 
 // OpenAIRefresher renews a ChatGPT login at OpenAI's public token endpoint.
 type OpenAIRefresher struct {
-	Client   *http.Client
-	TokenURL string
-	ClientID string
+	Client       *http.Client
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
 }
 
 // NewOpenAIRefresher returns a refresher for the production endpoint. A nil
@@ -350,6 +372,9 @@ func (r *OpenAIRefresher) Refresh(ctx context.Context, refreshToken string) (Ref
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", refreshToken)
 	form.Set("client_id", r.ClientID)
+	if r.ClientSecret != "" {
+		form.Set("client_secret", r.ClientSecret)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return RefreshResult{}, fmt.Errorf("build token request: %w", err)
@@ -370,11 +395,12 @@ func (r *OpenAIRefresher) Refresh(ctx context.Context, refreshToken string) (Ref
 		}
 		_ = json.Unmarshal(body, &oe)
 		msg := fmt.Sprintf("token endpoint returned %d", resp.StatusCode)
-		if oe.Error != "" {
+		// Never persist upstream free text: an OAuth server or proxy may
+		// reflect the submitted token in either error field. Only known
+		// protocol codes are safe for the audit log and owner notification.
+		switch oe.Error {
+		case "invalid_request", "invalid_client", "invalid_grant", "unauthorized_client", "unsupported_grant_type", "invalid_scope", "temporarily_unavailable", "server_error":
 			msg += ": " + oe.Error
-			if oe.Description != "" {
-				msg += " (" + oe.Description + ")"
-			}
 		}
 		// 400 and 401 are the provider's verdict on the grant itself; 429
 		// and 5xx are the provider's day.
@@ -387,6 +413,7 @@ func (r *OpenAIRefresher) Refresh(ctx context.Context, refreshToken string) (Ref
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 		IDToken      string `json:"id_token"`
+		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &tr); err != nil {
 		return RefreshResult{}, errors.New("token endpoint answered 200 with a body that is not JSON")
@@ -397,6 +424,8 @@ func (r *OpenAIRefresher) Refresh(ctx context.Context, refreshToken string) (Ref
 	res := RefreshResult{AccessToken: tr.AccessToken, RefreshToken: tr.RefreshToken, IDToken: tr.IDToken}
 	if exp, ok := codexauth.AccessTokenExpiry(tr.AccessToken); ok {
 		res.ExpiresAt = exp
+	} else if tr.ExpiresIn > 0 {
+		res.ExpiresAt = time.Now().UTC().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
 	return res, nil
 }

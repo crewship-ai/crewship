@@ -254,7 +254,7 @@ func TestProviderLogin_Create_Validation(t *testing.T) {
 		{"not a model provider", map[string]any{"name": "a", "type": "PROVIDER_LOGIN", "provider": "GITHUB", "value": "ghp_x"}, "not a model provider"},
 		{"openai subscription needs the file", map[string]any{"name": "b", "type": "PROVIDER_LOGIN", "provider": "OPENAI", "mode": "subscription", "value": "sk-proj-x"}, "auth.json"},
 		{"bad mode", map[string]any{"name": "c", "type": "PROVIDER_LOGIN", "provider": "OPENAI", "mode": "seat", "value": "sk-proj-x"}, "mode must be"},
-		{"google subscription unsupported", map[string]any{"name": "d", "type": "PROVIDER_LOGIN", "provider": "GOOGLE", "mode": "subscription", "value": "{}"}, "not supported"},
+		{"google subscription incomplete", map[string]any{"name": "d", "type": "PROVIDER_LOGIN", "provider": "GOOGLE", "mode": "subscription", "value": "{}"}, "no access_token"},
 	}
 	for _, c := range cases {
 		code, out := plCreate(t, h, userID, wsID, c.body)
@@ -685,7 +685,6 @@ func TestProviderLoginRefresher_SingleFlight(t *testing.T) {
 // Before a run starts, a login with < 48 h left is refreshed and the
 // delivered set carries the NEW access token.
 func TestProviderLogin_RunStartRefreshesTheDeliveredValue(t *testing.T) {
-	t.Parallel()
 	r := newPLRig(t)
 	credID := r.seedCodexLogin(t, "codex", 40*time.Hour)
 	newAccess := plFakeJWT(t, "plus", time.Now().Add(240*time.Hour))
@@ -695,7 +694,13 @@ func TestProviderLogin_RunStartRefreshesTheDeliveredValue(t *testing.T) {
 
 	restore := SetRunStartLoginRefresherForTesting(r.rf)
 	defer restore()
-	delivered, _, err := loadDeliveredCredentials(context.Background(), r.db, "ag-1")
+	if _, _, err := loadDeliveredCredentials(context.Background(), r.db, "ag-1"); err != nil {
+		t.Fatal(err)
+	}
+	if r.tokens.calls != 0 {
+		t.Fatal("read-only delivery lookup refreshed the login")
+	}
+	delivered, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,11 +722,40 @@ func TestProviderLogin_RunStartRefreshesTheDeliveredValue(t *testing.T) {
 	}
 	// Far from expiry: no call.
 	calls := r.tokens.calls
-	if _, _, err := loadDeliveredCredentials(context.Background(), r.db, "ag-1"); err != nil {
+	if _, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1"); err != nil {
 		t.Fatal(err)
 	}
 	if r.tokens.calls != calls {
 		t.Errorf("a fresh login was refreshed again at run start")
+	}
+}
+
+func TestProviderLogin_RunStartFreshnessFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		remaining    time.Duration
+		needsRelogin bool
+		wantErr      bool
+	}{
+		{"valid token survives temporary outage", 40 * time.Hour, false, false},
+		{"expired token cannot start", -time.Hour, false, true},
+		{"relogin required even before expiry", 40 * time.Hour, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newPLRig(t)
+			id := r.seedCodexLogin(t, "codex", tc.remaining)
+			r.tokens.err = errors.New("temporary endpoint outage")
+			if tc.needsRelogin {
+				execOrFatal(t, r.db, `UPDATE provider_login_refresh SET status = 'needs_relogin' WHERE credential_id = ?`, id)
+			}
+			_, err := r.rf.EnsureFreshForRun(context.Background(), id)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("EnsureFreshForRun error = %v, want error %v", err, tc.wantErr)
+			}
+			if tc.needsRelogin && r.tokens.calls != 0 {
+				t.Fatal("needs_relogin must not retry the token endpoint")
+			}
+		})
 	}
 }
 

@@ -810,7 +810,7 @@ func (h *InternalHandler) lookupCrewNamesForWorkspace(r *http.Request, workspace
 // predicate /keeper/execute enforces (credentialLeaseGateSQL); NULL expires_at is
 // a standing grant and is unaffected.
 func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID string) ([]mcpCredEntry, error) {
-	delivered, slotNotices, err := loadDeliveredCredentials(r.Context(), h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentialsForRun(r.Context(), h.db, agentID)
 	if err != nil {
 		h.logger.Error("resolve agent credentials", "error", err)
 		return nil, err

@@ -108,6 +108,7 @@ func TestIsProtectedAgentConfigPath(t *testing.T) {
 		"opencode.json",
 		".codex/config.toml",
 		".codex/auth.json",
+		".gemini/oauth_creds.json",
 	}
 	for _, relative := range protected {
 		for _, path := range []string{relative, crew + "/" + slug + "/" + relative} {
@@ -143,7 +144,7 @@ func TestIsProtectedAgentConfigPath(t *testing.T) {
 //
 // The agent door knows exactly one slug, so it can require an exact
 // "<crewID>/<slug>/" prefix. The crew door has no such context — a request
-// can legitimately name any agent in the crew — so this must deny the six
+// can legitimately name any agent in the crew — so this must deny the eight
 // generated files under WHICHEVER slug the path names, not just one. The
 // case that matters most here is "other-agent's config, reached through the
 // crew door": isProtectedAgentConfigPath(crew, slug, ...) says false for it
@@ -163,6 +164,7 @@ func TestIsProtectedCrewConfigPath(t *testing.T) {
 		"opencode.json",
 		".codex/config.toml",
 		".codex/auth.json",
+		".gemini/oauth_creds.json",
 	}
 	for _, relative := range protected {
 		for _, agentSlug := range []string{"riley", "other-agent", "morgan"} {

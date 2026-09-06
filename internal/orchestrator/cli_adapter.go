@@ -92,6 +92,11 @@ type CLIAdapter interface {
 		workDir string,
 		logger *slog.Logger,
 	) error
+
+	// AuthDelivery declares where this CLI reads the account that pays for
+	// its model — an env var, a file under HOME, or both (auth_delivery.go).
+	// Pure: the same value on every call.
+	AuthDelivery() AuthDelivery
 }
 
 // streamLineParserFactory is an optional CLIAdapter capability. Adapters whose

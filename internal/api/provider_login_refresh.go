@@ -75,8 +75,11 @@ func NewProviderLoginRefresher(db *sql.DB, logger *slog.Logger, ctr provider.Con
 	}
 	return &ProviderLoginRefresher{
 		db: db, logger: logger, container: ctr, now: func() time.Time { return time.Now().UTC() },
-		refresh:  map[string]providerlogin.TokenRefresher{"OPENAI": providerlogin.NewOpenAIRefresher(nil)},
-		interval: 10 * time.Minute,
+		refresh: map[string]providerlogin.TokenRefresher{
+			"OPENAI": providerlogin.NewOpenAIRefresher(nil),
+			"GOOGLE": providerlogin.NewGoogleRefresher(nil),
+		},
+		interval: time.Minute,
 	}
 }
 
@@ -165,7 +168,7 @@ func (r *ProviderLoginRefresher) RefreshDue(ctx context.Context) {
 		if d.ExpiresAt != "" {
 			exp, _ = time.Parse(time.RFC3339, d.ExpiresAt)
 		}
-		if !providerlogin.Due(exp, now, providerlogin.RefreshLead) {
+		if !providerlogin.Due(exp, now, providerlogin.RefreshLeadFor(d.Provider)) {
 			continue
 		}
 		if d.Status.Valid && d.Status.String == providerlogin.StatusFailed {
@@ -190,9 +193,9 @@ func parseNullTime(s sql.NullString) (time.Time, bool) {
 // EnsureFreshForRun is the run-start hook (§10.4): refresh when less than
 // RunStartLead remains. Returns the NEW ciphertext of the access token when a
 // refresh happened, so the caller can deliver it without a second read. A
-// failure is logged and the run proceeds on the token it has — a login with
-// 40 h left still works, and the monitor will retry.
-func (r *ProviderLoginRefresher) EnsureFreshForRun(ctx context.Context, credID string) (string, bool) {
+// transient failure allows a still-valid token; expired tokens, unknown
+// expiry on failed refresh, and needs_relogin fail closed.
+func (r *ProviderLoginRefresher) EnsureFreshForRun(ctx context.Context, credID string) (string, error) {
 	var provider, expiresAt string
 	var status sql.NullString
 	err := r.db.QueryRowContext(ctx, `
@@ -206,34 +209,44 @@ func (r *ProviderLoginRefresher) EnsureFreshForRun(ctx context.Context, credID s
 		WHERE c.id = ? AND c.type = ? AND c.deleted_at IS NULL`,
 		providerlogin.PartExpiresAt, providerlogin.PartMode, providerlogin.ModeSubscription,
 		providerlogin.PartRefreshToken, credID, CredTypeProviderLogin).Scan(&provider, &expiresAt, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil // not a refreshable login, or gone
+	}
 	if err != nil {
-		return "", false // not a refreshable login, or gone
+		return "", fmt.Errorf("check provider login freshness: %w", err)
 	}
 	if status.Valid && status.String == providerlogin.StatusNeedsRelogin {
-		return "", false
+		return "", errNeedsRelogin
 	}
 	var exp time.Time
 	if expiresAt != "" {
 		exp, _ = time.Parse(time.RFC3339, expiresAt)
 	}
-	if !providerlogin.Due(exp, r.now(), providerlogin.RunStartLead) {
-		return "", false
+	if !providerlogin.Due(exp, r.now(), providerlogin.RunStartLeadFor(provider)) {
+		return "", nil
 	}
 	enc, err := r.Refresh(ctx, credID, false)
 	if err != nil {
+		if exp.IsZero() || !exp.After(r.now()) {
+			return "", fmt.Errorf("provider login cannot be renewed before run: %w", err)
+		}
 		if !errors.Is(err, ErrRefreshInFlight) {
 			r.logger.Warn("provider login refresh before run start failed; starting on the stored token",
 				"credential_id", credID, "error", err)
 		}
-		return "", false
+		return "", nil
 	}
-	return enc, true
+	return enc, nil
 }
 
 // Refresh renews one login now. force skips the failure backoff (an operator
 // clicked Refresh); it never skips the single-flight claim. Returns the new
 // access token's ciphertext.
 func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, force bool) (string, error) {
+	// Once a provider rotates a token, cancellation of the initiating HTTP
+	// request must not discard it. Bound the whole operation below the lease.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
+	defer cancel()
 	now := r.now()
 
 	var provider, createdBy, wsID, name string
@@ -272,14 +285,14 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	if !force {
 		backoffClause = " AND (status != 'failed' OR next_at IS NULL OR next_at <= ?)"
 	}
-	args := []any{claimUntil, nowS, credID, nowS}
+	args := []any{claimUntil, nowS, credID, nowS, force}
 	if !force {
 		args = append(args, nowS)
 	}
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE provider_login_refresh SET in_progress_until = ?, updated_at = ?
 		 WHERE credential_id = ? AND (in_progress_until IS NULL OR in_progress_until < ?)
-		   AND status != 'needs_relogin'`+backoffClause, args...)
+		   AND (status != 'needs_relogin' OR ?)`+backoffClause, args...)
 	if err != nil {
 		return "", fmt.Errorf("claim refresh: %w", err)
 	}
@@ -294,22 +307,20 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 		if until, ok := parseNullTime(inFlight); ok && until.After(now) {
 			return "", ErrRefreshInFlight
 		}
-		if status == providerlogin.StatusNeedsRelogin {
-			// Forced retry of a needs_relogin login: allowed (the operator
-			// may know the seat is back), so claim it explicitly.
-			if _, err := r.db.ExecContext(ctx, `UPDATE provider_login_refresh SET in_progress_until = ?, updated_at = ? WHERE credential_id = ?`,
-				claimUntil, nowS, credID); err != nil {
-				return "", fmt.Errorf("claim refresh: %w", err)
-			}
-		} else {
-			return "", fmt.Errorf("refresh is backing off until %s", nextAt.String)
-		}
+		return "", fmt.Errorf("refresh is backing off until %s", nextAt.String)
 	}
 	release := func() {
 		_, _ = r.db.ExecContext(context.WithoutCancel(ctx),
 			`UPDATE provider_login_refresh SET in_progress_until = NULL WHERE credential_id = ?`, credID)
 	}
 
+	// Read rotating material AFTER winning the claim: a previous holder may
+	// have replaced it since the eligibility query above.
+	if err := r.db.QueryRowContext(ctx, `SELECT encrypted_value FROM credential_fields WHERE credential_id = ? AND key = ?`,
+		credID, providerlogin.PartRefreshToken).Scan(&refreshEnc); err != nil {
+		release()
+		return "", fmt.Errorf("load claimed refresh token: %w", err)
+	}
 	refreshToken, err := encryption.Decrypt(refreshEnc.String)
 	if err != nil {
 		release()
@@ -398,7 +409,11 @@ func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID string
 	}
 	nextAt := ""
 	if !res.ExpiresAt.IsZero() {
-		nextAt = res.ExpiresAt.Add(-providerlogin.RefreshLead).UTC().Format(time.RFC3339)
+		var p string
+		if err := tx.QueryRowContext(ctx, `SELECT provider FROM credentials WHERE id = ?`, credID).Scan(&p); err != nil {
+			return "", err
+		}
+		nextAt = res.ExpiresAt.Add(-providerlogin.RefreshLeadFor(p)).UTC().Format(time.RFC3339)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE provider_login_refresh SET status = ?, last_at = ?, next_at = NULLIF(?, ''), error = NULL, failures = 0, updated_at = ?
@@ -474,9 +489,9 @@ func (r *ProviderLoginRefresher) reRender(ctx context.Context, credID, wsID stri
 	// Every agent the login reaches, by the same sources the delivery query
 	// uses, narrowed to the one adapter that reads a file.
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT a.id, a.slug, cr.id, cr.slug FROM agents a
+		SELECT DISTINCT a.id, a.slug, cr.id, cr.slug, a.cli_adapter FROM agents a
 		JOIN crews cr ON cr.id = a.crew_id AND cr.deleted_at IS NULL
-		WHERE a.workspace_id = ? AND a.deleted_at IS NULL AND a.cli_adapter = 'CODEX_CLI'
+		WHERE a.workspace_id = ? AND a.deleted_at IS NULL AND a.cli_adapter IN ('CODEX_CLI', 'GEMINI_CLI')
 		  AND (
 		    EXISTS (SELECT 1 FROM agent_credentials ac WHERE ac.agent_id = a.id AND ac.credential_id = ?)
 		    OR EXISTS (SELECT 1 FROM credential_bindings b WHERE b.credential_id = ? AND
@@ -487,11 +502,11 @@ func (r *ProviderLoginRefresher) reRender(ctx context.Context, credID, wsID stri
 		r.logger.Warn("provider login re-render: query agents", "credential_id", credID, "error", err)
 		return
 	}
-	type target struct{ agentID, agentSlug, crewID, crewSlug string }
+	type target struct{ agentID, agentSlug, crewID, crewSlug, adapter string }
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.agentID, &t.agentSlug, &t.crewID, &t.crewSlug); err != nil {
+		if err := rows.Scan(&t.agentID, &t.agentSlug, &t.crewID, &t.crewSlug, &t.adapter); err != nil {
 			rows.Close()
 			return
 		}
@@ -533,7 +548,7 @@ func (r *ProviderLoginRefresher) reRender(ctx context.Context, credID, wsID stri
 			continue
 		}
 		containerID := r.container.CrewContainerName(t.crewID, t.crewSlug)
-		if err := orchestrator.DeliverCodexLogin(ctx, r.container, containerID, t.agentSlug, *login, r.logger); err != nil {
+		if err := orchestrator.DeliverProviderLogin(ctx, r.container, containerID, t.agentSlug, t.adapter, *login, r.logger); err != nil {
 			// Overwhelmingly "container not running": the next run start
 			// writes the file. Debug, like the revoke reconcile.
 			r.logger.Debug("provider login re-render skipped", "agent_slug", t.agentSlug, "crew_id", t.crewID, "error", err)
@@ -551,7 +566,7 @@ func (r *ProviderLoginRefresher) reRender(ctx context.Context, credID, wsID stri
 // means "deliver what is stored", which is what every test and `crewship
 // seed` gets.
 type runStartRefresher interface {
-	EnsureFreshForRun(ctx context.Context, credID string) (string, bool)
+	EnsureFreshForRun(ctx context.Context, credID string) (string, error)
 }
 
 var runStartLoginRefresher runStartRefresher
@@ -572,27 +587,33 @@ func SetRunStartLoginRefresherForTesting(r runStartRefresher) func() {
 	return func() { runStartLoginRefresher = prev }
 }
 
-// refreshLoginsBeforeRun applies the hook to a delivered set, replacing the
-// ciphertext of any login that was just rotated.
-func refreshLoginsBeforeRun(ctx context.Context, delivered []deliveredCredential) {
+// loadDeliveredCredentialsForRun is the mutating boot/delegation loader.
+// Metadata views and refresh-file reconciliation use the read-only loader;
+// opening a Providers tab must never rotate credentials.
+func loadDeliveredCredentialsForRun(ctx context.Context, db *sql.DB, agentID string) ([]deliveredCredential, []deliveredSlotNotice, error) {
+	delivered, notices, err := loadDeliveredCredentials(ctx, db, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
 	hook := runStartLoginRefresher
 	if hook == nil {
-		return
+		return delivered, notices, nil
 	}
-	seen := map[string]string{}
+	seen := map[string]bool{}
 	for i := range delivered {
 		if delivered[i].Type != CredTypeProviderLogin || delivered[i].HandleOnly {
 			continue
 		}
-		enc, ok := seen[delivered[i].ID]
-		if !ok {
-			enc, _ = hook.EnsureFreshForRun(ctx, delivered[i].ID)
-			seen[delivered[i].ID] = enc
-		}
-		if enc != "" {
-			delivered[i].EncryptedValue = enc
+		if !seen[delivered[i].ID] {
+			if _, err := hook.EnsureFreshForRun(ctx, delivered[i].ID); err != nil {
+				return nil, nil, fmt.Errorf("credential %s: %w", delivered[i].ID, err)
+			}
+			seen[delivered[i].ID] = true
 		}
 	}
+	// Refresh rotates multiple parts atomically. Re-read the complete set,
+	// including access ciphertext, instead of replacing just one field.
+	return loadDeliveredCredentials(ctx, db, agentID)
 }
 
 // ---------------------------------------------------------------------------
@@ -640,7 +661,7 @@ func (h *CredentialHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, err.Error())
 		return
 	case errors.Is(err, ErrRefreshUnsupported):
-		replyError(w, http.StatusBadRequest, "this login has no refresh flow: only a subscription login with a stored refresh token (ChatGPT) can be refreshed")
+		replyError(w, http.StatusBadRequest, "this login has no refresh flow: only a supported subscription login with a stored refresh token can be refreshed")
 		return
 	default:
 		// The failure is recorded on the login; the response says so and

@@ -34,6 +34,7 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 		{providerlogin.PartPlan, l.Plan, false},
 		{providerlogin.PartExpiresAt, "", false},
 		{providerlogin.PartMode, l.Mode, false},
+		{providerlogin.PartScope, l.Scope, false},
 	}
 	if !l.ExpiresAt.IsZero() {
 		parts[4].value = l.ExpiresAt.UTC().Format(time.RFC3339)
@@ -69,7 +70,7 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 	}
 	nextAt := ""
 	if !l.ExpiresAt.IsZero() {
-		nextAt = l.ExpiresAt.Add(-providerlogin.RefreshLead).UTC().Format(time.RFC3339)
+		nextAt = l.ExpiresAt.Add(-providerlogin.RefreshLeadFor(l.Provider)).UTC().Format(time.RFC3339)
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO provider_login_refresh (credential_id, status, next_at, updated_at) VALUES (?, ?, NULLIF(?, ''), ?)

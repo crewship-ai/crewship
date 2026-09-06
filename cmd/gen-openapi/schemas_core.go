@@ -108,7 +108,7 @@ func coreResourceSchemas() map[string]any {
 		"pays_with": map[string]any{"type": "object", "nullable": true, "properties": map[string]any{
 			"credential_id": stringSchema(), "name": stringSchema(), "login": ref("ProviderLogin"),
 		}, "required": []string{"credential_id", "name", "login"}},
-	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile",
+	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile", "pays_with",
 		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral",
 		"crew_id", "description", "role_title", "lead_mode", "llm_provider", "llm_model", "system_prompt",
 		"avatar_seed", "avatar_style", "avatar_url", "cli_tools", "schedule_cron", "schedule_prompt",

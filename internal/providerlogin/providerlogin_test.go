@@ -98,8 +98,8 @@ func TestSplit(t *testing.T) {
 			wantMode: "api_key", wantAccess: "sk-ant-api03-xyz",
 		},
 		{
-			name: "google subscription is not supported yet", provider: "GOOGLE", mode: "subscription", value: "{}",
-			wantErr: "not supported",
+			name: "google subscription rejects incomplete import", provider: "GOOGLE", mode: "subscription", value: "{}",
+			wantErr: "no access_token",
 		},
 		{
 			name: "cursor api key", provider: "CURSOR", mode: "api_key", value: "cur_123",
@@ -155,12 +155,18 @@ func TestSplit(t *testing.T) {
 
 func TestIsProviderAndDelivery(t *testing.T) {
 	t.Parallel()
-	for _, p := range []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "openai"} {
+	for _, p := range append(Providers(), "openai") {
 		if !IsProvider(p) {
 			t.Errorf("IsProvider(%q) = false", p)
 		}
+		if _, err := Split(p, ModeAPIKey, "fixture-key"); err != nil {
+			t.Errorf("API key for %s rejected: %v", p, err)
+		}
+		if DeliveryFor(p, ModeAPIKey).Target == "" {
+			t.Errorf("provider %s has no delivery slot", p)
+		}
 	}
-	for _, p := range []string{"GITHUB", "NONE", "", "OPENROUTER", "OPENAI_COMPAT"} {
+	for _, p := range []string{"GITHUB", "NONE", "", "OPENAI_COMPAT"} {
 		if IsProvider(p) {
 			t.Errorf("IsProvider(%q) = true", p)
 		}
@@ -175,6 +181,9 @@ func TestIsProviderAndDelivery(t *testing.T) {
 		{"GOOGLE", ModeAPIKey, "env", "GEMINI_API_KEY"},
 		{"CURSOR", ModeAPIKey, "env", "CURSOR_API_KEY"},
 		{"FACTORY", ModeAPIKey, "env", "FACTORY_API_KEY"},
+		{"GROQ", ModeAPIKey, "env", "GROQ_API_KEY"},
+		{"XAI", ModeAPIKey, "env", "XAI_API_KEY"},
+		{"OPENROUTER", ModeAPIKey, "env", "OPENROUTER_API_KEY"},
 	}
 	for _, c := range cases {
 		d := DeliveryFor(c.provider, c.mode)
@@ -276,6 +285,8 @@ func TestOpenAIRefresher_ErrorShapes(t *testing.T) {
 		wantPerm bool
 	}{
 		{"invalid grant is permanent", 400, `{"error":"invalid_grant","error_description":"refresh token expired"}`, "invalid_grant", true},
+		{"reflected description is redacted", 400, `{"error":"invalid_grant","error_description":"rejected rt.OLD"}`, "invalid_grant", true},
+		{"reflected error code is redacted", 400, `{"error":"rt.OLD"}`, "400", true},
 		{"unauthorized is permanent", 401, `{"error":"invalid_client"}`, "invalid_client", true},
 		{"server error is transient", 503, `upstream down`, "503", false},
 		{"rate limit is transient", 429, `{"error":"rate_limited"}`, "429", false},

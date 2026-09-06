@@ -342,6 +342,13 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
       GOOGLE: { placeholder: "AIza…", slot: "GOOGLE_API_KEY" },
       CURSOR: { placeholder: "key_…", slot: "CURSOR_API_KEY" },
       FACTORY: { placeholder: "fk-…", slot: "FACTORY_API_KEY" },
+      XAI: { placeholder: "Paste the xAI API key", slot: "XAI_API_KEY" },
+      GROQ: { placeholder: "Paste the Groq API key", slot: "GROQ_API_KEY" },
+      OPENROUTER: { placeholder: "Paste the OpenRouter API key", slot: "OPENROUTER_API_KEY" },
+      DEEPSEEK: { placeholder: "Paste the DeepSeek API key", slot: "DEEPSEEK_API_KEY" },
+      MOONSHOT: { placeholder: "Paste the Moonshot API key", slot: "MOONSHOT_API_KEY" },
+      ZAI: { placeholder: "Paste the Z.AI API key", slot: "ZAI_API_KEY" },
+      MINIMAX: { placeholder: "Paste the MiniMax API key", slot: "MINIMAX_API_KEY" },
     }
     const k = keyOf[p]
     return {
@@ -361,6 +368,15 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
         multiline: false,
         hint: "Run `claude setup-token` on your computer and paste the whole output. Delivered to Claude Code as CLAUDE_CODE_OAUTH_TOKEN.",
         slot: "CLAUDE_CODE_OAUTH_TOKEN",
+        supported: true,
+      }
+    case "GOOGLE":
+      return {
+        label: "Gemini login (oauth_creds.json)",
+        placeholder: '{ "access_token": "…", "refresh_token": "…", "expiry_date": 0 }',
+        multiline: true,
+        hint: "Sign in with Gemini CLI and paste ~/.gemini/oauth_creds.json. Crewship stores the refresh token securely and renews the access token.",
+        slot: "GEMINI_API_KEY",
         supported: true,
       }
     case "OPENAI":

@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
@@ -24,7 +25,7 @@ import (
 // Order matters — BuildEnvVars and BuildEnvVarsSidecar both start from this
 // exact sequence.
 func baseAgentEnv(req AgentRunRequest) []string {
-	return []string{
+	env := []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
@@ -32,6 +33,10 @@ func baseAgentEnv(req AgentRunRequest) []string {
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
+	if req.CLIAdapter == "OPENCODE" {
+		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug)+"/.local/share")
+	}
+	return env
 }
 
 // BuildEnvVars constructs the environment variables for a container exec,
@@ -76,9 +81,9 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		// taken a keeperEnabled parameter and pre-existing SECRET/Keeper
 		// behaviour on this path is unchanged; only the unclassified-type gap
 		// is closed here.
-		if credentialOAuthKind(*activeCred) == oauthOpenAI {
-			// #2428: a Codex login is a file, never an env var — see
-			// codex_auth_file.go. Writing the JSON blob into the env would
+		if credentialOAuthKind(*activeCred).fileDelivered() {
+			// #2428: a Codex or Gemini login is a file, never an env var —
+			// see auth_delivery.go. Writing the JSON blob into the env would
 			// hand the agent the refresh token for nothing.
 		} else if credEnvDeliverable(*activeCred) {
 			envVar := resolveEnvVar(activeCred)
@@ -95,8 +100,8 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		if activeCred != nil && cred.ID == activeCred.ID {
 			continue
 		}
-		if credentialOAuthKind(cred) == oauthOpenAI {
-			continue // #2428: file-delivered, see codex_auth_file.go
+		if credentialOAuthKind(cred).fileDelivered() {
+			continue // #2428: file-delivered, see auth_delivery.go
 		}
 		if cred.EnvVarName != "" && cred.PlainValue != "" {
 			// #2092/#2246: same gate as above, applied to every OTHER
@@ -248,15 +253,28 @@ const (
 	// CLAUDE_CODE_OAUTH_TOKEN env var, tunnelled through the sidecar.
 	oauthAnthropic
 	// oauthOpenAI: a Codex `auth.json` (ChatGPT subscription). Delivered as
-	// $CODEX_HOME/auth.json by syncCodexAuthFile, never as an env var and
+	// $CODEX_HOME/auth.json by syncLoginFile, never as an env var and
 	// never into the sidecar CredStore.
 	oauthOpenAI
+	// oauthGoogle: a Gemini CLI `oauth_creds.json` (Google account login).
+	// Delivered as ~/.gemini/oauth_creds.json by syncLoginFile, never as an
+	// env var and never into the sidecar CredStore.
+	oauthGoogle
 )
+
+// fileDelivered reports whether a login of this kind lands on disk rather
+// than in the environment — the property every env-delivery selector has to
+// check, so a JSON login is never written into a variable.
+func (k oauthKind) fileDelivered() bool {
+	return k == oauthOpenAI || k == oauthGoogle
+}
 
 // credentialOAuthKind classifies one delivered credential. The Anthropic arm
 // keeps its value-shape fallback (an `sk-ant-oat…` value of any type) exactly
-// as before; the OpenAI arm is decided by the provider column alone, because
-// a ChatGPT login has no distinctive prefix — it is a JSON object.
+// as before; the OpenAI and Google arms are decided by the provider column
+// alone, because those logins have no distinctive prefix — each is a JSON
+// object — and they are checked FIRST, since the Anthropic arm claims every
+// AI_CLI_TOKEN whatever its provider.
 //
 // It classifies by type and provider, not by whether a value is present:
 // resolveEnvVar names the variable for a credential whose value may be
@@ -277,11 +295,16 @@ func credentialOAuthKind(cred Credential) oauthKind {
 			return oauthOpenAI
 		case "ANTHROPIC":
 			return oauthAnthropic
+		case "GOOGLE":
+			return oauthGoogle
 		}
 		return oauthNone
 	}
 	if codexauth.IsLogin(cred.Type, cred.Provider) {
 		return oauthOpenAI
+	}
+	if geminiauth.IsLogin(cred.Type, cred.Provider) {
+		return oauthGoogle
 	}
 	if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
 		return oauthAnthropic
@@ -540,7 +563,11 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		// The sidecar allowlists api.anthropic.com and passes the tunnel through.
 		// No ANTHROPIC_BASE_URL (let Claude Code use the default HTTPS endpoint).
 		// No dummy ANTHROPIC_API_KEY (would override OAuth authentication).
-		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+		// The variable and the plan label come from the Claude Code
+		// adapter's declaration (auth_delivery.go) — the same table the
+		// file-delivered logins below read.
+		claudeDelivery := claudeCodeAdapter{}.AuthDelivery()
+		env = append(env, claudeDelivery.Env+"="+oauthToken)
 		// Still set dummy keys for other providers (OpenAI, Google) for sidecar injection
 		env = append(env, "OPENAI_API_KEY=sk-dummy-crewship-sidecar")
 		env = append(env, "GOOGLE_API_KEY=dummy-crewship-sidecar")
@@ -583,10 +610,17 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	//     plan read from the login's own token rather than hard-coded.
 	if req.CLIAdapter == "CODEX_CLI" {
 		env = append(env, "CODEX_HOME="+codexHomeDir(req.AgentSlug))
-		if login, ok := codexLoginCredential(req); ok {
-			env = overrideEnv(env, "CREWSHIP_BILLING_MODE", "flat_rate")
-			env = overrideEnv(env, "CREWSHIP_SUBSCRIPTION_PLAN", codexPlanLabel(login))
-		}
+	}
+
+	// A file-delivered login (auth_delivery.go: Codex's auth.json, Gemini's
+	// oauth_creds.json) is written by syncLoginFile in the preflight, not
+	// here. What the env carries is the consequence: the traffic goes
+	// through the CONNECT tunnel, so the run is billed flat-rate with the
+	// plan read from the login itself rather than hard-coded.
+	fileDelivery, fileLoginCred, hasFileLogin := fileLogin(req)
+	if hasFileLogin {
+		env = overrideEnv(env, "CREWSHIP_BILLING_MODE", "flat_rate")
+		env = overrideEnv(env, "CREWSHIP_SUBSCRIPTION_PLAN", loginPlanLabel(fileDelivery, fileLoginCred))
 	}
 
 	// #1030: the Gemini CLI routes its Google traffic through the sidecar
@@ -599,11 +633,19 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// value from the CredStore mid-flight, so the real key lives only in the
 	// sidecar heap. Scoped to GEMINI_CLI — OpenCode's multi-provider BYOK
 	// driver dials providers directly and must NOT be force-routed here.
+	//
+	// A Google-account login (geminiauth) is the exception to the dummies:
+	// Gemini CLI prefers a key in the environment over its login file, so a
+	// subscription run carries NO key at all and GOOGLE_GENAI_USE_GCA
+	// instead, which is how a headless run selects the login path.
 	if req.CLIAdapter == "GEMINI_CLI" {
-		env = append(env,
-			"GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9119/gemini",
-			"GEMINI_API_KEY=dummy-crewship-sidecar",
-		)
+		env = append(env, "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:9119/gemini")
+		if hasFileLogin {
+			env = dropEnv(env, "GOOGLE_API_KEY")
+			env = append(env, geminiauth.UseGCAEnv+"=true")
+		} else {
+			env = append(env, "GEMINI_API_KEY=dummy-crewship-sidecar")
+		}
 	}
 
 	// Multi-CLI BYO API key path. The sidecar reverse-proxy now injects keys
@@ -1437,19 +1479,18 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		break
 	}
 
-	// Codex login (#2428): not in the env, but on disk in the agent's HOME,
-	// which the agent can read just the same. Reported so the gap is visible;
-	// the delivered file carries no refresh token (codexauth.Render), which is
-	// what makes it informational rather than actionable.
-	if req.CLIAdapter == "CODEX_CLI" {
-		if login, ok := codexLoginCredential(req); ok {
-			out = append(out, CredentialEnvExposure{
-				EnvVarName: codexauth.FileRel,
-				Type:       login.Type,
-				Reason:     "Codex reads its ChatGPT login only from $CODEX_HOME/auth.json, so a short-lived access token is written there; the refresh token stays on the server",
-			})
-			markExposed(login.ID)
-		}
+	// File-delivered login (#2428, auth_delivery.go): not in the env, but on
+	// disk in the agent's HOME, which the agent can read just the same.
+	// Reported so the gap is visible; the delivered file carries no refresh
+	// token (the adapter's Render), which is what makes it informational
+	// rather than actionable.
+	if d, login, ok := fileLogin(req); ok {
+		out = append(out, CredentialEnvExposure{
+			EnvVarName: d.File,
+			Type:       login.Type,
+			Reason:     req.CLIAdapter + " reads its subscription login only from " + d.File + " under the agent's HOME, so a short-lived access token is written there; the refresh token stays on the server",
+		})
+		markExposed(login.ID)
 	}
 
 	// BYO API keys: CONNECT-tunneled adapters reach their upstream over an HTTPS
@@ -1679,10 +1720,22 @@ func overrideEnv(env []string, key, value string) []string {
 // OAuth tokens (type AI_CLI_TOKEN or value prefix sk-ant-oat) must be set as
 // CLAUDE_CODE_OAUTH_TOKEN -- Claude Code ignores them in ANTHROPIC_API_KEY.
 func resolveEnvVar(cred *Credential) string {
-	if credentialOAuthKind(*cred) == oauthAnthropic {
-		return "CLAUDE_CODE_OAUTH_TOKEN"
+	if v := loginEnvVar(credentialOAuthKind(*cred)); v != "" {
+		return v
 	}
 	return cred.EnvVarName
+}
+
+// dropEnv removes every KEY=... entry from env.
+func dropEnv(env []string, key string) []string {
+	prefix := key + "="
+	out := env[:0:0]
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // DefaultEnvVarForProvider returns the conventional env var name for a CLI tool provider.

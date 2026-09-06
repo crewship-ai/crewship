@@ -29,6 +29,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credname"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
@@ -73,6 +75,11 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 	// an Anthropic login never touch disk.
 	if codexauth.IsLogin(credType, provider) || isCodexProviderLogin(credType, provider, mode) {
 		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+	}
+	// A Gemini login is the same shape one directory over: rendered whole
+	// into ~/.gemini/oauth_creds.json by the orchestrator's AuthDelivery.
+	if geminiauth.IsLogin(credType, provider) || (credType == CredTypeProviderLogin && strings.EqualFold(provider, "GOOGLE") && mode == providerlogin.ModeSubscription) {
+		return []string{"/crew/agents/" + agentSlug + "/" + geminiauth.FileRel}
 	}
 	if credType == CredTypeProviderLogin {
 		return nil
@@ -170,24 +177,41 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	// fall out below when credSecretPaths returns no paths. Only live agents
 	// in live crews have a running container to reach.
 	rows, err := db.QueryContext(ctx, `
-		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type, c.provider
+		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type, c.provider, a.cli_adapter
 		FROM agent_credentials ac
 		JOIN agents a       ON a.id = ac.agent_id AND a.deleted_at IS NULL
 		JOIN credentials c  ON c.id = ac.credential_id
 		JOIN crews cr       ON cr.id = a.crew_id AND cr.deleted_at IS NULL
-		WHERE ac.credential_id = ? AND c.workspace_id = ?`,
-		credentialID, workspaceID)
+		WHERE ac.credential_id = ? AND c.workspace_id = ?
+		UNION
+		SELECT a.slug, cr.id, cr.slug, b.slot, c.type, c.provider, a.cli_adapter
+		FROM credential_bindings b
+		JOIN credentials c ON c.id = b.credential_id
+		JOIN agents a ON a.workspace_id = b.workspace_id AND a.deleted_at IS NULL
+		  AND ((b.scope = 'AGENT' AND b.agent_id = a.id)
+		    OR (b.scope = 'CREW' AND b.crew_id = a.crew_id)
+		    OR b.scope = 'WORKSPACE')
+		JOIN crews cr ON cr.id = a.crew_id AND cr.deleted_at IS NULL
+		WHERE b.credential_id = ? AND c.workspace_id = ?
+		UNION
+		SELECT a.slug, cr.id, cr.slug, c.name, c.type, c.provider, a.cli_adapter
+		FROM credential_crews cc
+		JOIN credentials c ON c.id = cc.credential_id
+		JOIN agents a ON a.crew_id = cc.crew_id AND a.workspace_id = c.workspace_id AND a.deleted_at IS NULL
+		JOIN crews cr ON cr.id = a.crew_id AND cr.deleted_at IS NULL
+		WHERE cc.credential_id = ? AND c.workspace_id = ?`,
+		credentialID, workspaceID, credentialID, workspaceID, credentialID, workspaceID)
 	if err != nil {
 		logger.Warn("revoke reconcile: query file mounts", "credential_id", credentialID, "error", err)
 		return
 	}
 	defer rows.Close()
 
-	type target struct{ agentSlug, crewID, crewSlug, envVar, credType, provider string }
+	type target struct{ agentSlug, crewID, crewSlug, envVar, credType, provider, adapter string }
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType, &t.provider); err != nil {
+		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType, &t.provider, &t.adapter); err != nil {
 			logger.Warn("revoke reconcile: scan", "error", err)
 			return
 		}
@@ -197,6 +221,7 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 		logger.Warn("revoke reconcile: rows", "error", err)
 		return
 	}
+	rows.Close()
 
 	// The credential's multi-part field keys (PRD §2.2), read once for all
 	// targets — they belong to the credential, not to the grant, so the same
@@ -253,6 +278,15 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 		}
 		t.envVar = envVar
 		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, t.provider, loginMode, fieldKeys)
+		if t.adapter == "OPENCODE" {
+			// This file is a complete per-run projection of authorized keys.
+			// Removing it is conservative when one grant is revoked; the next
+			// run reconstructs it from the remaining grants, never stale disk.
+			if script != "" {
+				script += "\n"
+			}
+			script += "rm -f '/crew/agents/" + t.agentSlug + "/" + orchestrator.OpenCodeAuthFileRel + "'"
+		}
 		if script == "" {
 			continue // type has no on-disk form
 		}

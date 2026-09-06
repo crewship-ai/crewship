@@ -814,8 +814,8 @@ func TestEnsureOnboardingSetupCrew_FollowsWorkspaceCredentialProvider(t *testing
 	if provider != "OPENAI" {
 		t.Errorf("agent llm_provider = %q, want OPENAI (matching the workspace's only credential)", provider)
 	}
-	if model != "gpt-5.5" {
-		t.Errorf("agent llm_model = %q, want gpt-5.5", model)
+	if model != "gpt-6-astra" {
+		t.Errorf("agent llm_model = %q, want gpt-6-astra", model)
 	}
 	// The marker's model is the PROPOSED CREW's, not the Guide's own, and the
 	// two are deliberately different: the Guide runs the runtime default

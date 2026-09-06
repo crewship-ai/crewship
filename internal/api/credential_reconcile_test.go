@@ -170,6 +170,36 @@ func TestReconcileRevokedCredential_NonFileType_NoExec(t *testing.T) {
 	}
 }
 
+func TestReconcileRevokedCredential_OpenCodeAllGrantSources(t *testing.T) {
+	for _, source := range []string{"direct", "crew_binding", "workspace_binding", "crew_link"} {
+		t.Run(source, func(t *testing.T) {
+			db := setupTestDB(t)
+			wsID, credID := seedFileMountCred(t, db, "API_KEY")
+			execOrFatal(t, db, `UPDATE agents SET cli_adapter = 'OPENCODE' WHERE id = 'agent-rec'`)
+			execOrFatal(t, db, `UPDATE credentials SET name = 'OPENAI_API_KEY', provider = 'OPENAI' WHERE id = ?`, credID)
+			execOrFatal(t, db, `UPDATE agent_credentials SET env_var_name = 'OPENAI_API_KEY' WHERE id = 'ac-rec'`)
+			if source != "direct" {
+				execOrFatal(t, db, `DELETE FROM agent_credentials WHERE id = 'ac-rec'`)
+			}
+			switch source {
+			case "crew_binding":
+				execOrFatal(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, crew_id, slot) VALUES ('binding-rec', ?, ?, 'CREW', 'crew-rec', 'OPENAI_API_KEY')`, wsID, credID)
+			case "workspace_binding":
+				execOrFatal(t, db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, slot) VALUES ('binding-rec', ?, ?, 'WORKSPACE', 'OPENAI_API_KEY')`, wsID, credID)
+			case "crew_link":
+				execOrFatal(t, db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES (?, 'crew-rec')`, credID)
+			}
+			var calls []provider.ExecConfig
+			h := NewCredentialHandler(db, newTestLogger())
+			h.SetContainer(newRecordingCtr(&calls, nil))
+			h.reconcileRevokedCredential(context.Background(), credID, wsID)
+			if len(calls) != 1 || calls[0].User != "1001:1001" || !strings.Contains(strings.Join(calls[0].Cmd, " "), "/crew/agents/writer/.local/share/opencode/auth.json") {
+				t.Fatalf("revocation did not remove the OpenCode derivative: %+v", calls)
+			}
+		})
+	}
+}
+
 func TestReconcileRevokedCredential_NilContainer_NoOp(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, credID := seedFileMountCred(t, db, "SECRET")
@@ -206,5 +236,32 @@ func TestCredSecretPaths_CodexLoginLivesInHome(t *testing.T) {
 	}
 	if s := buildCredRemoveScript("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "openai", "", nil); s != "rm -f '/crew/agents/reviewer/.codex/auth.json'" {
 		t.Errorf("remove script = %q", s)
+	}
+}
+
+// A Gemini login lives one directory over, in ~/.gemini — the AuthDelivery
+// file form — and revoke must reach it there too.
+func TestCredSecretPaths_GeminiLoginLivesInHome(t *testing.T) {
+	cases := []struct {
+		name       string
+		credType   string
+		provider   string
+		wantPaths  string
+		wantScript string
+	}{
+		{"google login", "AI_CLI_TOKEN", "GOOGLE", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google login, lower-case provider", "AI_CLI_TOKEN", "google", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google api key never touches disk", "API_KEY", "GOOGLE", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := credSecretPaths("researcher", "GEMINI_API_KEY", tc.credType, tc.provider, "", []string{"plan"})
+			if strings.Join(got, "|") != tc.wantPaths {
+				t.Errorf("paths = %v, want %q", got, tc.wantPaths)
+			}
+			if s := buildCredRemoveScript("researcher", "GEMINI_API_KEY", tc.credType, tc.provider, "", nil); s != tc.wantScript {
+				t.Errorf("remove script = %q, want %q", s, tc.wantScript)
+			}
+		})
 	}
 }

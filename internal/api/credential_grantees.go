@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 )
@@ -239,7 +238,7 @@ var crewCredentialGranteesSQL = fmt.Sprintf(`
 // failure mode this whole change is about; guessing "agent-scoped" would 503 a
 // working crew. Neither is a guess worth making when the alternative is one
 // clear error at boot.
-func loadCrewCredentialGrantees(ctx context.Context, db *sql.DB, agentID string) (*crewCredentialGrantees, error) {
+func loadCrewCredentialGrantees(ctx context.Context, db sqlQuerier, agentID string) (*crewCredentialGrantees, error) {
 	g := &crewCredentialGrantees{
 		crewMembers:  map[string]struct{}{},
 		crewWide:     map[string]struct{}{},

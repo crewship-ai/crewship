@@ -159,7 +159,7 @@ func scriptsOf(c *countingContainer) []string {
 func TestSyncCodexAuthFile_WritesRenderedFileWithoutRefreshToken(t *testing.T) {
 	req := codexLoginReq(t)
 	rc := &countingContainer{}
-	if err := syncCodexAuthFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
+	if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if len(scriptsOf(rc)) != 1 {
@@ -195,7 +195,7 @@ func TestSyncCodexAuthFile_RemovesStaleFile(t *testing.T) {
 	req := codexLoginReq(t)
 	req.Credentials = nil
 	rc := &countingContainer{}
-	if err := syncCodexAuthFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
+	if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if len(scriptsOf(rc)) != 1 || !strings.Contains(scriptsOf(rc)[0], "rm -f") || !strings.Contains(scriptsOf(rc)[0], ".codex/auth.json") {
@@ -209,7 +209,7 @@ func TestSyncCodexAuthFile_RejectsUnparseableLogin(t *testing.T) {
 	req := codexLoginReq(t)
 	req.Credentials[0].PlainValue = "sk-not-a-login"
 	rc := &countingContainer{}
-	if err := syncCodexAuthFile(context.Background(), rc, "ctr", req, slog.Default()); err == nil {
+	if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err == nil {
 		t.Fatal("expected an error for a value that is not auth.json")
 	}
 	if len(scriptsOf(rc)) != 0 {
