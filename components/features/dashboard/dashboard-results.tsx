@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRight, CheckCheck, CircleDot, ScrollText } from "lucide-react"
+import { ArrowUpRight, CheckCheck, CircleDot, ScrollText, UserRound } from "lucide-react"
 import type { AgentSummary, CrewSummary } from "@/app/(dashboard)/dashboard-types"
 import type { Mission } from "@/lib/types/mission"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
@@ -42,12 +42,13 @@ export function DashboardResults({ review, completed, runs, agents, crews, works
         {!hasResults && !error && !routineError && <p className="py-3 text-body text-muted-foreground">{routineLoading ? "Checking routine results…" : "Finished work will appear here. Start by assigning an issue to an agent."}</p>}
         <div className="flex flex-col gap-2">
           {rows.map((issue) => {
-            const agent = agents.find((a) => a.id === (issue.assignee_type === "agent" ? issue.assignee_id : issue.lead_agent_id))
+            const humanOwned = Boolean(issue.owner) || issue.assignee_type === "user"
+            const agent = humanOwned ? undefined : agents.find((a) => a.id === (issue.assignee_type === "agent" ? issue.assignee_id : issue.lead_agent_id))
             const crew = crews.find((c) => c.id === issue.crew_id)
-            const owner = agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
+            const owner = issue.owner ? issue.owner.name || "Issue owner" : humanOwned ? issue.assignee_name || "Issue owner" : agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
             return (
               <Link key={issue.id} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} className="group flex min-w-0 items-center gap-3 rounded-xl border border-border/60 bg-background/30 p-3 transition-colors duration-150 hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary">
-                {agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-10 w-10 shrink-0 rounded-xl bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="md" className="shrink-0" /> : <CircleDot className="h-8 w-8 shrink-0 text-primary-hover" aria-hidden />}
+                {humanOwned ? <UserRound className="h-8 w-8 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-10 w-10 shrink-0 rounded-xl bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="md" className="shrink-0" /> : <CircleDot className="h-8 w-8 shrink-0 text-primary-hover" aria-hidden />}
                 <span className="min-w-0 flex-1">
                   <span className="mb-1 flex flex-wrap items-center gap-2 text-micro text-muted-foreground"><span className="font-mono">{issue.identifier || "Issue"}</span><StatusPill status={issue.status} /></span>
                   <span className="line-clamp-2 text-body font-medium sm:block sm:truncate">{issue.title}</span>

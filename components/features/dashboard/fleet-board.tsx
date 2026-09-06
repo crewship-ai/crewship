@@ -82,6 +82,15 @@ const AGENT_DOT: Record<string, string> = {
   ACTIVE: "bg-success",
 }
 
+export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string {
+  if (agents.length === 0) return "no agents yet"
+  const running = agents.filter((agent) => agent.status === "RUNNING").length
+  const ready = agents.filter((agent) => agent.status === "IDLE" || agent.status === "ACTIVE").length
+  const errors = agents.filter((agent) => agent.status === "ERROR").length
+  const other = agents.length - running - ready - errors
+  return [running && `${running} running`, ready && `${ready} ready`, errors && `${errors} in error`, other && `${other} unavailable`].filter(Boolean).join(" · ")
+}
+
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
   const reduce = useReducedMotion()
   const [showAll, setShowAll] = React.useState(false)
@@ -91,7 +100,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
   const rest = cards.slice(FLEET_CARD_LIMIT)
   const restNeedingAttention = rest.filter((c) => c.row.tone === "danger" || c.row.tone === "warn").length
   return (
-    <section aria-label="Fleet" data-testid="dashboard-fleet-board" className="flex flex-col gap-2.5">
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="flex flex-col gap-2.5">
       <div className="flex items-center justify-between px-0.5">
         <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
           <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews · {cards.length} {cards.length === 1 ? "crew" : "crews"}
@@ -108,8 +117,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
               initial={reduce ? false : { opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : Math.min(index * 0.03, 0.1) }}
-              className="group flex flex-col gap-3 rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-border"
-              style={{ borderTopColor: color, borderTopWidth: 3, backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${color} 9%, transparent), transparent 70%)` }}
+              className="group flex flex-col gap-3 rounded-xl border border-t-[3px] border-border/60 bg-card p-4 transition-colors hover:border-border"
               data-testid="dashboard-fleet-card"
             >
               <div className="flex items-center gap-3">
@@ -136,7 +144,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                   {card.agents.length > 6 && <span className="text-micro text-muted-foreground">+{card.agents.length - 6}</span>}
                 </span>
                 <span className="ml-1 truncate text-label text-muted-foreground">
-                  {row.runningAgents > 0 ? `${row.runningAgents} running · ${Math.max(0, card.agents.length - row.runningAgents)} idle` : card.agents.length > 0 ? "ready for work" : "no agents yet"}
+                  {fleetAgentStatus(card.agents)}
                 </span>
               </div>
 
