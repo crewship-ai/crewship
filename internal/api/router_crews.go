@@ -10,6 +10,7 @@ package api
 // chatbridge auto-provision).
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -422,6 +423,22 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
+
+	// Device-code sign-in to a model provider (#2428, PRD provider-logins
+	// §10.3). Start creates a credential at the end, so it is gated inline
+	// exactly like POST /api/v1/credentials (role-or-capability); Status
+	// reads the caller's own row and needs no workspace context. The
+	// pollers for sign-ins left pending by a previous process are resumed
+	// here, off the request path.
+	providerLogins := NewProviderLoginHandler(r.db, r.logger, creds, nil)
+	r.providerLogins = providerLogins
+	r.authedMut("POST", "/api/v1/provider-logins/device", roleInline, providerLogins.Start)
+	r.mux.Handle("GET /api/v1/provider-logins/device/{deviceId}", authed(http.HandlerFunc(providerLogins.Status)))
+	resumeDone := beginBackgroundWork()
+	go func() {
+		defer resumeDone()
+		providerLogins.ResumePending(context.Background())
+	}()
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
 
 	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6). Separate handler

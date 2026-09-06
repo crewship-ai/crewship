@@ -308,6 +308,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range workflowRequestComponents {
 		schemas[name] = schema
 	}
+	_, providerLoginComponents := providerLoginSchemaCatalog()
+	for name, schema := range providerLoginComponents {
+		schemas[name] = schema
+	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
 		"sessionCookie":       map[string]any{"type": "apiKey", "in": "cookie", "name": "next-auth.session-token"},
@@ -534,6 +538,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	for key, schema := range routineTrustSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	providerLoginRoutes, _ := providerLoginSchemaCatalog()
+	for key, schema := range providerLoginRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()

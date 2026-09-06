@@ -59,6 +59,12 @@ crewship credential assign "ChatGPT Plus · jana" codex-reviewer --env-var-name 
 The slot name on `assign` is the binding's identity, not something Codex
 reads — the login is never exported as a variable.
 
+Or skip the paste: `crewship credential login --provider OPENAI` prints a
+one-time code and a URL, you enter the code in OpenAI's device page, and the
+server finishes the sign-in itself — no `codex` binary involved — and stores
+the resulting `auth.json` as the same kind of credential, named after the
+plan and account. See [Sign in with a code](/guides/credentials#sign-in-with-a-code).
+
 In the dashboard, *Add secret* → shape **Provider login** → brand **OpenAI**
 → **Subscription** takes the same file; **API key** on the same tile stores a
 metered key instead. A bare access token is refused at submit time: Codex
