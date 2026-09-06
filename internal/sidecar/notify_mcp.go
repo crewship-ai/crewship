@@ -128,7 +128,7 @@ func (s *Server) handleNotifyMCP(w http.ResponseWriter, r *http.Request) {
 		s.respondNotifyMCPToolsCall(w, r, req)
 	case "notifications/initialized", "notifications/cancelled":
 		// 202 + empty body — see the note in memory_mcp.go: an empty 200 has
-		// no Content-Type and Codex's MCP client drops the server over it.
+		// no Content-Type and strict MCP clients drop the server over it.
 		w.WriteHeader(http.StatusAccepted)
 	default:
 		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{

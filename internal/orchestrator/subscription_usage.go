@@ -45,6 +45,9 @@ func subscriptionUsageForEvent(req AgentRunRequest, runID, model string, event A
 	}
 	d := getAdapter(req.CLIAdapter).AuthDelivery()
 	login, ok := loginCredentialFor(req, d.Kind)
+	if d.FileDelivered() {
+		_, login, ok = fileLogin(req)
+	}
 	if !ok || login.ID == "" {
 		return SubscriptionUsage{}, false
 	}

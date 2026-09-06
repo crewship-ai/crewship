@@ -8,6 +8,7 @@ package orchestrator
 // command as much as on the env.
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -26,6 +27,37 @@ func codexAPIKeyReq() AgentRunRequest {
 		Credentials: []Credential{
 			{ID: "k1", EnvVarName: "OPENAI_API_KEY", PlainValue: "sk-openai-REAL", Type: "API_KEY", Provider: "OPENAI"},
 		},
+	}
+}
+
+func TestCodexMixedCredentialsRoutingAndBillingAgree(t *testing.T) {
+	for _, loginFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint("login-first=", loginFirst), func(t *testing.T) {
+			req := codexAPIKeyReq()
+			login := codexLoginReq(t).Credentials[0]
+			if loginFirst {
+				req.Credentials = append([]Credential{login}, req.Credentials...)
+			} else {
+				req.Credentials = append(req.Credentials, login)
+			}
+			if _, ok := resolveRoutedProvider(req, true); !ok {
+				t.Fatal("metered route missing")
+			}
+			if _, _, ok := fileLogin(req); ok {
+				t.Error("metered route must not select a subscription auth file")
+			}
+			env := BuildEnvVarsSidecar(req, false)
+			if got, _ := envValue(env, "CREWSHIP_BILLING_MODE"); got != "metered" {
+				t.Errorf("billing = %q, want metered", got)
+			}
+			if _, ok := envValue(env, "CREWSHIP_SUBSCRIPTION_PLAN"); ok {
+				t.Error("metered route carries a subscription plan")
+			}
+			event := AgentEvent{Type: "result", Metadata: map[string]any{"usage": map[string]any{"input_tokens": 10}}}
+			if _, ok := subscriptionUsageForEvent(req, "run", "gpt-test", event); ok {
+				t.Error("metered route must not record subscription usage")
+			}
+		})
 	}
 }
 

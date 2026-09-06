@@ -117,7 +117,7 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 func isCodexProviderLogin(credType, provider, mode string) bool {
 	return credType == providerlogin.Type &&
 		providerlogin.Canonical(provider) == codexauth.ProviderID &&
-		(mode == "" || mode == providerlogin.ModeSubscription)
+		mode == providerlogin.ModeSubscription
 }
 
 // buildCredRemoveScript emits the `sh -c` body that removes a credential's

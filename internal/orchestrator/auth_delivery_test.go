@@ -17,7 +17,25 @@ import (
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
+
+func TestSyncGoogleProviderLogin_InvalidExpiryFailsClosed(t *testing.T) {
+	for _, expiry := range []string{"", "invalid", "1969-01-01T00:00:00Z"} {
+		t.Run(expiry, func(t *testing.T) {
+			req := geminiLoginReq(t, "")
+			req.Credentials = []Credential{{ID: "login", Type: providerlogin.Type, Provider: "GOOGLE", PlainValue: "fake-access",
+				Fields: []CredentialField{{Key: providerlogin.PartMode, Value: providerlogin.ModeSubscription}, {Key: providerlogin.PartExpiresAt, Value: expiry}}}}
+			rc := &countingContainer{}
+			if err := syncLoginFile(context.Background(), rc, "ctr", req, slog.Default()); err == nil {
+				t.Fatal("invalid expiry must not be fabricated to continue the run")
+			}
+			if len(scriptsOf(rc)) != 0 {
+				t.Fatal("invalid login reached the container")
+			}
+		})
+	}
+}
 
 func TestAuthDelivery_Declarations(t *testing.T) {
 	cases := []struct {
