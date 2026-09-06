@@ -185,17 +185,17 @@ func TestBuildCLICommand(t *testing.T) {
 			// a value (workspace-write default for CODING profile).
 			"codex cli default (CODING-equivalent → workspace-write)",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--", codexDroidPrompt("hello")},
+			[]string{"codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write", "--", codexDroidPrompt("hello")},
 		},
 		{
 			"codex cli minimal profile downgrades sandbox to read-only",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", ToolProfile: "MINIMAL", UserMessage: "audit"},
-			[]string{"codex", "exec", "--json", "--sandbox", "read-only", "--", codexDroidPrompt("audit")},
+			[]string{"codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "read-only", "--", codexDroidPrompt("audit")},
 		},
 		{
 			"codex cli with model override",
 			AgentRunRequest{CLIAdapter: "CODEX_CLI", LLMModel: "gpt-5", UserMessage: "hello"},
-			[]string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "--", codexDroidPrompt("hello")},
+			[]string{"codex", "exec", "--json", "--skip-git-repo-check", "--sandbox", "workspace-write", "--model", "gpt-5", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// gemini-cli has no documented --system-instruction flag in
