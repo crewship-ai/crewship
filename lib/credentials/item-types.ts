@@ -24,6 +24,7 @@
 
 /** The closed set of credential `type` values internal/api/credentials_types.go accepts. */
 export const SERVER_CREDENTIAL_TYPES = [
+  "PROVIDER_LOGIN",
   "AI_CLI_TOKEN",
   "API_KEY",
   "CLI_TOKEN",
@@ -49,6 +50,7 @@ export type ServerCredentialType = (typeof SERVER_CREDENTIAL_TYPES)[number]
  * detail nobody scanning a table is asking about.
  */
 const CREDENTIAL_TYPE_LABELS: Record<string, string> = {
+  PROVIDER_LOGIN: "provider login",
   AI_CLI_TOKEN: "ai cli",
   API_KEY: "api key",
   CLI_TOKEN: "token",
@@ -110,14 +112,15 @@ export const CREDENTIAL_ITEM_TYPES: CredentialItemType[] = [
     // in /secrets as a file no model CLI reads, so until this tile there was
     // no way to create an AI_CLI_TOKEN or an API_KEY from the console at all.
     //
-    // credentialType here is the SUBSCRIPTION answer; the wizard swaps it for
-    // API_KEY in api-key mode (providerLoginCredentialType). Presentation —
-    // label, placeholder, hint, suggested slot — depends on the brand and the
-    // mode and lives in providerLoginPresentation, not in a static field.
+    // credentialType is the contract's own type (§10.2): the server parses
+    // the pasted value into parts and seals the refresh token itself, and the
+    // mode travels as its own field. Presentation — label, placeholder, hint,
+    // suggested slot — depends on the brand and the mode and lives in
+    // providerLoginPresentation, not in a static field.
     key: "PROVIDER_LOGIN",
     label: "Provider login",
     blurb: "Subscription or API key that pays for a model",
-    credentialType: "AI_CLI_TOKEN",
+    credentialType: "PROVIDER_LOGIN",
     primary: {
       key: "value",
       label: "Login",
@@ -280,6 +283,7 @@ export function getItemType(key: ItemTypeKey | string): CredentialItemType {
  */
 export function itemTypeForCredentialType(credentialType: string): ItemTypeKey {
   switch (credentialType) {
+    case "PROVIDER_LOGIN":
     case "AI_CLI_TOKEN":
       return "PROVIDER_LOGIN"
     case "USERPASS":
@@ -296,9 +300,15 @@ export function itemTypeForCredentialType(credentialType: string): ItemTypeKey {
 /** How a provider login pays: a flat-rate seat, or a metered key. */
 export type ProviderLoginMode = "subscription" | "api_key"
 
-/** The server type a provider login is stored as, by mode. */
-export function providerLoginCredentialType(mode: ProviderLoginMode): ServerCredentialType {
-  return mode === "api_key" ? "API_KEY" : "AI_CLI_TOKEN"
+/**
+ * The server type a provider login is created as. One type for both modes
+ * since contract §10.2: `PROVIDER_LOGIN`, with `mode` as its own field. The
+ * older rows (`AI_CLI_TOKEN`, or `API_KEY` with an AI provider) still read as
+ * logins — the server derives their `login` object — but nothing new is
+ * written that way.
+ */
+export function providerLoginCredentialType(_mode: ProviderLoginMode): ServerCredentialType {
+  return "PROVIDER_LOGIN"
 }
 
 export interface ProviderLoginPresentation {

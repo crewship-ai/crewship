@@ -173,9 +173,11 @@ describe("extraFieldsFor", () => {
 // #2428: the provider login is the one shape whose server type and value box
 // depend on the brand and on how the seat pays.
 describe("provider login", () => {
-  it("is stored as AI_CLI_TOKEN for a subscription and API_KEY for a key", () => {
-    expect(providerLoginCredentialType("subscription")).toBe("AI_CLI_TOKEN")
-    expect(providerLoginCredentialType("api_key")).toBe("API_KEY")
+  it("is stored as PROVIDER_LOGIN in both modes — the mode is its own field (§10.2)", () => {
+    expect(providerLoginCredentialType("subscription")).toBe("PROVIDER_LOGIN")
+    expect(providerLoginCredentialType("api_key")).toBe("PROVIDER_LOGIN")
+    expect(itemTypeForCredentialType("PROVIDER_LOGIN")).toBe("PROVIDER_LOGIN")
+    // The rows written before the type existed still open as the same shape.
     expect(itemTypeForCredentialType("AI_CLI_TOKEN")).toBe("PROVIDER_LOGIN")
   })
 
