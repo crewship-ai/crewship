@@ -18,6 +18,7 @@ import (
 // two test suites can live side by side without sharing fixtures.
 const llmSchemaSQL = `
 CREATE TABLE cost_ledger (
+	credential_id TEXT,
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     crew_id TEXT,

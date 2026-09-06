@@ -4,6 +4,24 @@ import (
 	"testing"
 )
 
+func TestParseCodex_RealErrorEnvelopes(t *testing.T) {
+	for _, tc := range []struct{ line, kind string }{
+		{`{"type":"turn.failed","error":{"message":"usage limit reached"}}`, "result"},
+		{`{"type":"error","message":"usage limit reached"}`, "error"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			var got []AgentEvent
+			parseCodexStreamJSON([]byte(tc.line), func(e AgentEvent) { got = append(got, e) })
+			if len(got) != 1 || got[0].Type != tc.kind || got[0].Content != "usage limit reached" {
+				t.Fatalf("lost provider error: %+v", got)
+			}
+			if tc.kind == "result" && got[0].Metadata.(map[string]interface{})["is_error"] != true {
+				t.Fatal("failed turn reported success")
+			}
+		})
+	}
+}
+
 // TestParseCodex_ThreadStarted pins the bootstrap event from the Rust port.
 // Schema: {"type":"thread.started","thread_id":"<uuid>","model":"<id>"}
 // (NOT session.started + session_id from the Agents-SDK style we initially

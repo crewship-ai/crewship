@@ -11,6 +11,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider-login runtime foundations** (#2428) — adapter-specific Codex and Gemini auth-file delivery with server-retained refresh tokens, normalized login parsing and refresh clients, and credential-attributed usage storage. Generated auth files are withheld from the Files API. Google refresh requires an operator-supplied OAuth client matching the imported grant.
+
+- **Codex runtime compatibility** (#2428) — route metered keys through the sidecar-backed model provider, recognize structured terminal errors, acknowledge MCP notifications with HTTP 202, and omit MCP endpoints blocked by crew network policy. OAuth refresh and device-flow libraries are included here; public onboarding and administration arrive in the dependent API/UI changes.
+
 - **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
 
 - **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)

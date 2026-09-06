@@ -36,6 +36,7 @@ import (
 // `sh -c "tmux new-session ... 'sh /tmp/agent-<slug>.sh' ..."`.
 func inBandStreamMock(slug, stream string) *mockContainer {
 	return &mockContainer{
+		preflightSucceeds: true,
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			joined := strings.Join(cfg.Cmd, " ")
 			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-"+slug) {

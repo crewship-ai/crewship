@@ -27,6 +27,7 @@ var protectedConfigRelPaths = []string{
 	".gemini/settings.json",
 	"opencode.json",
 	".codex/config.toml",
+	".codex/auth.json",
 }
 
 // seedCrewOutputFile writes content directly under the storage base's

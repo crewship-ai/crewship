@@ -80,8 +80,8 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		 cost_usd, tags,
 		 billing_mode, quota_remaining_pct, quota_window, subscription_plan,
 		 rate_input_per_m, rate_output_per_m, rate_cached_in_per_m, rate_cache_write_per_m,
-		 cost_confidence)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		 cost_confidence, credential_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	// Quota window is the sentinel for "did we get a rate-limit signal?".
 	// When window is empty, both quota_window and quota_remaining_pct land
@@ -122,6 +122,7 @@ func Record(ctx context.Context, db *sql.DB, j journal.Emitter, c Call) (CostRec
 		rate.CachedInputPerM,
 		rate.CacheWritePerM,
 		string(c.Confidence),
+		nullable(c.CredentialID),
 	)
 	if err != nil {
 		return CostRecord{}, fmt.Errorf("paymaster: insert ledger: %w", err)
