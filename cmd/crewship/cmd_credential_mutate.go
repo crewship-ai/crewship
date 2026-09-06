@@ -615,6 +615,10 @@ var credUpdateCmd = &cobra.Command{
 						cli.PrintWarning(fmt.Sprintf(
 							"%s is not validated on update — Crewship does not dial an operator-supplied endpoint.",
 							spec.ID))
+					} else if codexauth.IsLogin(cred.Type, cred.Provider) {
+						// Same as create: a ChatGPT login is not an API key and
+						// the probe would only report "Invalid API key" (#2428).
+						cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
 					} else {
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {

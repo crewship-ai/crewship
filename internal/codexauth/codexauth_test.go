@@ -61,9 +61,11 @@ func TestIsLogin(t *testing.T) {
 		{"CLI_TOKEN", "OPENAI", false},
 	}
 	for _, c := range cases {
-		if got := IsLogin(c.typ, c.provider); got != c.want {
-			t.Errorf("IsLogin(%q,%q) = %v, want %v", c.typ, c.provider, got, c.want)
-		}
+		t.Run(c.typ+"/"+strings.TrimSpace(c.provider), func(t *testing.T) {
+			if got := IsLogin(c.typ, c.provider); got != c.want {
+				t.Errorf("IsLogin(%q,%q) = %v, want %v", c.typ, c.provider, got, c.want)
+			}
+		})
 	}
 }
 
@@ -100,12 +102,14 @@ func TestParse_RejectsWhatCodexWouldReject(t *testing.T) {
 		"no account, none": `{"tokens":{"access_token":"a.b.c","id_token":"x","refresh_token":"y"}}`,
 	}
 	for name, v := range cases {
-		if _, err := Parse(v); err == nil {
-			t.Errorf("%s: Parse accepted %q", name, v)
-		}
-		if ShapeError(v) == "" {
-			t.Errorf("%s: ShapeError empty", name)
-		}
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse(v); err == nil {
+				t.Errorf("Parse accepted %q", v)
+			}
+			if ShapeError(v) == "" {
+				t.Error("ShapeError empty")
+			}
+		})
 	}
 	if msg := ShapeError(storedLogin(t, "acct-1")); msg != "" {
 		t.Errorf("valid login rejected: %s", msg)

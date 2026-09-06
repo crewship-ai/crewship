@@ -16,10 +16,19 @@ import (
 // key on --value-stdin would have met the same fate. Only the trailing
 // newline a shell or an editor appends is trimmed; interior newlines are
 // the value's own.
+//
+// Bounded to the server's own cap (internal/api/credentials_types.go
+// maxCredentialValueLen) plus one byte: a value the server would refuse is
+// refused here without buffering an unbounded pipe first.
 func readValueStdin() (string, error) {
-	b, err := io.ReadAll(os.Stdin)
+	const maxValueStdinBytes = 64 * 1024
+	b, err := io.ReadAll(io.LimitReader(os.Stdin, maxValueStdinBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read value from stdin: %w", err)
 	}
-	return strings.TrimRight(string(b), "\r\n"), nil
+	value := strings.TrimRight(string(b), "\r\n")
+	if len(value) > maxValueStdinBytes {
+		return "", fmt.Errorf("stdin value is too long (max %d bytes)", maxValueStdinBytes)
+	}
+	return value, nil
 }
