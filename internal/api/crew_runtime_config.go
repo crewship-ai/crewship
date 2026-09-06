@@ -89,16 +89,17 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		cachedRequirements         sql.NullString
 		devcontainerCfg            sql.NullString
 		servicesJSON               sql.NullString
+		allowPrivateEndpoints      sql.NullBool
 	)
 	err := db.QueryRowContext(ctx, `
-		SELECT slug, network_mode, allowed_domains,
+		SELECT slug, network_mode, allowed_domains, allow_private_endpoints,
 		       container_memory_mb, container_cpus, container_ttl_hours,
 		       runtime_image, cached_image, cached_requirements,
 		       devcontainer_config, services_json
 		FROM crews
 		WHERE id = ? AND (? = '' OR workspace_id = ?) AND deleted_at IS NULL`,
 		crewID, workspaceID, workspaceID,
-	).Scan(&slug, &networkMode, &allowedDomain,
+	).Scan(&slug, &networkMode, &allowedDomain, &allowPrivateEndpoints,
 		&memoryMB, &cpus, &ttlHours,
 		&runtimeImage, &cachedImage, &cachedRequirements,
 		&devcontainerCfg, &servicesJSON)
@@ -131,6 +132,10 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		MemoryMB:    resolveCrewContainerMemoryMB(int(memoryMB.Int64)),
 		CPUs:        resolveCrewContainerCPUs(cpus.Float64),
 		NetworkMode: networkMode.String,
+		// #961: carried so an agent-less crew start (routine `script` steps,
+		// via Orchestrator.EnsureCrewSidecar) gives the sidecar the crew's REAL
+		// egress policy rather than a silently narrower one.
+		AllowPrivateEndpoints: allowPrivateEndpoints.Bool,
 		// #1662: this read the raw column, so a NULL arrived as 0 — which the
 		// reaper reads as "never stop". It is the field the two wake paths
 		// that never reach RunAgent (script steps, prewarm) use to register a

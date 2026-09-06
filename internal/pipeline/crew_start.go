@@ -10,6 +10,13 @@ package pipeline
 // never resolved it at all, hand-building a config from the resolved agent.
 // None of them started the crew's declared sidecars, so a routine that ran a
 // step against a crew with `services: [postgres]` executed against nothing.
+//
+// "Sidecars" there means the crew's declared SERVICE containers (postgres,
+// redis). It has never meant crewship-sidecar, the in-container egress proxy —
+// that one is per-exec, not per-container-start, and lives with the rest of its
+// lifecycle in internal/orchestrator. A path that execs into the container and
+// carries orchestrator.SidecarProxyEnv must call
+// Orchestrator.EnsureCrewSidecar for itself; see RunScript in runner_script.go.
 
 import (
 	"context"
