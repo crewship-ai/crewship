@@ -63,3 +63,15 @@ The full Go run uses an isolated mktemp directory under /dev/shm as TMPDIR.
 - Local exported-UI browser acceptance: 6 passed (34.8s), at 1280px and 390px,
   served on loopback port 43183 with intercepted APIs. Final deployment performs
   another build and the same acceptance against the public dev3 URL.
+
+## Deployment
+
+Feature commit `dd99756c` deployed only to dev3 via
+`sudo systemctl reload crewship-ws@3`, completing 20:04:55 UTC. The deployment
+rebuilt the frontend and server successfully. Health returned `{"status":"ok"}`;
+public `/credentials` returned HTTP 200.
+
+The public fixture-based Playwright run passed all 6 scenarios (13.9s):
+`CREDENTIALS_TEST_URL=https://crewship-dev3.unifylab.cz pnpm exec playwright test --config=/tmp/crewship-provider-first.config.mjs`.
+Log: `/tmp/credential-ux-public-e2e.log`. No real provider requests, secret changes,
+push or PR merge were performed.
