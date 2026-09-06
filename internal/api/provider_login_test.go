@@ -454,6 +454,49 @@ func (r *plRig) refreshState(t *testing.T, credID string) (status string, failur
 	return status, failures, e.String
 }
 
+func TestProviderLoginRefresher_StaleResultDoesNotReplaceNewLogin(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reimported", true: "revoked"}[revoked], func(t *testing.T) {
+			r := newPLRig(t)
+			id := r.seedCodexLogin(t, "racing-login", time.Hour)
+			var oldRefresh, oldAccess string
+			if err := r.db.QueryRow(`SELECT encrypted_value FROM credential_fields WHERE credential_id = ? AND key = 'refresh_token'`, id).Scan(&oldRefresh); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = ?`, id).Scan(&oldAccess); err != nil {
+				t.Fatal(err)
+			}
+			if revoked {
+				execOrFatal(t, r.db, `UPDATE credentials SET deleted_at = ? WHERE id = ?`, time.Now().Format(time.RFC3339), id)
+			} else {
+				newRefresh, err := encryption.Encrypt("newly-imported-refresh")
+				if err != nil {
+					t.Fatal(err)
+				}
+				execOrFatal(t, r.db, `UPDATE credential_fields SET encrypted_value = ? WHERE credential_id = ? AND key = 'refresh_token'`, newRefresh, id)
+			}
+			_, err := r.rf.storeRotated(context.Background(), id, oldRefresh, providerlogin.RefreshResult{
+				AccessToken: "stale-access", RefreshToken: "stale-refresh", ExpiresAt: time.Now().Add(time.Hour),
+			}, time.Now())
+			if !errors.Is(err, errRefreshSuperseded) {
+				t.Fatalf("stale refresh = %v", err)
+			}
+			r.rf.recordFailure(context.Background(), id, r.wsID, "racing-login", r.userID, oldRefresh, errors.New("stale failure"), time.Now())
+			status, failures, _ := r.refreshState(t, id)
+			if status != "ok" || failures != 0 {
+				t.Fatalf("stale failure modified refresh state: %s, %d", status, failures)
+			}
+			var access string
+			if err := r.db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = ?`, id).Scan(&access); err != nil {
+				t.Fatal(err)
+			}
+			if access != oldAccess {
+				t.Fatal("stale refresh replaced the access token")
+			}
+		})
+	}
+}
+
 func TestProviderLogin_RefreshEndpoint_RotatesTheLogin(t *testing.T) {
 	t.Parallel()
 	r := newPLRig(t)

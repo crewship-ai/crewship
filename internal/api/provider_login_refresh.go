@@ -51,6 +51,8 @@ var ErrRefreshInFlight = errors.New("a refresh of this login is already in fligh
 // API key) or no sealed refresh token to run it with.
 var ErrRefreshUnsupported = errors.New("this login has no refresh flow")
 
+var errRefreshSuperseded = errors.New("login changed while refresh was in flight; retry with the current login")
+
 // errNeedsRelogin: the login is past repair by refresh.
 var errNeedsRelogin = errors.New("login needs a re-login: the stored refresh token no longer works")
 
@@ -311,7 +313,7 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	}
 	release := func() {
 		_, _ = r.db.ExecContext(context.WithoutCancel(ctx),
-			`UPDATE provider_login_refresh SET in_progress_until = NULL WHERE credential_id = ?`, credID)
+			`UPDATE provider_login_refresh SET in_progress_until = NULL WHERE credential_id = ? AND in_progress_until = ?`, credID, claimUntil)
 	}
 
 	// Read rotating material AFTER winning the claim: a previous holder may
@@ -328,7 +330,7 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	}
 	result, rerr := tr.Refresh(ctx, refreshToken)
 	if rerr != nil {
-		r.recordFailure(ctx, credID, wsID, name, createdBy, rerr, now)
+		r.recordFailure(ctx, credID, wsID, name, createdBy, refreshEnc.String, rerr, now)
 		release()
 		return "", rerr
 	}
@@ -340,7 +342,7 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 			result.ExpiresAt = exp
 		}
 	}
-	enc, err := r.storeRotated(ctx, credID, result, now)
+	enc, err := r.storeRotated(ctx, credID, refreshEnc.String, result, now)
 	if err != nil {
 		release()
 		return "", err
@@ -356,7 +358,7 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 // one transaction, and clears the failure state. The old refresh token is
 // dead the moment the endpoint answered; a half-written row is a login that
 // can never refresh again, so all-or-nothing is the only acceptable shape.
-func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID string, res providerlogin.RefreshResult, now time.Time) (string, error) {
+func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID, expectedRefreshEnc string, res providerlogin.RefreshResult, now time.Time) (string, error) {
 	accessEnc, err := encryption.Encrypt(res.AccessToken)
 	if err != nil {
 		return "", fmt.Errorf("encrypt access token: %w", err)
@@ -372,10 +374,19 @@ func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID string
 	if !res.ExpiresAt.IsZero() {
 		expS = res.ExpiresAt.UTC().Format(time.RFC3339)
 	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE credentials SET encrypted_value = ?, token_expires_at = NULLIF(?, ''), updated_at = ? WHERE id = ?`,
-		accessEnc, expS, nowS, credID); err != nil {
+	// The operator may have re-imported or revoked this login during the
+	// remote call. Ciphertext identity is an exact generation check, unlike
+	// a second-resolution updated_at timestamp.
+	updated, err := tx.ExecContext(ctx,
+		`UPDATE credentials SET encrypted_value = ?, token_expires_at = NULLIF(?, ''), updated_at = ?
+		 WHERE id = ? AND deleted_at IS NULL
+		 AND EXISTS (SELECT 1 FROM credential_fields f WHERE f.credential_id = credentials.id AND f.key = ? AND f.encrypted_value = ?)`,
+		accessEnc, expS, nowS, credID, providerlogin.PartRefreshToken, expectedRefreshEnc)
+	if err != nil {
 		return "", fmt.Errorf("store access token: %w", err)
+	}
+	if n, err := updated.RowsAffected(); err != nil || n != 1 {
+		return "", errRefreshSuperseded
 	}
 	upsertSecret := func(key, value string) error {
 		if value == "" {
@@ -433,7 +444,7 @@ func (r *ProviderLoginRefresher) storeRotated(ctx context.Context, credID string
 // recordFailure bumps the failure count, sets the backoff, and after
 // MaxFailures — or a permanent error — marks the login needs_relogin and
 // tells the owner.
-func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID, name, ownerID string, rerr error, now time.Time) {
+func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID, name, ownerID, expectedRefreshEnc string, rerr error, now time.Time) {
 	msg := rerr.Error()
 	if len(msg) > 500 {
 		msg = msg[:500]
@@ -447,10 +458,18 @@ func (r *ProviderLoginRefresher) recordFailure(ctx context.Context, credID, wsID
 	if failures >= providerlogin.MaxFailures || providerlogin.IsPermanent(rerr) {
 		status = providerlogin.StatusNeedsRelogin
 	}
-	if _, err := r.db.ExecContext(ctx, `
+	updated, err := r.db.ExecContext(ctx, `
 		UPDATE provider_login_refresh SET status = ?, next_at = ?, error = ?, failures = ?, updated_at = ?
-		WHERE credential_id = ?`, status, nextAt, msg, failures, nowS, credID); err != nil {
+		WHERE credential_id = ? AND EXISTS (
+		 SELECT 1 FROM credential_fields f JOIN credentials c ON c.id = f.credential_id
+		 WHERE f.credential_id = ? AND f.key = ? AND f.encrypted_value = ? AND c.deleted_at IS NULL
+		)`, status, nextAt, msg, failures, nowS, credID, credID, providerlogin.PartRefreshToken, expectedRefreshEnc)
+	if err != nil {
 		r.logger.Warn("provider login refresh: record failure", "credential_id", credID, "error", err)
+		return
+	}
+	if n, err := updated.RowsAffected(); err != nil || n != 1 {
+		return // a stale failure must not poison a newly imported login
 	}
 	recordCredentialEventBestEffort(ctx, r.db, r.logger, credID, AuditEventRefresh, "", "",
 		map[string]any{"outcome": status, "failures": failures, "error": msg})
@@ -657,7 +676,7 @@ func (h *CredentialHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	_, err = h.loginRefresher.Refresh(ctx, credID, true)
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrRefreshInFlight):
+	case errors.Is(err, ErrRefreshInFlight), errors.Is(err, errRefreshSuperseded):
 		replyError(w, http.StatusConflict, err.Error())
 		return
 	case errors.Is(err, ErrRefreshUnsupported):
