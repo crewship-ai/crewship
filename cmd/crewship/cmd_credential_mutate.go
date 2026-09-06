@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/spf13/cobra"
@@ -258,10 +259,11 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		if valueStdin {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				value = scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
 			}
+			value = v
 		}
 
 		authToken, _, err := readAuthToken(flags)
@@ -446,6 +448,13 @@ var credCreateCmd = &cobra.Command{
 				"%s is not validated on create — Crewship does not dial an operator-supplied endpoint. The first agent call through the sidecar is the test.",
 				endpointSpec.ID))
 
+		case codexauth.IsLogin(credType, provider):
+			// A ChatGPT login is a JWT for chatgpt.com, not an API key; the
+			// probe would send it to api.openai.com and report "Invalid API
+			// key" for a login that works (#2428). The server validates its
+			// shape instead, and the first Codex run is the live test.
+			cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
+
 		default:
 			valid, errMsg := testCredentialValue(client, provider, credType, value)
 			if valid {
@@ -525,9 +534,11 @@ var credUpdateCmd = &cobra.Command{
 			body["name"] = v
 		}
 		if flags.Changed("value-stdin") {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				v := scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
+			}
+			{
 				if v == "" {
 					return fmt.Errorf("stdin value cannot be empty")
 				}
@@ -671,10 +682,11 @@ Examples:
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")
 		if valueStdin {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				value = scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
 			}
+			value = v
 		}
 		rotateAuthToken, authChanged, err := readAuthToken(flags)
 		if err != nil {

@@ -49,7 +49,9 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			docURL:  "https://developers.openai.com/codex/cli/reference",
 			// `codex exec --json` is the documented non-interactive form; the
 			// pre-refactor `codex --quiet` does not exist in the Rust port.
-			mustHave:         []string{"exec", "--json", "--sandbox"},
+			// --skip-git-repo-check: 0.153.2 exits 1 outside a git repo
+			// without it, and an agent workdir is not a repo (#2428).
+			mustHave:         []string{"exec", "--json", "--sandbox", "--skip-git-repo-check"},
 			mustNotHave:      []string{"--quiet"},
 			pinnedNpmVersion: "@openai/codex@0.153.2",
 		},

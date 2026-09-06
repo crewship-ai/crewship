@@ -44,7 +44,13 @@ func (codexAdapter) Name() string { return "CODEX_CLI" }
 func (codexAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
-	cmd := []string{"codex", "exec", "--json"}
+	// --skip-git-repo-check: since the 0.1xx line `codex exec` refuses to
+	// start outside a git repository ("Not inside a trusted directory and
+	// --skip-git-repo-check was not specified", exit 1) — measured on
+	// 0.153.2 during the first live run on crewship-dev (#2428). Agent
+	// workdirs are not repositories unless a task cloned one, and the
+	// sandbox policy below is the safety boundary here, not the repo check.
+	cmd := []string{"codex", "exec", "--json", "--skip-git-repo-check"}
 	model := req.LLMModel
 
 	// Codex supports custom OpenAI Responses providers through its native
