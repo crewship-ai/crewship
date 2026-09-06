@@ -239,6 +239,8 @@ These are off by default and intended for operators debugging performance.
 |----------|---------|-------------|
 | `GOOGLE_CLIENT_ID` | (unset — Google sign-in disabled) | OAuth 2.0 client ID for the "Sign in with Google" flow. Loaded via `applyEnvOverrides` in `internal/config/config.go`. |
 | `GOOGLE_CLIENT_SECRET` | (unset) | OAuth client secret paired with the client ID. Required when `GOOGLE_CLIENT_ID` is set. |
+| `CREWSHIP_GEMINI_OAUTH_CLIENT_ID` | (unset — imported Gemini grant refresh disabled) | Server-only OAuth client ID matching the client that issued an imported Gemini CLI grant. Separate from Crewship web sign-in. Configure together with its client secret and restart the server. |
+| `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` | (unset) | Server-only secret for that Gemini OAuth client. Never put it in browser configuration or agent credentials. Crewship does not bundle or automatically download an upstream client's identity. |
 
 ## Logging
 
