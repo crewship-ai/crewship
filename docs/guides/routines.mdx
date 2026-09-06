@@ -2015,9 +2015,13 @@ that added `outcome` discharges it):
 as a second opinion, never authoritative, and silently absent for agentless/dry-run
 routines. `outcome` is the one **deterministic routing decision**: today it drives the
 inbox (`NEEDS_HUMAN` → exactly one action-required card) and an issue session's state
-(`NEEDS_HUMAN` → `awaiting_input`); a run that reports none of the seven values still
-gets one — `FAILED`, with `error_message` set to `"no outcome reported"` — rather than
-being read as a silent success. §9.6 also names an issue-comment lane for
+(`NEEDS_HUMAN` → `awaiting_input`); a run with an `agent_run` step that reports none of
+the seven values still gets one — `FAILED`, with `error_message` set to `"no outcome
+reported"` — rather than being read as a silent success. A routine with **no** agent step
+(an `agentless: true` probe, or one built only from `script` / `transform` / `notify` /
+`crewship` steps) has nobody who could report a hand-off, so a clean run there is
+`SUCCEEDED` with no error — the strict default flags a missing report, not a missing
+agent. §9.6 also names an issue-comment lane for
 `WORK_CREATED`/`PARTIAL`, which is not yet gated on `outcome` specifically — see the note
 under [API reference → Issues → Outcome](/api-reference/issues#outcome) for exactly what
 is and isn't wired.
