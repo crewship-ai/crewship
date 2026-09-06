@@ -74,8 +74,11 @@ func TestRunHandler_List_RoutineRunCarriesSlugAndTrigger(t *testing.T) {
 	if got.PipelineSlug == nil || *got.PipelineSlug != "nightly-digest" {
 		t.Errorf("pipeline_slug = %v, want nightly-digest — without it the row has no name to show", got.PipelineSlug)
 	}
-	if got.TriggerType != "schedule" {
-		t.Errorf("trigger_type = %q, want schedule (from pipeline_runs.triggered_via)", got.TriggerType)
+	// triggered_via "schedule" is presented in the documented trigger_type
+	// vocabulary (USER / CRON / WEBHOOK), the one the run.started payload
+	// and the ?trigger= filter use.
+	if got.TriggerType != "CRON" {
+		t.Errorf("trigger_type = %q, want CRON (from pipeline_runs.triggered_via = schedule)", got.TriggerType)
 	}
 	// Not asserted here: that agent_slug is null. The shared fixture stamps
 	// an agent_id on every journal row it writes, so this test cannot
