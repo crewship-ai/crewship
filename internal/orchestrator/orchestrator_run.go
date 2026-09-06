@@ -1474,15 +1474,15 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		}
 		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
 	}
-	// Codex's ChatGPT login lives in $CODEX_HOME, not /secrets (#2428). Same
-	// fail-loud posture as the file-mounted credentials above: without the
-	// file Codex does not fail closed, it falls through to the dummy key.
-	if req.CLIAdapter == "CODEX_CLI" {
-		if err := syncCodexAuthFile(ctx, batch, req.ContainerID, req, o.logger); err != nil {
-			o.logger.Error("failed to deliver Codex login", "error", err, "agent_id", req.AgentID)
-			o.failRun(ctx, req, runID, "error")
-			return nil, "", fmt.Errorf("deliver Codex login for %s: %w", req.AgentSlug, err)
-		}
+	// A file-delivered login (Codex's $CODEX_HOME/auth.json, Gemini's
+	// ~/.gemini/oauth_creds.json — auth_delivery.go, #2428) lives under the
+	// agent's HOME, not /secrets. Same fail-loud posture as the file-mounted
+	// credentials above: without the file the CLI does not fail closed, it
+	// falls through to the dummy key. A no-op for adapters with no file form.
+	if err := syncLoginFile(ctx, batch, req.ContainerID, req, o.logger); err != nil {
+		o.logger.Error("failed to deliver login file", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
 	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 

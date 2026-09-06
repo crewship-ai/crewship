@@ -208,3 +208,30 @@ func TestCredSecretPaths_CodexLoginLivesInHome(t *testing.T) {
 		t.Errorf("remove script = %q", s)
 	}
 }
+
+// A Gemini login lives one directory over, in ~/.gemini — the AuthDelivery
+// file form — and revoke must reach it there too.
+func TestCredSecretPaths_GeminiLoginLivesInHome(t *testing.T) {
+	cases := []struct {
+		name       string
+		credType   string
+		provider   string
+		wantPaths  string
+		wantScript string
+	}{
+		{"google login", "AI_CLI_TOKEN", "GOOGLE", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google login, lower-case provider", "AI_CLI_TOKEN", "google", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google api key never touches disk", "API_KEY", "GOOGLE", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := credSecretPaths("researcher", "GEMINI_API_KEY", tc.credType, tc.provider, []string{"plan"})
+			if strings.Join(got, "|") != tc.wantPaths {
+				t.Errorf("paths = %v, want %q", got, tc.wantPaths)
+			}
+			if s := buildCredRemoveScript("researcher", "GEMINI_API_KEY", tc.credType, tc.provider, nil); s != tc.wantScript {
+				t.Errorf("remove script = %q, want %q", s, tc.wantScript)
+			}
+		})
+	}
+}

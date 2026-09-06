@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 )
@@ -190,6 +191,14 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 		// renders with, so what stores is exactly what delivers.
 		if codexauth.IsLogin(req.Type, req.Provider) {
 			if msg := codexauth.ShapeError(req.Value); msg != "" {
+				return msg
+			}
+		}
+		// A Google login is Gemini CLI's whole oauth_creds.json, on the
+		// same terms: geminiauth is the parser the orchestrator renders
+		// with, so a value that stores is a value that delivers.
+		if geminiauth.IsLogin(req.Type, req.Provider) {
+			if msg := geminiauth.ShapeError(req.Value); msg != "" {
 				return msg
 			}
 		}

@@ -29,6 +29,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credname"
+	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -69,6 +70,11 @@ func credSecretPaths(agentSlug, envVar, credType, provider string, fieldKeys []s
 	// (codexauth.Render) — so the field loop below has nothing to add.
 	if codexauth.IsLogin(credType, provider) {
 		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+	}
+	// A Gemini login is the same shape one directory over: rendered whole
+	// into ~/.gemini/oauth_creds.json by the orchestrator's AuthDelivery.
+	if geminiauth.IsLogin(credType, provider) {
+		return []string{"/crew/agents/" + agentSlug + "/" + geminiauth.FileRel}
 	}
 	dir := "/secrets/" + agentSlug
 	var paths []string
