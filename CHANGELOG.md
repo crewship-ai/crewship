@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Demo use cases, one script each** (`scripts/demo/`, #2424) — the second version of the demo scripts. `scripts/walkthrough.sh` was one `set -e` checklist that stopped at its first failing line and could not run step six without steps one to five; it is now twelve self-contained use cases (`uc-NN-<slug>.sh`) run alone or all in order by `scripts/demo/run.sh`, each narrated for an audience, verified by assertions and honest about what it could not run: a use case whose need is missing (a model, a GitHub token) exits with the reason and the runner prints **SKIP**, never a green row. Memory recall, delegation, ephemeral hire with its approval, credential escalation answered by `crewship escalation supply`, the approval gate, a token-zero routine landing in the inbox, a wake-gated schedule holding on a real scheduler tick, eval tiers, GitHub token injection, and the three demo packs through `seed verify --pack`. `scripts/demo-test.sh` (CI `shell` job) ShellChecks the suite and drives the runner against stubs. Guide: `docs/guides/demo-use-cases.mdx`.
 - **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
 
 - **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)
@@ -20,32 +21,35 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
+- **`crewship run` and `crewship ask` no longer hang forever against a busy
+  agent.** An agent serves one run at a time, and since #2269 a send that
+  arrives while it is busy is bounced with a sender-only `agent_busy` event —
+  with, by design, no terminal `done` after it: emitting one would travel the
+  shared session channel and finalize the *winning* sender's live turn
+  mid-generation. The web frontend renders that frame. Neither CLI event loop
+  knew it, so both fell through and went back to waiting for a `done` the
+  server had already decided not to send. Measured on dev3: two of three
+  concurrent `crewship run` calls against one agent printed nothing for 200 s
+  and exited only on the caller's own timeout, while the server logged both
+  the rejection and the frame it sent. They now print
+  `[busy] The agent is busy with another run right now.` and exit non-zero in
+  under a second.
 
-- **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
+  `run` has **two** event loops — the streaming switch and
+  `collectAgentStream`, which is what `--no-stream`/`--wait` select and which
+  `routine iterate` shares — and the first cut of this fix patched only the
+  first. The unit test passed and the live run still hung, because the test
+  drove the path the flag did not select. Both loops handle the frame now, and
+  both are pinned by tests; `collectAgentStream` is the strict case, since
+  `runNoStream` passes it timeout 0 and there is no deadline to end the wait.
+  The event name is one exported constant (`ws.AgentBusyEventType`) named by
+  server, clients and tests alike, and the scripted-event test harness now
+  builds frames from the server's own `ws.ServerMessage`/`ws.ChatEvent` rather
+  than from the client's mirror of them — a client-shaped fixture is what let
+  this stay green in CI while failing against every real server. Unknown event
+  types are no longer swallowed in silence: under `--verbose` both loops name
+  what arrived, which is how this was found.
 
-- **A routine `script` step ran against a sidecar nobody had started.** Every
-  script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
-  crew egress allowlist is enforced — but crewship-sidecar was only ever
-  started by the *agent* run path, which needs an agent. So on a crew whose
-  container had not yet served an agent run, every script step that touched the
-  network died on `connect to 127.0.0.1 port 9119: Connection refused`. #1473
-  gave script steps the proxy (the security half) and left the liveness half
-  open. It was deterministic on a fresh install, and it hit the demo first: the
-  `ci-nightly-triage` pack runs its `script` probe *before* its `agent_run`, so
-  a new workspace's very first nightly probe failed, and the probe's
-  fail-loud-on-error rule (correct in itself) raised "Nightly CI — something to
-  handle" about the platform's own bug — the exact inverse of the pack's
-  "costs nothing on a quiet night" claim. The crew-agnostic half of
-  `ensureSidecar` is now `settleSidecar`, with `EnsureCrewSidecar` as a second
-  door onto the same check/reuse/restart sequence and the same #1220 lifecycle
-  lock, and `RunScript` calls it before exec. A crew-started sidecar carries the
-  full network policy and *no* credentials — a script step authenticates
-  through its own `script.env` — so it is stamped `crew-only-no-credentials`
-  and an agent run replaces it unconditionally rather than inheriting a sidecar
-  that would inject nothing into its model traffic. The reverse never happens:
-  a healthy agent-started sidecar is reused, never downgraded.
-- **A crew can always run its agents** (#2429) — two defects behind "stdbuf: failed to run command 'claude': No such file or directory" on every wizard-built crew. mise now installs under `/opt/mise` instead of the agent's home — `/home/agent` is a per-crew named volume at runtime and hid every tool the image had put there — and the build puts the agent's tool directories (`/home/agent/.local/bin`, `/opt/mise/data/shims`) plus the matching `MISE_*` variables into the image `ENV`, `/etc/environment` and the runtime container env, so mise-installed tools resolve from the non-login exec the agent runs in; the runtime merges the aggregated PATH, the captured login PATH and the well-known tool directories into one instead of letting a captured login PATH replace the rest. And the adapter CLI is no longer the operator's job: every build reads the crew's agents' `cli_adapter`s, adds a mise tool (or an installer, for `droid`) for each CLI no declared feature provides, and runs `command -v` for every required binary as the agent user before the image is called ready — a miss fails the build with the binary named. The verified binaries are stored with the image and read by the dispatch gate (chat, issues, routines, container start): an image that is missing or not verified for a live agent's adapter is rebuilt before the agent runs, whichever path created the agent, and a plain base image with no features still gets the build its agents need; creating or moving an agent onto an uncovered adapter enqueues the rebuild immediately. A cache hit now returns the runtime contract instead of an empty one that was stored as NULL (which dropped the privileged flag, mounts and env of the previous build). `droid` installs into the image-resident `/opt/crewship/bin`. Cache keys changed (schema v3), so existing crews rebuild once.
 - **The docs-drift pack turned its own graceful degrade into a hard failure.**
   `docs_audit.sh` deliberately exits zero when the scan cannot run, so the
   status page keeps a meaningful panel — but its two `fail()` paths wrote a
@@ -75,6 +79,113 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   failures belonging to a workspace that no longer existed. What the scope
   drops is stated in the PASS detail rather than filtered in silence, and an
   unparseable timestamp never buys a pass.
+
+- **Every routine run was recorded as `FAILED`.** `DeriveOutcome` treats a clean
+  completion that reports no §9.6 hand-off as `FAILED` with "no outcome
+  reported" — right for an agent, which was asked for one, and impossible for a
+  routine built from `script`, `transform`, `notify` and `crewship` steps, where
+  nothing can ever report anything. Every routine run in a seeded workspace read
+  `status=completed, outcome=FAILED`, `crewship routine logs` printed `Error: no
+  outcome reported` on the happy path, and both `crewshipd_successful_runs_total`
+  and the digest's `pipeline_runs WHERE outcome='SUCCEEDED'` counted zero
+  routines forever. The strict default now applies only when the run actually
+  contained a step that could report (`agent_run`, or `call_pipeline`, which
+  fails closed); anything else settles `SUCCEEDED` with an empty reason. A
+  routine that *does* carry an agent step and still says nothing is unchanged —
+  that remains a real missing hand-off. Existing rows are not backfilled.
+- **§12's violation counter could not see the violation it was written for.**
+  `crewshipd_inbox_items_on_successful_runs` joined `pipeline_runs.id =
+  inbox_items.source_id`, and its comment claimed "no other producer keys an
+  item by a run id". A `notify` step keys its item `<run_id>:<step_id>`, so the
+  join never matched and the numerator was structurally always zero. It now
+  compares the run id against the prefix before the separator — equality on the
+  extracted prefix, never a `LIKE`, so a run whose id merely prefixes another's
+  is not miscounted. With this and the outcome fix in place the series reports a
+  real, non-zero ratio on a seeded workspace, because the shipped packs *do*
+  post an inbox message from a successful run. That contradiction between the
+  packs and §12 is now measured rather than hidden, and is left for a decision.
+
+- **`-f json` printed English prose on the commands that mint an identifier.**
+  `--format` is a persistent flag, so every command in the tree advertises it,
+  and the premise of this CLI is that agents drive it. `crewship issue create
+  -f json` answered `Created issue ENG-14: ZZ fmt probe` — an agent had to
+  regex its own identifier out of a sentence. None of the offenders was in
+  `formatContractExempt`, and none would have qualified; the existing guard
+  simply could not see them, because it only exercises commands it can invoke
+  without arguments. A new guard covers every `create` in the tree plus a named
+  ratchet of six issue mutations, and all 21 violations it found are fixed —
+  `issue create -f json` now emits the object `issue get -f json` emits, so one
+  parser handles both, and the human output is byte-identical. The wider
+  population of mutating commands still off-contract is left to its own
+  ratcheting programme rather than papered over.
+- **Internal ids where a name belongs.** `routine list` printed a crew cuid in
+  its AUTHOR CREW column, `cost` and `paymaster` printed `agent/<cuid>`, and
+  `history` showed `?` for every routine run with a blank trigger. Slugs are
+  resolved for the human formats; machine formats keep the ids a script joins
+  on. An entity deleted since the run still shows its id, which is the honest
+  answer rather than a guess.
+- **`crewship issue activity` was unordered** — `created` could appear last —
+  while `issue events` on the same issue was correctly seq-ordered.
+- **Refusals that named no way out.** `keeper ask --credential` matched only a
+  credential's env-var slot and answered "credential not found for name" for a
+  credential plainly present in `credential list`; it now resolves slot, name
+  or id and, when the credential exists but the agent cannot reach it, says
+  exactly that and gives the `credential assign` command. A DONE issue refused
+  both deletion and cancellation with no hint that `DONE → BACKLOG → delete`
+  was open all along; both refusals now name the allowed targets and the
+  shortest route. And `crewship inbox resolve` on a live waitpoint — correctly
+  refused, because the decision has to reach the run — now prints the
+  `routine waitpoints approve/reject` commands with the real token.
+- **`crewship routine active` hid runs paused at a waitpoint**, though a run
+  waiting for a human is in flight in every sense that matters. It now lists
+  queued, running and waiting runs, with the state in a STATUS column.
+
+- **The one documentation page the deployed index could never carry.** The
+  scheduled `Documentation surface` job had been red on a count —
+  "llms.txt lists 306 pages, docs.json declares 307" — which read as Mintlify
+  lag and was not. `docs/manifest/README.md` was declared in the navigation and
+  404 on the live site, because Mintlify does not publish a `README` basename;
+  each merge that added a page moved both numbers and preserved the off-by-one.
+  Renamed to `manifest/overview`, matching `cli/overview` and
+  `api-reference/overview`. `checkServed` now names the pages it cannot find
+  instead of only counting them — it had both sets in memory and threw the
+  difference away, which is why one page hid behind a number for days.
+- **The runtime-conformance harness ignored the gap registry it fills.**
+  `KnownRuntimeGaps` records that podman below 5 drops supplementary GIDs and
+  that upgrading is the only remedy; the harness failed the nightly build over
+  exactly that, on a runner where it could not be otherwise. `ClassifyConformance`
+  joins them: a documented gap is reported in full with its operator-facing
+  detail but no longer reddens the build, an undocumented drop still does, and a
+  control the runtime *honours* while the registry still calls it broken now
+  fails as a stale entry — that registry feeds `doctor` and `/system/runtime`,
+  so leaving it to rot tells operators their agents cannot read crew memory
+  when they can.
+- **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
+
+- **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
+
+- **A routine `script` step ran against a sidecar nobody had started.** Every
+  script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
+  crew egress allowlist is enforced — but crewship-sidecar was only ever
+  started by the *agent* run path, which needs an agent. So on a crew whose
+  container had not yet served an agent run, every script step that touched the
+  network died on `connect to 127.0.0.1 port 9119: Connection refused`. #1473
+  gave script steps the proxy (the security half) and left the liveness half
+  open. It was deterministic on a fresh install, and it hit the demo first: the
+  `ci-nightly-triage` pack runs its `script` probe *before* its `agent_run`, so
+  a new workspace's very first nightly probe failed, and the probe's
+  fail-loud-on-error rule (correct in itself) raised "Nightly CI — something to
+  handle" about the platform's own bug — the exact inverse of the pack's
+  "costs nothing on a quiet night" claim. The crew-agnostic half of
+  `ensureSidecar` is now `settleSidecar`, with `EnsureCrewSidecar` as a second
+  door onto the same check/reuse/restart sequence and the same #1220 lifecycle
+  lock, and `RunScript` calls it before exec. A crew-started sidecar carries the
+  full network policy and *no* credentials — a script step authenticates
+  through its own `script.env` — so it is stamped `crew-only-no-credentials`
+  and an agent run replaces it unconditionally rather than inheriting a sidecar
+  that would inject nothing into its model traffic. The reverse never happens:
+  a healthy agent-started sidecar is reused, never downgraded.
+- **A crew can always run its agents** (#2429) — two defects behind "stdbuf: failed to run command 'claude': No such file or directory" on every wizard-built crew. mise now installs under `/opt/mise` instead of the agent's home — `/home/agent` is a per-crew named volume at runtime and hid every tool the image had put there — and the build puts the agent's tool directories (`/home/agent/.local/bin`, `/opt/mise/data/shims`) plus the matching `MISE_*` variables into the image `ENV`, `/etc/environment` and the runtime container env, so mise-installed tools resolve from the non-login exec the agent runs in; the runtime merges the aggregated PATH, the captured login PATH and the well-known tool directories into one instead of letting a captured login PATH replace the rest. And the adapter CLI is no longer the operator's job: every build reads the crew's agents' `cli_adapter`s, adds a mise tool (or an installer, for `droid`) for each CLI no declared feature provides, and runs `command -v` for every required binary as the agent user before the image is called ready — a miss fails the build with the binary named. The verified binaries are stored with the image and read by the dispatch gate (chat, issues, routines, container start): an image that is missing or not verified for a live agent's adapter is rebuilt before the agent runs, whichever path created the agent, and a plain base image with no features still gets the build its agents need; creating or moving an agent onto an uncovered adapter enqueues the rebuild immediately. A cache hit now returns the runtime contract instead of an empty one that was stored as NULL (which dropped the privileged flag, mounts and env of the previous build). `droid` installs into the image-resident `/opt/crewship/bin`. Cache keys changed (schema v3), so existing crews rebuild once.
 
 <!--
   Backfill (#2086). The twenty-four entries between this marker and the next
@@ -268,6 +379,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   omission. A privileged human override of a hold is a separate feature
   this does not add: it would need to be explicit and audited, not an
   accident of which handler a request reaches.
+
+### Added
 
 - **`DONE` is now the only word for "finished" on `missions.status`; `COMPLETED` is retired (#2383).**
   Issues moved to `DONE` while the mission engine's PATCH endpoint moved an
@@ -3114,6 +3227,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 <!-- End of the #2086 backfill. Entries below were written with their PRs. -->
 
+### Fixed
+
 - **An agent-created mission dispatched its first task straight into a
   `FOREIGN KEY constraint failed` (#2139).** `assignments.chat_id` is
   `NOT NULL REFERENCES chats(id)`, and the mission task dispatcher inserts
@@ -3597,6 +3712,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   counters now recognize `run.agent_span` entries directly, reading the
   span's own `status` field for the error count.
 
+### Added
+
 - **A database write looked exactly like `ls` in the run trace.** Sub-span
   kinds were derived from the tool NAME alone, and every shell call is the
   same tool — so `psql -c "delete from orders"` and a directory listing both
@@ -3858,6 +3975,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never gone. The error-distinguishing variant already existed one function
   below and was unused.
 
+### Added
+
 - **A container-boot conformance test that needs no API key.** The sidecar's
   `/health` is served from in-memory state, so a real container, a real sidecar
   and a real health probe cost nothing to run. It asserts uid 1001 resolves,
@@ -3943,6 +4062,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   another that carries the same file. Cascade deletes (an issue hard-deleted)
   never reach that refcount, so `crewship issue delete` runs a reclaim pass
   derived purely from the table.
+
+### Changed
 
 - **Go toolchain moved 1.26.6 → 1.27.0, and every place that names it now
   agrees (#2060).** Dependabot bumps the root `Dockerfile` alone, which is the
@@ -4150,6 +4271,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `components/branding/crewship-logo.tsx` to `lib/brand-mark.ts` and is
   re-exported, so importers are unaffected.
 
+### Fixed
+
 - **Deploying a crew template links credentials for the agent's own provider.**
   `autoAssignCredentials` filtered the workspace's credentials with a hardcoded
   `provider = 'ANTHROPIC'` while the agents it links them to carry whatever
@@ -4245,6 +4368,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   `provisioned (container image ready)` and points at the same command, for the
   same reason.
 
+### Added
+
 - **`crewship crew start <crew>` — start a crew's container on purpose.** There
   was no way to. `crew provision` builds an image and stops; the container was
   only ever created lazily by the crew's first agent run, so the only route to a
@@ -4338,6 +4463,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   adds a delete the rendered plan never showed, and `--yes` (which every CI
   invocation carries) would have waved it through. SDK callers get the same
   guarantee via `manifest.Options{NoDelete: true}` → `ErrDeletesRefused`.
+
+### Changed
 
 - **`OTEL_EXPORTER_OTLP_ENDPOINT` is treated as the base URL it is, and
   `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is honoured (#1870).** The standard
@@ -4517,6 +4644,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   than an attachments table, and three v144 timestamp-regression guards use it as
   their canary. Removing it belongs with #1768 item 8, together with moving those
   guards.
+
+### Fixed
 
 - **Two crews with the same issue prefix no longer wedge each other (#1797).**
   An identifier is `<prefix>-<n>`, where the prefix is the crew's
@@ -4841,6 +4970,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   allow. When the policy resolver is unwired the gate holds rather than
   proceeding — a wiring bug fails closed.
 
+### Changed
+
 - **A `container` CLI call that finished microseconds before its deadline no
   longer reports a timeout (#2030).** The `internal/provider/apple` half of the
   process-group fix below is a user-visible behaviour change, not only an
@@ -4932,6 +5063,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   Missions created through the dashboard/JWT API are neither capped nor counted
   against the agents' budget — an operator planning work is making a decision —
   and issues (which share the `missions` table) never count.
+
+### Fixed
 
 - **Leaving a workspace kept every crew membership (#1976).** `RemoveMember`
   deleted the `workspace_members` row and nothing else, so each `crew_members`
