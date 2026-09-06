@@ -65,6 +65,19 @@ endpoint variants are not claimed complete.
 - `go test ./... -count=1 -timeout 30m`: exit 0.
 - `go vet ./...`: exit 0.
 - `pnpm lint`: no errors, 33 existing warnings.
-- `pnpm build`: passed. Deployment rebuild and public checks follow the commit.
+- `pnpm build`: passed; deployment also rebuilt the final commit successfully.
 
 Logs: `/tmp/provider-guided-{ui,e2e,go,vet,lint,build}.log`.
+
+## Dev3 deployment
+
+`52f56ee4` was deployed with `sudo systemctl reload crewship-ws@3`.
+The reload completed successfully at 17:27 UTC. The build is marked dirty
+because the pre-existing AGENTS.md change and untracked handoff files were
+preserved, not staged. No other instance was restarted.
+
+Public `/credentials`: HTTP 200. Backend `/api/health`: `{"status":"ok"}`.
+The four browser acceptance scenarios also passed through the public dev3
+address after deployment (8.7s, `/tmp/provider-guided-public-e2e.log`), still
+with all API requests intercepted; this is not a real-provider sign-in test.
+This deployment note is a documentation-only follow-up to the deployed commit.
