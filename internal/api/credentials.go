@@ -26,6 +26,9 @@ type CredentialHandler struct {
 	// /secrets on revoke (#814). nil when Docker isn't wired (tests,
 	// --no-docker) — reconciliation then no-ops. Set via SetContainer.
 	container provider.ContainerProvider
+	// loginRefresher runs POST /{id}/refresh (docs/prd/provider-logins.md
+	// §10.3). nil when not wired (tests); the route then answers 503.
+	loginRefresher *ProviderLoginRefresher
 }
 
 // decryptEndpointURLForRead returns the decrypted endpoint URL for an
@@ -151,6 +154,10 @@ type credentialResponse struct {
 	CreatedByActorType    *string `json:"created_by_actor_type"`
 	CreatedByActorID      *string `json:"created_by_actor_id"`
 	ProvisionedForService *string `json:"provisioned_for_service"`
+	// Login is the provider-login view (docs/prd/provider-logins.md §10.1):
+	// present on a PROVIDER_LOGIN row and, derived, on an AI_CLI_TOKEN or
+	// API_KEY row of a model provider; absent on every other credential.
+	Login *loginView `json:"login,omitempty"`
 }
 
 // Batch loaders and junction-table helpers live in credentials_loaders.go
@@ -193,6 +200,18 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		// table — json_each expands it; json_each(NULL) yields no rows.
 		where += " AND EXISTS (SELECT 1 FROM json_each(c.tags) WHERE value = ?)"
 		whereArgs = append(whereArgs, tag)
+	}
+	// ?kind=provider_login (docs/prd/provider-logins.md §10.1): only the rows
+	// that carry a login object — the Providers tab's list. Any other value
+	// is a 400 rather than a silent full list.
+	if kind := strings.TrimSpace(q.Get("kind")); kind != "" {
+		if kind != "provider_login" {
+			replyError(w, http.StatusBadRequest, "kind must be provider_login")
+			return
+		}
+		sqlFrag, args := loginRowsSQL()
+		where += sqlFrag
+		whereArgs = append(whereArgs, args...)
 	}
 
 	// #1033: opt-in cursor pagination. When the caller passes paginate=true
@@ -300,7 +319,8 @@ const credentialSelectPrefix = `
 		c.created_at, c.updated_at,
 		c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
 		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
-		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
+		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count,
+		COALESCE(c.created_by, '')
 	FROM credentials c
 	WHERE `
 
@@ -315,10 +335,11 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 	defer rows.Close()
 
 	result := []credentialResponse{}
+	sources := map[string]loginSource{}
 	for rows.Next() {
 		var c credentialResponse
 		var lastUsedIPsRaw, tagsRaw sql.NullString
-		var encValue string
+		var encValue, createdBy string
 		if err := rows.Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
 			&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail, &c.Username,
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
@@ -326,7 +347,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
 			&encValue, &c.Sensitivity, &c.SecurityLevel,
-			&c.AgentCount); err != nil {
+			&c.AgentCount, &createdBy); err != nil {
 			return nil, err
 		}
 		c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
@@ -334,9 +355,23 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 		c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
 		c.Testable = probeSupported(c.Provider, c.Type)
 		c.SecurityLevelLabel = keeper.SecurityLevel(c.SecurityLevel).Label()
+		if isLoginRow(c.Type, c.Provider) {
+			src := loginSource{CreatedBy: createdBy, EncryptedValue: encValue}
+			if c.TokenExpiresAt != nil {
+				src.TokenExpiresAt = *c.TokenExpiresAt
+			}
+			sources[c.ID] = src
+		}
 		result = append(result, c)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// rows is closed before the login loader runs its own queries: SQLite
+	// serialises against an open cursor (see loadDeliveredCredentials).
+	rows.Close()
+	attachLoginViews(ctx, h.db, h.logger, result, sources)
+	return result, nil
 }
 
 // enrichCredentials batch-loads the crew_ids / agent names / mcp-used columns
@@ -412,7 +447,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var c credentialResponse
 	var lastUsedIPsRaw, tagsRaw sql.NullString
-	var encValue string
+	var encValue, createdBy string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
 			c.scope, c.crew_id, c.account_label, c.account_email, c.username,
@@ -421,7 +456,8 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
 			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
-			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
+			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count,
+			COALESCE(c.created_by, '')
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
 	`, args...).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
@@ -431,7 +467,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
 		&encValue, &c.Sensitivity, &c.SecurityLevel,
-		&c.AgentCount)
+		&c.AgentCount, &createdBy)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)
 	c.EndpointURL = decryptEndpointURLForRead(c.Type, encValue, h.logger)
@@ -444,6 +480,15 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		replyInternalError(w, h.logger, "get credential", err)
 		return
+	}
+	if isLoginRow(c.Type, c.Provider) {
+		src := loginSource{CreatedBy: createdBy, EncryptedValue: encValue}
+		if c.TokenExpiresAt != nil {
+			src.TokenExpiresAt = *c.TokenExpiresAt
+		}
+		one := []credentialResponse{c}
+		attachLoginViews(r.Context(), h.db, h.logger, one, map[string]loginSource{c.ID: src})
+		c.Login = one[0].Login
 	}
 
 	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)

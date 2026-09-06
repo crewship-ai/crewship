@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // securityLevelHint is the one rejection message both write paths use. It names
@@ -56,11 +57,14 @@ func encryptOrError(w http.ResponseWriter, logger *slog.Logger, logMsg, value st
 var provisionedForServiceRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type createCredentialRequest struct {
-	Name          string   `json:"name"`
-	Description   *string  `json:"description"`
-	Value         string   `json:"value"`
-	Type          string   `json:"type"`
-	Provider      string   `json:"provider"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	Value       string  `json:"value"`
+	Type        string  `json:"type"`
+	Provider    string  `json:"provider"`
+	// Mode is PROVIDER_LOGIN's subscription | api_key (PRD provider-logins
+	// §10.2). Optional: inferred from the value's shape when omitted.
+	Mode          string   `json:"mode,omitempty"`
 	Scope         string   `json:"scope"`
 	CrewID        *string  `json:"crew_id"`
 	CrewIDs       []string `json:"crew_ids"`
@@ -404,6 +408,26 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()
 
+	// A provider login (docs/prd/provider-logins.md §10.2) is split HERE,
+	// after validation ran the same split for its verdict: the value column
+	// gets the access token / setup-token / key, the rest become parts below,
+	// and the pasted whole is never stored anywhere.
+	var login *providerlogin.Login
+	if req.Type == CredTypeProviderLogin && !manifestPending {
+		l, err := providerlogin.Split(req.Provider, req.Mode, req.Value)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		login = &l
+		req.Value = l.AccessToken
+		req.Provider = l.Provider
+		if !l.ExpiresAt.IsZero() {
+			exp := l.ExpiresAt.UTC().Format(time.RFC3339)
+			req.TokenExpires = &exp
+		}
+	}
+
 	encryptedValue, ok := encryptOrError(w, h.logger, "encrypt credential", req.Value)
 	if !ok {
 		return
@@ -490,6 +514,17 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The login's parts, in the same transaction as the row: a login with
+	// its refresh token missing is a login that expires in ten days with no
+	// way back, so it is all or nothing.
+	if login != nil {
+		if err := storeProviderLoginParts(r.Context(), tx, credID, *login, now); err != nil {
+			tx.Rollback()
+			replyInternalError(w, h.logger, "store provider login parts", err)
+			return
+		}
+	}
+
 	// Stamp the timeline so the detail-sheet Audit tab shows when the
 	// credential first appeared. INSIDE the create tx (audit
 	// reliability): a credential must not materialize without its
@@ -530,8 +565,20 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"name": req.Name, "type": req.Type, "scope": req.Scope,
 	})
 
+	// The login object rides on the create response too, so the wizard can
+	// show plan / owner / delivery without a second round-trip.
+	var loginResp *loginView
+	if isLoginRow(req.Type, req.Provider) {
+		if lv, _, err := loadLoginView(r.Context(), h.db, h.logger, credID); err == nil {
+			loginResp = lv
+		} else {
+			h.logger.Warn("credential create: load login view", "credential_id", credID, "error", err)
+		}
+	}
+
 	actorTypeResp := &actorType
 	writeJSON(w, http.StatusCreated, credentialResponse{
+		Login:                 loginResp,
 		ID:                    credID,
 		Name:                  req.Name,
 		Description:           req.Description,

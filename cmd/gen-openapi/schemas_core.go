@@ -103,6 +103,11 @@ func coreResourceSchemas() map[string]any {
 		"created_at": stringSchema(), "updated_at": stringSchema(), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
 		"created_by_user_id": stringSchema(), "ephemeral": boolSchema(), "expires_at": nullableString(), "expired_at": nullableString(),
 		"parent_lead_id": nullableString(), "hire_reason": nullableString(),
+		// pays_with (docs/prd/provider-logins.md §10.3): the provider login
+		// this agent's model is paid with, null when none. GET only.
+		"pays_with": map[string]any{"type": "object", "nullable": true, "properties": map[string]any{
+			"credential_id": stringSchema(), "name": stringSchema(), "login": ref("ProviderLogin"),
+		}, "required": []string{"credential_id", "name", "login"}},
 	}, "id", "workspace_id", "name", "slug", "agent_role", "status", "cli_adapter", "timeout_seconds", "tool_profile",
 		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral",
 		"crew_id", "description", "role_title", "lead_mode", "llm_provider", "llm_model", "system_prompt",

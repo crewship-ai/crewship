@@ -29,6 +29,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // CredentialType is a string alias used to document intent at call
@@ -54,6 +55,16 @@ const (
 	// type its value is a destination, not a secret, so it is echoed back on
 	// GET/list (see credentials read path) rather than redacted.
 	CredTypeEndpointURL CredentialType = "ENDPOINT_URL"
+	// CredTypeProviderLogin is a seat that pays for a model
+	// (docs/prd/provider-logins.md §5.1, §10.2): a Claude Code setup-token,
+	// the auth.json of a ChatGPT login, or a metered API key, with an owner,
+	// a plan, an expiry and — where the provider has one — a refresh flow
+	// the server runs. encrypted_value holds the access token / setup-token
+	// / key; the rest are credential_fields parts (providerlogin.Part*),
+	// the refresh token among them, sealed. The request carries `mode`
+	// (subscription | api_key) and `value` = whatever the operator pasted;
+	// the server splits it (providerlogin.Split).
+	CredTypeProviderLogin CredentialType = providerlogin.Type
 )
 
 // validCredentialTypes is the closed set the Create path accepts. The
@@ -70,6 +81,7 @@ var validCredentialTypes = map[CredentialType]struct{}{
 	CredTypeCertificate:   {},
 	CredTypeGenericSecret: {},
 	CredTypeEndpointURL:   {},
+	CredTypeProviderLogin: {},
 }
 
 // validateCredentialType checks only the closed type enum — extracted
@@ -78,7 +90,7 @@ var validCredentialTypes = map[CredentialType]struct{}{
 // per-type field validation.
 func validateCredentialType(t string) string {
 	if _, ok := validCredentialTypes[t]; !ok {
-		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL"
+		return "type must be one of: AI_CLI_TOKEN, API_KEY, CLI_TOKEN, SECRET, OAUTH2, USERPASS, SSH_KEY, CERTIFICATE, GENERIC_SECRET, ENDPOINT_URL, PROVIDER_LOGIN"
 	}
 	return ""
 }
@@ -207,6 +219,16 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 			if msg := validateEndpointURL(req.Value); msg != "" {
 				return msg
 			}
+		}
+
+	case CredTypeProviderLogin:
+		// The same split the Create path stores, run for its verdict only:
+		// what stores is exactly what delivers, so a value the orchestrator
+		// could not render (a bare key in subscription mode, an auth.json
+		// without id_token, a provider with no login shape) is refused
+		// here with the operator-facing reason.
+		if _, err := providerlogin.Split(req.Provider, req.Mode, req.Value); err != nil {
+			return err.Error()
 		}
 
 	case CredTypeEndpointURL:

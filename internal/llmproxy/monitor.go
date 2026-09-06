@@ -41,6 +41,23 @@ type CredentialMonitor struct {
 	anthropicModelsURL string
 	openaiModelsURL    string
 	googleModelsURL    string
+
+	// refreshHook runs on every tick before the validation pass: the
+	// provider-login refresher (internal/api, docs/prd/provider-logins.md
+	// §5.3), which renews ChatGPT logins from their sealed refresh tokens.
+	// Kept as a hook rather than an import because this package must not
+	// depend on internal/api; nil when nothing is wired.
+	refreshHook atomic.Pointer[func(context.Context)]
+}
+
+// SetRefreshHook registers the function the tick calls before validating.
+// Safe before or after Run.
+func (cm *CredentialMonitor) SetRefreshHook(fn func(context.Context)) {
+	if fn == nil {
+		cm.refreshHook.Store(nil)
+		return
+	}
+	cm.refreshHook.Store(&fn)
 }
 
 // NewCredentialMonitor creates a monitor that periodically validates provider
@@ -89,6 +106,9 @@ func (cm *CredentialMonitor) Run(ctx context.Context) {
 			cm.logger.Info("credential monitor stopped")
 			return
 		case <-ticker.C:
+			if hook := cm.refreshHook.Load(); hook != nil {
+				(*hook)(ctx)
+			}
 			cm.checkAll(ctx)
 		}
 	}

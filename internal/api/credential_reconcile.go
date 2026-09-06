@@ -30,6 +30,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // Defensive validator — an agent slug comes from our own DB (validated at
@@ -62,13 +63,19 @@ var credSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // interpolated: delivery refused to write that file for the same reason, so
 // there is nothing to remove, and the one outcome that matters is that it never
 // reaches the shell.
-func credSecretPaths(agentSlug, envVar, credType, provider string, fieldKeys []string) []string {
+func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKeys []string) []string {
 	// A Codex login (#2428) is the one credential written OUTSIDE /secrets:
 	// Codex reads it only from $CODEX_HOME, which is the agent's HOME. The
 	// file carries no parts — it is rendered from the credential as a whole
-	// (codexauth.Render) — so the field loop below has nothing to add.
-	if codexauth.IsLogin(credType, provider) {
+	// (codexauth.Render) — so the field loop below has nothing to add. Both
+	// shapes of the login (the legacy blob and the PROVIDER_LOGIN in
+	// subscription mode) write that one file; a login in api_key mode and
+	// an Anthropic login never touch disk.
+	if codexauth.IsLogin(credType, provider) || isCodexProviderLogin(credType, provider, mode) {
 		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+	}
+	if credType == CredTypeProviderLogin {
+		return nil
 	}
 	dir := "/secrets/" + agentSlug
 	var paths []string
@@ -96,6 +103,16 @@ func credSecretPaths(agentSlug, envVar, credType, provider string, fieldKeys []s
 	return paths
 }
 
+// isCodexProviderLogin reports whether a PROVIDER_LOGIN row is a ChatGPT
+// subscription — the one login shape that lives on disk in a container. The
+// orchestrator makes the same call from the delivered parts
+// (credentialOAuthKind); here the mode comes from the row's fields.
+func isCodexProviderLogin(credType, provider, mode string) bool {
+	return credType == CredTypeProviderLogin &&
+		providerlogin.Canonical(provider) == codexauth.ProviderID &&
+		(mode == "" || mode == providerlogin.ModeSubscription)
+}
+
 // buildCredRemoveScript emits the `sh -c` body that removes a credential's
 // file(s) from a running container. Paths are single-quoted (the segments are
 // validated safe by the caller). Returns "" when the type has no on-disk form.
@@ -104,8 +121,8 @@ func credSecretPaths(agentSlug, envVar, credType, provider string, fieldKeys []s
 // reads secrets by path and .env is advisory, so a now-dangling entry is inert
 // (the file it points at is gone) and rewriting a 0400 file adds shell/portability
 // risk for no security gain. It clears on the next container boot.
-func buildCredRemoveScript(agentSlug, envVar, credType, provider string, fieldKeys []string) string {
-	paths := credSecretPaths(agentSlug, envVar, credType, provider, fieldKeys)
+func buildCredRemoveScript(agentSlug, envVar, credType, provider, mode string, fieldKeys []string) string {
+	paths := credSecretPaths(agentSlug, envVar, credType, provider, mode, fieldKeys)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -191,20 +208,29 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	// must be loud: it is the difference between "the secret is gone from the
 	// container" and "the operator believes it is". The primary file is still
 	// removed below — a partial revoke beats none.
+	//
+	// The cleartext value column rides along for ONE key: a provider login's
+	// mode part decides whether the login is the Codex file on disk or an
+	// env-only key. Secret parts have NULL there by the table's CHECK, so no
+	// ciphertext is read.
 	var fieldKeys []string
+	var loginMode string
 	if fieldRows, ferr := db.QueryContext(ctx,
-		`SELECT key FROM credential_fields WHERE credential_id = ? ORDER BY ordinal ASC, key ASC`,
+		`SELECT key, COALESCE(value, '') FROM credential_fields WHERE credential_id = ? ORDER BY ordinal ASC, key ASC`,
 		credentialID); ferr != nil {
 		logger.Warn("revoke reconcile: field keys — multi-part files may survive in running containers",
 			"credential_id", credentialID, "error", ferr)
 	} else {
 		for fieldRows.Next() {
-			var key string
-			if serr := fieldRows.Scan(&key); serr != nil {
+			var key, value string
+			if serr := fieldRows.Scan(&key, &value); serr != nil {
 				logger.Warn("revoke reconcile: scan field key", "credential_id", credentialID, "error", serr)
 				break
 			}
 			fieldKeys = append(fieldKeys, key)
+			if key == providerlogin.PartMode {
+				loginMode = value
+			}
 		}
 		if ierr := fieldRows.Err(); ierr != nil {
 			logger.Warn("revoke reconcile: iterate field keys", "credential_id", credentialID, "error", ierr)
@@ -226,7 +252,7 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 			continue
 		}
 		t.envVar = envVar
-		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, t.provider, fieldKeys)
+		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, t.provider, loginMode, fieldKeys)
 		if script == "" {
 			continue // type has no on-disk form
 		}

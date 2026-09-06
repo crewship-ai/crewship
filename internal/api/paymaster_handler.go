@@ -201,7 +201,16 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
+	// The seats behind the usage rows (docs/prd/provider-logins.md §5.5):
+	// every provider login in the workspace with its owner, plan and refresh
+	// state, so the panel keys its rows per login rather than per provider.
+	// Usage itself is still grouped by (provider, plan): cost_ledger carries
+	// no credential id, so a row joins to its logins by plan_label.
+	logins, err := listProviderLogins(r.Context(), h.db, h.logger, workspaceID)
+	if err != nil {
+		h.logger.Warn("paymaster subscription-usage: logins", "err", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "logins": logins, "since": since, "until": until})
 }
 
 // parseWindow accepts ?since=<RFC3339>&until=<RFC3339> or ?range=7d|24h|1h
