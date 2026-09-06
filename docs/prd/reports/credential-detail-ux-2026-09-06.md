@@ -64,3 +64,16 @@ in the accessible label; the input now has the stable accessible name `Tags`.
   `/tmp/credential-detail-go-retry.log`.
 - The fresh `TMPDIR=... go test ./... -count=1 -timeout 30m` run completed
   successfully with exit 0, including the full API and database suites.
+
+## Deployment
+
+Deployed feature commit `01092b16` to dev3 using
+`sudo systemctl reload crewship-ws@3`; frontend export rebuilt at 18:09 UTC.
+Service returned active/running, local `/api/health` returned `{"status":"ok"}`
+and public `/credentials` returned HTTP 200.
+
+`CREDENTIALS_TEST_URL=https://crewship-dev3.unifylab.cz pnpm exec playwright test --config=/tmp/crewship-provider-first.config.mjs`
+passed all 6 cases (13.2s), including immediate detail updates after Edit.
+This validates the deployed frontend with intercepted fixture APIs, not real
+provider authentication or production-secret mutations. Public test log:
+`/tmp/credential-detail-public-e2e.log`. No push or PR merge was performed.
