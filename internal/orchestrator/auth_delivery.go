@@ -64,7 +64,7 @@ func (d AuthDelivery) FileDelivered() bool { return d.File != "" }
 // CLI's login goes".
 
 func (claudeCodeAdapter) AuthDelivery() AuthDelivery {
-	return AuthDelivery{Env: claudeOAuthTokenEnv, Kind: oauthAnthropic, PlanLabel: func(string) string { return "Anthropic Max" }}
+	return AuthDelivery{Env: claudeOAuthTokenEnv, Kind: oauthAnthropic, PlanLabel: func(string) string { return "Claude (plan unknown)" }}
 }
 
 func (codexAdapter) AuthDelivery() AuthDelivery {

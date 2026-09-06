@@ -572,8 +572,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// "exit 0" as "it worked". Tool-level failures are deliberately excluded —
 	// see inband_failure.go for the run-vs-tool boundary.
 	var inBand inBandFailure
+	usageModel := req.LLMModel
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
+		if event.Type == "system" {
+			if meta, ok := event.Metadata.(map[string]any); ok {
+				if model, ok := meta["model"].(string); ok && model != "" {
+					usageModel = model
+				}
+			}
+		}
+		o.recordSubscriptionUsage(execCtx, req, runState.ID, usageModel, event)
 		// A line that decoded partially kept whatever matched and dropped the
 		// rest; the parser records which field it could not read. Say so once
 		// per run: the dropped field is data the CLI sent us and nothing else

@@ -45,13 +45,12 @@ func codexFileFor(login Credential) (codexauth.File, error) {
 }
 
 // anthropicPlanLabel is the flat-rate plan label for a Claude Code login.
-// A setup-token names no plan, so the legacy AI_CLI_TOKEN keeps the label it
-// has always had; a PROVIDER_LOGIN whose owner recorded the plan shows it.
+// A setup-token names no plan; only an explicitly recorded plan may be shown.
 func anthropicPlanLabel(login Credential) string {
 	if login.isProviderLogin() {
 		if plan := login.part(providerlogin.PartPlan); plan != "" {
 			return providerlogin.PlanLabel("ANTHROPIC", plan)
 		}
 	}
-	return "Anthropic Max"
+	return "Claude (plan unknown)"
 }

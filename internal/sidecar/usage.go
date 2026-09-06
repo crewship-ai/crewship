@@ -17,7 +17,8 @@ type LLMUsage struct {
 	// AgentID is resolved from the per-agent token embedded in the disposable
 	// proxy key. It is sidecar-local attribution metadata, never parsed from or
 	// sent to an upstream provider.
-	AgentID string
+	AgentID      string
+	CredentialID string // selected locally by CredStore, never read from upstream
 	// Provider is the LOWERCASE paymaster rate-card key
 	// (llmroute.Spec.LedgerProvider), e.g. "anthropic" / "openrouter" — not
 	// the uppercase CredStore ProviderType and not the body codec. It is set

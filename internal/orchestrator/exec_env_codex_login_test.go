@@ -123,7 +123,7 @@ func TestBuildEnvVarsSidecar_AnthropicLogin_Unchanged(t *testing.T) {
 	if got, _ := envValue(env, "CLAUDE_CODE_OAUTH_TOKEN"); got != "sk-ant-oat01-x" {
 		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN = %q", got)
 	}
-	if got, _ := envValue(env, "CREWSHIP_SUBSCRIPTION_PLAN"); got != "Anthropic Max" {
+	if got, _ := envValue(env, "CREWSHIP_SUBSCRIPTION_PLAN"); got != "Claude (plan unknown)" {
 		t.Errorf("CREWSHIP_SUBSCRIPTION_PLAN = %q", got)
 	}
 	// An untyped credential whose VALUE looks like an Anthropic token keeps

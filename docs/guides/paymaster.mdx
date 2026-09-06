@@ -332,7 +332,7 @@ See [llm.middleware.go](/guides/llm-middleware) for the full stack (`telemetry -
 - `GET /api/v1/paymaster/spend/by-agent/{crewId}?range=24h` -- per-agent rollup inside a crew (metered only).
 - `GET /api/v1/paymaster/spend/by-mission/{missionId}` -- single-mission total (metered only).
 - `GET /api/v1/paymaster/top-spenders?limit=10&range=7d` -- highest-cost scopes (metered only).
-- `GET /api/v1/paymaster/subscriptions?range=30d` -- flat-rate credentials grouped by `(plan, provider)` with call count, token count, last-used timestamp. **No \$ figure** — see "Billing modes" above for why.
+- `GET /api/v1/paymaster/subscriptions?range=30d` -- flat-rate usage grouped by `(credential_id, subscription_plan, provider)` with call count, token count and `last_ts`. Historical rows without a credential identity remain explicitly unattributed, never matched by plan name. The dashboard also lists configured subscription logins without observed usage; the CLI shows recorded usage rows. **No \$ figure** — see "Billing modes" above for why.
 
 Window syntax: `range=1h|24h|7d|30d` or explicit `since=<RFC3339>&until=<RFC3339>`. Default is 7 days.
 

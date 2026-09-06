@@ -167,6 +167,7 @@ func SpendByMission(ctx context.Context, db *sql.DB, missionID string) (MissionS
 // LastTS is the most-recent flat-rate ledger row matching the plan, used
 // by the UI to surface "last used 14m ago".
 type SubscriptionUsage struct {
+	CredentialID     string    `json:"credential_id,omitempty"`
 	SubscriptionPlan string    `json:"subscription_plan"`
 	Provider         string    `json:"provider"`
 	CallCount        int64     `json:"call_count"`
@@ -176,7 +177,7 @@ type SubscriptionUsage struct {
 }
 
 // SubscriptionUsageByPlan rolls up flat_rate ledger rows in the workspace
-// by (subscription_plan, provider) for the given window. Empty plan label
+// by (credential_id, subscription_plan, provider) for the given window. Empty plan label
 // (rare; pre-migration rows or buggy emitters) is reported as "unknown" so
 // the UI doesn't render a blank cell.
 //
@@ -198,11 +199,11 @@ func SubscriptionUsageByPlan(ctx context.Context, db *sql.DB, workspaceID string
 		args = append(args, until.UTC().Format(tsLayout))
 	}
 
-	q := `SELECT COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider,
+	q := `SELECT COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider, COALESCE(credential_id, ''),
 	             COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
 	             COALESCE(MAX(ts), '')
 	      FROM cost_ledger WHERE ` + joinAnd(conds) +
-		` GROUP BY COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider
+		` GROUP BY COALESCE(NULLIF(subscription_plan, ''), 'unknown'), provider, COALESCE(credential_id, '')
 		  ORDER BY COUNT(*) DESC`
 
 	rows, err := db.QueryContext(ctx, q, args...)
@@ -217,7 +218,7 @@ func SubscriptionUsageByPlan(ctx context.Context, db *sql.DB, workspaceID string
 			s       SubscriptionUsage
 			lastStr string
 		)
-		if err := rows.Scan(&s.SubscriptionPlan, &s.Provider,
+		if err := rows.Scan(&s.SubscriptionPlan, &s.Provider, &s.CredentialID,
 			&s.CallCount, &s.InTokens, &s.OutTokens, &lastStr); err != nil {
 			return nil, fmt.Errorf("paymaster: scan subscription usage: %w", err)
 		}

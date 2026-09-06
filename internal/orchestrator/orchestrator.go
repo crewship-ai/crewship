@@ -557,7 +557,8 @@ type Orchestrator struct {
 	// replaces it with a no-op. Used to record one agent.run.* row per
 	// terminal run outcome (completed/error/cancelled) so `crewship audit`
 	// surfaces agent-run activity (#1207) — previously invisible to it.
-	auditLog AuditEmitter
+	auditLog                  AuditEmitter
+	subscriptionUsageRecorder func(context.Context, SubscriptionUsage) error
 
 	// hooks + approvalGate + episodicRecall are optional integration
 	// points. Each is nil-safe: callers always exercise them through the

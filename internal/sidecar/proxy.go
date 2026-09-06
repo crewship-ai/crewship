@@ -423,6 +423,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	spec, isLLM := llmroute.MatchHost(strings.ToLower(stripPort(host)))
 	provider := ""
 	actorID := ""
+	credentialID := ""
 	if isLLM {
 		var allowed bool
 		actorID, allowed = p.authorizeLLMRoute(w, r)
@@ -441,6 +442,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		llmroute.ApplyAuth(r, spec, cred.Token, cred.Headers)
+		credentialID = cred.ID
 		p.logger.Debug("credential injected",
 			"provider", provider,
 			"credential_id", cred.ID,
@@ -500,7 +502,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider, actorID)
+	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider, actorID, credentialID)
 }
 
 // handleConnect handles HTTPS CONNECT tunnel requests.
@@ -809,7 +811,11 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID)
+	credentialID := ""
+	if cred != nil {
+		credentialID = cred.ID
+	}
+	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID, credentialID)
 }
 
 // authorizeLLMRoute authenticates the disposable provider key before the
@@ -865,7 +871,7 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // `ledgerProvider` is the lowercase paymaster rate-card key
 // (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
 // are separate — OpenAI-shaped bodies, its own rate card.
-func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID string) {
+func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID, credentialID string) {
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
 	if ledgerProvider == "" || p.onLLMCall == nil {
 		_, _ = io.Copy(w, resp.Body)
@@ -883,6 +889,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 			_, _ = io.Copy(w, resp.Body)
 		}
 		usage.AgentID = actorID
+		usage.CredentialID = credentialID
 		usage.Provider = ledgerProvider
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
@@ -908,6 +915,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 
 	usage := parseLLMUsage(codec, buf.String())
 	usage.AgentID = actorID
+	usage.CredentialID = credentialID
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)

@@ -466,6 +466,7 @@ func (s *Server) mountAPIRouter(
 	// JournalEmitter interface to the full journal.Emitter so the
 	// orchestrator package stays independent of internal/journal.
 	orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+	orch.SetSubscriptionUsageRecorder(newSubscriptionUsageRecorder(deps.DB, s.journalWriter))
 
 	// Wire the audit-log recorder into the orchestrator so a run that
 	// reaches a terminal state (completed/error/cancelled) writes an

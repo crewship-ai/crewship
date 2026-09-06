@@ -281,7 +281,7 @@ var paymasterSubscriptionsCmd = &cobra.Command{
 	Long: `Show flat-rate subscription usage — the API counterpart to the
 "Subscription plans" panel on the Paymaster dashboard. No $-figures
 because flat-rate cost is always $0 by construction; the row shape is
-plan + provider + call_count + token totals + last_used.
+credential_id + subscription_plan + provider + call_count + token totals + last_ts.
 
 Examples:
   crewship paymaster subscriptions
@@ -318,12 +318,13 @@ Examples:
 		}
 		var body struct {
 			Rows []struct {
-				Plan       string `json:"plan"`
-				Provider   string `json:"provider"`
-				CallCount  int64  `json:"call_count"`
-				InTokens   int64  `json:"input_tokens"`
-				OutTokens  int64  `json:"output_tokens"`
-				LastUsedAt string `json:"last_used_at"`
+				CredentialID string `json:"credential_id,omitempty"`
+				Plan         string `json:"subscription_plan"`
+				Provider     string `json:"provider"`
+				CallCount    int64  `json:"call_count"`
+				InTokens     int64  `json:"input_tokens"`
+				OutTokens    int64  `json:"output_tokens"`
+				LastUsedAt   string `json:"last_ts"`
 			} `json:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
@@ -331,11 +332,16 @@ Examples:
 		}
 		f := newFormatter()
 		return f.AutoHuman(body.Rows, func() {
-			fmt.Printf("%s%-20s  %-12s  %6s  %12s  %s%s\n",
-				cli.Bold, "Plan", "Provider", "Calls", "Tokens", "Last used", cli.Reset)
+			fmt.Printf("%s%-26s  %-20s  %-12s  %6s  %12s  %s%s\n",
+				cli.Bold, "Login", "Plan", "Provider", "Calls", "Tokens", "Last used", cli.Reset)
 			fmt.Println(strings.Repeat("─", 80))
 			for _, r := range body.Rows {
-				fmt.Printf("%-20s  %-12s  %6d  %12d  %s\n",
+				login := r.CredentialID
+				if login == "" {
+					login = "unknown"
+				}
+				fmt.Printf("%-26s  %-20s  %-12s  %6d  %12d  %s\n",
+					login,
 					truncateString(r.Plan, 20),
 					truncateString(r.Provider, 12),
 					r.CallCount,
@@ -343,7 +349,7 @@ Examples:
 					r.LastUsedAt)
 			}
 			if len(body.Rows) == 0 {
-				fmt.Printf("\n%s(no subscription credentials configured in this workspace)%s\n", cli.Dim, cli.Reset)
+				fmt.Printf("\n%s(no subscription usage recorded in this window)%s\n", cli.Dim, cli.Reset)
 			}
 		})
 	},

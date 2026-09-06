@@ -81052,6 +81052,9 @@
                           "call_count": {
                             "type": "integer"
                           },
+                          "credential_id": {
+                            "type": "string"
+                          },
                           "input_tokens": {
                             "type": "integer"
                           },

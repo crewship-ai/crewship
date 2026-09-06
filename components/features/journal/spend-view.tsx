@@ -332,6 +332,7 @@ export function SpendView() {
             <section>
               <SubscriptionsPanel
                 rows={subscriptionRows}
+                logins={subscriptions.data?.logins}
                 loading={subscriptions.loading && subscriptionRows.length === 0}
                 error={subscriptions.error}
                 notConfigured={subscriptions.notConfigured}
