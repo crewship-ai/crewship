@@ -481,7 +481,7 @@ func TestProviderLoginRefresher_StaleResultDoesNotReplaceNewLogin(t *testing.T) 
 			if !errors.Is(err, errRefreshSuperseded) {
 				t.Fatalf("stale refresh = %v", err)
 			}
-			r.rf.recordFailure(context.Background(), id, r.wsID, "racing-login", r.userID, oldRefresh, errors.New("stale failure"), time.Now())
+			r.rf.recordFailure(context.Background(), id, r.wsID, "racing-login", oldRefresh, errors.New("stale failure"), time.Now())
 			status, failures, _ := r.refreshState(t, id)
 			if status != "ok" || failures != 0 {
 				t.Fatalf("stale failure modified refresh state: %s, %d", status, failures)
@@ -613,15 +613,16 @@ func TestProviderLoginRefresher_FailuresEscalateToNeedsRelogin(t *testing.T) {
 			t.Errorf("after failure %d: status=%q failures=%d error=%q", i, status, failures, msg)
 		}
 	}
-	// The owner was told, once, through the inbox.
+	// Current workspace administrators are told once, without a personal
+	// target that would keep exposing the account after a role downgrade.
 	var n int
-	var target, kind string
-	if err := r.db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(target_user_id),''), COALESCE(MAX(kind),'') FROM inbox_items WHERE source_id = ?`,
-		"provider-login-relogin:"+credID).Scan(&n, &target, &kind); err != nil {
+	var target, targetRole, kind string
+	if err := r.db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(target_user_id),''), COALESCE(MAX(target_role),''), COALESCE(MAX(kind),'') FROM inbox_items WHERE source_id = ?`,
+		"provider-login-relogin:"+credID).Scan(&n, &target, &targetRole, &kind); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 || target != r.userID || kind != "message" {
-		t.Errorf("inbox notification: n=%d target=%q kind=%q", n, target, kind)
+	if n != 1 || target != "" || targetRole != "ADMIN" || kind != "message" {
+		t.Errorf("inbox notification: n=%d target=%q role=%q kind=%q", n, target, targetRole, kind)
 	}
 	// needs_relogin is terminal for the scheduler: the due scan leaves it.
 	before := r.tokens.calls

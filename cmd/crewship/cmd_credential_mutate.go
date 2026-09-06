@@ -543,20 +543,30 @@ var credCreateCmd = &cobra.Command{
 		var created struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
+			// Status is decoded so the machine formats can answer the
+			// question the human hint below answers in prose: an OAuth
+			// credential is created PENDING and works only once the flow
+			// completes.
+			Status string `json:"status,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Credential created: %s (%s)", created.Name, created.ID))
-		if oauthApp != nil {
-			// The row exists and holds nothing yet. Saying "created" and
-			// stopping would leave an operator with a credential that fails
-			// every agent run until they discover the second half themselves.
-			fmt.Printf("Status is PENDING until the OAuth flow completes. Finish it with:\n"+
-				"  crewship oauth connect %s\n", created.Name)
-		}
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Credential created: %s (%s)", created.Name, created.ID))
+			if oauthApp != nil {
+				// The row exists and holds nothing yet. Saying "created" and
+				// stopping would leave an operator with a credential that fails
+				// every agent run until they discover the second half themselves.
+				//
+				// Human-only: a machine caller reads `status` off the created
+				// row rather than a sentence, and this advice on stdout in
+				// front of a JSON document is what breaks the pipe.
+				fmt.Printf("Status is PENDING until the OAuth flow completes. Finish it with:\n"+
+					"  crewship oauth connect %s\n", created.Name)
+			}
+		})
 	},
 }
 

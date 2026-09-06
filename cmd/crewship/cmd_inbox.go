@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -45,15 +47,21 @@ Examples:
   crewship inbox list --all                 # walk every page, not just the first
   crewship inbox list --offset 50           # skip the first 50 rows
   crewship inbox read <id>                  # mark as read
-  crewship inbox resolve <id> --action approved
+  crewship inbox resolve <id> --action acknowledged   # messages / failed runs
   crewship inbox unread <id>                # flip back to unread
+
+'resolve' applies to the kinds the inbox OWNS — message, failed_run, and an
+orphaned waitpoint/escalation whose backing record is already gone. A LIVE
+waitpoint or escalation is decided at its source, so that the decision reaches
+the run rather than just closing a row; 'inbox resolve' on one is refused, and
+tells you which command to run instead. See 'crewship inbox resolve --help'.
 
 Status:
   list      — live (GET /api/v1/inbox)
   get       — live (GET /api/v1/inbox/{id})
-  read      — live (PATCH /api/v1/inbox/{id} state=read)
+  read      — live (PATCH /api/v1/inbox/{id} state=read; every kind)
   unread    — live (PATCH /api/v1/inbox/{id} state=unread)
-  resolve   — live (PATCH /api/v1/inbox/{id} state=resolved)
+  resolve   — live (PATCH /api/v1/inbox/{id} state=resolved; inbox-owned kinds)
   archive   — live (PATCH /api/v1/inbox/{id} state=resolved action=archived)`,
 }
 
@@ -244,19 +252,35 @@ the user did so the audit trail records the decision shape, not just
 
   approved | denied | retried | cancelled | acknowledged | dismissed
 
-This is the inbox-side resolve only — it does NOT call the source
-endpoint (e.g. it won't approve a waitpoint through to the executor).
-For source-aware actions, use the matching subcommand instead:
+WHICH KINDS THIS APPLIES TO
 
-  crewship approvals approve <id>           # waitpoints via approvals queue
-  crewship approvals deny <id>              # (both incl. ephemeral-hire reviews)
-  crewship escalation resolve <id> ...      # escalations via escalation lifecycle
-  crewship hire approve <agent-id>          # ephemeral-hire PENDING_REVIEW waitpoints
+  message, failed_run              — always; the inbox owns these rows
+  waitpoint, escalation            — only when the backing record is already
+                                     gone (an orphan the sweep left behind).
+                                     A LIVE one is refused with 409.
+
+That refusal is the design, not a gap. This is the inbox-side resolve only: it
+does NOT call the source endpoint, so resolving a live waitpoint here would
+close the row and leave the routine parked forever, waiting for a decision that
+never reached it. The decision has to be made where it drives the run.
+
+For a live item, use the source command — 'inbox resolve' prints the exact one
+when it refuses:
+
+  crewship routine waitpoints approve <token>   # the waitpoint the run is on
+  crewship routine waitpoints reject <token>
+  crewship approvals approve <id>               # waitpoints via approvals queue
+  crewship approvals deny <id>                  # (both incl. ephemeral-hire reviews)
+  crewship escalation resolve <id> ...          # escalations via escalation lifecycle
+  crewship hire approve <agent-id>              # ephemeral-hire PENDING_REVIEW waitpoints
+
+'crewship inbox read <id>' works on every kind, and is what you want when you
+have dealt with an item at its source and just want it out of the unread feed.
 
 Examples:
-  crewship inbox resolve <id> --action approved
-  crewship inbox resolve <id> --action retried
-  crewship inbox resolve <id>               # generic resolve, no action`,
+  crewship inbox resolve <id> --action acknowledged   # a message
+  crewship inbox resolve <id> --action retried        # a failed run
+  crewship inbox resolve <id>                         # generic resolve, no action`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		action, _ := cmd.Flags().GetString("action")
@@ -624,10 +648,83 @@ func patchInboxState(id, state, action string) error {
 		return err
 	}
 	if err := cli.CheckError(resp); err != nil {
-		return err
+		return inboxSourceHint(client, id, err)
 	}
 	cli.PrintSuccess(fmt.Sprintf("Inbox %s → %s", id, state))
 	return nil
+}
+
+// inboxSourceHint turns the server's 409 into a command the caller can run.
+//
+// The refusal itself is correct and deliberate (inbox_handler.go): a LIVE
+// waitpoint or escalation must be decided at its source, because that is what
+// makes the decision drive the run — resolving it in the inbox would close the
+// row and leave the routine parked forever. Only a source-LESS row (an orphan
+// whose backing record is gone) may be dismissed from here.
+//
+// What the CLI got wrong was stopping at the refusal. The error names an
+// internal endpoint path, which is not something an operator can run, and the
+// token the source command needs is one GET away. `routine run` already prints
+// the same pair of commands when it parks on a waitpoint; this makes the inbox
+// answer in the same shape.
+//
+// Best-effort throughout: the ORIGINAL error is always returned, decorated
+// where possible. A failed enrichment must not replace a real conflict with a
+// lookup error.
+func inboxSourceHint(client *cli.Client, id string, err error) error {
+	var apiErr *cli.APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusConflict {
+		return err
+	}
+
+	kind, _ := apiErr.Extensions["kind"].(string)
+	sourceID := ""
+	// The 409 body echoes the kind but not the source id, and the source id
+	// IS the token the follow-up command takes, so fetch the row for it.
+	if resp, gerr := client.Get("/api/v1/inbox/" + url.PathEscape(id) +
+		"?workspace_id=" + url.QueryEscape(cli.ResolveWorkspace(flagWorkspace, cliCfg))); gerr == nil {
+		if cli.CheckError(resp) == nil {
+			var item struct {
+				Kind     string `json:"kind"`
+				SourceID string `json:"source_id"`
+			}
+			if cli.ReadJSON(resp, &item) == nil {
+				sourceID = item.SourceID
+				if kind == "" {
+					kind = item.Kind
+				}
+			}
+		}
+	}
+
+	var hint string
+	switch kind {
+	case "waitpoint":
+		token := sourceID
+		if token == "" {
+			token = "<token>"
+		}
+		hint = fmt.Sprintf(
+			"\nThis is a live waitpoint: the decision has to reach the run, so it is made at the source.\n"+
+				"  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n"+
+				"  reject:  crewship routine waitpoints reject %s\n"+
+				"  mark it read here instead: crewship inbox read %s",
+			token, token, id)
+	case "escalation":
+		target := sourceID
+		if target == "" {
+			target = "<escalation-id>"
+		}
+		hint = fmt.Sprintf(
+			"\nThis is a live escalation: resolving it in the inbox would close the row without answering it.\n"+
+				"  approve: crewship escalation resolve %s --action approve\n"+
+				"  reject:  crewship escalation resolve %s --action reject\n"+
+				"  mark it read here instead: crewship inbox read %s",
+			target, target, id)
+	default:
+		return err
+	}
+	return fmt.Errorf("%w%s", err, hint)
 }
 
 // inboxCountCmd is the scriptable mirror of GET /api/v1/inbox/count —

@@ -133,9 +133,10 @@ to every workspace, not just the one the CLI is currently pointed at.`,
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Feature flag %q created (default %s, %d%% rollout).",
-			ff.Key, boolBadge(ff.Enabled), ff.Percentage))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(ff, func() {
+			cli.PrintSuccess(fmt.Sprintf("Feature flag %q created (default %s, %d%% rollout).",
+				ff.Key, boolBadge(ff.Enabled), ff.Percentage))
+		})
 	},
 }
 

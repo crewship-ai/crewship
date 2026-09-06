@@ -821,7 +821,16 @@ export function IssueCardDetail({
             </p>
           ) : (
             <ul className="space-y-2 text-[12px]">
-              {activities.map((a) => (
+              {[...activities]
+                .sort((x, y) => {
+                  // Newest first, whichever order the server listed them in
+                  // (the API answers oldest-first since seq-cursored resync).
+                  const sx = (x as { seq?: number }).seq
+                  const sy = (y as { seq?: number }).seq
+                  if (typeof sx === "number" && typeof sy === "number" && sx !== sy) return sy - sx
+                  return String(y.created_at ?? "").localeCompare(String(x.created_at ?? ""))
+                })
+                .map((a) => (
                 <ActivityRow key={a.id} activity={a} mentions={mentions} />
               ))}
             </ul>

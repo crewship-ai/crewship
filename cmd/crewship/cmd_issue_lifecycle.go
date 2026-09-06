@@ -112,9 +112,16 @@ var issueCreateCmd = &cobra.Command{
 			return err
 		}
 
-		identifier := derefStr(created.Identifier, created.ID)
-		cli.PrintSuccess(fmt.Sprintf("Created issue %s: %s", identifier, created.Title))
-		return nil
+		// The identifier the server just minted is the load-bearing half of
+		// this command: it is what the next command in a script addresses the
+		// issue by. Emitting it only inside an English sentence on stderr left
+		// an agent regexing "ENG-14" out of prose, so the machine formats get
+		// the whole created issue — the same shape `issue get` emits, so one
+		// parser handles both.
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			identifier := derefStr(created.Identifier, created.ID)
+			cli.PrintSuccess(fmt.Sprintf("Created issue %s: %s", identifier, created.Title))
+		})
 	},
 }
 
@@ -243,10 +250,20 @@ var issueUpdateCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		resp.Body.Close()
 
-		cli.PrintSuccess(fmt.Sprintf("Issue %s updated.", args[0]))
-		return nil
+		// The PATCH returns the whole updated issue (issue_handler_update.go
+		// ends `writeJSON(w, http.StatusOK, issue)`), and it is the only place
+		// a caller can read back what the update actually produced — a status
+		// the server normalised, a label set it rewrote. It used to be closed
+		// unread.
+		var updated issueItem
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+
+		return resolvedFormatter(cmd).AutoHuman(updated, func() {
+			cli.PrintSuccess(fmt.Sprintf("Issue %s updated.", args[0]))
+		})
 	},
 }
 
@@ -283,7 +300,25 @@ var issueDeleteCmd = &cobra.Command{
 		}
 		resp.Body.Close()
 
-		cli.PrintSuccess(fmt.Sprintf("Issue %s deleted.", args[0]))
-		return nil
+		// A 204 carries no body, so the receipt is synthesised here rather
+		// than passed through. It still has to exist: a delete that answers
+		// only in prose is one a script cannot confirm without parsing
+		// English, and the identifier is what it would be confirming.
+		return resolvedFormatter(cmd).AutoHuman(issueDeleteResult{
+			Identifier: identifier,
+			ID:         issue.ID,
+			Deleted:    true,
+		}, func() {
+			cli.PrintSuccess(fmt.Sprintf("Issue %s deleted.", args[0]))
+		})
 	},
+}
+
+// issueDeleteResult is the machine receipt for `issue delete`. The server
+// answers 204, so there is nothing to pass through and the shape is ours;
+// it names the issue that is gone in both spellings a caller may hold.
+type issueDeleteResult struct {
+	Identifier string `json:"identifier" yaml:"identifier"`
+	ID         string `json:"id" yaml:"id"`
+	Deleted    bool   `json:"deleted" yaml:"deleted"`
 }

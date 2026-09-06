@@ -29,13 +29,24 @@ var crewFilesCmd = &cobra.Command{
 
 var crewFilesListCmd = &cobra.Command{
 	Use:   "list <crew-slug-or-id>",
-	Short: "List files in the crew's /crew/shared directory",
-	Long: `List the entries under the crew's shared volume (the inter-agent
-"Shared Ship" namespace).
+	Short: "List a crew's files — the /output tree by default, /crew/shared with --path shared",
+	Long: `List a crew's files. A crew has TWO file trees and this command reads
+whichever --path selects:
+
+  (no --path)      the crew's /output tree — what agents wrote to /output/
+  --path shared    the /crew/shared bind mount — the inter-agent "Shared Ship"
+                   namespace, and where a manifest's bundled ` + "`files:`" + ` land
+                   (config/, work/, scripts/ on a freshly provisioned crew)
+
+They are different namespaces, not two views of one, so a crew whose only
+files came from its manifest lists nothing without --path shared. That is the
+routing 'crew files get' and 'crew files save' already use; the bare list used
+to answer "No files." for it with no indication that another tree existed.
 
 Examples:
-  crewship crew files list demo-crew
-  crewship crew files list demo-crew --path /shared/notes
+  crewship crew files list demo-crew                 # the /output tree
+  crewship crew files list demo-crew --path shared   # the bundled files
+  crewship crew files list demo-crew --path shared/notes
   crewship crew files list demo-crew --format json --filter '.[] | .name'`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,9 +88,30 @@ Examples:
 		case "yaml":
 			return f.YAML(body)
 		default:
+			// An empty /output tree is the normal state of a crew whose files
+			// all came from its manifest, and "No files." on its own reads as
+			// "the delivery failed" — the operator has no way to learn that
+			// the bytes are one flag away, in the other tree.
+			if len(extractFileList(body)) == 0 {
+				return printCrewFilesEmptyNote(subdir, args[0])
+			}
 			return printFilesTable(body)
 		}
 	},
+}
+
+// printCrewFilesEmptyNote says WHICH tree came back empty, and where the other
+// one is. Human formats only — the machine formats above already returned the
+// empty array, which is the honest machine answer and needs no prose.
+func printCrewFilesEmptyNote(subdir, crewRef string) error {
+	if subdir == "" {
+		fmt.Printf("%sNo files in this crew's /output tree.%s\n", cli.Dim, cli.Reset)
+		fmt.Printf("%sBundled manifest files live in the shared tree: crewship crew files list %s --path shared%s\n",
+			cli.Dim, crewRef, cli.Reset)
+		return nil
+	}
+	fmt.Printf("%sNo files under %q.%s\n", cli.Dim, subdir, cli.Reset)
+	return nil
 }
 
 var crewFilesGetCmd = &cobra.Command{
@@ -290,7 +322,7 @@ func putBytes(ctx context.Context, client *cli.Client, path string, body io.Read
 // reuse to avoid future drift.
 
 func init() {
-	crewFilesListCmd.Flags().String("path", "", "Subdirectory under /crew/shared to list")
+	crewFilesListCmd.Flags().String("path", "", "Subtree to list: empty = the crew's /output tree; \"shared\" (or shared/<subdir>) = the /crew/shared bind mount where bundled manifest files land")
 	crewFilesListCmd.Flags().Bool("recursive", false, "Recurse into subdirectories")
 	jqExprFlag(crewFilesListCmd)
 
