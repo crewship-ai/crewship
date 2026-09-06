@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 )
@@ -179,6 +180,19 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 		// is opaque values (webhook secrets, signing keys, custom tokens).
 		// The generic "value required" gate in the Create handler is
 		// enough.
+
+	case CredTypeAICLIToken:
+		// A Claude Code setup-token is opaque. An OpenAI login (#2428) is
+		// not: it is Codex's whole auth.json, and a value Codex would refuse
+		// — a bare token, a file missing id_token — must be refused HERE,
+		// where the operator can read why, not at run time as a 401 that
+		// blames the key. codexauth is the same parser the orchestrator
+		// renders with, so what stores is exactly what delivers.
+		if codexauth.IsLogin(req.Type, req.Provider) {
+			if msg := codexauth.ShapeError(req.Value); msg != "" {
+				return msg
+			}
+		}
 
 	case CredTypeAPIKey:
 		// An API_KEY is an opaque secret for every provider that dials a

@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -61,7 +62,14 @@ var credSlugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // interpolated: delivery refused to write that file for the same reason, so
 // there is nothing to remove, and the one outcome that matters is that it never
 // reaches the shell.
-func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []string {
+func credSecretPaths(agentSlug, envVar, credType, provider string, fieldKeys []string) []string {
+	// A Codex login (#2428) is the one credential written OUTSIDE /secrets:
+	// Codex reads it only from $CODEX_HOME, which is the agent's HOME. The
+	// file carries no parts — it is rendered from the credential as a whole
+	// (codexauth.Render) — so the field loop below has nothing to add.
+	if codexauth.IsLogin(credType, provider) {
+		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+	}
 	dir := "/secrets/" + agentSlug
 	var paths []string
 	switch credType {
@@ -96,8 +104,8 @@ func credSecretPaths(agentSlug, envVar, credType string, fieldKeys []string) []s
 // reads secrets by path and .env is advisory, so a now-dangling entry is inert
 // (the file it points at is gone) and rewriting a 0400 file adds shell/portability
 // risk for no security gain. It clears on the next container boot.
-func buildCredRemoveScript(agentSlug, envVar, credType string, fieldKeys []string) string {
-	paths := credSecretPaths(agentSlug, envVar, credType, fieldKeys)
+func buildCredRemoveScript(agentSlug, envVar, credType, provider string, fieldKeys []string) string {
+	paths := credSecretPaths(agentSlug, envVar, credType, provider, fieldKeys)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -145,7 +153,7 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	// fall out below when credSecretPaths returns no paths. Only live agents
 	// in live crews have a running container to reach.
 	rows, err := db.QueryContext(ctx, `
-		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type
+		SELECT a.slug, cr.id, cr.slug, ac.env_var_name, c.type, c.provider
 		FROM agent_credentials ac
 		JOIN agents a       ON a.id = ac.agent_id AND a.deleted_at IS NULL
 		JOIN credentials c  ON c.id = ac.credential_id
@@ -158,11 +166,11 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	}
 	defer rows.Close()
 
-	type target struct{ agentSlug, crewID, crewSlug, envVar, credType string }
+	type target struct{ agentSlug, crewID, crewSlug, envVar, credType, provider string }
 	var targets []target
 	for rows.Next() {
 		var t target
-		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType); err != nil {
+		if err := rows.Scan(&t.agentSlug, &t.crewID, &t.crewSlug, &t.envVar, &t.credType, &t.provider); err != nil {
 			logger.Warn("revoke reconcile: scan", "error", err)
 			return
 		}
@@ -218,7 +226,7 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 			continue
 		}
 		t.envVar = envVar
-		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, fieldKeys)
+		script := buildCredRemoveScript(t.agentSlug, t.envVar, t.credType, t.provider, fieldKeys)
 		if script == "" {
 			continue // type has no on-disk form
 		}

@@ -51,7 +51,7 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			// pre-refactor `codex --quiet` does not exist in the Rust port.
 			mustHave:         []string{"exec", "--json", "--sandbox"},
 			mustNotHave:      []string{"--quiet"},
-			pinnedNpmVersion: "@openai/codex@0.128.0",
+			pinnedNpmVersion: "@openai/codex@0.153.2",
 		},
 		{
 			adapter:  "GEMINI_CLI",

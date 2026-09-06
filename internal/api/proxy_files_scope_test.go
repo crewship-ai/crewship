@@ -107,6 +107,7 @@ func TestIsProtectedAgentConfigPath(t *testing.T) {
 		".gemini/settings.json",
 		"opencode.json",
 		".codex/config.toml",
+		".codex/auth.json",
 	}
 	for _, relative := range protected {
 		for _, path := range []string{relative, crew + "/" + slug + "/" + relative} {
@@ -161,6 +162,7 @@ func TestIsProtectedCrewConfigPath(t *testing.T) {
 		".gemini/settings.json",
 		"opencode.json",
 		".codex/config.toml",
+		".codex/auth.json",
 	}
 	for _, relative := range protected {
 		for _, agentSlug := range []string{"riley", "other-agent", "morgan"} {

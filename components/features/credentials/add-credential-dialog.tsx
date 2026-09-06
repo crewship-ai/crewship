@@ -360,7 +360,24 @@ export function AddCredentialDialog({
             </div>
           )}
 
-          {type === "AI_CLI_TOKEN" && (
+          {type === "AI_CLI_TOKEN" && provider === "OPENAI" && (
+            <div className="rounded-md border border-info bg-info/10 p-3 text-label text-info dark:border-info dark:bg-info/20 dark:text-info space-y-1">
+              <p className="font-medium">How to sign in with your ChatGPT plan:</p>
+              <ol className="list-decimal list-inside space-y-0.5">
+                <li>
+                  On your computer, run: <code className="rounded bg-info/15 px-1 font-mono dark:bg-info/25">codex login</code>
+                </li>
+                <li>
+                  Paste the whole contents of <code className="rounded bg-info/15 px-1 font-mono dark:bg-info/25">~/.codex/auth.json</code> below
+                </li>
+              </ol>
+              {/* #2428: Codex reads a login only from auth.json, so this is the
+                  file — not a token. The refresh token inside it is kept on
+                  the server; agents receive a short-lived access token. */}
+              <p>The refresh token stays on the server. Agents only get a short-lived access token, so one login can pay for any number of them.</p>
+            </div>
+          )}
+          {type === "AI_CLI_TOKEN" && provider !== "OPENAI" && (
             <div className="rounded-md border border-info bg-info/10 p-3 text-label text-info dark:border-info dark:bg-info/20 dark:text-info space-y-1">
               <p className="font-medium">How to get a setup token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
@@ -375,7 +392,7 @@ export function AddCredentialDialog({
 
           <div className="space-y-2">
             <Label htmlFor="cred-value">
-              {type === "AI_CLI_TOKEN" ? "Setup Token" : type === "API_KEY" ? "API Key" : "Value"}
+              {type === "AI_CLI_TOKEN" ? (provider === "OPENAI" ? "Codex login (auth.json)" : "Setup Token") : type === "API_KEY" ? "API Key" : "Value"}
             </Label>
             <div className="relative">
               <Input
@@ -383,7 +400,9 @@ export function AddCredentialDialog({
                 type={showValue ? "text" : "password"}
                 placeholder={
                   type === "AI_CLI_TOKEN"
-                    ? "Paste setup-token output here"
+                    ? provider === "OPENAI"
+                      ? "Paste the contents of ~/.codex/auth.json"
+                      : "Paste setup-token output here"
                     : type === "API_KEY"
                       ? "e.g. sk-ant-..."
                       : "Enter secret value"
@@ -404,7 +423,10 @@ export function AddCredentialDialog({
                 <span className="sr-only">{showValue ? "Hide" : "Show"} value</span>
               </Button>
             </div>
-            {provider !== "NONE" && provider !== "CUSTOM_CLI" && value.trim() && !value.trim().startsWith("sk-ant-oat") && (
+            {/* No probe for logins: a setup-token is a claude.ai bearer and a
+                Codex login is a ChatGPT JWT — neither answers the vendor's
+                /models endpoint the probe calls. */}
+            {provider !== "NONE" && provider !== "CUSTOM_CLI" && value.trim() && !value.trim().startsWith("sk-ant-oat") && !(type === "AI_CLI_TOKEN" && provider === "OPENAI") && (
               <div className="flex items-center gap-2">
                 <Button
                   type="button"

@@ -146,6 +146,9 @@ var protectedAgentConfigRelPaths = map[string]bool{
 	".gemini/settings.json": true,
 	"opencode.json":         true,
 	".codex/config.toml":    true,
+	// The Codex login (#2428): a short-lived ChatGPT access token. Written
+	// 0600 by syncCodexAuthFile; must not be readable back over HTTP.
+	".codex/auth.json": true,
 }
 
 // isProtectedAgentConfigPath identifies the exact per-agent files Crewship

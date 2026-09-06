@@ -1474,6 +1474,16 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		}
 		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
 	}
+	// Codex's ChatGPT login lives in $CODEX_HOME, not /secrets (#2428). Same
+	// fail-loud posture as the file-mounted credentials above: without the
+	// file Codex does not fail closed, it falls through to the dummy key.
+	if req.CLIAdapter == "CODEX_CLI" {
+		if err := syncCodexAuthFile(ctx, batch, req.ContainerID, req, o.logger); err != nil {
+			o.logger.Error("failed to deliver Codex login", "error", err, "agent_id", req.AgentID)
+			o.failRun(ctx, req, runID, "error")
+			return nil, "", fmt.Errorf("deliver Codex login for %s: %w", req.AgentSlug, err)
+		}
+	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -74,7 +75,11 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 		// taken a keeperEnabled parameter and pre-existing SECRET/Keeper
 		// behaviour on this path is unchanged; only the unclassified-type gap
 		// is closed here.
-		if credEnvDeliverable(*activeCred) {
+		if credentialOAuthKind(*activeCred) == oauthOpenAI {
+			// #2428: a Codex login is a file, never an env var — see
+			// codex_auth_file.go. Writing the JSON blob into the env would
+			// hand the agent the refresh token for nothing.
+		} else if credEnvDeliverable(*activeCred) {
 			envVar := resolveEnvVar(activeCred)
 			env = append(env, envVar+"="+activeCred.PlainValue)
 			env = appendCredentialFields(env, *activeCred, true)
@@ -88,6 +93,9 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	for _, cred := range req.Credentials {
 		if activeCred != nil && cred.ID == activeCred.ID {
 			continue
+		}
+		if credentialOAuthKind(cred) == oauthOpenAI {
+			continue // #2428: file-delivered, see codex_auth_file.go
 		}
 		if cred.EnvVarName != "" && cred.PlainValue != "" {
 			// #2092/#2246: same gate as above, applied to every OTHER
@@ -213,6 +221,44 @@ func envHasAssignment(env []string, name, value string) bool {
 // (the shape of bug that produced this in the first place).
 func credEnvDeliverable(cred Credential) bool {
 	return credpolicy.For(cred.Type).Delivery != credpolicy.DeliveryNone
+}
+
+// oauthKind says WHICH vendor's login an OAuth-shaped credential is. It exists
+// because AI_CLI_TOKEN is one type for every vendor's subscription login, and
+// until #2428 every selector read the type alone: an OpenAI (ChatGPT) login
+// would have been written to CLAUDE_CODE_OAUTH_TOKEN, billed as "Anthropic
+// Max", and never reached Codex — which cannot read a login from the
+// environment at all (codexauth).
+type oauthKind int
+
+const (
+	// oauthNone: not a login. API keys, CLI tokens, secrets.
+	oauthNone oauthKind = iota
+	// oauthAnthropic: a Claude Code setup-token. Delivered as the
+	// CLAUDE_CODE_OAUTH_TOKEN env var, tunnelled through the sidecar.
+	oauthAnthropic
+	// oauthOpenAI: a Codex `auth.json` (ChatGPT subscription). Delivered as
+	// $CODEX_HOME/auth.json by syncCodexAuthFile, never as an env var and
+	// never into the sidecar CredStore.
+	oauthOpenAI
+)
+
+// credentialOAuthKind classifies one delivered credential. The Anthropic arm
+// keeps its value-shape fallback (an `sk-ant-oat…` value of any type) exactly
+// as before; the OpenAI arm is decided by the provider column alone, because
+// a ChatGPT login has no distinctive prefix — it is a JSON object.
+//
+// It classifies by type and provider, not by whether a value is present:
+// resolveEnvVar names the variable for a credential whose value may be
+// withheld, so an empty PlainValue is the caller's question, not this one's.
+func credentialOAuthKind(cred Credential) oauthKind {
+	if codexauth.IsLogin(cred.Type, cred.Provider) {
+		return oauthOpenAI
+	}
+	if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
+		return oauthAnthropic
+	}
+	return oauthNone
 }
 
 // injectMCPCredentialEnvVars adds the actual credential values for env vars
@@ -431,8 +477,11 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	hasOAuth := false
 	var oauthToken string
 	for _, cred := range req.Credentials {
-		isOAuth := cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat")
-		if !isOAuth || cred.PlainValue == "" {
+		// #2428: only a Claude Code login belongs in CLAUDE_CODE_OAUTH_TOKEN.
+		// An OpenAI (ChatGPT) login is the same AI_CLI_TOKEN type and takes
+		// the file path below (syncCodexAuthFile); before this check it was
+		// injected here and labelled "Anthropic Max".
+		if credentialOAuthKind(cred) != oauthAnthropic || cred.PlainValue == "" {
 			continue
 		}
 		// #2092/#2246: the second disjunct above matches on the VALUE's
@@ -484,15 +533,30 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		)
 	}
 
-	// #1030: Codex routes its OpenAI traffic through the sidecar reverse-proxy
-	// by pointing OPENAI_BASE_URL at the /openai prefix on the sidecar port.
-	// The dummy OPENAI_API_KEY set above stays (Codex needs a syntactically
-	// valid key to send); the sidecar swaps it for the real value from the
-	// CredStore mid-flight, so the real key lives only in the sidecar heap.
-	// Scoped to Codex — OpenCode's multi-provider BYOK driver dials providers
-	// directly and must NOT be force-routed here.
+	// Codex (#2428). Three facts measured against codex-cli 0.153.2 decide
+	// what is and is not set here — docs/prd/provider-logins.md §3.2:
+	//
+	//   - OPENAI_BASE_URL no longer exists. The binary knows no OPENAI_*
+	//     variable but OPENAI_API_KEY, and the built-in `openai` provider
+	//     cannot be overridden from config either. Until this change the
+	//     API-key path set that variable, Codex ignored it and dialled
+	//     api.openai.com directly with the dummy key, and every run ended in
+	//     a 401 the sidecar never saw. The route now goes through a custom
+	//     model_provider on the loopback proxy — resolveRoutedProvider's
+	//     codexDefaultRoute, emitted by the Codex adapter's BuildCommand.
+	//   - CODEX_API_KEY OVERRIDES $CODEX_HOME/auth.json; OPENAI_API_KEY does
+	//     not. The dummy OPENAI_API_KEY above is therefore harmless to a
+	//     subscription run, and a dummy CODEX_API_KEY must never be set.
+	//   - A subscription run ignores every base URL and goes to chatgpt.com
+	//     through the CONNECT tunnel, exactly like Claude Code's OAuth mode:
+	//     the sidecar cannot meter it, so it is billed flat-rate, with the
+	//     plan read from the login's own token rather than hard-coded.
 	if req.CLIAdapter == "CODEX_CLI" {
-		env = append(env, "OPENAI_BASE_URL=http://127.0.0.1:9119/openai/v1")
+		env = append(env, "CODEX_HOME="+codexHomeDir(req.AgentSlug))
+		if login, ok := codexLoginCredential(req); ok {
+			env = overrideEnv(env, "CREWSHIP_BILLING_MODE", "flat_rate")
+			env = overrideEnv(env, "CREWSHIP_SUBSCRIPTION_PLAN", codexauth.PlanLabel(login.PlainValue))
+		}
 	}
 
 	// #1030: the Gemini CLI routes its Google traffic through the sidecar
@@ -833,6 +897,43 @@ func credentialRoutesTo(cred Credential, s llmroute.Spec) bool {
 	return false
 }
 
+// ProxyBaseURL is the loopback base URL a CLI's custom-provider config points
+// at for this route. For every /llm/… descriptor it is origin + prefix: the
+// sidecar owns the upstream path there. The OPENAI descriptor is the one
+// grandfathered route whose prefix is STRIPPED before forwarding, so the
+// upstream's own /v1 has to come from the client — the same shape the retired
+// OPENAI_BASE_URL=…/openai/v1 had (#2428).
+func (rp routedProvider) ProxyBaseURL() string {
+	base := sidecarProxyOrigin + rp.Spec.PathPrefix
+	if rp.Spec.ID == codexauth.ProviderID {
+		base += "/v1"
+	}
+	return base
+}
+
+// codexDefaultRoute is the route for a Codex run on its DEFAULT provider —
+// an OpenAI API key with no provider prefix on the model (#2428). It is
+// Codex-only: OpenCode keeps its documented BYOK env-var path, and every
+// other adapter has no endpoint override to point at the proxy.
+//
+// It refuses without a key credential the sidecar will actually hold, like
+// every other branch of resolveRoutedProvider — a subscription login is not
+// a key (credentialFor skips it), and a Codex run that carries only a login
+// stays unrouted so Codex reads auth.json and goes to chatgpt.com.
+func codexDefaultRoute(req AgentRunRequest, model string) (routedProvider, bool) {
+	if req.CLIAdapter != "CODEX_CLI" {
+		return routedProvider{}, false
+	}
+	s, ok := llmroute.Lookup(codexauth.ProviderID)
+	if !ok {
+		return routedProvider{}, false
+	}
+	if _, ok := credentialFor(req, s); !ok {
+		return routedProvider{}, false
+	}
+	return routedProvider{Spec: s, ProviderID: strings.ToLower(s.ID), ModelID: model, Label: s.DisplayName}, true
+}
+
 // resolveRoutedProvider picks the descriptor this run's model traffic is proxied
 // through, or ok=false when it is not proxied at all. viaSidecar is false on the
 // no-sidecar exec path, where there is no proxy to route to.
@@ -915,11 +1016,24 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 		// does not depend on the UI having duplicated the provider into LLMModel.
 		prefix, model = strings.TrimSpace(req.LLMProvider), strings.TrimSpace(req.LLMModel)
 	}
-	if prefix == "" || model == "" {
+	if prefix == "" {
+		// No provider named anywhere: Codex means OpenAI (#2428).
+		return codexDefaultRoute(req, model)
+	}
+	if model == "" {
 		return routedProvider{}, false
 	}
 	s, ok := llmroute.Lookup(strings.ToUpper(prefix))
-	if !ok || !proxyRoutable(s) {
+	if !ok {
+		return routedProvider{}, false
+	}
+	if !proxyRoutable(s) {
+		// The grandfathered descriptors (/v1, /openai, /gemini) are reached
+		// by their CLIs' global base-URL variables, not by a per-run provider
+		// block — except Codex's, whose variable no longer exists (#2428).
+		if s.ID == codexauth.ProviderID {
+			return codexDefaultRoute(req, model)
+		}
 		return routedProvider{}, false
 	}
 	cred, ok := credentialFor(req, s)
@@ -972,7 +1086,10 @@ func credentialFor(req AgentRunRequest, s llmroute.Spec) (Credential, bool) {
 	var best Credential
 	found := false
 	for _, cred := range req.Credentials {
-		if !credentialRoutesTo(cred, s) || credentialLeaseLapsed(cred, now) {
+		// A login is never a proxy credential: credTypeToProvider keeps it
+		// out of the CredStore, so counting it here would route a run to a
+		// provider the proxy has nothing for (#2428).
+		if !credentialRoutesTo(cred, s) || credentialLeaseLapsed(cred, now) || credentialOAuthKind(cred) != oauthNone {
 			continue
 		}
 		if !found || cred.Priority < best.Priority {
@@ -1270,8 +1387,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	// type whose value merely looks like an OAuth token is no longer
 	// injected, so it must not be reported here either.
 	for _, cred := range req.Credentials {
-		isOAuth := cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat")
-		if !isOAuth || cred.PlainValue == "" || !credEnvDeliverable(cred) {
+		if credentialOAuthKind(cred) != oauthAnthropic || cred.PlainValue == "" || !credEnvDeliverable(cred) {
 			continue
 		}
 		out = append(out, CredentialEnvExposure{
@@ -1281,6 +1397,21 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		})
 		markExposed(cred.ID)
 		break
+	}
+
+	// Codex login (#2428): not in the env, but on disk in the agent's HOME,
+	// which the agent can read just the same. Reported so the gap is visible;
+	// the delivered file carries no refresh token (codexauth.Render), which is
+	// what makes it informational rather than actionable.
+	if req.CLIAdapter == "CODEX_CLI" {
+		if login, ok := codexLoginCredential(req); ok {
+			out = append(out, CredentialEnvExposure{
+				EnvVarName: codexauth.FileRel,
+				Type:       "AI_CLI_TOKEN",
+				Reason:     "Codex reads its ChatGPT login only from $CODEX_HOME/auth.json, so a short-lived access token is written there; the refresh token stays on the server",
+			})
+			markExposed(login.ID)
+		}
 	}
 
 	// BYO API keys: CONNECT-tunneled adapters reach their upstream over an HTTPS
@@ -1424,14 +1555,16 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 	switch adapter {
 	case "CODEX_CLI":
-		// #1030: Codex's OpenAI key is now isolated by the sidecar reverse-
-		// proxy (OPENAI_BASE_URL routes it through /openai → api.openai.com,
-		// where the real key is injected from the CredStore). So — exactly
-		// like CLAUDE_CODE for Anthropic — Codex no longer needs the real
-		// OPENAI_API_KEY written to its env; the dummy stays and the sidecar
-		// swaps it mid-flight. Returning nil keeps the real key out of
-		// /proc/<pid>/environ. (The CredStore still receives it via
-		// credTypeToProvider, independent of this set.)
+		// #1030/#2428: Codex's OpenAI key is isolated by the sidecar reverse-
+		// proxy. The route is a custom model_provider block in the Codex
+		// command (codexDefaultRoute → adapter_codex.go) whose env_key is the
+		// dummy OPENAI_API_KEY; the sidecar swaps it for the real value from
+		// the CredStore mid-flight. So — exactly like CLAUDE_CODE for
+		// Anthropic — Codex never needs the real key in its env. Returning nil
+		// keeps it out of /proc/<pid>/environ. (The CredStore still receives
+		// it via credTypeToProvider, independent of this set.) A ChatGPT
+		// login is not a key and takes the file path, so it is not here
+		// either.
 		return nil
 	case "GEMINI_CLI":
 		// #1030: Gemini's Google key is now isolated by the sidecar reverse-
@@ -1506,7 +1639,7 @@ func overrideEnv(env []string, key, value string) []string {
 // OAuth tokens (type AI_CLI_TOKEN or value prefix sk-ant-oat) must be set as
 // CLAUDE_CODE_OAUTH_TOKEN -- Claude Code ignores them in ANTHROPIC_API_KEY.
 func resolveEnvVar(cred *Credential) string {
-	if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
+	if credentialOAuthKind(*cred) == oauthAnthropic {
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}
 	return cred.EnvVarName
