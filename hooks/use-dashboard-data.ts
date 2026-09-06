@@ -147,6 +147,23 @@ export function useDashboardMissions(workspaceId: string | null, opts?: Dashboar
   })
 }
 
+/** Issue identifiers and owners come from the issues API, not mission summaries.
+ * Separate status queries keep review work visible even after many completions. */
+export function useDashboardResults(workspaceId: string | null, status: string, opts?: DashboardQueryOpts) {
+  return useQuery<Mission[]>({
+    queryKey: ["dashboard-results", workspaceId ?? "", status],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId!)}&status=${encodeURIComponent(status)}&sort=updated_at&limit=4`, { signal })
+      if (!res.ok) throw new Error("Could not load results")
+      const rows: unknown = await res.json()
+      if (!Array.isArray(rows)) throw new Error("Invalid results response")
+      return rows as Mission[]
+    },
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+  })
+}
+
 export function useMissionMetrics(workspaceId: string | null, opts?: DashboardQueryOpts) {
   return useQuery<MissionMetricsResponse | null>({
     queryKey: dashboardKeys.missionMetrics(workspaceId ?? ""),
@@ -378,6 +395,7 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     for (const queryKey of keys) {
       qc.invalidateQueries({ queryKey })
     }
+    qc.invalidateQueries({ queryKey: ["dashboard-results", workspaceId] })
     // Windowed queries share these prefixes; invalidate every mounted window.
     qc.invalidateQueries({ queryKey: ["runs-insights", workspaceId] })
     // crew-spend is no longer mounted — the cost tile it fed was removed with

@@ -70,16 +70,10 @@ function MotionLink({
   className?: string
   children: React.ReactNode
 }) {
-  const reduce = useReducedMotion()
   return (
-    <motion.div
-      whileHover={reduce ? undefined : { x: 3 }}
-      whileTap={reduce ? undefined : { scale: 0.995 }}
-      transition={{ type: "spring", stiffness: 520, damping: 38 }}
-      className={className}
-    >
+    <div className={className}>
       <Link href={href}>{children}</Link>
-    </motion.div>
+    </div>
   )
 }
 
@@ -250,12 +244,12 @@ export function AttentionStrip({
             {state === "items" ? "Needs your attention" : state === "clear" ? "All clear" : "Attention status unavailable"}
           </h2>
           {visible.length > 0 && (
-            <span className="rounded-full bg-warn/12 px-2 py-0.5 text-micro font-semibold text-warn">
-              {items.length}
+            <span className="hidden shrink-0 whitespace-nowrap rounded-full bg-warn/12 px-2 py-0.5 text-micro font-semibold text-warn sm:inline-flex">
+              {items.length} categories
             </span>
           )}
         </div>
-        <Link href={entityHref({ kind: "inbox" })} className="inline-flex items-center gap-1 text-label text-primary-hover hover:underline">
+        <Link href={entityHref({ kind: "inbox" })} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-label text-primary-hover hover:underline">
           Open Inbox <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -349,11 +343,15 @@ function elapsed(startedAt: string, now: number): string {
 }
 
 export function RunningNow({
-  runs,
+  runs: allRuns,
   agents,
   crews,
   children,
+  loading = false,
+  error = null,
 }: {
+  loading?: boolean
+  error?: string | null
   runs: PipelineRun[]
   agents: AgentSummary[]
   crews: CrewSummary[]
@@ -361,24 +359,27 @@ export function RunningNow({
   children?: React.ReactNode
 }) {
   const reduce = useReducedMotion()
+  const runs = allRuns.filter((run) => run.status === "running")
+  const waitingCount = allRuns.filter((run) => run.status === "waiting" || run.status === "paused").length
+  const queuedCount = allRuns.filter((run) => run.status === "queued").length
   const now = useNow(runs.length > 0)
   const agentById = React.useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
   const crewById = React.useMemo(() => new Map(crews.map((crew) => [crew.id, crew])), [crews])
 
   return (
     <DashboardCard
-      title="Running now"
+      title="Routines running now"
       icon={Play}
-      hint={runs.length > 0 ? `${runs.length} active` : "fleet idle"}
+      hint={error ? "unavailable" : loading && runs.length === 0 ? "checking" : runs.length > 0 ? `${runs.length} running` : "none running"}
       action={<Link href="/activity" className="text-primary-hover hover:underline">Activity →</Link>}
       className="h-full"
     >
       {runs.length === 0 ? (
-        <InlineEmpty icon={CheckCircle2} text="Nothing is running — the fleet is ready for its next assignment." />
+        <InlineEmpty icon={CheckCircle2} text={error ? "Could not refresh routine activity. Open Activity to retry." : loading ? "Checking routine activity…" : "No routines are running right now."} />
       ) : (
-        <div className="overflow-x-auto">
-          <div className="min-w-[650px]">
-            <div className="grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_110px_78px] gap-3 border-b border-border/60 px-2 pb-2 text-label text-muted-foreground">
+        <div className="min-w-0">
+          <div className="min-w-0">
+            <div className="sr-only">
               <span>Agent / Crew</span><span>Work</span><span>Elapsed · cost</span><span className="text-right">Action</span>
             </div>
             <AnimatePresence initial={false}>
@@ -396,7 +397,7 @@ export function RunningNow({
                     transition={{ type: "spring", stiffness: 360, damping: 34 }}
                   >
                     <MotionLink href={`/activity?run=${encodeURIComponent(run.id)}`}>
-                      <div className="group grid grid-cols-[minmax(160px,1fr)_minmax(190px,1.4fr)_110px_78px] items-center gap-3 rounded-md border-b border-border/50 px-2 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
+                      <div className="group grid grid-cols-2 items-center gap-2 rounded-md border-b border-border/50 px-2 py-3 last:border-0 hover:bg-foreground/[0.025]">
                         <span className="flex min-w-0 items-center gap-2.5">
                           <LiveDot tone={waiting ? "warn" : "success"} />
                           <span className="min-w-0">
@@ -404,7 +405,7 @@ export function RunningNow({
                               {agent?.name || run.pipeline_name || run.pipeline_slug}
                             </span>
                             <span className="block truncate text-label text-muted-foreground">
-                              {crew?.name || agent?.crew?.name || "Unassigned"}
+                              {crew?.name || agent?.crew?.name || "Workspace routine"}
                             </span>
                           </span>
                         </span>
@@ -432,6 +433,8 @@ export function RunningNow({
           </div>
         </div>
       )}
+      {waitingCount > 0 && <Link href={entityHref({ kind: "inbox" })} className="mt-3 block rounded-lg bg-warn/10 px-3 py-2 text-label text-warn">{waitingCount} awaiting approval · Open Inbox →</Link>}
+      {queuedCount > 0 && <p className="mt-2 text-label text-muted-foreground">{queuedCount} queued</p>}
       {children}
     </DashboardCard>
   )
@@ -841,7 +844,7 @@ export function buildAttentionItems({
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
-  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox" }), tone: "warn", icon: Clock3 })
+  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: approvals.length === 1 ? approvals[0].id : undefined }), tone: "warn", icon: Clock3 })
   if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
