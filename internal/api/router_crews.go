@@ -10,6 +10,7 @@ package api
 // chatbridge auto-provision).
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -22,7 +23,7 @@ import (
 // Router struct).
 func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	authed := r.authMw.RequireAuth
-	wsCtx := r.authMw.RequireWorkspace
+	wsCtx := func(h http.Handler) http.Handler { return r.authMw.RequireWorkspace(r.providerAccountPolicy(h)) }
 
 	ws := NewWorkspaceHandler(r.db, r.logger)
 	if r.hub != nil {
@@ -70,6 +71,15 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Reuses the container provider already wired for the keeper's exec path;
 	// nil (tests / --no-docker) makes reconciliation a no-op.
 	creds.SetContainer(r.keeperContainer)
+	// Provider logins (docs/prd/provider-logins.md §5.3): the refresher that
+	// renews a ChatGPT login from its sealed refresh token. One instance
+	// serves the Refresh route, the run-start hook in loadDeliveredCredentials
+	// and — through the server — the monitor's tick. Same container provider
+	// as revoke, for the re-render into running containers.
+	loginRefresher := NewProviderLoginRefresher(r.db, r.logger, r.keeperContainer)
+	creds.SetLoginRefresher(loginRefresher)
+	SetRunStartLoginRefresher(loginRefresher)
+	r.loginRefresher = loginRefresher
 	// Stash on the router so registerInternalRoutes can wire the
 	// /api/v1/internal/credentials Create + Rotate adapter against
 	// the same instance the public surface uses.
@@ -422,7 +432,27 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
+
+	// Device-code sign-in to a model provider (#2428, PRD provider-logins
+	// §10.3). Start creates a credential at the end, so it is gated inline
+	// exactly like POST /api/v1/credentials (role-or-capability); Status
+	// reads the caller's own row and needs no workspace context. The
+	// pollers for sign-ins left pending by a previous process are resumed
+	// here, off the request path.
+	providerLogins := NewProviderLoginHandler(r.db, r.logger, creds, nil)
+	r.providerLogins = providerLogins
+	r.authedMut("POST", "/api/v1/provider-logins/device", roleInline, providerLogins.Start)
+	r.mux.Handle("GET /api/v1/provider-logins/device/{deviceId}", authed(http.HandlerFunc(providerLogins.Status)))
+	resumeDone := beginBackgroundWork()
+	go func() {
+		defer resumeDone()
+		providerLogins.ResumePending(context.Background())
+	}()
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
+	// Force a provider-login refresh now (docs/prd/provider-logins.md §10.3);
+	// 409 while one is in flight. Same tier as test-stored: the handler
+	// repeats the update-role check.
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/refresh", roleCreate, creds.Refresh)
 
 	// Credential reveal (PRD-CREDENTIALS-V2-2026 §2.6). Separate handler
 	// because it needs a synchronous journal emitter the other credential

@@ -76,7 +76,7 @@ Show detailed information about an agent.
 crewship agent get <slug-or-id>
 ```
 
-**Output fields:** Name, Slug, ID, Role, Role Title (only when set), Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count. When a cron schedule is configured, additional rows appear: Schedule (`<cron> (enabled|disabled)`), Schedule Prompt, Next Run, and Last Run. When `--webhook-require-timestamp` is set on the agent, a `Webhook Auth: timestamped signature required` row appears.
+**Output fields:** Name, Slug, ID, Role, Role Title (only when set), Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count, Pays with (the provider login paying for the agent's adapter — name, id, plan, owner and refresh state, or a dash when nothing in its delivery pays for it; see [Provider logins](/guides/credentials#provider-logins)). When a cron schedule is configured, additional rows appear: Schedule (`<cron> (enabled|disabled)`), Schedule Prompt, Next Run, and Last Run. When `--webhook-require-timestamp` is set on the agent, a `Webhook Auth: timestamped signature required` row appears.
 
 ---
 

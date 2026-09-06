@@ -162,19 +162,20 @@ var readRoutesWithoutWorkspace = map[string]string{
 		"there is no session to scope from (§7.3.1)",
 
 	// Caller-scoped: the row set is the caller's own, keyed on user id.
-	"GET /api/v1/workspaces":               "caller's own memberships — this is what RESOLVES a workspace, so it cannot be scoped by one",
-	"GET /api/v1/auth/sessions":            "caller's own sessions",
-	"GET /api/v1/auth/cli-tokens":          "caller's own CLI tokens",
-	"GET /api/v1/auth/cli-token/validate":  "validates the caller's own presented token",
-	"GET /api/v1/auth/pair/poll":           "polls the caller's own pairing attempt",
-	"GET /api/v1/ws-token":                 "mints a websocket token for the caller",
-	"GET /api/v1/me/preferences":           "caller's own preferences",
-	"GET /api/v1/onboarding/status":        "per-user onboarding progress",
-	"GET /api/v1/users/{id}/avatar":        "avatar blob; no tenant rows",
-	"GET /api/v1/oauth/callback":           "OAuth redirect landing; state carries the context",
-	"GET /api/v1/feedback":                 "caller's own submitted feedback",
-	"GET /api/v1/connectors/{connectorId}": "static connector manifest read off disk, not tenant rows",
-	"GET /api/v1/mcp-registry/search":      "static registry catalog",
+	"GET /api/v1/workspaces":                        "caller's own memberships — this is what RESOLVES a workspace, so it cannot be scoped by one",
+	"GET /api/v1/auth/sessions":                     "caller's own sessions",
+	"GET /api/v1/auth/cli-tokens":                   "caller's own CLI tokens",
+	"GET /api/v1/auth/cli-token/validate":           "validates the caller's own presented token",
+	"GET /api/v1/auth/pair/poll":                    "polls the caller's own pairing attempt",
+	"GET /api/v1/provider-logins/device/{deviceId}": "polls the caller's own device-code sign-in; the row is read by (id, user_id) and any other id is a 404 (#2428)",
+	"GET /api/v1/ws-token":                          "mints a websocket token for the caller",
+	"GET /api/v1/me/preferences":                    "caller's own preferences",
+	"GET /api/v1/onboarding/status":                 "per-user onboarding progress",
+	"GET /api/v1/users/{id}/avatar":                 "avatar blob; no tenant rows",
+	"GET /api/v1/oauth/callback":                    "OAuth redirect landing; state carries the context",
+	"GET /api/v1/feedback":                          "caller's own submitted feedback",
+	"GET /api/v1/connectors/{connectorId}":          "static connector manifest read off disk, not tenant rows",
+	"GET /api/v1/mcp-registry/search":               "static registry catalog",
 
 	// Instance-global catalogs and status. No tenant rows involved.
 	//

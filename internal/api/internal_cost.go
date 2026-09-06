@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -21,10 +22,11 @@ import (
 // orchestrator based on credential type at exec time), which is the
 // closest thing to ground truth available at the proxy hot path.
 type sidecarCostRecordRequest struct {
-	WorkspaceID string `json:"workspace_id"`
-	CrewID      string `json:"crew_id"`
-	AgentID     string `json:"agent_id"`
-	MissionID   string `json:"mission_id,omitempty"`
+	WorkspaceID  string `json:"workspace_id"`
+	CrewID       string `json:"crew_id"`
+	AgentID      string `json:"agent_id"`
+	MissionID    string `json:"mission_id,omitempty"`
+	CredentialID string `json:"credential_id,omitempty"`
 
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
@@ -89,6 +91,18 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	if !assertBoundCrewWorkspaceDB(w, req, r.db, r.logger, &body.CrewID) {
 		return
 	}
+	if body.CredentialID != "" {
+		var found int
+		err := r.db.QueryRowContext(req.Context(), `SELECT 1 FROM credentials WHERE id = ? AND workspace_id = ?`, body.CredentialID, body.WorkspaceID).Scan(&found)
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusBadRequest, "credential is not in this workspace")
+			return
+		}
+		if err != nil {
+			replyInternalError(w, r.logger, "resolve cost payer", err)
+			return
+		}
+	}
 	if strings.TrimSpace(body.Provider) == "" || strings.TrimSpace(body.Model) == "" {
 		replyError(w, http.StatusBadRequest, "provider and model required")
 		return
@@ -132,6 +146,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 	}
 
 	rec, err := paymaster.Record(req.Context(), r.db, r.Journal(), paymaster.Call{
+		CredentialID:        body.CredentialID,
 		Scope:               scope,
 		Provider:            body.Provider,
 		Model:               body.Model,

@@ -8,8 +8,10 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/llmroute"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"golang.org/x/term"
@@ -258,10 +260,42 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		if valueStdin {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				value = scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
 			}
+			value = v
+		}
+		// --from-file: the whole file is the value. It exists for the one
+		// credential that IS a file — Codex's auth.json (PRD provider-logins
+		// §5.6, P-A item 7) — and reads it the way --value-stdin would, so the
+		// trailing newline `codex login` writes is not part of the login.
+		if fromFile, _ := flags.GetString("from-file"); fromFile != "" {
+			if flags.Changed("value") || valueStdin {
+				return cli.WithExitCode(fmt.Errorf("--from-file cannot be combined with --value or --value-stdin"), cli.ExitValidation)
+			}
+			b, err := os.ReadFile(fromFile)
+			if err != nil {
+				return cli.WithExitCode(fmt.Errorf("read --from-file: %w", err), cli.ExitValidation)
+			}
+			value = strings.TrimRight(string(b), "\r\n")
+		}
+		loginMode, _ := flags.GetString("mode")
+		isProviderLogin := strings.EqualFold(credType, providerlogin.Type)
+		if loginMode != "" && !isProviderLogin {
+			return cli.WithExitCode(fmt.Errorf("--mode is only valid with --type PROVIDER_LOGIN"), cli.ExitValidation)
+		}
+		if isProviderLogin {
+			credType = providerlogin.Type
+			loginMode = strings.ToLower(strings.TrimSpace(loginMode))
+			if loginMode != "" && !providerlogin.ValidMode(loginMode) {
+				return cli.WithExitCode(fmt.Errorf("--mode must be %s or %s", providerlogin.ModeSubscription, providerlogin.ModeAPIKey), cli.ExitValidation)
+			}
+			if provider == "" || !providerlogin.IsProvider(provider) {
+				return cli.WithExitCode(fmt.Errorf("--type PROVIDER_LOGIN needs --provider, one of %s: a provider login pays for a model",
+					strings.Join(providerlogin.Providers(), ", ")), cli.ExitValidation)
+			}
+			provider = providerlogin.Canonical(provider)
 		}
 
 		authToken, _, err := readAuthToken(flags)
@@ -383,6 +417,9 @@ var credCreateCmd = &cobra.Command{
 		if provider != "" {
 			body["provider"] = provider
 		}
+		if loginMode != "" {
+			body["mode"] = loginMode
+		}
 		if envVarName != "" {
 			body["env_var_name"] = envVarName
 		}
@@ -445,6 +482,38 @@ var credCreateCmd = &cobra.Command{
 			cli.PrintWarning(fmt.Sprintf(
 				"%s is not validated on create — Crewship does not dial an operator-supplied endpoint. The first agent call through the sidecar is the test.",
 				endpointSpec.ID))
+
+		case isProviderLogin && (loginMode == providerlogin.ModeSubscription ||
+			(loginMode == "" && (strings.HasPrefix(value, "{") || strings.HasPrefix(value, "sk-ant-oat")))):
+			// A seat, not a key: a ChatGPT login is a chatgpt.com JWT inside
+			// auth.json and a Claude setup-token is a CONNECT-tunnel OAuth
+			// token; neither answers a /v1/models probe. The server checks
+			// the shape and the first run is the live test.
+			cli.PrintWarning("No key probe for a subscription login — the server validates its shape; the first run is the test")
+
+		case isProviderLogin:
+			// api_key mode is a metered key and probes exactly like API_KEY.
+			valid, errMsg := testCredentialValue(client, provider, "API_KEY", value)
+			if valid {
+				cli.PrintSuccess("Key validated successfully")
+			} else {
+				msg := errMsg
+				if msg == "" {
+					msg = "key validation failed"
+				}
+				if !term.IsTerminal(int(os.Stdin.Fd())) {
+					cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+				} else if !confirmInvalidKey(msg) {
+					return fmt.Errorf("aborted")
+				}
+			}
+
+		case codexauth.IsLogin(credType, provider):
+			// A ChatGPT login is a JWT for chatgpt.com, not an API key; the
+			// probe would send it to api.openai.com and report "Invalid API
+			// key" for a login that works (#2428). The server validates its
+			// shape instead, and the first Codex run is the live test.
+			cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
 
 		default:
 			valid, errMsg := testCredentialValue(client, provider, credType, value)
@@ -525,9 +594,11 @@ var credUpdateCmd = &cobra.Command{
 			body["name"] = v
 		}
 		if flags.Changed("value-stdin") {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				v := scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
+			}
+			{
 				if v == "" {
 					return fmt.Errorf("stdin value cannot be empty")
 				}
@@ -604,6 +675,10 @@ var credUpdateCmd = &cobra.Command{
 						cli.PrintWarning(fmt.Sprintf(
 							"%s is not validated on update — Crewship does not dial an operator-supplied endpoint.",
 							spec.ID))
+					} else if codexauth.IsLogin(cred.Type, cred.Provider) {
+						// Same as create: a ChatGPT login is not an API key and
+						// the probe would only report "Invalid API key" (#2428).
+						cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
 					} else {
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {
@@ -671,10 +746,11 @@ Examples:
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")
 		if valueStdin {
-			scanner := bufio.NewScanner(os.Stdin)
-			if scanner.Scan() {
-				value = scanner.Text()
+			v, err := readValueStdin()
+			if err != nil {
+				return err
 			}
+			value = v
 		}
 		rotateAuthToken, authChanged, err := readAuthToken(flags)
 		if err != nil {

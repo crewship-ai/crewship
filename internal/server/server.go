@@ -50,25 +50,28 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
-	httpServer        *http.Server
-	ipcServer         *http.Server
-	mux               *http.ServeMux
-	ipcMux            *http.ServeMux
-	spaHandler        http.Handler
-	cfg               *config.Config
-	logger            *slog.Logger
-	wsHub             *ws.Hub
-	orchestrator      *orchestrator.Orchestrator
-	missionEngine     *orchestrator.MissionEngine
-	container         provider.ContainerProvider
-	storage           provider.StorageProvider
-	state             provider.StateProvider
-	logWriter         *logcollector.Writer
-	logReader         *logcollector.Reader
-	convStore         *conversation.Store
-	tokenPool         *llmproxy.TokenPool
-	tokenSyncer       *llmproxy.TokenSyncer
-	credMonitor       *llmproxy.CredentialMonitor
+	httpServer    *http.Server
+	ipcServer     *http.Server
+	mux           *http.ServeMux
+	ipcMux        *http.ServeMux
+	spaHandler    http.Handler
+	cfg           *config.Config
+	logger        *slog.Logger
+	wsHub         *ws.Hub
+	orchestrator  *orchestrator.Orchestrator
+	missionEngine *orchestrator.MissionEngine
+	container     provider.ContainerProvider
+	storage       provider.StorageProvider
+	state         provider.StateProvider
+	logWriter     *logcollector.Writer
+	logReader     *logcollector.Reader
+	convStore     *conversation.Store
+	tokenPool     *llmproxy.TokenPool
+	tokenSyncer   *llmproxy.TokenSyncer
+	credMonitor   *llmproxy.CredentialMonitor
+	// loginRefresher runs standalone ONLY when there is no credMonitor to
+	// tick it (LLM proxy off); otherwise the monitor's tick calls it.
+	loginRefresher    *goapi.ProviderLoginRefresher
 	debugLogs         *logging.RingBuffer
 	db                *sql.DB
 	apiRouter         *goapi.Router
@@ -463,6 +466,7 @@ func (s *Server) mountAPIRouter(
 	// JournalEmitter interface to the full journal.Emitter so the
 	// orchestrator package stays independent of internal/journal.
 	orch.SetJournal(newOrchestratorJournalAdapter(s.journalWriter))
+	orch.SetSubscriptionUsageRecorder(newSubscriptionUsageRecorder(deps.DB, s.journalWriter))
 
 	// Wire the audit-log recorder into the orchestrator so a run that
 	// reaches a terminal state (completed/error/cancelled) writes an
@@ -972,6 +976,17 @@ func (s *Server) mountAPIRouter(
 		logger.Error("failed to create API router", "error", err)
 	} else {
 		s.apiRouter = apiRouter
+		// Provider-login refresh (docs/prd/provider-logins.md §5.3) rides the
+		// credential monitor's tick when there is one, and runs on its own
+		// ticker otherwise — a ChatGPT login must be renewed whether or not
+		// the LLM proxy is on.
+		if rf := apiRouter.LoginRefresher(); rf != nil {
+			if s.credMonitor != nil {
+				s.credMonitor.SetRefreshHook(rf.RefreshDue)
+			} else {
+				s.loginRefresher = rf
+			}
+		}
 		mux.Handle("/api/", apiRouter)
 		// /exposed/{token}/... needs two things: (a) combinedHandler has
 		// to pick s.mux over spaHandler for this prefix (done there),

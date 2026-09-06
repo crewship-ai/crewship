@@ -178,6 +178,7 @@ POST /api/v1/credentials/{credentialId}/fields roleCreate
 POST /api/v1/credentials/{credentialId}/reveal roleInline
 POST /api/v1/credentials/{credentialId}/rotate roleInline
 POST /api/v1/credentials/{credentialId}/test roleCreate
+POST /api/v1/credentials/{credentialId}/refresh roleCreate
 POST /api/v1/crew-ai-suggest roleCreate
 POST /api/v1/crew-connections roleCreate
 POST /api/v1/crew-templates/{slug}/deploy roleCreate
@@ -257,6 +258,7 @@ POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/webhooks roleSelf
 POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
+POST /api/v1/provider-logins/device roleInline
 POST /api/v1/recipes/{slug}/install roleManage
 POST /api/v1/recurring-issues roleCreate
 POST /api/v1/saved-views roleCreate

@@ -653,7 +653,7 @@ func (h *QueryHandler) finishQuery(
 // Three arrivals, three near-misses, one shared definition now. Do not spell the
 // query out here again.
 func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
-	delivered, slotNotices, err := loadDeliveredCredentials(ctx, h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
@@ -720,7 +720,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 		}
 		for _, f := range fields {
 			c.Fields = append(c.Fields, orchestrator.CredentialField{
-				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+				Key: f.Key, EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
 			})
 		}
 		creds = append(creds, c)

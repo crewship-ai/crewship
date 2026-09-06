@@ -76,6 +76,11 @@ const (
 	// Metadata carries who/why/classification and the journal entry id that
 	// anchors it to the chain. Never the value.
 	AuditEventReveal CredentialAuditEvent = "REVEAL"
+	// AuditEventRefresh (docs/prd/provider-logins.md §5.7): the server
+	// renewed a provider login's access token from its sealed refresh
+	// token — by the monitor, before a run start, or on request. Metadata
+	// carries the trigger, the outcome and the new expiry; never a token.
+	AuditEventRefresh CredentialAuditEvent = "REFRESH"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -89,6 +94,7 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventRejected: {},
 	AuditEventLeased:   {},
 	AuditEventReveal:   {},
+	AuditEventRefresh:  {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call

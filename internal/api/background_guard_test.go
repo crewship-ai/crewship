@@ -24,6 +24,7 @@ import (
 // request-scoped goroutine lands, nothing registers it, and six weeks
 // later a different test family starts failing intermittently (#1596).
 var unregisteredSpawnSites = map[string]string{
+	"provider_login_device.go:spawn": "device pollers are handler-owned: Stop cancels their context and joins h.wg; device fixtures register Stop before DB cleanup. A global drain would wait for human authorization in unrelated tests.",
 	// Daemons: started once, live for the process.
 	"assignments_running_recovery.go:StartStuckRunningSweeper":   "boot daemon: ticker loop, stopped via ctx",
 	"assignments_stuck_sweeper.go:StartStuckQueueSweeper":        "boot daemon: ticker loop, stopped via ctx",

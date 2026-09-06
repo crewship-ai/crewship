@@ -88,3 +88,29 @@ func TestHandleSidecarCostRecord_HappyPath(t *testing.T) {
 		t.Errorf("cost_ledger rows=%d want 1", count)
 	}
 }
+
+func TestHandleSidecarCostRecord_PayerMustBelongToWorkspace(t *testing.T) {
+	r, _ := costRouter(t)
+	wsID, credID := seedFileMountCred(t, r.db, "API_KEY")
+	for _, workspace := range []string{wsID, "other-workspace"} {
+		raw, err := json.Marshal(map[string]any{
+			"workspace_id": workspace, "credential_id": credID,
+			"provider": "openai", "model": "gpt-6-astra", "input_tokens": 10,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := postCost(t, r, string(raw))
+		want := http.StatusBadRequest
+		if workspace == wsID {
+			want = http.StatusAccepted
+		}
+		if rr.Code != want {
+			t.Fatalf("status=%d want %d: %s", rr.Code, want, rr.Body.String())
+		}
+	}
+	var payer string
+	if err := r.db.QueryRow(`SELECT credential_id FROM cost_ledger`).Scan(&payer); err != nil || payer != credID {
+		t.Fatalf("payer not persisted: %q %v", payer, err)
+	}
+}

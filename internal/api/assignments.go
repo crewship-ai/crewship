@@ -285,7 +285,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 	//	  "pending_oauth" as a real env value at the sub-agent boundary.
 	//	the #1373 lease gate — a lapsed lease handed over here is worse than at
 	//	  boot: the value crosses to an agent the lease was never issued to.
-	delivered, slotNotices, err := loadDeliveredCredentials(ctx, h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
@@ -349,7 +349,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 		}
 		for _, f := range fields {
 			c.Fields = append(c.Fields, orchestrator.CredentialField{
-				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+				Key: f.Key, EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
 			})
 		}
 		creds = append(creds, c)

@@ -136,14 +136,14 @@ func (h *CredentialBindingHandler) List(w http.ResponseWriter, r *http.Request) 
 	}
 
 	q := r.URL.Query()
-	where := []string{"b.workspace_id = ?"}
+	where := []string{"b.workspace_id = ?", "c.workspace_id = b.workspace_id", "c.deleted_at IS NULL"}
 	args := []any{workspaceID}
 	// Crew-scope the list the same way GET /credentials does. A binding list is
 	// a map of where a tenant's secrets go, and without this a MEMBER of one
 	// crew reads the account name, slot and crew of a credential scoped to a
 	// crew they don't belong to — a cross-crew metadata leak the rest of the
 	// credential surface (List, Get, fields, reveal) is careful to prevent. The
-	// filter is a no-op for MANAGER+ (canRole "update"), matching those paths.
+	// Provider accounts are visible only to OWNER/ADMIN, matching those paths.
 	if vis, visArgs := credentialVisibilityFilter(RoleFromContext(r.Context()), UserFromContext(r.Context())); vis != "" {
 		where = append(where, "1=1"+vis) // vis begins " AND (...)"
 		args = append(args, visArgs...)
@@ -412,6 +412,9 @@ func (h *CredentialBindingHandler) ResolveForAgent(w http.ResponseWriter, r *htt
 			continue
 		}
 		seen[d.EnvVar] = struct{}{}
+		if _, visible := names[d.ID]; !visible {
+			continue
+		}
 		slots = append(slots, resolvedSlot{
 			Slot:           d.EnvVar,
 			CredentialID:   d.ID,
@@ -434,7 +437,17 @@ func (h *CredentialBindingHandler) ResolveForAgent(w http.ResponseWriter, r *htt
 	// "delivered under no name", which is the ambiguity this view exists to
 	// remove.
 	resp := map[string]any{"agent_id": agentID, "slots": slots}
-	if warnings := deliveredSlotWarnings(slotNotices, names); len(warnings) > 0 {
+	visibleNotices := make([]deliveredSlotNotice, 0, len(slotNotices))
+	for _, notice := range slotNotices {
+		if _, visible := names[notice.CredentialID]; visible {
+			// Collision reasons can name a DIFFERENT, hidden credential.
+			if _, canSeeHolder := names[notice.ConflictingCredentialID]; notice.ConflictingCredentialID != "" && !canSeeHolder {
+				notice.Reason = "the derived environment variable is already occupied"
+			}
+			visibleNotices = append(visibleNotices, notice)
+		}
+	}
+	if warnings := deliveredSlotWarnings(visibleNotices, names); len(warnings) > 0 {
 		resp["warnings"] = warnings
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -457,21 +470,7 @@ func bindingSourceLabel(source int) string {
 }
 
 func (h *CredentialBindingHandler) credentialNames(r *http.Request, workspaceID string) (map[string]string, error) {
-	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT id, name FROM credentials WHERE workspace_id = ?`, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]string{}
-	for rows.Next() {
-		var id, name string
-		if err := rows.Scan(&id, &name); err != nil {
-			return nil, err
-		}
-		out[id] = name
-	}
-	return out, rows.Err()
+	return visibleCredentialNames(r, h.db, workspaceID)
 }
 
 // ownedByWorkspace answers "does this id exist in this tenant". Table names are
