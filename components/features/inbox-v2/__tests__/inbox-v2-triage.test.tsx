@@ -38,10 +38,11 @@ describe("InboxTriage", () => {
     render(<InboxTriage action={action} updates={[]} history={[]} lookup={lookup} live={false} onOpen={() => {}} onCrew={onCrew} />)
     expect(screen.getByText("Waiting for you")).toBeInTheDocument()
     expect(screen.getByText("Ops")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /Ops/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Filter inbox by Ops" }))
     expect(onCrew).toHaveBeenCalledWith("c-ops")
-    // A row without a crew is a bucket you cannot narrow to.
-    expect(screen.getByRole("button", { name: /No crew/ })).toBeDisabled()
+    // Workspace-wide items are a static summary, not a dead filter button.
+    expect(screen.getByText("Workspace")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Filter inbox by Workspace/ })).toBeNull()
   })
 
   it("is never blank: the zero form says what lands here", () => {

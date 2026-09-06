@@ -22,6 +22,8 @@ import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 
 import { entryKindPill, outcomeStatus } from "./inbox-v2-derive"
+import { EntryAvatar } from "./inbox-entry-identity"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { InboxTriage } from "./inbox-v2-triage"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Confirmation, type InboxV2Entry } from "./inbox-v2-types"
 
@@ -49,6 +51,8 @@ interface Props {
   onDenyHire?: () => Promise<void>
   /** What the triage card shows when nothing is open. */
   triage?: {
+    incomplete?: boolean
+    loading?: boolean
     action: InboxV2Entry[]
     updates: InboxV2Entry[]
     history: InboxV2Entry[]
@@ -197,7 +201,7 @@ function ApprovalDetail({
             )}
           </div>
           <div>
-            <h2 className="text-xl font-semibold">{entry.title}</h2>
+            <div className="flex items-start gap-3"><EntryAvatar entry={entry} lookup={lookup} /><h2 className="text-xl font-semibold">{entry.title}</h2></div>
             <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
               <span>Requested by</span>
               {agent ? (
@@ -208,7 +212,7 @@ function ApprovalDetail({
               {crew && (
                 <>
                   <span>·</span>
-                  <Link href={entityHref({ kind: "crew", slug: crew.slug })} className="text-foreground hover:underline">{crew.name}</Link>
+                  <Link href={entityHref({ kind: "crew", slug: crew.slug })} className="inline-flex items-center gap-1.5 text-foreground hover:underline"><CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" />{crew.name}</Link>
                 </>
               )}
               <span>· {formatDateTime(row.created_at)}</span>

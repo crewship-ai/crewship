@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { History, Inbox, ListChecks, ShieldX } from "lucide-react"
 import { toast } from "sonner"
@@ -13,7 +13,7 @@ import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { useApprovals, decideApproval } from "@/hooks/use-approvals"
 import { useInbox, useInboxItem } from "@/hooks/use-inbox"
-import { useRealtimeStatusSafe } from "@/hooks/use-realtime"
+import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 import { inboxBulk } from "@/lib/api/inbox"
@@ -22,22 +22,27 @@ import type { Mission } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
 
 import {
-  approvalEntry, EMPTY_INBOX_V2_FILTERS, filterAndSortEntries,
+  approvalEntry, EMPTY_INBOX_V2_FILTERS, INBOX_V2_TYPES,
   groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
+import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
-import type { InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
+import type { InboxRoutineRef, InboxV2Confirmation, InboxV2Entry, InboxV2View } from "./inbox-v2-types"
 
 export function InboxV2() {
   const { workspaceId, role } = useWorkspace()
   const params = useSearchParams()
+  const router = useRouter()
+  const detailRef = useRef<HTMLElement>(null)
+  const requestedView = params?.get("view") ?? null
+  const requestedKind = params?.get("kind") ?? null
   const requestedID = params?.get("item") ?? null
   const requestedSearch = params?.get("agent") ?? params?.get("filter") ?? ""
-  const [view, setView] = useState<InboxV2View>("action")
+  const [chosenView, setView] = useState<InboxV2View | null>(null)
   // `request:<id>` rather than `inbox:<id>`: the caller of ?item= knows an id,
   // not which source owns it, and an approval-queue deep link keyed
   // `approval:<id>` could never match. selectEntry resolves it against both.
@@ -47,7 +52,7 @@ export function InboxV2() {
   const [confirmation, setConfirmation] = useState<InboxV2Confirmation | null>(null)
   const [filters, setFilters] = useState<InboxV2Filters>({ ...EMPTY_INBOX_V2_FILTERS, search: requestedSearch })
   const [collapsed, setCollapsed] = useState(false)
-  const lookup = useInboxLookup(workspaceId)
+  const roster = useInboxLookup(workspaceId)
   const wsStatus = useRealtimeStatusSafe()
   const live = wsStatus === "connected"
 
@@ -110,6 +115,45 @@ export function InboxV2() {
     refetchInterval: 30_000,
   })
 
+  const routines = useQuery<InboxRoutineRef[]>({
+    queryKey: ["inbox-routine-names", workspaceId ?? ""],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId!)}/pipelines`, { signal })
+      if (!res.ok) throw new Error("Routine names unavailable")
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error("Invalid routine names response")
+      return data
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 60_000,
+    retry: false,
+  })
+  // Bounded identity lookup: never mistake a mission's crew lead for its assignee.
+  // Older issues outside this window keep a crew identity instead of inventing an author.
+  const issues = useQuery<Mission[]>({
+    queryKey: ["inbox-issue-owners", workspaceId ?? ""],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId!)}&limit=100&sort=updated_at`, { signal })
+      if (!res.ok) throw new Error("Issue owners unavailable")
+      const data = await res.json()
+      if (!Array.isArray(data)) throw new Error("Invalid issue owners response")
+      return data
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 30_000,
+    retry: false,
+  })
+  useRealtimeEvent("issue.updated", () => { void issues.refetch() })
+  useRealtimeEvent("issue.created", () => { void issues.refetch() })
+  useRealtimeEvent("mission.updated", () => { void issues.refetch() })
+
+  const lookup = useMemo(() => ({
+    ...roster,
+    issueById: new Map((issues.data ?? []).map((issue) => [issue.id, issue])),
+    missionById: new Map((missions.data ?? []).map((mission) => [mission.id, mission])),
+    routineBySlug: new Map((routines.data ?? []).map((routine) => [routine.slug, routine])),
+  }), [roster, missions.data, routines.data, issues.data])
+
   const allInbox = useMemo(() => [...active.items, ...resolved.items], [active.items, resolved.items])
   const suppressedApprovals = useMemo(
     () => suppressedApprovalIDs(allInbox, approvals.rows),
@@ -146,14 +190,38 @@ export function InboxV2() {
     }
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
-  const visible = useMemo(() => filterAndSortEntries(feeds[view], filters), [feeds, filters, view])
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
   const selected = selectEntry(allEntries, selectedKey)
+  const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
+  const visible = useMemo(() => filterInboxEntries(feeds[view], filters, lookup), [feeds, filters, view, lookup])
+  useEffect(() => {
+    setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
+  }, [requestedView])
+  useEffect(() => {
+    const type = INBOX_V2_TYPES.find((entry) => entry.key === requestedKind)?.key ?? null
+    setFilters((current) => ({ ...current, type }))
+  }, [requestedKind])
+  useEffect(() => {
+    if (selectedKey && detailRef.current) {
+      detailRef.current.scrollTop = 0
+      detailRef.current.focus({ preventScroll: true })
+    }
+  }, [selectedKey])
+  function showView(next: InboxV2View) {
+    setView(next)
+    setSelectedKey(null)
+    setConfirmation(null)
+    router.push(`/inbox?view=${next}`)
+  }
   // A deep link can name a row that is gone, belongs to another workspace, or
   // simply has not arrived yet — `active` and `resolved` are two independent
   // walks. Distinguish "still loading" from "not here", and never substitute
   // a different decision for the one that was asked for.
-  const feedsSettled = !active.loading && !resolved.loading && !approvals.loading
+  const feedsSettled = !active.loading && !resolved.loading && !approvals.loading && !missions.isPending
+  // Choose the initial view once; live arrivals must not switch a view someone is reading.
+  useEffect(() => {
+    if (chosenView === null && feedsSettled) setView(feeds.action.length ? "action" : "updates")
+  }, [chosenView, feedsSettled, feeds.action.length])
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
   const selectedInboxID = selected?.source === "inbox" ? selected.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
@@ -173,7 +241,7 @@ export function InboxV2() {
   })
 
   async function refreshAll() {
-    await Promise.allSettled([active.refresh(), resolved.refresh(), approvals.refresh(), missions.refetch()])
+    await Promise.allSettled([all.refresh(), approvals.refresh(), missions.refetch(), issues.refetch(), routines.refetch()])
   }
 
   function complete(entry: InboxV2Entry, action: string) {
@@ -257,6 +325,9 @@ export function InboxV2() {
   function openEntry(entry: InboxV2Entry) {
     setSelectedKey(entry.key)
     setConfirmation(null)
+    const query = new URLSearchParams(params?.toString())
+    query.set("item", entry.inboxItem?.id || entry.approval?.id || entry.key)
+    router.push(`/inbox?${query.toString()}`)
     if (entry.source === "inbox" && entry.inboxItem?.state === "unread") {
       void active.patch(entry.inboxItem.id, "read").catch(() => {})
     }
@@ -274,12 +345,12 @@ export function InboxV2() {
       <SubBar
         icon={Inbox}
         title="Inbox"
-        description={`${feeds.action.length} need you · ${feeds.updates.length} updates · ${feeds.history.length} decided`}
-        meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} live={live} className="ml-1 hidden sm:inline-flex" />}
+        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${feeds.action.length} need you · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
+        meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} className="ml-1 hidden sm:inline-flex" />}
         ariaLabel="Inbox"
         actions={
           <>
-            <SubBarSecondary icon={History} onClick={() => { setView("history"); setSelectedKey(null); setConfirmation(null) }}>
+            <SubBarSecondary icon={History} onClick={() => showView("history")}>
               History
             </SubBarSecondary>
             <SubBarPrimary
@@ -288,48 +359,11 @@ export function InboxV2() {
               title={next ? "Open the oldest item waiting on you" : "Nothing is waiting on you"}
               onClick={() => { if (next) { setView("action"); openEntry(next) } }}
             >
-              Decide next
+              Review next
             </SubBarPrimary>
           </>
         }
       />
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      {/* Same shell as routines-layout: a collapsible aside, w-9 when shut.
-          The 190px view rail is gone — the views are a facet section inside
-          this one column, the way Routines carries its status buckets. */}
-      <aside
-        className={cn(
-          "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all",
-          // Full width on a phone — a fixed 340px column left a dead strip
-          // beside it, because the reading pane is hidden until a row is
-          // opened. Desktop keeps the fixed column.
-          collapsed ? "w-9" : "w-full lg:w-[340px]",
-          selectedKey && "hidden lg:block",
-        )}
-      >
-        {collapsed ? (
-          <div className="flex h-full flex-col items-center pt-1.5">
-            <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
-          </div>
-        ) : (
-          <InboxV2Explorer
-            view={view}
-            onView={(next) => { setView(next); setSelectedKey(null); setConfirmation(null) }}
-            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
-            entries={feeds[view]}
-            visible={visible}
-            filters={filters}
-            onFilters={setFilters}
-            selectedKey={selected?.key ?? null}
-            onOpen={openEntry}
-            onMarkAllRead={view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
-            onToggleCollapse={() => setCollapsed(true)}
-            lookup={lookup}
-          />
-        )}
-      </aside>
-
-      <main className={cn("min-w-0 flex-1 overflow-y-auto", !selectedKey && "hidden lg:block")}>
         {sourceState.degraded && (
           <div className="flex items-center gap-2 border-b border-destructive/25 bg-destructive/[0.07] px-4 py-2">
             <ShieldX className="h-3.5 w-3.5 shrink-0 text-destructive" />
@@ -343,19 +377,58 @@ export function InboxV2() {
             </button>
           </div>
         )}
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      {/* Same shell as routines-layout: a collapsible aside, w-9 when shut.
+          The 190px view rail is gone — the views are a facet section inside
+          this one column, the way Routines carries its status buckets. */}
+      <aside
+        className={cn(
+          "shrink-0 overflow-hidden border-r border-border/60 bg-card",
+          // Full width on a phone — a fixed 340px column left a dead strip
+          // beside it, because the reading pane is hidden until a row is
+          // opened. Desktop keeps the fixed column.
+          collapsed ? "w-full lg:w-9" : "w-full lg:w-[370px] xl:w-[390px]",
+          selectedKey && "hidden lg:block",
+        )}
+      >
+        {collapsed && (
+          <div className="hidden h-full flex-col items-center pt-1.5 lg:flex">
+            <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
+          </div>
+        )}
+        <div className={cn("h-full", collapsed && "lg:hidden")}>
+          <InboxV2Explorer
+            view={view}
+            onView={showView}
+            viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
+            entries={feeds[view]}
+            visible={visible}
+            filters={filters}
+            onFilters={setFilters}
+            selectedKey={selected?.key ?? null}
+            onOpen={openEntry}
+            onMarkAllRead={view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
+            onToggleCollapse={() => setCollapsed(true)}
+            lookup={lookup}
+          />
+        </div>
+      </aside>
+
+      <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className={cn("min-w-0 flex-1 overflow-y-auto", !selectedKey && "hidden lg:block")}>
         {selectedKey && (
-          <div className="sticky top-0 z-10 border-b border-border/60 bg-background/95 px-3 py-2 backdrop-blur lg:hidden">
-            <Button variant="ghost" size="sm" onClick={() => setSelectedKey(null)}>← Back to inbox</Button>
+          <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
+            <Button variant="ghost" size="sm" onClick={() => showView(view)}>← Back to inbox</Button>
           </div>
         )}
         <InboxV2Detail
+          key={selected?.key || "overview"}
           entry={selected}
           selectionMissing={selectionMissing}
           role={(role as WorkspaceRole | null) ?? null}
           detailedInboxItem={detailedInbox.data}
           detailLoading={detailedInbox.isFetching}
           confirmation={confirmation}
-          onClearConfirmation={() => { setConfirmation(null); setSelectedKey(null) }}
+          onClearConfirmation={() => showView(view)}
           onViewReceipt={(entry) => { setConfirmation(null); setView("history"); setSelectedKey(entry.key) }}
           onInboxResolve={async (item, action) => inboxResolve(inboxEntry(item), action)}
           onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
@@ -370,6 +443,8 @@ export function InboxV2() {
           lookup={lookup}
           onDenyHire={hireTwin ? denyHire : undefined}
           triage={{
+            incomplete: sourceState.degraded,
+            loading: sourceState.loading && allEntries.length === 0,
             action: feeds.action,
             updates: feeds.updates,
             history: feeds.history,
@@ -379,7 +454,11 @@ export function InboxV2() {
               setView(holds)
               openEntry(entry)
             },
-            onCrew: (crewId) => setFilters({ ...filters, crew: crewId }),
+            onCrew: (crewId) => {
+              const target = feeds.action.some((entry) => entryIdentity(entry, lookup).crew?.id === crewId) ? "action" : "updates"
+              showView(target)
+              setFilters({ ...EMPTY_INBOX_V2_FILTERS, crew: crewId })
+            },
           }}
         />
       </main>

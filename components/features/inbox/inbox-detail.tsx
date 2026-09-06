@@ -8,19 +8,18 @@ import { Appear, DetailCard, Pill, type DetailTone } from "@/components/ui/detai
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
-import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { hostOf } from "@/lib/routine-step-describe"
-import type { InboxLookup } from "@/components/features/inbox-v2/inbox-v2-types"
+import { EMPTY_INBOX_LOOKUP, type InboxLookup } from "@/components/features/inbox-v2/inbox-v2-types"
+import { EntryAvatar, entryIdentity } from "@/components/features/inbox-v2/inbox-entry-identity"
 import { RoutineProposalDiff } from "./routine-proposal-diff"
 import { Button } from "@/components/ui/button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { FourEyesNotice } from "@/components/features/escalations/four-eyes-notice"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
 
-import { ActorLabel } from "./inbox-actor"
 import { EvidenceFacts } from "./evidence-facts"
 import { KindActions } from "./kind-actions"
 import type { InboxActFn } from "./run-needs-human-actions"
@@ -248,6 +247,7 @@ function MessageBody({ body }: { body: string }) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
         className="self-start type-meta font-medium text-primary hover:underline"
       >
         {expanded ? "Show less" : "Show the whole message"}
@@ -328,9 +328,10 @@ export function DecisionCard({
 
         {/* The question, not the server's "Agent escalation:" prefix — the
             kind pill beside the heading already says what this is. */}
-        <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
+        <div className="text-lg font-semibold leading-snug">{entryTitle(inboxEntry(item))}</div>
 
         <DecisionSubject item={item} />
+        {item.body_md && <div className="rounded-lg border border-border/60 bg-background/30 p-4"><MessageBody key={item.id} body={item.body_md} /></div>}
 
         {/* Ahead of the buttons: whether this person can resolve it at all
             decides whether pressing one is worth anything. The same component
@@ -567,13 +568,13 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
   const isResolved = item.state === "resolved"
   const decision = decisionMetaFor(item)
   const jump = jumpFor(item)
-  const subject = subjectOf(item)
+  const identity = entryIdentity(inboxEntry(item), lookup ?? EMPTY_INBOX_LOOKUP)
+  const subject = identity.actor ?? subjectOf(item)
   const runID = payloadString(item, "pipeline_run_id")
   const kind = entryKindPill(inboxEntry(item))
   const crewID = crewIdOf(item)
-  const crew = crewID && lookup ? lookup.crewById.get(crewID) ?? null : null
-  const agentSlug = agentSlugOf(item)
-  const agent = agentSlug && lookup ? lookup.agentBySlug.get(agentSlug) ?? null : null
+  const crew = identity.crew
+  const agent = identity.agent
   const crewName = crew?.name ?? agent?.crew?.name ?? null
   const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
   const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
@@ -622,10 +623,11 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
           <DetailCard>
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="text-body font-semibold">{entryTitle(inboxEntry(item))}</div>
+                <div className="text-lg font-semibold leading-snug">{entryTitle(inboxEntry(item))}</div>
                 <AttentionBadge item={item} />
               </div>
               <DecisionSubject item={item} />
+              {item.body_md && <MessageBody key={item.id} body={item.body_md} />}
               <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} onAct={onAct} />
             </div>
           </DetailCard>
@@ -639,22 +641,22 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         <DetailCard bare>
           <div className="grid grid-cols-2 divide-x divide-hairline sm:grid-cols-4">
             <Definition
-              label={subject.kind === "agent" ? "Agent" : "From"}
+              label={agent && item.payload?.mission_id ? "Assignee" : subject.kind === "agent" ? "Agent" : "From"}
               value={agent ? (
                 <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className="h-5 w-5 shrink-0 rounded-md" />
+                  <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-lg" />
                   <span className="truncate">{agent.name}</span>
                   {agent.role_title && <span className="truncate text-[11px] text-muted-foreground">{agent.role_title}</span>}
                 </Link>
               ) : (
-                <ActorLabel actor={subject} size={20} />
+                <span className="inline-flex min-w-0 items-center gap-2"><EntryAvatar entry={inboxEntry(item)} lookup={lookup ?? EMPTY_INBOX_LOOKUP} /><span className="truncate">{identity.name}</span></span>
               )}
             />
             <Definition
               label="Crew"
               value={crewName ? (
                 <Link href={crewHref ?? "#"} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: crewColor(crew?.color ?? agent?.crew?.color ?? null) }} aria-hidden />
+                  <CrewIcon icon={crew?.icon || "users"} color={crew?.color ?? agent?.crew?.color} size="sm" />
                   <span className="truncate">{crewName}</span>
                 </Link>
               ) : crewID ? (
@@ -695,7 +697,8 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
 
       {item.kind === "waitpoint" && runID !== "" && (
         <Appear order={2}>
-          <DetailCard title="How the run got here" icon={Clock} bare>
+          <details className="rounded-xl border border-border/60 bg-card">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-body font-medium"><Clock className="h-4 w-4 text-muted-foreground" />How the run got here</summary>
             <div className="px-4 py-3">
               <WaitpointRunDetail
                 workspaceId={item.workspace_id}
@@ -703,7 +706,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
                 inboxResolved={isResolved}
               />
             </div>
-          </DetailCard>
+          </details>
         </Appear>
       )}
 
@@ -720,22 +723,15 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
         />
       )}
 
-      {item.body_md && (
-        <Appear order={3}>
-          <DetailCard title="Message" icon={CONCEPT_ICON.inbox}>
-            <MessageBody body={item.body_md} />
-          </DetailCard>
-        </Appear>
-      )}
-
       {/* Counted on the VISIBLE keys, not on the payload: a row whose payload
           is nothing but reason/source/step_id would otherwise draw a Context
           heading above an empty box. */}
       {item.payload && visibleContextEntries(item.payload).length > 0 && (
         <Appear order={4}>
-          <DetailCard title="Context" subtitle="secrets masked">
-            <ContextDetails payload={item.payload} />
-          </DetailCard>
+          <details className="rounded-xl border border-border/60 bg-card">
+            <summary className="cursor-pointer px-4 py-3 text-body font-medium">Additional context</summary>
+            <div className="border-t border-border/60 p-4"><ContextDetails payload={item.payload} /></div>
+          </details>
         </Appear>
       )}
 

@@ -8,26 +8,25 @@ import {
   Inbox, ListChecks, MessageSquare, ShieldCheck, Workflow, type LucideIcon,
 } from "lucide-react"
 
-import { ActorAvatar } from "@/components/features/inbox/inbox-actor"
-import { remainingLabel, since, subjectOf } from "@/components/features/inbox/inbox-derive"
+import { remainingLabel, since } from "@/components/features/inbox/inbox-derive"
 import {
   SidebarActiveChip, SidebarActiveChips, SidebarCollapseButton, SidebarFacet,
   SidebarFacetOption, SidebarFilterPopover, SidebarRow, SidebarSearch,
   SidebarSection, SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
-import { crewColor } from "@/app/(dashboard)/dashboard-helpers"
 import { cn } from "@/lib/utils"
 
 import {
-  deadlineBucket, entryAgentRef, entryCrewId, entryKindPill, entryTitle, entryType, entryVerb,
+  deadlineBucket, entryKindPill, entryTitle, entryVerb,
   facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, outcomeStatus,
   type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
-import { EMPTY_INBOX_LOOKUP, resolveAgent, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
+import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
 
 /**
  * The inbox column, built on the shared sidebar-kit — the same explorer
@@ -110,7 +109,7 @@ export function InboxV2Explorer({
 
   const sections = view === "updates"
     ? [
-        { label: "Agent replies", rows: visible.filter((e) => e.category === "chat.replies") },
+        { label: "Replies & results", rows: visible.filter((e) => e.category === "chat.replies") },
         { label: "Important updates", rows: visible.filter((e) => e.category !== "chat.replies") },
       ]
     : view === "history"
@@ -122,6 +121,12 @@ export function InboxV2Explorer({
 
   return (
     <div className="flex h-full flex-col">
+      <div className="grid shrink-0 grid-cols-3 gap-1.5 border-b border-border/60 p-3" aria-label="Inbox views">
+        {VIEWS.map((v) => <button type="button" key={v.key} onClick={() => onView(v.key)} aria-pressed={view === v.key} className={cn("flex flex-col gap-2 rounded-xl border p-2.5 text-left transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-primary", view === v.key ? "border-primary/40 bg-primary/10" : "border-transparent hover:bg-muted/60")}>
+          <span className="flex items-center justify-between gap-1"><v.icon className={cn("h-4 w-4", v.tone)} aria-hidden /><span className="font-mono text-body font-semibold tabular-nums">{viewCounts[v.key]}</span></span>
+          <span className="whitespace-nowrap text-label font-medium">{v.label}</span>
+        </button>)}
+      </div>
       <SidebarToolbar>
         <div data-inbox-search className="min-w-0 flex-1">
           <SidebarSearch
@@ -132,6 +137,7 @@ export function InboxV2Explorer({
         </div>
         <SidebarFilterPopover
           label="Filter inbox"
+          className="[&>button]:text-muted-foreground"
           activeCount={activeCount}
           onClear={() => set({ type: null, deadline: null, unreadOnly: false, crew: null })}
         >
@@ -193,9 +199,17 @@ export function InboxV2Explorer({
             </SidebarFacetOption>
           </SidebarFacet>
         </SidebarFilterPopover>
-        {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
+        {onToggleCollapse && <span className="hidden lg:inline-flex"><SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} /></span>}
       </SidebarToolbar>
 
+      <div className="flex shrink-0 items-center gap-2 px-3 pb-2">
+        <CrewIcon icon={filters.crew ? lookup.crewById.get(filters.crew)?.icon || "users" : "users"} color={filters.crew ? lookup.crewById.get(filters.crew)?.color : null} size="sm" />
+        <label htmlFor="inbox-crew-filter" className="sr-only">Filter by crew</label>
+        <select id="inbox-crew-filter" value={filters.crew || ""} onChange={(event) => set({ crew: event.target.value || null })} className="h-8 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-2 text-label focus-visible:outline-2 focus-visible:outline-primary">
+          <option value="">All crews</option>
+          {[...lookup.crewById.values()].map((crew) => <option key={crew.id} value={crew.id}>{crew.name}</option>)}
+        </select>
+      </div>
       <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
         {filters.type && (
           <SidebarActiveChip onRemove={() => set({ type: null })}>{TYPE_LABEL[filters.type]}</SidebarActiveChip>
@@ -213,32 +227,6 @@ export function InboxV2Explorer({
         )}
       </SidebarActiveChips>
 
-      <SidebarSection label="View" count={VIEWS.length} className="border-b border-white/[0.06]">
-        {VIEWS.map((v) => {
-          const Icon = v.icon
-          const count = viewCounts[v.key]
-          const selected = view === v.key
-          return (
-            <SidebarRow as="div" key={v.key} selected={selected} onSelect={() => onView(v.key)}>
-              <Icon className={cn("h-3.5 w-3.5 shrink-0", v.tone, count === 0 && !selected && "opacity-40")} />
-              <span className={cn("flex-1 truncate", count === 0 && !selected ? "text-foreground/40" : "text-foreground/80")}>
-                {v.label}
-              </span>
-              <span className={cn(
-                "rounded-full px-1.5 py-px text-[10px] tabular-nums",
-                count === 0
-                  ? "text-muted-foreground-soft/50"
-                  : selected
-                    ? "bg-primary/15 text-primary"
-                    : "bg-white/[0.05] text-muted-foreground",
-              )}>
-                {count}
-              </span>
-            </SidebarRow>
-          )
-        })}
-      </SidebarSection>
-
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto pb-1">
           {sections.filter((s) => s.rows.length > 0).map((section, index) => (
@@ -250,7 +238,7 @@ export function InboxV2Explorer({
                   <button
                     type="button"
                     onClick={onMarkAllRead}
-                    className="text-[10px] text-muted-foreground/80 transition-colors hover:text-foreground"
+                    className="text-label text-muted-foreground transition-colors hover:text-foreground"
                   >
                     Mark all read
                   </button>
@@ -327,88 +315,32 @@ function FacetCount({ value }: { value: number }) {
   return <span className="ml-auto shrink-0 tabular-nums text-[10px] opacity-70">{value}</span>
 }
 
-function EntryRow({
-  entry, selected, onOpen, lookup,
-}: { entry: InboxV2Entry; selected: boolean; onOpen: () => void; lookup: InboxLookup }) {
-  const deadlineMins = entry.deadlineAt
-    ? Math.round((Date.parse(entry.deadlineAt) - Date.now()) / 60_000)
-    : null
+function EntryRow({ entry, selected, onOpen, lookup }: { entry: InboxV2Entry; selected: boolean; onOpen: () => void; lookup: InboxLookup }) {
+  const deadlineMins = entry.deadlineAt ? Math.round((Date.parse(entry.deadlineAt) - Date.now()) / 60_000) : null
   const pill = entryKindPill(entry)
-  const title = entryTitle(entry)
-  const verb = entryVerb(entry)
-  const crewId = entryCrewId(entry)
-  const crew = crewId ? lookup.crewById.get(crewId) ?? null : null
-  const ref = entryAgentRef(entry)
-  const agent = resolveAgent(lookup, ref)
-  const crewName = crew?.name ?? agent?.crew?.name ?? null
-  const crewTint = crewColor(crew?.color ?? agent?.crew?.color ?? null)
-  const agentLabel = agent?.name ?? ref.label
-  const actor = entry.inboxItem ? subjectOf(entry.inboxItem) : null
-  const type = entryType(entry)
-  const Icon = type ? TYPE_ICON[type] : MessageSquare
+  const { crew, name } = entryIdentity(entry, lookup)
   const expiring = deadlineMins != null && entry.actionable && deadlineBucket(entry) === "hour"
   const outcome = entry.historical ? outcomeStatus(entry.outcome) : null
-
   return (
-    <SidebarRow as="div" selected={selected} onSelect={onOpen} className="items-start py-1.5">
+    <SidebarRow as="div" selected={selected} onSelect={onOpen} className={cn("mx-2 my-1 items-start gap-2.5 rounded-xl border p-3 transition-colors duration-150", selected ? "border-primary/30 bg-primary/10" : "border-transparent hover:border-border/60 hover:bg-muted/40")}>
       <span className="relative mt-0.5 shrink-0">
-        {agent ? (
-          <AgentAvatar
-            seed={agent.avatar_seed || agent.slug}
-            style={agent.avatar_style}
-            agentId={agent.id}
-            avatarUrl={agent.avatar_url}
-            alt=""
-            className="h-5 w-5 rounded-md"
-          />
-        ) : actor ? (
-          <ActorAvatar actor={actor} size={20} />
-        ) : (
-          <span className={cn(
-            "flex h-5 w-5 items-center justify-center rounded-md",
-            entry.actionable ? "bg-warn/10 text-warn" : "bg-white/[0.05] text-muted-foreground",
-          )}>
-            <Icon className="h-3 w-3" />
-          </span>
-        )}
-        {entry.unread && (
-          <span aria-hidden className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-info ring-2 ring-card" />
-        )}
+        <EntryAvatar entry={entry} lookup={lookup} />
+        {entry.unread && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-card" />}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex flex-wrap items-center justify-between gap-1.5">
           {outcome ? <StatusPill status={outcome} /> : <StatusPill tone={pill.tone} label={pill.label} />}
-          <span className={cn("min-w-0 truncate", entry.unread ? "font-semibold text-foreground" : "text-foreground/80")}>
-            {title}
-          </span>
+          <span className="text-micro text-muted-foreground">{entry.actionable ? "Review" : entryVerb(entry)}</span>
         </span>
-        <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground">
-          {crewName && (
-            <>
-              <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: crewTint }} aria-hidden />
-              <span className="truncate">{crewName}</span>
-              <span className="text-muted-foreground-soft">·</span>
-            </>
-          )}
-          <span className="truncate">{agentLabel}</span>
-          <span className="text-muted-foreground-soft">·</span>
-          <span className={cn("shrink-0 tabular-nums", expiring && "font-semibold text-destructive")}>
-            {deadlineMins != null && entry.actionable
-              ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired"
-              : since(entry.createdAt)}
-          </span>
+        <span className={cn("line-clamp-2 text-body leading-snug", entry.unread ? "font-semibold text-foreground" : "font-medium text-foreground/85")}>{entryTitle(entry)}</span>
+        <span className="flex min-w-0 items-center gap-1 text-label text-muted-foreground">
+          {crew && <><CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" /><span className="truncate">{crew.name}</span><span>·</span></>}
+          <span className="truncate">{name}</span>
         </span>
-      </span>
-      <span
-        className={cn(
-          "kit-tap mt-0.5 inline-flex h-6 shrink-0 items-center rounded-md border px-2 text-[11px] font-medium",
-          entry.actionable
-            ? "border-border bg-card text-foreground group-hover:border-primary/40"
-            : "border-transparent text-muted-foreground",
-        )}
-        aria-hidden
-      >
-        {verb}
+        <span className={cn("text-micro tabular-nums text-muted-foreground", expiring && "font-semibold text-destructive")}>
+          {deadlineMins != null && entry.actionable ? deadlineMins > 0 ? `expires in ${remainingLabel(deadlineMins)}` : "expired" : since(entry.createdAt)}
+          {entry.unread && <span className="ml-2 text-primary-hover">Unread</span>}
+        </span>
       </span>
     </SidebarRow>
   )

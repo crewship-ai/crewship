@@ -184,7 +184,7 @@ export function selectEntry(entries: InboxV2Entry[], key: string | null): InboxV
   if (exact) return exact
   if (key.startsWith("request:")) {
     const id = key.slice("request:".length)
-    return entries.find((entry) => entry.key.endsWith(`:${id}`)) ?? null
+    return entries.find((entry) => entry.key === id || entry.key.endsWith(`:${id}`)) ?? null
   }
   return null
 }
