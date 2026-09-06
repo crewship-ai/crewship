@@ -59,7 +59,10 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { hasLogin, paysForLabel, type ProviderLogin } from "@/lib/credentials/provider-logins"
 import { RevealDialog } from "./reveal-dialog"
+import { AssignLoginDialog } from "./assign-login-dialog"
+import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
 
 interface CredentialSummary {
   id: string
@@ -114,6 +117,9 @@ interface CredentialSummary {
    *  server, which the badge renders as unclassified rather than as L1. */
   security_level?: number
   security_level_label?: string
+  /** The seat this row is, when it pays for a model — PRD provider-logins
+   *  §10.1. Absent on a secret and on a server that predates the tab. */
+  login?: ProviderLogin | null
 }
 
 interface AuditEvent {
@@ -220,11 +226,17 @@ export interface CredentialDetailSheetProps {
    *  cuid before this: an identifier nobody recognises, in the one place the
    *  page is meant to say WHO can read the secret. */
   crewsById?: Record<string, CredentialCrewRef>
+  /** Provider logins only: opens the wizard's sign-in step for this seat's
+   *  provider and mode. Without it the Re-login action is not offered. */
+  onRelogin?: (cred: CredentialSummary) => void
+  /** Provider logins only: open with the Assign dialog already up — the
+   *  Providers list's own Assign button lands here. */
+  assignOnOpen?: boolean
 }
 
 export function CredentialDetailSheet({
   workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit, onBack,
-  toolGaps = [], readinessKnown = false, crewsById = {},
+  toolGaps = [], readinessKnown = false, crewsById = {}, onRelogin, assignOnOpen = false,
 }: CredentialDetailSheetProps) {
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
@@ -245,6 +257,10 @@ export function CredentialDetailSheet({
   const [sensitivity, setSensitivity] = React.useState<string | null>(null)
   const [sensitivitySaving, setSensitivitySaving] = React.useState(false)
   const [sensitivityError, setSensitivityError] = React.useState<string | null>(null)
+  // The `login` a Refresh-now returned. Wins over the list payload so the
+  // status pill and the expiry follow the refresh without a page reload.
+  const [loginOverride, setLoginOverride] = React.useState<ProviderLogin | null>(null)
+  const [assignOpen, setAssignOpen] = React.useState(false)
 
   // Hide affordances users can't perform rather than letting them
   // click through to a 403. Mirrors the backend gating exactly:
@@ -266,6 +282,8 @@ export function CredentialDetailSheet({
   // SetSensitivity: the lower branch re-checks with "manage"); raising is
   // MANAGER+. Two gates because the server has two.
   const canLowerSensitivity = abilities.can("manage", "Credential")
+  // POST /credentials/bindings is roleManage, like the wizard's slot step.
+  const canBind = abilities.can("manage", "Credential")
 
   const effectiveSensitivity = sensitivity ?? credential?.sensitivity ?? null
 
@@ -315,8 +333,13 @@ export function CredentialDetailSheet({
       setSensitivityError(null)
       setRevealEnabled(false)
       setRevealOpen(false)
+      setAssignOpen(false)
     }
-  }, [open, credential])
+    // A refresh's answer belongs to the seat it refreshed, not the next one
+    // opened in the rail.
+    setLoginOverride(null)
+    if (open && credential && assignOnOpen && hasLogin(credential)) setAssignOpen(true)
+  }, [open, credential, assignOnOpen])
 
   // The workspace reveal switch. MANAGER+ may read it (GetPolicy's own gate),
   // so anyone below "update" is never asked — a 403 here would be read as
@@ -395,6 +418,11 @@ export function CredentialDetailSheet({
   }, [open, credential, workspaceId, canRotate, canUpdate])
 
   if (!credential) return null
+
+  // The seat view. `loginOverride` is what the last Refresh-now returned.
+  const loginRow = loginOverride ? { ...credential, login: loginOverride } : credential
+  const seat = hasLogin(loginRow) ? loginRow : null
+  const accountId = fields.find((f) => f.key === "account_id" && !f.is_secret)?.value ?? null
 
   const brand = getBrand(credential.provider)
   const BrandIcon = brand.Icon
@@ -703,6 +731,36 @@ export function CredentialDetailSheet({
                       </Pill>
                     ))}
                   </div>
+
+                  {/* A seat's verbs, in the header where the wireframe puts
+                      them: Assign · Test · Re-login · Revoke. Revoke is the
+                      same delete the danger zone offers, named the way a seat
+                      is taken away rather than the way a row is removed. */}
+                  {seat && (
+                    <ProviderLoginActions
+                      credential={seat}
+                      testable={Boolean(credential.testable)}
+                      testing={testing}
+                      canUpdate={canUpdate}
+                      canBind={canBind}
+                      canDelete={canDelete}
+                      onAssign={() => setAssignOpen(true)}
+                      onTest={handleTest}
+                      onRelogin={onRelogin ? () => onRelogin(credential) : undefined}
+                      onRevoke={() => setConfirmDelete(true)}
+                    />
+                  )}
+                  {seat && testResult && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 text-[11px]",
+                        testResult.valid ? "text-success" : "text-destructive",
+                      )}
+                    >
+                      {testResult.valid ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                    </span>
+                  )}
                 </div>
               </DetailCard>
             </Appear>
@@ -723,6 +781,24 @@ export function CredentialDetailSheet({
                       </p>
                     </DetailCard>
                   </Appear>
+                )}
+
+                {/* The seat's own sections come first: what a provider login
+                    is asked about — whose, which plan, how much of the window
+                    is left, when it expires — is answered here, and the
+                    value/fields/audit cards below are what it has in common
+                    with every other row. */}
+                {seat && (
+                  <ProviderLoginCards
+                    workspaceId={workspaceId}
+                    credential={seat}
+                    accountId={accountId}
+                    canUpdate={canUpdate}
+                    onLoginChange={(next) => {
+                      setLoginOverride(next)
+                      onRefresh()
+                    }}
+                  />
                 )}
 
                 {/*
@@ -749,7 +825,9 @@ export function CredentialDetailSheet({
                       // brand .cli like the badge above: that flag marks the
                       // CLIs Crewship drives in the container, which excluded
                       // GitHub/GitLab/Vercel despite real probes.
-                      credential.testable && canUpdate ? (
+                      // A seat's Test lives in its header action row (and a
+                      // subscription has none — see ProviderLoginActions).
+                      credential.testable && canUpdate && !seat ? (
                         <span className="inline-flex items-center gap-2">
                           {testResult && (
                             <span
@@ -907,11 +985,25 @@ export function CredentialDetailSheet({
 
                 <Appear order={5}>
                   <DetailCard
-                    title="Used by"
+                    title={seat ? "Pays for" : "Used by"}
                     icon={Users}
                     subtitle={
-                      credential._count_agent_credentials > 0
-                        ? `${credential._count_agent_credentials}`
+                      seat
+                        ? paysForLabel(seat.login.pays_for)
+                        : credential._count_agent_credentials > 0
+                          ? `${credential._count_agent_credentials}`
+                          : undefined
+                    }
+                    action={
+                      seat && canBind ? (
+                        <button type="button" onClick={() => setAssignOpen(true)} className="text-primary hover:underline">
+                          Assign to agent →
+                        </button>
+                      ) : undefined
+                    }
+                    footer={
+                      seat
+                        ? `Add a second ${brand.label} seat to the same scope and it becomes a pool — priority order, then round-robin, rate-limited seats skipped per run.`
                         : undefined
                     }
                   >
@@ -1028,7 +1120,7 @@ export function CredentialDetailSheet({
                       </ul>
                     ) : (
                       <p className="text-[12px] text-muted-foreground">
-                        No agent holds this credential yet.
+                        {seat ? "No agent pays with this seat yet." : "No agent holds this credential yet."}
                       </p>
                     )}
 
@@ -1421,6 +1513,19 @@ export function CredentialDetailSheet({
           </div>
         </div>
       </div>
+
+      {seat && (
+        <AssignLoginDialog
+          workspaceId={workspaceId}
+          credential={seat}
+          open={assignOpen}
+          onOpenChange={setAssignOpen}
+          onAssigned={(agent) => {
+            toast.success(`${agent.name} now pays with ${credential.name}`)
+            onRefresh()
+          }}
+        />
+      )}
 
       <RevealDialog
         workspaceId={workspaceId}
