@@ -549,6 +549,14 @@ an agent's API keys, and the sidecar injects none on its behalf. (When an agent
 run happens in the same crew, that thin proxy is replaced with the agent's full
 one.)
 
+**If the sidecar is switched off instance-wide** (`CREWSHIP_SIDECAR_ENABLED=false`)
+there is no proxy to start — and the step still carries `HTTP_PROXY`, because
+dropping it would silently widen script-step egress on exactly the instances
+that turned the fence off. So on such an instance a script step's outbound calls
+**fail** rather than going direct, and `network_mode` / `allowed_domains` never
+apply to it. Loopback still works. Keep the sidecar on if your routines have
+script steps that reach the network.
+
 ## Approval gates (`type: wait`, kind `approval`)
 
 A `wait` step with `kind: approval` pauses the run for a human decision. The run

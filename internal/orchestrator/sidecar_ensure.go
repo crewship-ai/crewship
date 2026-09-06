@@ -230,9 +230,12 @@ type CrewSidecarSpec struct {
 // what has not happened.
 //
 // It is a no-op when the sidecar is disabled instance-wide
-// (CREWSHIP_SIDECAR_ENABLED=false): there is then no fence to meet and no agent
-// run starts one either. That is logged, not an error — an operator who turned
-// the sidecar off should not find their script steps failing.
+// (CREWSHIP_SIDECAR_ENABLED=false): no agent run starts one there either. That
+// is logged rather than raised, because it is the operator's own setting and
+// not a fault of the step. Note what it means though — the step still carries
+// the proxy environment, so on such an instance a script step's outbound calls
+// fail and network_mode/allowed_domains never apply to it. That is unchanged
+// by this door; it has been the shape since script steps first got the proxy.
 //
 // Read the package-level comment above for exactly what a crew-level start can
 // and cannot hand the sidecar. In short: the full network policy, no
@@ -251,7 +254,14 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 	o.mu.RUnlock()
 
 	if !sidecarEnabled {
-		o.logger.Warn("sidecar disabled instance-wide — a script step's egress is unproxied and the crew allowlist does not apply to it",
+		// NOT "unproxied": RunScript appends SidecarProxyEnv unconditionally
+		// (dropping it when the sidecar is off would silently widen script-step
+		// egress on exactly the instances that turned the fence off), so the
+		// step still points at 127.0.0.1:9119 with nothing listening and its
+		// outbound calls fail rather than going direct. Loopback still works —
+		// NO_PROXY covers it. This predates the crew-level start: the agent
+		// path starts nothing here either.
+		o.logger.Warn("sidecar disabled instance-wide — no proxy is started, and a script step still carries HTTP_PROXY, so its outbound calls fail and the crew allowlist never applies",
 			"crew_id", spec.CrewID, "container_id", shortID(spec.ContainerID))
 		return nil
 	}
