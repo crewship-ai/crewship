@@ -279,6 +279,12 @@ jobs:
         run: bash scripts/test-harness-pr-subset-test.sh
       - name: claim-issue.sh (claim parsing + clone detection)
         run: bash scripts/claim-issue-test.sh
+      # The demo use-case suite (scripts/demo): ShellCheck over every script,
+      # and its runner against stub use cases — that exit 3 maps to SKIP and
+      # never PASS, that every failure is counted, and that a hung use case
+      # cannot hang the run. Server-free.
+      - name: demo use-case suite (ShellCheck + runner verdicts)
+        run: bash scripts/demo-test.sh
       - name: api-contract gate (budget arithmetic + pacing/advisory flags)
         run: bash scripts/api-contract-gate-test.sh
       # summary.py decides what counts as a finding and how many operations

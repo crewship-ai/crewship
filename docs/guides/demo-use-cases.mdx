@@ -1,0 +1,105 @@
+---
+title: "Demo use cases"
+description: "Twelve product use cases as twelve scripts — run one at a time against a seeded install, each narrated for an audience and verified by assertions."
+icon: "list-checks"
+stability: experimental
+tag: Experimental
+---
+
+# Demo use cases
+
+The second version of the demo scripts. The first, `scripts/walkthrough.sh`,
+was one checklist under `set -e`: the first failing line ended it, and there
+was no way to run step six without steps one to five. This version is
+twelve units under `scripts/demo/`, one script per use case, each runnable
+alone and each ending in a verdict.
+
+```bash
+export CREWSHIP_PROFILE=dev2           # or CREWSHIP_SERVER
+scripts/demo/run.sh                    # list the use cases and what each needs
+scripts/demo/run.sh memory-recall      # run one
+scripts/demo/run.sh --all              # run all twelve, one summary table
+scripts/demo/run.sh --all --needs none # only the ones that need no model and no token
+```
+
+The scripts sit on the CLI integration harness under `scripts/test-harness`
+and drive the real `crewship` binary; nothing here reads a database or calls
+the API by hand.
+
+## The use cases
+
+| # | Use case | Needs | What the audience sees |
+|---|---|---|---|
+| 1 | `memory-recall` | model | A fact told to Alex in one session comes back in a fresh one, and `crewship memory search` finds it. |
+| 2 | `delegation` | model | Alex hands a task to Sam and reports Sam's answer; a new agent-to-agent chat appears on Sam. |
+| 3 | `ephemeral-hire` | — | `crewship hire` stages a contractor in a guided crew; the approval and the inbox waitpoint; `crewship hire approve`. |
+| 4 | `credential-escalation` | model | Morgan asks for a token it lacks; a human answers with `crewship escalation supply`, from stdin. The value never comes back out of the API. |
+| 5 | `approval-gate` | model | `approval-gate-demo` drafts a change and parks on `wait(approval)`; `crewship routine waitpoints approve` resumes it to completion. |
+| 6 | `routine-notification` | — | `workspace-digest` (query → transform → notify, no model) completes; the inbox item carries the run id. |
+| 7 | `schedule-wake-gate` | — | A schedule gated by `cost-spike-probe` holds on a real scheduler tick: the probe ran, the digest did not. |
+| 8 | `eval-tiers` | model | `crewship eval scenarios` runs two recipes on the fast and the smart tier. |
+| 9 | `github-injection` | github, model | A bound GitHub token reaches the container as `GH_TOKEN`; `gh auth status` inside it says so; the transcript never holds the value. |
+| 10 | `pack-ci-watch` | github | The [nightly CI watch pack](/guides/demo-packs#nightly-ci-watch): the delivered script, the token-zero probe, `crewship seed verify --pack ci-watch`. |
+| 11 | `pack-docs-drift` | github | The [docs drift pack](/guides/demo-packs#docs-drift) through `seed verify`, with this checkout as the fact-check source. |
+| 12 | `pack-site-replica` | — | The [site replica pack](/guides/demo-packs#site-replica) through `seed verify`; `NOT BUILT` until somebody asks Alex to copy the site. |
+
+**Needs** is what a use case cannot run without. `model` is an ACTIVE
+model-provider credential in the workspace; `github` is `SEED_GITHUB_TOKEN`
+at seed time, or a bound GITHUB credential. A use case whose need is
+missing does not pretend: it exits with a reason and the runner prints
+**SKIP** for it. A green row means the use case ran and every assertion
+held.
+
+## Reading a run
+
+Each use case prints numbered steps, the commands it runs with their
+output, a ✓ or ✗ per assertion, and a 👀 line naming where to look in the
+web UI right now — the inbox, the agent, the Page. It ends with its own
+summary. The runner then prints one table:
+
+```
+USE CASE                 RESULT   TIME  NOTE
+routine-notification     PASS       1s
+schedule-wake-gate       PASS      18s
+pack-ci-watch            SKIP       0s  no GitHub token: set SEED_GITHUB_TOKEN and re-run `crewship seed` …
+```
+
+Exit status is 1 when any use case failed. A SKIP never fails the run;
+the reason is in the NOTE column.
+
+## Before you start
+
+A seeded install and a login: [`crewship seed`](/cli/seed) prints the
+account. The use cases with a model need the seed's model credential to be
+ACTIVE; `eval-tiers` needs `crewship seed --with-evals`. Point the scripts
+at the same server the browser shows (`CREWSHIP_PROFILE` or
+`CREWSHIP_SERVER`) and, when the UI lives on another host than the API,
+set `DEMO_WEB_URL` so the 👀 lines are right.
+
+The packs with a GitHub token (10, 11) need the token at seed time — see
+[Demo packs → Credentials](/guides/demo-packs#credentials). Without it they
+SKIP, and so does `seed verify`.
+
+## Writing one
+
+A use case is a bash script `scripts/demo/uc-NN-<slug>.sh` with a
+four-line header the runner lists from, `source "$HERE/lib.sh"`,
+`preflight`, its steps, and `finish`. `lib.sh` gives it the harness
+(`cs`, `ask_agent`, `assert_*`, `poll_until`, `nonce`) plus the demo layer:
+`demo_step`, `demo_say`, `demo_show`, `demo_ui`, `demo_need` and
+`demo_skip_all`, `run_routine`, `demo_cleanup`. There is no `set -e` on
+purpose: a failed assertion is a red line, and the audience still sees the
+steps after it. `scripts/demo/README.md` has the contract; the existing
+twelve are the examples.
+
+## Known limits
+
+- `crewship routine schedules now` runs the target routine directly and
+  bypasses the wake gate, so use case 7 waits for a real tick instead
+  (under 90 seconds).
+- Use cases 2 and 4 depend on an agent doing what it was asked. Each
+  retries once, then SKIPs with the reason rather than reporting the
+  model's phrasing as a product failure.
+- What `walkthrough.sh` still shows and this does not: nothing. Its steps
+  are use cases 1 to 9 here; step 8 (seeded cron schedules) no longer
+  matches what the seed creates and became use case 7.

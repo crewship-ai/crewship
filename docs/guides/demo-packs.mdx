@@ -138,10 +138,13 @@ crewship seed verify --format json --strict
 ```
 
 See [`crewship seed`](/cli/seed#crewship-seed-verify) for the row-by-row
-contract. In short: scripts byte-identical to the seed, no routine of the
-pack already FAILED in this workspace, the probe against an independent read
-of the source, the agent's counts against the probe, no secret in the report,
-the notification in the inbox, the panels written by that run.
+contract, and [Demo use cases](/guides/demo-use-cases) for the per-pack
+script that shows the delivered files, runs the probe and calls `verify`
+as one unit (`scripts/demo/run.sh pack-ci-watch`). In short: scripts
+byte-identical to the seed, no routine of the pack already FAILED in this
+workspace, the probe against an independent read of the source, the agent's
+counts against the probe, no secret in the report, the notification in the
+inbox, the panels written by that run.
 
 ## Where the packs came from
 
