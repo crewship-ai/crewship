@@ -26,6 +26,12 @@ describe("client message reading", () => {
     expect(screen.getByRole("link", { name: "Open ENG-6" })).toHaveAttribute("href", "/issues/ENG-6")
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull()
   })
+  it("keeps the answer receipt visible when reopened from history", () => {
+    show(message({ kind: "run_needs_human", state: "resolved", resolved_action: "answer", payload: { receipt: { action: "answer", run_id: "resumed-run", seq: 14 } } }))
+    expect(screen.getByTestId("act-receipt")).toHaveTextContent("resumed-run")
+    expect(screen.getByTestId("act-receipt")).toHaveTextContent("event #14")
+    expect(screen.queryByRole("button", { name: "Answer" })).toBeNull()
+  })
   it("makes long code reachable by keyboard", async () => {
     const { container } = show(message({ body_md: "```text\n" + "output_".repeat(150) + "\n```" }))
     await waitFor(() => expect(container.querySelector("pre")).toHaveAttribute("tabindex", "0"))

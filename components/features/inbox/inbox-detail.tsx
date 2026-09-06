@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { EvidenceFacts } from "./evidence-facts"
+import { ActReceipt, receiptOf } from "./run-needs-human-actions"
 import { KindActions } from "./kind-actions"
 import type { InboxActFn } from "./run-needs-human-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
@@ -541,6 +542,7 @@ function fourEyesAgentOf(item: InboxItem): string | null {
 
 export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire, onAct }: InboxDetailProps) {
   const isResolved = item.state === "resolved"
+  const actReceipt = isResolved && item.kind === "run_needs_human" ? receiptOf(item) : null
   const decision = decisionMetaFor(item)
   const identity = entryIdentity(inboxEntry(item), lookup ?? EMPTY_INBOX_LOOKUP)
   const runID = payloadString(item, "pipeline_run_id")
@@ -626,6 +628,7 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
           </section>
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
             {messageLinks.map((l, index) => <Button asChild key={l.href} size="sm" variant={index === 0 ? "default" : "outline"}><Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link></Button>)}
+            {actReceipt && <ActReceipt receipt={actReceipt} />}
             {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
           </div>
         </section>
