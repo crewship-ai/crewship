@@ -50,6 +50,17 @@ func TestCredSecretPaths(t *testing.T) {
 	}
 }
 
+func TestCodexProviderRevokeRequiresSubscriptionMode(t *testing.T) {
+	for _, mode := range []string{"", "api_key", "unknown", "subscription"} {
+		t.Run(mode, func(t *testing.T) {
+			paths := credSecretPaths("writer", "OPENAI_API_KEY", "PROVIDER_LOGIN", "OPENAI", mode, nil)
+			if got, want := len(paths) != 0, mode == "subscription"; got != want {
+				t.Fatalf("mode %q: removes login file = %v, want %v", mode, got, want)
+			}
+		})
+	}
+}
+
 // TestCredSecretPaths_IncludesMultiPartFields is the revoke half of P4 delivery.
 // A multi-part credential writes one file per part (exec_sidecar.go), so a
 // revoke that removed only the primary would leave the secret access key on

@@ -31,7 +31,7 @@ func TestSubscriptionsWithSamePlanRemainSeparate(t *testing.T) {
 		t.Fatalf("usage assigned to wrong login: %v", got)
 	}
 	var cost float64
-	if err := db.QueryRow(`SELECT SUM(cost_usd) FROM cost_ledger`).Scan(&cost); err != nil || cost != 0 {
+	if err := db.QueryRowContext(ctx, `SELECT SUM(cost_usd) FROM cost_ledger`).Scan(&cost); err != nil || cost != 0 {
 		t.Fatalf("subscription rows must not carry marginal dollar charges: %v %v", cost, err)
 	}
 	other, err := SubscriptionUsageByPlan(ctx, db, "ws-other", time.Time{}, time.Time{})

@@ -11,11 +11,11 @@ import (
 // 202 Accepted and an empty body.
 //
 // The regression this pins is not cosmetic. An empty 200 carries no
-// Content-Type, and Codex's Rust MCP client treats that as a fatal transport
+// Content-Type, and a strict Rust MCP client treats that as a fatal transport
 // error ("Unexpected content type: Some(\"missing-content-type; body: \")"),
 // kills the worker and drops the server — so memory, routines and notify were
-// announced at initialize and gone one message later, in every Codex run. The
-// TypeScript client Claude Code uses accepts the empty 200, which is why the
+// announced at initialize and gone one message later. A more permissive
+// TypeScript client accepts the empty 200, which is why the
 // two adapters silently disagreed about whether Crewship's own tools exist.
 func TestMCPNotificationsAckWith202AndNoBody(t *testing.T) {
 	handlers := map[string]func(*Server) (string, func(http.ResponseWriter, *http.Request)){
@@ -42,7 +42,7 @@ func TestMCPNotificationsAckWith202AndNoBody(t *testing.T) {
 				handler(w, req)
 
 				if w.Code != http.StatusAccepted {
-					t.Errorf("status = %d, want 202 — an empty 200 has no Content-Type and Codex drops the server over it", w.Code)
+					t.Errorf("status = %d, want 202 — strict clients reject an empty 200 without Content-Type", w.Code)
 				}
 				if body := w.Body.String(); body != "" {
 					t.Errorf("body = %q, want empty", body)

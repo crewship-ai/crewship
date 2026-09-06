@@ -219,11 +219,11 @@ func (s *Server) handleMemoryMCPForAgent(w http.ResponseWriter, r *http.Request,
 		// Accepted with an EMPTY body.
 		//
 		// This used to be 200. An empty 200 has no Content-Type either, and
-		// that is exactly what Codex's Rust MCP client refuses: it logs
+		// that is exactly what a strict Rust MCP client refuses: it logs
 		// `Unexpected content type: Some("missing-content-type; body: ")`,
 		// kills the transport worker and drops the server — so every
 		// crewship-hosted tool (memory, routines, notify) vanished from a
-		// Codex run right after a successful initialize. Claude Code's
+		// run right after a successful initialize. A more permissive
 		// TypeScript client tolerates the empty 200, which is why the two
 		// adapters silently disagreed about whether our tools exist (#2428).
 		w.WriteHeader(http.StatusAccepted)
