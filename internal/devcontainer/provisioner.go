@@ -359,9 +359,13 @@ func NewProvisioner(docker CommitClient, installer *Installer, downloader *Featu
 func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *provisionOpts) (AggregatedRequirements, []FeatureRecord) {
 	resolved, _, err := p.resolveFeatures(ctx, cfg)
 	if err != nil {
-		p.logger.Warn("cache hit: could not resolve features for the runtime requirements; feature-declared mounts and flags are absent",
+		// A half answer (no mounts, no privileged flag) would be stored as
+		// the crew's contract; an empty one leaves the previous build's
+		// contract in place (the job keeps the column when nothing new is
+		// known). Say so, and return nothing.
+		p.logger.Warn("cache hit: could not resolve features; keeping the crew's previous runtime requirements",
 			"error", err)
-		resolved = nil
+		return AggregatedRequirements{}, nil
 	}
 	req := p.aggregateFeatureRequirements(resolved, cfg.ContainerEnv)
 	req.ContainerEnv = ensureAgentToolPath(req.ContainerEnv)
@@ -405,8 +409,12 @@ func featureStepLabel(featureID string) string {
 // features identify themselves by; matches `feature.Metadata.ID` after
 // download for every feature we've seen in the wild.
 func featureLeafID(ref string) string {
-	// Drop a tag suffix.
-	if idx := strings.LastIndex(ref, ":"); idx >= 0 {
+	ref = strings.TrimSpace(ref)
+	// Drop a digest suffix first ("…/claude-code@sha256:ab…"), then a tag.
+	if idx := strings.Index(ref, "@"); idx >= 0 {
+		ref = ref[:idx]
+	}
+	if idx := strings.LastIndex(ref, ":"); idx >= 0 && idx > strings.LastIndex(ref, "/") {
 		ref = ref[:idx]
 	}
 	if idx := strings.LastIndex(ref, "/"); idx >= 0 {
@@ -488,7 +496,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
-	if len(cfg.Features) == 0 && cfg.PostCreateCommand == nil && len(cfg.ContainerEnv) == 0 && miseConfig == "" {
+	if len(cfg.Features) == 0 && cfg.PostCreateCommand == nil && len(cfg.ContainerEnv) == 0 && miseConfig == "" && len(o.requiredBinaries) == 0 {
 		p.logger.Debug("skipping provisioning - config has no customizations")
 		if o.onProgress != nil {
 			o.onProgress(1, 1, "No customizations needed")
@@ -636,18 +644,20 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		return fail("post_create", err)
 	}
 
-	// 6c. Every adapter CLI the crew's agents need must resolve now, from the
-	// PATH the agent will actually get (tool dirs first, then the image's).
-	if err := p.verifyRequiredBinaries(ctx, containerID, o.requiredBinaries, p.installer.execInContainerAsUser); err != nil {
-		return fail(ProvStepVerifyBinaries, err)
-	}
-
-	// 7. Write containerEnv (aggregated from features + root-level) to
-	// /etc/environment. Root-level wins on key conflict. The agent's own tool
-	// dirs (mise shims, ~/.local/bin) go first — see tool_path.go.
+	// 7. Aggregate containerEnv (features + root-level; root wins on a key
+	// conflict) with the agent's own tool dirs first — see tool_path.go.
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
 	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
 	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)
+
+	// 7a. Every adapter CLI the crew's agents need must resolve now, from the
+	// PATH the agent will actually get — the aggregated one, feature dirs
+	// included, not the temp container's bare PATH.
+	if err := p.verifyRequiredBinaries(ctx, containerID, o.requiredBinaries, requirements.ContainerEnv["PATH"], p.installer.execInContainerAsUser); err != nil {
+		return fail(ProvStepVerifyBinaries, err)
+	}
+
+	// 7b. Write the aggregated containerEnv to /etc/environment.
 	// Append root-level postStartCommand hooks after feature hooks — user
 	// intent wins over feature defaults.
 	requirements.PostStartCommands = append(
@@ -680,9 +690,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// The aggregated env goes into the image config too (`docker commit
 	// --change 'ENV …'`), not only into /etc/environment: a non-login exec
 	// never reads /etc/environment, and the image must be usable on its own.
+	// `${containerEnv:X}` references are expanded against the base image's
+	// env here — a committed ENV line is applied to the image config as-is,
+	// with no build-time substitution the way a Dockerfile ENV gets.
 	_, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
-		Changes:   imageEnvChanges(requirements.ContainerEnv),
+		Changes:   imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)),
 	})
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))

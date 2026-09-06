@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
@@ -56,8 +58,7 @@ func crewAgentAdapters(ctx context.Context, db *sql.DB, crewID string) ([]string
 // An image built before adapter verification existed records no binaries and
 // therefore never covers anything: one rebuild brings it under the guarantee.
 func crewImageCoversAdapter(ctx context.Context, db *sql.DB, crewID, workspaceID, adapter string) (built, covered bool, err error) {
-	cli, ok := devcontainer.AdapterCLIFor(adapter)
-	if !ok {
+	if _, ok := devcontainer.AdapterCLIFor(adapter); !ok {
 		return false, true, nil // unknown adapter: validated elsewhere, nothing to install
 	}
 	var cachedImage, reqJSON sql.NullString
@@ -74,20 +75,57 @@ func crewImageCoversAdapter(ctx context.Context, db *sql.DB, crewID, workspaceID
 	if !cachedImage.Valid || cachedImage.String == "" {
 		return false, false, nil
 	}
+	return true, devcontainer.ImageCoversAdapter(parseCachedRequirements(reqJSON), adapter), nil
+}
+
+// parseCachedRequirements decodes the crews.cached_requirements column; nil
+// when absent or unreadable — which ImageCoversAdapter reads as "verified for
+// nothing", so a rebuild rewrites it.
+func parseCachedRequirements(reqJSON sql.NullString) *devcontainer.AggregatedRequirements {
+	if !reqJSON.Valid || strings.TrimSpace(reqJSON.String) == "" {
+		return nil
+	}
 	var req devcontainer.AggregatedRequirements
-	if reqJSON.Valid && reqJSON.String != "" {
-		if jerr := json.Unmarshal([]byte(reqJSON.String), &req); jerr != nil {
-			// Unreadable requirements are treated as "not verified" — the
-			// rebuild rewrites them.
-			return true, false, nil
-		}
+	if err := json.Unmarshal([]byte(reqJSON.String), &req); err != nil {
+		return nil
 	}
-	for _, b := range req.AdapterBinaries {
-		if b == cli.Binary {
-			return true, true, nil
-		}
+	return &req
+}
+
+// crewImageReady is the dispatch-time truth about a crew's image: whether a
+// build is needed at all (config customizations, or agents whose adapter CLI
+// must be installed), whether the cached image is present, and whether it
+// was verified for every live agent's adapter. It is what EnsureProvisioned
+// and the agent-create/update hooks consult, so an agent added by any path —
+// wizard, hire, template, onboarding, manifest — is covered before it runs.
+func crewImageReady(ctx context.Context, db *sql.DB, crewID, workspaceID string, imagePresent func(string) bool) (needsBuild bool, ready bool, reason string, err error) {
+	var devcontainerCfg, miseCfg, cachedImage, reqJSON sql.NullString
+	err = db.QueryRowContext(ctx,
+		`SELECT devcontainer_config, mise_config, cached_image, cached_requirements
+		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewID, workspaceID).Scan(&devcontainerCfg, &miseCfg, &cachedImage, &reqJSON)
+	if err != nil {
+		return false, false, "", fmt.Errorf("load crew for provisioning check: %w", err)
 	}
-	return true, false, nil
+	adapters, err := crewAgentAdapters(ctx, db, crewID)
+	if err != nil {
+		return false, false, "", err
+	}
+	effectiveCfg := database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid)
+	needsBuild = crewNeedsProvision(effectiveCfg, miseCfg.String) || len(devcontainer.RequiredAdapterCLIs(adapters)) > 0
+	if !needsBuild {
+		return false, true, "no build needed", nil
+	}
+	if !cachedImage.Valid || cachedImage.String == "" {
+		return true, false, "no image built yet", nil
+	}
+	if imagePresent != nil && !imagePresent(cachedImage.String) {
+		return true, false, "cached image " + cachedImage.String + " is not present locally", nil
+	}
+	if !devcontainer.ImageCoversAdapters(parseCachedRequirements(reqJSON), adapters) {
+		return true, false, "image " + cachedImage.String + " was not verified for the crew's adapter CLIs", nil
+	}
+	return true, true, "", nil
 }
 
 // ensureCrewImageHasAdapter enqueues a rebuild of the crew when its cached

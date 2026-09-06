@@ -167,15 +167,32 @@ func TestEnsureAdapterCLIs(t *testing.T) {
 	})
 }
 
-func TestFeatureIDFromRef(t *testing.T) {
+func TestFeatureLeafID_StripsTagAndDigest(t *testing.T) {
 	for ref, want := range map[string]string{
 		"ghcr.io/devcontainers-extra/features/claude-code:2":         "claude-code",
 		"ghcr.io/devcontainers-extra/features/claude-code@sha256:ab": "claude-code",
 		"ghcr.io/devcontainers/features/common-utils":                "common-utils",
-		"claude-code": "claude-code",
+		"localhost:5000/features/python:1":                           "python",
+		"claude-code":                                                "claude-code",
 	} {
-		if got := featureIDFromRef(ref); got != want {
+		if got := featureLeafID(ref); got != want {
 			t.Errorf("%s: got %q want %q", ref, got, want)
 		}
+	}
+}
+
+func TestImageCoversAdapter(t *testing.T) {
+	req := &AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+	if !ImageCoversAdapter(req, "CLAUDE_CODE") || ImageCoversAdapter(req, "CODEX_CLI") {
+		t.Error("coverage by binary name is wrong")
+	}
+	if !ImageCoversAdapter(req, "NOPE") || !ImageCoversAdapter(nil, "") {
+		t.Error("an unknown or empty adapter needs nothing and must count as covered")
+	}
+	if ImageCoversAdapter(nil, "CLAUDE_CODE") {
+		t.Error("no requirements (no build, or a pre-verification build) must not count as covered")
+	}
+	if !ImageCoversAdapters(req, []string{"CLAUDE_CODE", "claude_code"}) || ImageCoversAdapters(req, []string{"CLAUDE_CODE", "GEMINI_CLI"}) {
+		t.Error("ImageCoversAdapters is not the conjunction")
 	}
 }

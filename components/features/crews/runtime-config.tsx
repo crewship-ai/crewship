@@ -1439,7 +1439,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
            * comes from the IMAGE, and the image has the shims dir ahead of
            * /usr/local/bin:
            *
-           *   PATH=…:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:…
+           *   PATH=…:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:…
            *
            * Measured, not reasoned: replaying InstallMise + InstallMiseTools
            * on a clean devcontainers/javascript-node:22-bookworm and pinning

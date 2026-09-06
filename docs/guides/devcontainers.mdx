@@ -198,7 +198,7 @@ mise tools are installed as the `agent` user (UID 1001) under `/opt/mise` — da
 
 ### The agent's PATH
 
-The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. The runtime prepends the same directories even when a login PATH was captured at build time: a login shell does not see mise's shims either. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
+The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin`, `/opt/crewship/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. At container start the runtime merges three sources into one PATH — these directories, the build's aggregated `containerEnv` PATH (feature-declared directories and the image's own, with `${containerEnv:PATH}` expanded), and the login PATH captured at build time — so nothing a feature or a profile script added is lost, and a captured login PATH that does not know about mise's shims cannot hide them. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
 
 ### Adapter CLIs are installed and verified
 
@@ -206,7 +206,9 @@ An agent on `CLAUDE_CODE` needs `claude` in the image; `CODEX_CLI` needs `codex`
 
 After the install steps the build runs `command -v` for every required binary as the agent user, with the agent's PATH. A binary that did not land fails the build with its name — `adapter CLI not installed in this image: claude` — instead of the first chat message failing with "No such file or directory".
 
-The verified binaries are recorded with the image. Creating an agent on an adapter the image was not verified for, or moving an agent to one, enqueues a rebuild; a message sent meanwhile waits for the build and is delivered when it is ready.
+The verified binaries are recorded with the image, and the dispatch gate reads them: before an agent runs — from chat, an issue, a routine, a container start — the crew's image must be present and verified for the adapter of every live agent, or a rebuild is enqueued and the message waits for it. So an agent added by any path (the wizard, a hire, a template, onboarding, a manifest) is covered before it first runs, and a plain base image with no features still gets the build its agents need. A crew whose image was built before this verification existed rebuilds once. Creating or moving an agent onto an uncovered adapter enqueues the rebuild right away rather than at the first message.
+
+Binaries the build installs on the agent's behalf that mise does not carry (the Factory `droid` CLI) land in `/opt/crewship/bin`, an image-resident directory owned by the agent user and on its PATH.
 
 ---
 

@@ -402,6 +402,14 @@ func devcontainerNeedsProvision(cfgJSON, miseJSON string) bool {
 	return len(cfg.Features) > 0 || cfg.PostCreateCommand != nil
 }
 
+// adapterNeedsImage reports whether an adapter execs a CLI the build must
+// install — i.e. whether the crew needs a provisioned image for it even
+// when its devcontainer config declares nothing.
+func adapterNeedsImage(adapter string) bool {
+	_, known := devcontainer.AdapterCLIFor(adapter)
+	return known
+}
+
 func generateMsgID() string {
 	b := make([]byte, 8)
 	now := time.Now().UnixNano()
@@ -580,7 +588,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// fix for the dead crewship-cache:* tag: that tag exists in no registry,
 	// so without rebuilding it the run path would ImagePull it and fail with
 	// "pull access denied", leaving the crew permanently broken.
-	needsProvision := info.DevcontainerConfig != "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig)
+	// A crew needs a built image when its config customises one, or when this
+	// agent's adapter execs a CLI the build has to install (claude, codex, …).
+	// The adapter-driven need applies only where a provisioner exists: with
+	// none (no Docker client), the runtime image is whatever the operator
+	// gave us, exactly as before.
+	needsProvision := (info.DevcontainerConfig != "" && devcontainerNeedsProvision(info.DevcontainerConfig, info.MiseConfig)) ||
+		(b.provisioning != nil && adapterNeedsImage(info.CLIAdapter))
 	cachedImageMissing := false
 	if needsProvision && info.CachedImage != "" {
 		if checker, ok := b.container.(imagePresenceChecker); ok {
@@ -596,10 +610,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			}
 		}
 	}
-	if needsProvision && (info.CachedImage == "" || cachedImageMissing) {
+	// An image that exists but was never verified for this agent's adapter
+	// CLI is rebuilt the same way a missing one is: the agent was added (by
+	// any path) after the last build, or the build predates verification.
+	adapterUncovered := b.provisioning != nil && needsProvision && info.CachedImage != "" && !cachedImageMissing &&
+		!devcontainer.ImageCoversAdapter(info.CachedRequirements, info.CLIAdapter)
+	if needsProvision && (info.CachedImage == "" || cachedImageMissing || adapterUncovered) {
 		if cachedImageMissing {
 			b.logger.Info("cached image missing locally; re-provisioning",
 				"crew_slug", info.CrewSlug, "crew_id", info.CrewID, "cached_image", info.CachedImage)
+		} else if adapterUncovered {
+			b.logger.Info("cached image not verified for the agent's adapter CLI; rebuilding",
+				"crew_slug", info.CrewSlug, "crew_id", info.CrewID, "cached_image", info.CachedImage, "adapter", info.CLIAdapter)
 		} else {
 			b.logger.Info("agent start auto-triggering devcontainer build",
 				"crew_slug", info.CrewSlug, "crew_id", info.CrewID)

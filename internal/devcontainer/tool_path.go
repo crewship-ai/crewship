@@ -23,13 +23,17 @@ import (
 // /etc/environment (commit path) and the runtime container env all carry it.
 var AgentToolPathDirs = []string{
 	"/home/agent/.local/bin",
+	AgentBinDir,
 	MiseShimsDir,
 }
 
-// defaultImagePath is the PATH assumed when the config declares none — the
-// standard Debian/Ubuntu devcontainer base PATH, mirroring the runtime's
-// defaultAgentPath so the two never disagree about where `sh` lives.
-const defaultImagePath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+// imagePathRef is what stands in for the image's own PATH when the config
+// declares none: the devcontainer reference the Dockerfile generator turns
+// into `$PATH`, the runtime expands against the image env at container
+// create, and the commit path resolves against the base image before
+// `docker commit`. A hard-coded Debian default here would replace a base
+// image's own PATH (golang, python images add /go/bin, /usr/local/go/bin …).
+const imagePathRef = "${containerEnv:PATH}"
 
 // ensureAgentToolPath returns env with PATH starting with AgentToolPathDirs
 // (deduplicated, existing order otherwise kept) and with the MISE_* variables
@@ -47,7 +51,7 @@ func ensureAgentToolPath(env map[string]string) map[string]string {
 	}
 	current := strings.TrimSpace(env["PATH"])
 	if current == "" {
-		current = defaultImagePath
+		current = imagePathRef
 	}
 	present := map[string]bool{}
 	for _, d := range strings.Split(current, ":") {
@@ -71,16 +75,20 @@ func ensureAgentToolPath(env map[string]string) map[string]string {
 // imageEnvChanges renders env as `ENV KEY=value` Dockerfile instructions for
 // `docker commit --change`, sorted for a stable image config. Values are
 // double-quoted with Go escaping, which the Dockerfile parser accepts, so a
-// value with spaces or quotes cannot break the instruction. Keys that are
-// not valid environment names, and values with control characters, are
-// skipped rather than committed broken.
-func imageEnvChanges(env map[string]string) []string {
+// value with spaces or quotes cannot break the instruction. `${containerEnv:X}`
+// and `${X}` references are expanded against imageEnv (the base image's env):
+// a committed ENV line gets no build-time substitution, unlike a Dockerfile
+// ENV. A reference that imageEnv cannot answer is dropped. Keys that are not
+// legal environment names (envKeyRe, the same rule as the Dockerfile path)
+// and values with control characters are skipped rather than committed
+// broken.
+func imageEnvChanges(env, imageEnv map[string]string) []string {
 	if len(env) == 0 {
 		return nil
 	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
-		if !isEnvKey(k) || strings.ContainsAny(env[k], "\n\r\x00") {
+		if !envKeyRe.MatchString(k) || strings.ContainsAny(env[k], "\n\r\x00") {
 			continue
 		}
 		keys = append(keys, k)
@@ -88,22 +96,30 @@ func imageEnvChanges(env map[string]string) []string {
 	sort.Strings(keys)
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, "ENV "+k+"="+strconv.Quote(env[k]))
+		out = append(out, "ENV "+k+"="+strconv.Quote(expandEnvRefs(env[k], imageEnv)))
 	}
 	return out
 }
 
-func isEnvKey(k string) bool {
-	if k == "" {
-		return false
-	}
-	for i, r := range k {
-		switch {
-		case r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
-		case r >= '0' && r <= '9' && i > 0:
-		default:
-			return false
+// expandEnvRefs replaces `${containerEnv:X}` and `${X}` with lookup[X]; an
+// unknown X becomes the empty string, and the PATH separators around it are
+// collapsed so "a:${containerEnv:PATH}" with no image PATH is "a", not "a:".
+func expandEnvRefs(v string, lookup map[string]string) string {
+	v = strings.ReplaceAll(v, "${containerEnv:", "${")
+	for {
+		start := strings.Index(v, "${")
+		if start < 0 {
+			break
 		}
+		end := strings.Index(v[start:], "}")
+		if end < 0 {
+			break
+		}
+		name := v[start+2 : start+end]
+		v = v[:start] + lookup[name] + v[start+end+1:]
 	}
-	return true
+	for strings.Contains(v, "::") {
+		v = strings.ReplaceAll(v, "::", ":")
+	}
+	return strings.Trim(v, ":")
 }

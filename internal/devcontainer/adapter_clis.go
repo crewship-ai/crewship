@@ -46,7 +46,14 @@ var adapterCLIs = []AdapterCLI{
 	{Adapter: "GEMINI_CLI", Binary: "gemini", MiseTool: "gemini-cli"},
 	{Adapter: "OPENCODE", Binary: "opencode", MiseTool: "opencode"},
 	{Adapter: "CURSOR_CLI", Binary: "cursor-agent", MiseTool: "cursor-agent"},
-	{Adapter: "FACTORY_DROID", Binary: "droid", InstallCommand: "curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh && bash /tmp/droid-install.sh && rm -f /tmp/droid-install.sh"},
+	// The Factory installer copies the binary to $HOME/.local/bin, which is
+	// under the home volume and therefore invisible at runtime; it is run
+	// with a throwaway HOME and the binary moved to the image-resident,
+	// agent-owned AgentBinDir (agent_home.go), which is on the agent's PATH.
+	{Adapter: "FACTORY_DROID", Binary: "droid", InstallCommand: "curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh" +
+		" && HOME=/tmp/droid-home sh /tmp/droid-install.sh" +
+		" && install -m 0755 /tmp/droid-home/.local/bin/droid " + AgentBinDir + "/droid" +
+		" && rm -rf /tmp/droid-install.sh /tmp/droid-home"},
 }
 
 // AdapterCLIFor returns the CLI an adapter execs. ok is false for an adapter
@@ -174,7 +181,7 @@ func featureProvidesBinary(cfg *Config, a AdapterCLI) bool {
 		return false
 	}
 	for ref := range cfg.Features {
-		id := featureIDFromRef(ref)
+		id := featureLeafID(ref)
 		for _, want := range a.FeatureIDs {
 			if id == want {
 				return true
@@ -184,17 +191,34 @@ func featureProvidesBinary(cfg *Config, a AdapterCLI) bool {
 	return false
 }
 
-// featureIDFromRef extracts "claude-code" from
-// "ghcr.io/devcontainers-extra/features/claude-code:2" (or "@sha256:…").
-func featureIDFromRef(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if i := strings.LastIndex(ref, "/"); i >= 0 {
-		ref = ref[i+1:]
+// ImageCoversAdapter reports whether an image whose verified binaries are
+// req.AdapterBinaries can run an agent on the given adapter. An unknown or
+// empty adapter has nothing to install and counts as covered; a nil req (no
+// build yet, or one from before adapter verification existed) covers nothing.
+func ImageCoversAdapter(req *AggregatedRequirements, adapter string) bool {
+	cli, ok := AdapterCLIFor(adapter)
+	if !ok {
+		return true
 	}
-	if i := strings.IndexAny(ref, ":@"); i >= 0 {
-		ref = ref[:i]
+	if req == nil {
+		return false
 	}
-	return ref
+	for _, b := range req.AdapterBinaries {
+		if b == cli.Binary {
+			return true
+		}
+	}
+	return false
+}
+
+// ImageCoversAdapters is ImageCoversAdapter over a crew's agents.
+func ImageCoversAdapters(req *AggregatedRequirements, adapters []string) bool {
+	for _, a := range adapters {
+		if !ImageCoversAdapter(req, a) {
+			return false
+		}
+	}
+	return true
 }
 
 // SortedBinaries is a small helper for callers that store the verified set.

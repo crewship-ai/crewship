@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -130,5 +132,61 @@ func TestUpdateAgentAdapterRebuilds(t *testing.T) {
 	}
 	if len(fake.calls) != 1 || fake.calls[0] != rig.crewID {
 		t.Errorf("adapter change must rebuild the crew once: %v", fake.calls)
+	}
+}
+
+// Every adapter the handlers accept must have an install recipe in the
+// devcontainer catalogue — a fifth adapter added to validCLIAdapters alone
+// would be accepted and never installed.
+func TestValidCLIAdaptersHaveInstallRecipes(t *testing.T) {
+	for adapter := range validCLIAdapters {
+		if _, ok := devcontainer.AdapterCLIFor(adapter); !ok {
+			t.Errorf("%s is accepted by the agent handlers but has no adapter CLI recipe", adapter)
+		}
+	}
+}
+
+// crewImageReady is the dispatch gate's truth table.
+func TestCrewImageReady(t *testing.T) {
+	present := func(string) bool { return true }
+	absent := func(string) bool { return false }
+	tests := []struct {
+		name         string
+		cfg          string // devcontainer_config column ("" = NULL → read-time default)
+		agents       []string
+		cachedImage  string
+		reqs         string
+		imagePresent func(string) bool
+		wantNeeds    bool
+		wantReady    bool
+	}{
+		{"no agents, bare image, no customisation", `{"image":"debian"}`, nil, "", "", present, false, true},
+		{"plain image but an agent needs claude: build required", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "", "", present, true, false},
+		{"image built and verified", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, present, true, true},
+		{"image built for claude, codex agent added later", `{"image":"debian"}`, []string{"CLAUDE_CODE", "CODEX_CLI"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, present, true, false},
+		{"image from before verification", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"loginPath":"/usr/bin"}`, present, true, false},
+		{"image gone from the daemon", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, absent, true, false},
+		{"NULL config defaults to the claude-code image and still needs verification", "", []string{"CLAUDE_CODE"}, "crewship-cache:a", "", present, true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newCovACRig(t)
+			if tc.cfg != "" {
+				if _, err := rig.db.Exec(`UPDATE crews SET devcontainer_config = ? WHERE id = ?`, tc.cfg, rig.crewID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setCrewImage(t, rig, tc.cachedImage, tc.reqs)
+			for i, a := range tc.agents {
+				createAgentWith(t, rig, "ag"+string(rune('a'+i)), a)
+			}
+			needs, ready, _, err := crewImageReady(context.Background(), rig.db, rig.crewID, rig.wsID, tc.imagePresent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if needs != tc.wantNeeds || ready != tc.wantReady {
+				t.Errorf("needsBuild=%v ready=%v, want %v/%v", needs, ready, tc.wantNeeds, tc.wantReady)
+			}
+		})
 	}
 }

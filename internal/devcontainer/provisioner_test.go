@@ -274,7 +274,7 @@ func TestProvision_CacheHitReturnsRequirements(t *testing.T) {
 	if req.ContainerEnv["TZ"] != "UTC" {
 		t.Errorf("operator env dropped: %v", req.ContainerEnv)
 	}
-	if !strings.HasPrefix(req.ContainerEnv["PATH"], "/home/agent/.local/bin:/opt/mise/data/shims:") {
+	if !strings.HasPrefix(req.ContainerEnv["PATH"], "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:") {
 		t.Errorf("tool PATH missing: %q", req.ContainerEnv["PATH"])
 	}
 	if req.ContainerEnv["MISE_DATA_DIR"] != "/opt/mise/data" {

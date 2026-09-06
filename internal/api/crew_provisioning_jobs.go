@@ -1148,8 +1148,11 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 	}
 	updateArgs = append(updateArgs, crewID, workspaceID)
 
+	// COALESCE: a result that carries no requirements (a cache hit whose
+	// feature resolution failed) keeps the previous build's contract rather
+	// than erasing it to NULL.
 	_, err = h.db.ExecContext(updateCtx,
-		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = ?, `+
+		`UPDATE crews SET cached_image = ?, config_hash = ?, cached_requirements = COALESCE(?, cached_requirements), `+
 			setFeatures+
 			`updated_at = datetime('now')
 		 WHERE id = ? AND workspace_id = ?`,

@@ -364,7 +364,7 @@ func (p *Provisioner) recordProvisionSteps(
 	}
 	// Recorded as a RUN layer: a missing adapter CLI fails the build here,
 	// with the binary named, rather than the first chat message.
-	if err := p.verifyRequiredBinaries(ctx, noContainer, requiredBinaries, rec.exec); err != nil {
+	if err := p.verifyRequiredBinaries(ctx, noContainer, requiredBinaries, containerEnv["PATH"], rec.exec); err != nil {
 		return fmt.Errorf("verify adapter binaries: %w", err)
 	}
 	if err := p.writeAggregatedContainerEnv(ctx, noContainer, containerEnv, rec.exec); err != nil {
