@@ -85,3 +85,68 @@ func logRuntimeGaps(logger *slog.Logger, d DetectResult) {
 			"runtime", d.Runtime, "version", d.Version, "control", g.Control, "detail", g.Detail)
 	}
 }
+
+// ConformanceVerdict is what the conformance harness should do about one
+// measured control, once the known-gap registry has had its say.
+type ConformanceVerdict string
+
+const (
+	// ConformanceHonoured — the runtime delivered the control. Nothing to do.
+	ConformanceHonoured ConformanceVerdict = "honoured"
+	// ConformanceRegression — the runtime dropped a control nobody has
+	// recorded as droppable here. This is the case the harness exists to
+	// catch, and the only one that should redden a build.
+	ConformanceRegression ConformanceVerdict = "regression"
+	// ConformanceKnownGap — the runtime dropped a control this registry
+	// already documents as undeliverable on it. Expected, and reported in
+	// full, but not a failure: the registry's own contract is that Crewship
+	// runs on every platform it can and says what it cannot do there
+	// (see the Gap doc comment). A build that fails on a gap we have already
+	// written down and cannot fix teaches nobody anything; it only trains
+	// people to ignore the job.
+	ConformanceKnownGap ConformanceVerdict = "known-gap"
+	// ConformanceStaleGap — the runtime DID deliver a control the registry
+	// claims it drops. The registry is the thing that is wrong, and silence
+	// here is how it rots: KnownRuntimeGaps feeds `crewship doctor`, the
+	// /system/runtime payload and the startup WARN, so a stale entry tells
+	// operators their agents cannot read memory when they can.
+	ConformanceStaleGap ConformanceVerdict = "stale-gap"
+)
+
+// ClassifyConformance judges one measured control against the gaps recorded
+// for the runtime under test.
+//
+// This is the join the harness was missing. KnownRuntimeGaps documents itself
+// as "measured by the runtime-conformance harness against a real daemon", but
+// the harness never read it back, so the two contradicted each other: the
+// registry said podman below 5 cannot carry gid 1002 and upgrading is the only
+// remedy, while the harness failed the build over exactly that, nightly, on a
+// runner where it could not be otherwise. Both statements were right and the
+// pair was useless.
+//
+// control is the registry's Control name for the probe ("GroupAdd"); a probe
+// that tracks no registry control passes an empty string and is judged on
+// honoured alone. The matching Gap is returned when one applies, so the caller
+// can print the operator-facing detail rather than restating the field name.
+func ClassifyConformance(control string, honoured bool, gaps []Gap) (ConformanceVerdict, Gap) {
+	var match Gap
+	found := false
+	if control != "" {
+		for _, g := range gaps {
+			if strings.EqualFold(strings.TrimSpace(g.Control), strings.TrimSpace(control)) {
+				match, found = g, true
+				break
+			}
+		}
+	}
+	switch {
+	case honoured && found:
+		return ConformanceStaleGap, match
+	case honoured:
+		return ConformanceHonoured, Gap{}
+	case found:
+		return ConformanceKnownGap, match
+	default:
+		return ConformanceRegression, Gap{}
+	}
+}
