@@ -9,11 +9,18 @@ it: its own crew, its own label, its own project.
 export CREWSHIP_PROFILE=dev2            # or CREWSHIP_SERVER
 export CREWSHIP=/tmp/crewship-2-dev     # the binary dev.sh built (default: ./crewship at the repo root)
 
+./demo.sh init                          # after a nuke: demo@crewship.ai / password123, login, model credential — no data
 ./demo.sh list                          # the steps, in order
 ./demo.sh plan  01-issues               # dry-run
 ./demo.sh apply 01-issues               # create / update, never delete
 ./demo.sh reset 01-issues               # delete + recreate — run it again from scratch
 ```
+
+`init` is the v2 counterpart of what the v1 seed does before its data: the
+admin user, a CLI login (re-pinning the profile's workspace, which a nuke
+invalidates), and one model credential from `SEED_ANTHROPIC_API_KEY` in the
+repo's `.env.local` — nothing else. A fresh dev slot is therefore
+`./dev.sh nuke --yes`, `./demo.sh init`, `./demo.sh apply 00-crew`.
 
 | Step | What it puts in the workspace | What to check in the UI |
 |---|---|---|

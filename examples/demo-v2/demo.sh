@@ -5,6 +5,7 @@
 #   ./demo.sh plan  <step>          dry-run: what apply would create/update/delete
 #   ./demo.sh apply <step>          create or update the step's resources (never deletes)
 #   ./demo.sh reset <step>          delete + recreate them — "run it again from scratch"
+#   ./demo.sh init                  fresh instance: the demo user, a login, the model credential
 #   ./demo.sh bind-model            bind the workspace's model credential to the Lab agents
 #
 # apply/reset of 00-crew also binds the model credential and builds the
@@ -16,6 +17,14 @@
 #
 # Target: CREWSHIP_PROFILE / CREWSHIP_SERVER as for any crewship command.
 # Binary: CREWSHIP (default: ./crewship at the repo root, else PATH).
+#
+# `init` is the v2 counterpart of what `crewship seed` does before its data:
+# bootstrap demo@crewship.ai / password123 (DEMO_EMAIL / DEMO_PASSWORD), log
+# the CLI in, and create the one model credential every agent needs from
+# SEED_ANTHROPIC_API_KEY (read from the repo's .env.local when unset) — an
+# OAuth token becomes CLAUDE_CODE_OAUTH_TOKEN, an API key ANTHROPIC_API_KEY,
+# the same names the v1 seed uses. It seeds NO data: crews, issues and the
+# rest come from the steps.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +60,69 @@ resolve() {
       return
     fi
   done
+}
+
+DEMO_EMAIL="${DEMO_EMAIL:-demo@crewship.ai}"
+DEMO_PASSWORD="${DEMO_PASSWORD:-password123}"
+
+# target_server — the URL the CLI would talk to: CREWSHIP_SERVER, else the
+# profile's stored server, else the CLI default.
+target_server() {
+  if [[ -n "${CREWSHIP_SERVER:-}" ]]; then printf '%s' "$CREWSHIP_SERVER"; return; fi
+  local s
+  s="$(cs server list --format json 2>/dev/null | jq -r --arg p "${CREWSHIP_PROFILE:-}" \
+        'if $p == "" then (.[]? | select(.active == true) | .server) else (.[]? | select(.name == $p) | .server) end' 2>/dev/null | head -1)"
+  printf '%s' "${s:-http://localhost:8080}"
+}
+
+init_instance() {
+  local server; server="$(target_server)"
+  printf '== init %s as %s ==\n' "$server" "$DEMO_EMAIL"
+  local out
+  if out="$(printf '%s' "$DEMO_PASSWORD" | cs init --server "$server" --email "$DEMO_EMAIL" --name "Demo User" --password-stdin 2>&1)"; then
+    echo "  + bootstrapped $DEMO_EMAIL"
+  elif grep -qi "already" <<<"$out"; then
+    echo "  = instance already initialised — logging in"
+  else
+    printf '%s\n' "$out" | sed 's/^/  /'; return 1
+  fi
+  local login=(login --server "$server" --email "$DEMO_EMAIL" --password-stdin)
+  [[ -n "${CREWSHIP_PROFILE:-}" ]] && login+=(--profile "$CREWSHIP_PROFILE")
+  if printf '%s\n' "$DEMO_PASSWORD" | cs "${login[@]}" >/dev/null 2>&1; then
+    echo "  + logged in${CREWSHIP_PROFILE:+ (profile $CREWSHIP_PROFILE)}"
+  else
+    echo "  ! login failed" >&2; return 1
+  fi
+  # A profile keeps the workspace id of the previous database; after a nuke
+  # that id no longer exists and every call answers 403 "Not a member".
+  # Re-pin to the workspace the bootstrap just created.
+  local ws
+  ws="$(cs workspace list --format json 2>/dev/null | jq -r 'first(.[]?) | .slug // .id // empty' 2>/dev/null)"
+  if [[ -n "$ws" ]]; then
+    local use=(workspace use "$ws")
+    [[ -n "${CREWSHIP_PROFILE:-}" ]] && use+=(--profile "$CREWSHIP_PROFILE")
+    cs "${use[@]}" >/dev/null 2>&1 && echo "  + workspace $ws"
+  fi
+  cs whoami 2>/dev/null | sed 's/^/  /'
+
+  printf '== model credential ==\n'
+  if [[ -n "$(cs credential list --format json 2>/dev/null | jq -r '.[]? | select(.provider == "ANTHROPIC" and .status == "ACTIVE") | .name' 2>/dev/null | head -1)" ]]; then
+    echo "  = an ACTIVE ANTHROPIC credential exists"; return 0
+  fi
+  local key="${SEED_ANTHROPIC_API_KEY:-}"
+  if [[ -z "$key" && -f "$ROOT/.env.local" ]]; then
+    key="$(sed -nE 's/^SEED_ANTHROPIC_API_KEY=["'"'"']?([^"'"'"']*)["'"'"']?$/\1/p' "$ROOT/.env.local" | tail -1)"
+  fi
+  if [[ -z "$key" ]]; then
+    echo "  ! SEED_ANTHROPIC_API_KEY not set and not in $ROOT/.env.local — no model credential created" >&2; return 1
+  fi
+  local name type
+  if [[ "$key" == sk-ant-oat* ]]; then name=CLAUDE_CODE_OAUTH_TOKEN; type=AI_CLI_TOKEN; else name=ANTHROPIC_API_KEY; type=API_KEY; fi
+  if printf '%s' "$key" | cs credential create --name "$name" --type "$type" --provider ANTHROPIC --env-var-name "$name" --value-stdin >/dev/null 2>&1; then
+    echo "  + $name ($type)"
+  else
+    echo "  ! could not create $name" >&2; return 1
+  fi
 }
 
 # bind_model — the crew manifest declares no credential slot (see
@@ -104,6 +176,7 @@ case "$cmd" in
       printf '\n== provision %s ==\n' "$CREW_SLUG"; cs crew provision "$CREW_SLUG" || rc=1
     fi
     exit $rc ;;
+  init) init_instance ;;
   bind-model) bind_model ;;
   *) echo "unknown command '$cmd'" >&2; list >&2; exit 2 ;;
 esac
