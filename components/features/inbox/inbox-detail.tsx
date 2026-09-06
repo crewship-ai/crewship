@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, CircleDot, Clock, Eye, EyeOff, Link2, MessageSquare, ScrollText, Users, MoreHorizontal } from "lucide-react"
 
-import { Appear, DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { DetailCard, Pill, type DetailTone } from "@/components/ui/detail"
+import { InboxMessageSurface, messageSection, messageDivider } from "./inbox-message-surface"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -25,8 +26,8 @@ import { KindActions } from "./kind-actions"
 import type { InboxActFn } from "./run-needs-human-actions"
 import { WaitpointRunDetail } from "./waitpoint-run-detail"
 import {
-  absolute, attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, jumpFor, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
-  payloadString, payloadStrings, safeChatURL, since, subjectOf, type WorkspaceRole,
+  absolute, attentionBadge, canRole, deciderCopy, decisionMetaFor, expiresIn, linkToOpen, payloadNumber, remainingLabel, riskLevelOf,
+  payloadString, payloadStrings, safeChatURL, since, type WorkspaceRole,
 } from "./inbox-derive"
 
 /**
@@ -175,11 +176,11 @@ function ContextDetails({ payload }: { payload: Record<string, unknown> }) {
   const entries = visibleContextEntries(payload)
   if (entries.length === 0) return null
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[11px]">
+    <dl className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] text-[11px]">
       {entries.map(([k, v]) => {
         return (
           <div key={k} className="contents">
-            <dt className="text-muted-foreground/70">{humanizeKey(k)}</dt>
+            <dt className="text-muted-foreground">{humanizeKey(k)}</dt>
             <dd className="min-w-0 break-words text-foreground/80">
               {typeof v === "string" ? (
                 looksSecret(k, v) ? (
@@ -227,7 +228,7 @@ function MessageBody({ body }: { body: string }) {
   // paint, and a body this long is long whatever it renders to.
   const long = body.length > BODY_CLAMP_CHARS
 
-  if (!long) return <MarkdownContent compact>{body}</MarkdownContent>
+  if (!long) return <MarkdownContent>{body}</MarkdownContent>
 
   return (
     <div className="flex flex-col gap-2">
@@ -237,7 +238,7 @@ function MessageBody({ body }: { body: string }) {
           !expanded && "max-h-[16rem] overflow-hidden",
         )}
       >
-        <MarkdownContent compact>{body}</MarkdownContent>
+        <MarkdownContent>{body}</MarkdownContent>
         {/* Fades rather than cutting mid-glyph, so the clamp reads as
             "there is more" instead of as a rendering fault. */}
         {!expanded && (
@@ -257,8 +258,9 @@ function MessageBody({ body }: { body: string }) {
 }
 
 export function DecisionCard({
-  item, role, onResolve, onRefresh, onDenyHire, crewHref, onAct,
+  item, role, onResolve, onRefresh, onDenyHire, crewHref, onAct, embedded = false,
 }: {
+  embedded?: boolean
   item: InboxItem
   role: WorkspaceRole | null
   onResolve: (action: string) => void | Promise<void>
@@ -267,6 +269,7 @@ export function DecisionCard({
   crewHref?: string | null
   onAct?: InboxActFn
 }) {
+  const Frame = embedded ? "section" : DetailCard
   const meta = decisionMetaFor(item)
   if (!meta) return null
 
@@ -275,10 +278,7 @@ export function DecisionCard({
   const mins = expiresIn(item)
 
   return (
-    <DetailCard
-      tone={!isResolved && meta.tone === "warn" ? "warn" : "default"}
-      className={!isResolved && meta.tone === "warn" ? "bg-warn/[.06]" : undefined}
-    >
+    <Frame className={embedded ? messageSection : undefined}>
       <div data-testid="decision-card" className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <AlertTriangle className={cn("h-4 w-4", !isResolved && meta.tone === "warn" ? "text-warn" : "text-muted-foreground")} />
@@ -328,10 +328,10 @@ export function DecisionCard({
 
         {/* The question, not the server's "Agent escalation:" prefix — the
             kind pill beside the heading already says what this is. */}
-        <div className="text-lg font-semibold leading-snug">{entryTitle(inboxEntry(item))}</div>
+        <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entryTitle(inboxEntry(item))}</h1>
 
         <DecisionSubject item={item} />
-        {item.body_md && <div className="rounded-lg border border-border/60 bg-background/30 p-4"><MessageBody key={item.id} body={item.body_md} /></div>}
+        {item.body_md && <div className="py-2"><MessageBody key={item.id} body={item.body_md} /></div>}
 
         {/* Ahead of the buttons: whether this person can resolve it at all
             decides whether pressing one is worth anything. The same component
@@ -339,6 +339,7 @@ export function DecisionCard({
             other surface with a one-click Approve on the same escalation, and
             it used to offer it in silence. Every value is the server's
             read-time answer; the row never re-derives it from the payload. */}
+        {payloadString(item, "kind") === "routine_proposal" && <RoutineProposalDiff workspaceId={item.workspace_id} slug={payloadString(item, "slug")} fromVersion={payloadNumber(item, "from_version")} toVersion={payloadNumber(item, "to_version")} />}
         <FourEyesNotice
           required={item.second_approver_required === true}
           byWorkspace={item.second_approver_by_workspace === true}
@@ -369,21 +370,21 @@ export function DecisionCard({
         {!isResolved && !allowed && (
           <p className="type-meta text-muted-foreground">
             {deciderCopy(meta.requires)}
-            {" — you can still archive it."}
+
           </p>
         )}
         {allowed && !isResolved && (
-          <p className="type-meta text-muted-foreground-soft">
+          <p className="type-meta text-muted-foreground">
             {deciderCopy(meta.requires)} · you can
           </p>
         )}
         {meta.missingEndpoint && (
-          <p className="type-meta rounded-md border border-dashed border-border/60 px-2.5 py-1.5 font-mono text-muted-foreground-soft">
+          <p className="type-meta rounded-md border border-dashed border-border/60 px-2.5 py-1.5 font-mono text-muted-foreground">
             missing on the server: {meta.missingEndpoint}
           </p>
         )}
       </div>
-    </DetailCard>
+    </Frame>
   )
 }
 
@@ -436,7 +437,7 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
           spelled out because that is what a person checks before saying yes. */}
       {link && (
         <div className="flex flex-col gap-1">
-          <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">What you are approving</span>
+          <span className="type-meta uppercase tracking-wide text-muted-foreground">What you are approving</span>
           <div className="flex items-center gap-2.5 rounded-lg border border-primary/35 bg-primary/[0.06] px-3 py-2" data-testid="decision-link">
             <Link2 className="h-4 w-4 shrink-0 text-primary-hover" />
             <span className="flex min-w-0 flex-1 flex-col">
@@ -452,7 +453,7 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
       {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5">{chips}</div>}
       {asks.map((a) => (
         <div key={a.key} className="flex flex-wrap items-baseline gap-1.5">
-          <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">
+          <span className="type-meta uppercase tracking-wide text-muted-foreground">
             {a.label}
           </span>
           {a.values.map((v) => (
@@ -473,26 +474,6 @@ export function DecisionSubject({ item }: { item: InboxItem }) {
           ))}
         </ul>
       )}
-    </div>
-  )
-}
-
-/**
- * One cell of the identity strip. No field caption: the strip used to print
- * the payload key under every value (`sender_name`, `crew_id`, `created_at`),
- * which is documentation for a developer, not identity for a client.
- */
-function Definition({
-  label, value, mono,
-}: {
-  label: string
-  value: React.ReactNode
-  mono?: boolean
-}) {
-  return (
-    <div className="min-w-0 px-4 py-2">
-      <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{label}</div>
-      <div className={cn("type-row mt-0.5 flex min-w-0 items-center gap-1.5 truncate", mono && "font-mono text-[12px]")}>{value}</div>
     </div>
   )
 }
@@ -567,18 +548,19 @@ function fourEyesAgentOf(item: InboxItem): string | null {
 export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, onRefresh, lookup, onDenyHire, onAct }: InboxDetailProps) {
   const isResolved = item.state === "resolved"
   const decision = decisionMetaFor(item)
-  const jump = jumpFor(item)
   const identity = entryIdentity(inboxEntry(item), lookup ?? EMPTY_INBOX_LOOKUP)
-  const subject = identity.actor ?? subjectOf(item)
   const runID = payloadString(item, "pipeline_run_id")
   const kind = entryKindPill(inboxEntry(item))
-  const crewID = crewIdOf(item)
   const crew = identity.crew
   const agent = identity.agent
   const crewName = crew?.name ?? agent?.crew?.name ?? null
   const crewSlug = crew?.slug ?? agent?.crew?.slug ?? null
   const crewHref = crewSlug ? entityHref({ kind: "crew", slug: crewSlug }) : null
   const links = originLinks(item, lookup)
+  // Message navigation is rendered once here, alongside the existing Dismiss action.
+  const messageLinks = item.kind === "message" ? links : []
+  const relatedLinks = item.kind === "message" ? [] : links
+  const contentLabel = item.kind === "failed_run" ? "What happened" : item.kind === "run_needs_human" ? "Your input is needed" : item.payload?.issue_identifier ? "Task update" : item.sender_type === "pipeline" ? "Routine update" : "Message"
 
   // Decision items are source-managed: the inbox PATCH rejects anything but
   // "read" while the SOURCE still exists, so they cannot be blind-archived.
@@ -611,169 +593,66 @@ export function InboxDetail({ item, role, onResolve, onArchive, onMarkUnread, on
     item.kind !== "escalation"
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* A message and a failed run have no decision to frame, but they DO
-          have actions — Open chat, Open ENG-6, Retry, Dismiss. Rendering
-          KindActions only inside the decision card is what made Dismiss
-          disappear for exactly the rows whose only affordance it was. */}
-      <Appear order={0}>
-        {decision ? (
-          <DecisionCard item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} onAct={onAct} />
-        ) : (
-          <DetailCard>
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-lg font-semibold leading-snug">{entryTitle(inboxEntry(item))}</div>
-                <AttentionBadge item={item} />
-              </div>
-              <DecisionSubject item={item} />
-              {item.body_md && <MessageBody key={item.id} body={item.body_md} />}
-              <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={isResolved} onAct={onAct} />
-            </div>
-          </DetailCard>
-        )}
-      </Appear>
-
-      {/* Identity, as names and links: the agent, its crew, what kind of ask
-          this is and when it arrived. It used to print the crew's cuid under
-          a `crew_id` caption and the category as `agents.escalation`. */}
-      <Appear order={1}>
-        <DetailCard bare>
-          <div className="grid grid-cols-2 divide-x divide-hairline sm:grid-cols-4">
-            <Definition
-              label={agent && item.payload?.mission_id ? "Assignee" : subject.kind === "agent" ? "Agent" : "From"}
-              value={agent ? (
-                <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className="h-8 w-8 shrink-0 rounded-lg" />
-                  <span className="truncate">{agent.name}</span>
-                  {agent.role_title && <span className="truncate text-[11px] text-muted-foreground">{agent.role_title}</span>}
-                </Link>
-              ) : (
-                <span className="inline-flex min-w-0 items-center gap-2"><EntryAvatar entry={inboxEntry(item)} lookup={lookup ?? EMPTY_INBOX_LOOKUP} /><span className="truncate">{identity.name}</span></span>
-              )}
-            />
-            <Definition
-              label="Crew"
-              value={crewName ? (
-                <Link href={crewHref ?? "#"} className="flex min-w-0 items-center gap-1.5 hover:underline">
-                  <CrewIcon icon={crew?.icon || "users"} color={crew?.color ?? agent?.crew?.color} size="sm" />
-                  <span className="truncate">{crewName}</span>
-                </Link>
-              ) : crewID ? (
-                // A crew id the lookup cannot name: still loading, or a crew
-                // this list does not carry. Not "No crew".
-                <span className="text-muted-foreground">{lookup?.ready ? "A crew this list does not show" : "…"}</span>
-              ) : (
-                <span className="text-muted-foreground">No crew</span>
-              )}
-            />
-            <Definition label="Kind" value={<StatusPill tone={kind.tone} label={kind.label} />} />
-            <Definition
-              label={isResolved ? "Resolved" : "Arrived"}
-              value={isResolved
-                ? <><StatusPill status={item.resolved_action ?? "resolved"} /><span className="text-muted-foreground">{since(item.resolved_at)}</span></>
-                : <>{absolute(item.created_at)}<span className="text-muted-foreground">· {since(item.created_at)}</span></>}
-            />
+    <InboxMessageSurface>
+      <header className={cn(messageSection, "flex items-start gap-3 border-b border-border/60 !py-3")}>
+        <span className="mt-0.5"><EntryAvatar entry={inboxEntry(item)} lookup={lookup ?? EMPTY_INBOX_LOOKUP} compact /></span>
+        <div className="min-w-0 flex-1 text-body">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            {agent ? <Link href={entityHref({ kind: "agent", slug: agent.slug })} className="font-medium hover:underline">{agent.name}</Link> : <span className="font-medium">{identity.name}</span>}
+            {agent && !!item.payload?.mission_id && <span className="text-micro text-muted-foreground">Assignee</span>}
+            {crewName && crewHref && <Link href={crewHref} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"><CrewIcon icon={crew?.icon || "users"} color={crew?.color ?? agent?.crew?.color} size="sm" className="h-4 w-4 rounded [&_svg]:h-2.5 [&_svg]:w-2.5" />{crewName}</Link>}
           </div>
-        </DetailCard>
-      </Appear>
+          <time dateTime={item.created_at} title={absolute(item.created_at)} className="text-micro text-muted-foreground">{absolute(item.created_at)} · {since(item.created_at)}</time>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Message options" className="h-9 w-9 shrink-0"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {!isResolved && <DropdownMenuItem onSelect={onMarkUnread}>Mark unread</DropdownMenuItem>}
+            {archivable && <DropdownMenuItem onSelect={() => void onArchive()}>Archive</DropdownMenuItem>}
+            {restorable && <DropdownMenuItem onSelect={onMarkUnread}>Restore</DropdownMenuItem>}
+            {isResolved && !restorable && <DropdownMenuItem disabled>Saved in History</DropdownMenuItem>}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
 
-      {/* Where this came from — the chat it was raised in, the run it
-          paused, the issue, the crew — every one a link (README §5). */}
-      {links.length > 0 && (
-        <Appear order={2}>
-          <DetailCard bare>
-            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
-              <span className="type-meta uppercase tracking-wide text-muted-foreground-soft">Where this came from</span>
-              {links.map((l) => (
-                <Button asChild key={l.href} size="xs" variant="outline" className="gap-1.5">
-                  <Link href={l.href}><l.icon className="h-3 w-3" />{l.label}</Link>
-                </Button>
-              ))}
-            </div>
-          </DetailCard>
-        </Appear>
-      )}
-
-      {item.kind === "waitpoint" && runID !== "" && (
-        <Appear order={2}>
-          <details className="rounded-xl border border-border/60 bg-card">
-            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-body font-medium"><Clock className="h-4 w-4 text-muted-foreground" />How the run got here</summary>
-            <div className="px-4 py-3">
-              <WaitpointRunDetail
-                workspaceId={item.workspace_id}
-                pipelineRunId={runID}
-                inboxResolved={isResolved}
-              />
-            </div>
-          </details>
-        </Appear>
-      )}
-
-      {/* A routine proposal is a decision about a CHANGE, so the change
-          is on the item rather than three clicks away in another
-          surface. Only for that kind — every other inbox item has no
-          versions to compare. */}
-      {payloadString(item, "kind") === "routine_proposal" && (
-        <RoutineProposalDiff
-          workspaceId={item.workspace_id}
-          slug={payloadString(item, "slug")}
-          fromVersion={payloadNumber(item, "from_version")}
-          toVersion={payloadNumber(item, "to_version")}
-        />
-      )}
-
-      {/* Counted on the VISIBLE keys, not on the payload: a row whose payload
-          is nothing but reason/source/step_id would otherwise draw a Context
-          heading above an empty box. */}
-      {item.payload && visibleContextEntries(item.payload).length > 0 && (
-        <Appear order={4}>
-          <details className="rounded-xl border border-border/60 bg-card">
-            <summary className="cursor-pointer px-4 py-3 text-body font-medium">Additional context</summary>
-            <div className="border-t border-border/60 p-4"><ContextDetails payload={item.payload} /></div>
-          </details>
-        </Appear>
-      )}
-
-      <Appear order={5}>
-        <DetailCard bare>
-          <div className="type-meta flex flex-wrap items-center gap-3 px-4 py-2 text-muted-foreground-soft">
-            {!isResolved ? (
-              <>
-                <button type="button" onClick={onMarkUnread} className="hover:text-foreground">
-                  Mark unread
-                </button>
-                {archivable && (
-                  <>
-                    <span>·</span>
-                    <button type="button" onClick={() => void onArchive()} className="hover:text-foreground">
-                      Archive
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <span>
-                {item.resolved_action === "archived" ? "Archived" : "Resolved"} {since(item.resolved_at ?? item.updated_at)}
-                {item.resolved_action && item.resolved_action !== "archived" && ` · ${item.resolved_action}`}
-              </span>
-            )}
-            {restorable && (
-              <button type="button" onClick={onMarkUnread} className="hover:text-foreground">
-                Restore
-              </button>
-            )}
-            {jump && links.length === 0 && (
-              <Button asChild size="xs" variant="ghost" className="ml-auto gap-1.5 text-primary">
-                <Link href={jump.href}>
-                  <jump.icon className="h-3 w-3" />
-                  {jump.label}
-                </Link>
-              </Button>
-            )}
+      {decision ? (
+        <DecisionCard embedded item={item} role={role} onResolve={onResolve} onRefresh={onRefresh} onDenyHire={onDenyHire} crewHref={crewHref} onAct={onAct} />
+      ) : (
+        <section className={messageSection}>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <StatusPill tone={kind.tone} label={kind.label} />
+            <AttentionBadge item={item} />
+            {isResolved && <StatusPill status={item.resolved_action ?? "resolved"} />}
           </div>
-        </DetailCard>
-      </Appear>
-    </div>
+          <h1 className="text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{entryTitle(inboxEntry(item))}</h1>
+          <div className="mt-4"><DecisionSubject item={item} /></div>
+          <section className="py-3" aria-label={contentLabel}>
+            {(item.kind === "failed_run" || item.kind === "run_needs_human") && <h2 className="mb-2 text-body font-medium">{contentLabel}</h2>}
+            {item.body_md ? <MessageBody key={item.id} body={item.body_md} /> : <p className="text-body text-muted-foreground">No message content was included.</p>}
+          </section>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+            {messageLinks.map((l, index) => <Button asChild key={l.href} size="sm" variant={index === 0 ? "default" : "outline"}><Link href={l.href}><l.icon className="mr-1.5 h-3.5 w-3.5 shrink-0" />{l.label}</Link></Button>)}
+            {!isResolved && <KindActions item={item} onResolve={onResolve} onRefresh={onRefresh} disabled={false} onAct={onAct} hideMessageLinks />}
+          </div>
+        </section>
+      )}
+
+      {relatedLinks.length > 0 && <nav aria-label="Related work" className={cn(messageSection, messageDivider, "flex flex-wrap items-center gap-3 !py-3")}>
+        {relatedLinks.map((l) => <Link key={l.href} href={l.href} className="inline-flex min-h-8 items-center gap-1.5 text-body text-primary-hover hover:underline"><l.icon className="h-3.5 w-3.5" />{l.label}</Link>)}
+      </nav>}
+
+
+      {item.kind === "waitpoint" && runID !== "" && <details className={messageDivider}>
+        <summary className="cursor-pointer px-4 py-3 text-body text-muted-foreground sm:px-6"><Clock className="mr-1.5 inline h-3.5 w-3.5" />How the run got here</summary>
+        <div className={messageSection}><WaitpointRunDetail workspaceId={item.workspace_id} pipelineRunId={runID} inboxResolved={isResolved} /></div>
+      </details>}
+      {item.payload && visibleContextEntries(item.payload).length > 0 && <details className={messageDivider}>
+        <summary className="cursor-pointer px-4 py-3 text-body text-muted-foreground sm:px-6">Additional context</summary>
+        <div className={messageSection}><ContextDetails payload={item.payload} /></div>
+      </details>}
+      {isResolved && <footer className={cn(messageSection, messageDivider, "!py-3 text-label text-muted-foreground")}>
+        {item.resolved_action === "archived" ? "Archived" : "Resolved"} {since(item.resolved_at ?? item.updated_at)}{item.resolved_action && item.resolved_action !== "archived" && ` · ${item.resolved_action}`}
+      </footer>}
+    </InboxMessageSurface>
   )
 }

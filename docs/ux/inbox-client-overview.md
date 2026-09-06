@@ -42,3 +42,28 @@ rows. Updates use 20px identities and two compact lines (title, owner/age),
 without card borders, extra kind badges or repeated Open/Unread labels.
 Unread remains an accessible dot; decisions retain kind/outcome and expiry.
 Touch targets follow the shared sidebar kit. Message bodies are unchanged.
+
+
+## Unified message reading surface
+
+Details now use one responsive document surface instead of separate metadata,
+origin and action cards. The compact identity header precedes the subject and
+14px Markdown body. Source links appear once for messages; archived messages
+retain navigation without stale action buttons. Archive, unread and restore
+live in an accessible options menu with the existing source-managed guards.
+Approvals, mission signals and grouped incidents share the same surface and
+spacing. Routine proposal diffs and approval impact precede decision actions.
+Grouped incidents expose their original individual notices. Technical context
+and run steps remain expandable; secrets retain display redaction.
+
+No bodies are rewritten, no summaries are fabricated and no new result-fetch
+contract is introduced. An issue-review notification that contains only the
+issue title still links to the issue for its full output. Code and tables are
+keyboard reachable and horizontally scroll within the document; long text
+wraps. Actions wrap on narrow screens, and entrance motion respects reduced
+motion. Navigation does not approve or dismiss an item.
+
+Validation: 311 frontend tests, full Go test/vet, lint and production export.
+Browser fixtures cover all ten inbox kinds with long Markdown/code/context,
+plus pending and completed queue approvals at desktop, tablet and phone sizes.
+Public real-data smoke checks are run separately after deployment.

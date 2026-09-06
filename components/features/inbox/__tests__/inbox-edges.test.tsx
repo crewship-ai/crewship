@@ -244,8 +244,9 @@ describe("the detail's own edges", () => {
         onResolve={noop} onArchive={noop} onMarkUnread={noop} onRefresh={noop}
       />,
     )
-    expect(screen.getByRole("button", { name: /Restore/ })).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /^Archive$/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    expect(screen.getByRole("menuitem", { name: /Restore/ })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /^Archive$/ })).not.toBeInTheDocument()
   })
 
   it("does not offer an invalid Restore for source-managed history", () => {
@@ -256,7 +257,8 @@ describe("the detail's own edges", () => {
         onResolve={noop} onArchive={noop} onMarkUnread={noop} onRefresh={noop}
       />,
     )
-    expect(screen.queryByRole("button", { name: /Restore/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole("button", { name: "Message options" }), { key: "ArrowDown" })
+    expect(screen.queryByRole("menuitem", { name: /Restore/ })).not.toBeInTheDocument()
   })
 })
 
