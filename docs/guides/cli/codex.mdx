@@ -26,7 +26,8 @@ has for API keys (`CODEX_API_KEY`) *overrides* a stored login.
 | Credential | Type · provider | What the agent receives | Billing |
 |---|---|---|---|
 | OpenAI API key (`sk-…`, `sk-svcacct-…`) | `API_KEY` · `OPENAI` | a disposable `OPENAI_API_KEY` plus a per-run `model_provider` block pointing Codex at the sidecar; the real key is injected there | metered |
-| ChatGPT plan (Plus / Pro / Business) | `AI_CLI_TOKEN` · `OPENAI` | `$CODEX_HOME/auth.json`, rendered from the login with a **placeholder refresh token** | `flat_rate`, plan read from the token |
+| ChatGPT plan (Plus / Pro / Business) | `PROVIDER_LOGIN` · `OPENAI` · mode `subscription` (or the older `AI_CLI_TOKEN` · `OPENAI` blob) | `$CODEX_HOME/auth.json`, rendered from the login with a **placeholder refresh token**; the server refreshes the access token centrally | `flat_rate`, plan read from the token |
+| OpenAI API key stored as a seat | `PROVIDER_LOGIN` · `OPENAI` · mode `api_key` | exactly as `API_KEY` above | metered |
 
 ### API key
 
@@ -52,9 +53,18 @@ Run `codex login` on your own machine, then store the **whole**
 
 ```bash
 crewship credential create --name "ChatGPT Plus · jana" \
-  --type AI_CLI_TOKEN --provider OPENAI --value-stdin < ~/.codex/auth.json
+  --type PROVIDER_LOGIN --provider OPENAI --mode subscription --from-file ~/.codex/auth.json
 crewship credential assign "ChatGPT Plus · jana" codex-reviewer --env-var-name OPENAI_API_KEY
+crewship credential get "ChatGPT Plus · jana"       # plan, owner, expiry, refresh state
 ```
+
+The server splits the file: the access token becomes the credential's value,
+`refresh_token` and `id_token` become secret parts (the refresh token is
+sealed — never revealed, never delivered), `account_id`, `plan`, `expires_at`
+and `mode` identifier parts. The older form — the whole file stored as
+`--type AI_CLI_TOKEN --provider OPENAI` — still works and is delivered the
+same way, but it has no owner, no expiry badge and no central refresh; see
+[Provider logins](/guides/credentials#provider-logins).
 
 The slot name on `assign` is the binding's identity, not something Codex
 reads — the login is never exported as a variable.

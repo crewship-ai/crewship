@@ -476,6 +476,26 @@
             "nullable": true,
             "type": "string"
           },
+          "pays_with": {
+            "nullable": true,
+            "properties": {
+              "credential_id": {
+                "type": "string"
+              },
+              "login": {
+                "$ref": "#/components/schemas/ProviderLogin"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "credential_id",
+              "name",
+              "login"
+            ],
+            "type": "object"
+          },
           "role_title": {
             "nullable": true,
             "type": "string"
@@ -2658,6 +2678,9 @@
             },
             "type": "array"
           },
+          "login": {
+            "$ref": "#/components/schemas/ProviderLogin"
+          },
           "mcp_used": {
             "type": "boolean"
           },
@@ -2854,6 +2877,10 @@
             "type": "array"
           },
           "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mode": {
             "nullable": true,
             "type": "string"
           },
@@ -8744,6 +8771,136 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "ProviderLogin": {
+        "properties": {
+          "delivery": {
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "target"
+            ],
+            "type": "object"
+          },
+          "expires_at": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "owner_email": {
+            "nullable": true,
+            "type": "string"
+          },
+          "owner_user_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "pays_for": {
+            "properties": {
+              "agents": {
+                "type": "integer"
+              },
+              "crews": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "agents",
+              "crews"
+            ],
+            "type": "object"
+          },
+          "plan": {
+            "nullable": true,
+            "type": "string"
+          },
+          "plan_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "quota": {
+            "nullable": true,
+            "properties": {
+              "resets_at": {
+                "type": "string"
+              },
+              "window_5h_pct": {
+                "type": "integer"
+              },
+              "window_weekly_pct": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
+          "refresh": {
+            "properties": {
+              "error": {
+                "nullable": true,
+                "type": "string"
+              },
+              "last_at": {
+                "nullable": true,
+                "type": "string"
+              },
+              "next_at": {
+                "nullable": true,
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "supported": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "supported",
+              "status",
+              "last_at",
+              "next_at",
+              "error"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "mode",
+          "provider",
+          "plan",
+          "plan_label",
+          "owner_user_id",
+          "owner_email",
+          "expires_at",
+          "refresh",
+          "quota",
+          "delivery",
+          "pays_for"
+        ],
+        "type": "object"
+      },
+      "ProviderLoginRefreshResponse": {
+        "properties": {
+          "login": {
+            "$ref": "#/components/schemas/ProviderLogin"
+          }
+        },
+        "required": [
+          "login"
+        ],
         "type": "object"
       },
       "RecipeInstallRequest": {
@@ -36678,6 +36835,14 @@
         "parameters": [
           {
             "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "paginate",
             "required": false,
             "schema": {
@@ -38842,6 +39007,182 @@
               }
             },
             "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/refresh": {
+      "post": {
+        "operationId": "post_api_v1_credentials_credentialId_refresh",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderLoginRefreshResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

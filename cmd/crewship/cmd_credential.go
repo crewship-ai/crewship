@@ -43,6 +43,74 @@ type credRow struct {
 	SecurityLevelLabel    *string `json:"security_level_label"`
 	CreatedByActorType    *string `json:"created_by_actor_type"`
 	ProvisionedForService *string `json:"provisioned_for_service"`
+	// Login is the provider-login object (PRD provider-logins §10.1), present
+	// on a PROVIDER_LOGIN row and on a legacy AI_CLI_TOKEN / API_KEY of a
+	// model provider. Drives `--kind provider_login`'s table.
+	Login *credLogin `json:"login,omitempty"`
+}
+
+// credLogin mirrors the API's login object — the fields an operator asks
+// about at the terminal. Values never travel here; the shape carries none.
+type credLogin struct {
+	Mode        string  `json:"mode"`
+	Provider    string  `json:"provider"`
+	Plan        *string `json:"plan"`
+	PlanLabel   *string `json:"plan_label"`
+	OwnerUserID *string `json:"owner_user_id"`
+	OwnerEmail  *string `json:"owner_email"`
+	ExpiresAt   *string `json:"expires_at"`
+	Refresh     struct {
+		Supported bool    `json:"supported"`
+		Status    string  `json:"status"`
+		LastAt    *string `json:"last_at"`
+		NextAt    *string `json:"next_at"`
+		Error     *string `json:"error"`
+	} `json:"refresh"`
+	Delivery struct {
+		Kind   string `json:"kind"`
+		Target string `json:"target"`
+	} `json:"delivery"`
+	PaysFor struct {
+		Agents int `json:"agents"`
+		Crews  int `json:"crews"`
+	} `json:"pays_for"`
+}
+
+// loginPairs renders a login object as detail rows, appended to a
+// credential's or an agent's detail view.
+func loginPairs(l *credLogin) [][]string {
+	if l == nil {
+		return nil
+	}
+	str := func(p *string, fallback string) string {
+		if p == nil || *p == "" {
+			return fallback
+		}
+		return *p
+	}
+	refresh := l.Refresh.Status
+	if !l.Refresh.Supported {
+		refresh = "not supported (" + l.Mode + ")"
+	} else {
+		if l.Refresh.LastAt != nil {
+			refresh += ", last " + *l.Refresh.LastAt
+		}
+		if l.Refresh.NextAt != nil {
+			refresh += ", next " + *l.Refresh.NextAt
+		}
+		if l.Refresh.Error != nil {
+			refresh += " — " + *l.Refresh.Error
+		}
+	}
+	return [][]string{
+		{"Mode", l.Mode},
+		{"Plan", str(l.PlanLabel, str(l.Plan, "—"))},
+		{"Owner", str(l.OwnerEmail, str(l.OwnerUserID, "—"))},
+		{"Expires", str(l.ExpiresAt, "unknown / never")},
+		{"Refresh", refresh},
+		{"Delivery", l.Delivery.Kind + " " + l.Delivery.Target},
+		{"Pays for", fmt.Sprintf("%d agents, %d crews", l.PaysFor.Agents, l.PaysFor.Crews)},
+	}
 }
 
 // decodeCredentialListPage tolerates BOTH the legacy bare-array response and
@@ -91,6 +159,10 @@ every page. --search and --tag filter server-side.`,
 		all, _ := flags.GetBool("all")
 		offset, _ := flags.GetInt("offset")
 		offsetSet := flags.Changed("offset")
+		kind, _ := flags.GetString("kind")
+		if kind != "" && kind != "provider_login" {
+			return cli.WithExitCode(fmt.Errorf("--kind must be provider_login (the only kind the server filters on)"), cli.ExitValidation)
+		}
 
 		if limitSet && limit <= 0 {
 			return fmt.Errorf("--limit must be a positive integer, got %d", limit)
@@ -130,6 +202,9 @@ every page. --search and --tag filter server-side.`,
 			}
 			if tag != "" {
 				q.Set("tag", tag)
+			}
+			if kind != "" {
+				q.Set("kind", kind)
 			}
 			if cur != "" {
 				q.Set("cursor", cur)
@@ -187,6 +262,39 @@ every page. --search and --tag filter server-side.`,
 		// the service slug so operators see *what* the auto-managed
 		// row belongs to without a second `crewship credential get`.
 		f := newFormatter()
+		if kind == "provider_login" {
+			// The Providers tab at the terminal: one row per seat, with what
+			// distinguishes a login from a secret — mode, plan, owner, expiry,
+			// refresh state, and how many agents it pays for.
+			headers := []string{"ID", "NAME", "PROVIDER", "MODE", "PLAN", "OWNER", "EXPIRES", "REFRESH", "AGENTS"}
+			var rows [][]string
+			for _, c := range creds {
+				l := c.Login
+				if l == nil {
+					l = &credLogin{Mode: "—", Provider: c.Provider}
+				}
+				val := func(p *string) string {
+					if p == nil || *p == "" {
+						return "—"
+					}
+					return *p
+				}
+				refresh := l.Refresh.Status
+				if !l.Refresh.Supported {
+					refresh = "—"
+				}
+				rows = append(rows, []string{c.ID, c.Name, l.Provider, l.Mode, val(l.PlanLabel), val(l.OwnerEmail), val(l.ExpiresAt), refresh, fmt.Sprintf("%d", l.PaysFor.Agents)})
+			}
+			if err := f.Auto(creds, headers, rows); err != nil {
+				return err
+			}
+			if !all && lastNext != nil && *lastNext != "" {
+				fmt.Fprintf(os.Stderr, "More results available — re-run with --all, or --cursor %s for the next page.\n", *lastNext)
+			} else if offsetSet {
+				printListFooter(f, readListMeta(lastResp), len(creds))
+			}
+			return nil
+		}
 		headers := []string{"ID", "NAME", "TYPE", "TIER", "STATUS", "AGENTS", "SOURCE"}
 		var rows [][]string
 		for _, c := range creds {
@@ -247,14 +355,15 @@ var credGetCmd = &cobra.Command{
 		}
 
 		var cred struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			Type      string  `json:"type"`
-			Provider  string  `json:"provider"`
-			Status    string  `json:"status"`
-			Scope     string  `json:"scope"`
-			CreatedAt string  `json:"created_at"`
-			CrewID    *string `json:"crew_id"`
+			ID        string     `json:"id"`
+			Name      string     `json:"name"`
+			Type      string     `json:"type"`
+			Provider  string     `json:"provider"`
+			Status    string     `json:"status"`
+			Scope     string     `json:"scope"`
+			CreatedAt string     `json:"created_at"`
+			CrewID    *string    `json:"crew_id"`
+			Login     *credLogin `json:"login,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &cred); err != nil {
 			return err
@@ -270,6 +379,9 @@ var credGetCmd = &cobra.Command{
 			{"Scope", cred.Scope},
 			{"Created", cred.CreatedAt},
 		}
+		// A provider login says who owns the seat, what it pays for and
+		// whether the server can keep it alive — rows a secret does not have.
+		pairs = append(pairs, loginPairs(cred.Login)...)
 		return f.AutoDetail(cred, pairs)
 	},
 }
@@ -662,7 +774,55 @@ var credDefaultEnvVarCmd = &cobra.Command{
 	},
 }
 
+// credRefreshCmd forces a provider-login refresh now (PRD provider-logins
+// §10.3): the server renews the access token from the sealed refresh token
+// it keeps, re-renders the file into running containers, and reports the
+// login's new state. 409 while another refresh is in flight.
+var credRefreshCmd = &cobra.Command{
+	Use:   "refresh <name-or-id>",
+	Short: "Refresh a provider login's access token now (ChatGPT logins)",
+	Long: `Refresh a provider login's access token now.
+
+Only a subscription login with a stored refresh token (a ChatGPT auth.json
+imported as --type PROVIDER_LOGIN) can be refreshed; a Claude setup-token
+and an API key have no refresh flow. The server refreshes such logins on
+its own 24 h before expiry and before a run start with less than 48 h left;
+this command is for forcing one, e.g. after the login was marked
+needs_relogin and re-imported.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Post("/api/v1/credentials/"+credID+"/refresh", map[string]any{})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Login *credLogin `json:"login"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		f := newFormatter()
+		cli.PrintSuccess("Login refreshed: " + credID)
+		return f.AutoDetail(out, loginPairs(out.Login))
+	},
+}
+
 func init() {
+	credListCmd.Flags().String("kind", "", "Only provider logins (kind=provider_login): seats that pay for a model, shown with mode, plan, owner, expiry and refresh state")
 	credListCmd.Flags().Int("limit", 0, "Page size (1-500; enables cursor pagination)")
 	credListCmd.Flags().String("cursor", "", "Opaque cursor from a previous page's output")
 	credListCmd.Flags().String("search", "", "Filter by a substring of the name or description (server-side)")
@@ -671,10 +831,12 @@ func init() {
 	credListCmd.Flags().Int("offset", 0, "Rows to skip before the first one shown (positional paging; not with --all/--cursor)")
 
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
-	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL (required)")
+	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN|ENDPOINT_URL|PROVIDER_LOGIN (required)")
 	credCreateCmd.Flags().String("provider", "", "Provider: "+credprovider.ProvidersHelp())
 	credCreateCmd.Flags().String("value", "", "Credential value — the URL for ENDPOINT_URL (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
+	credCreateCmd.Flags().String("from-file", "", "Read the value from a file — the whole ~/.codex/auth.json for a ChatGPT login (--type PROVIDER_LOGIN --provider OPENAI)")
+	credCreateCmd.Flags().String("mode", "", "PROVIDER_LOGIN only: subscription (a seat: Claude setup-token, ChatGPT auth.json) or api_key (a metered key). Inferred from the value when omitted")
 	credCreateCmd.Flags().String("base-url", "", "Endpoint this provider is reached at — required for a provider whose upstream comes from the credential (OPENAI_COMPAT), rejected for every other. Stored with the key as one object and delivered to the sidecar, never to the agent's environment")
 	credCreateCmd.Flags().String("auth-token", "", "Bearer token sent to the endpoint (Authorization: Bearer …); stored encrypted, never displayed. For --type ENDPOINT_URL, or with --base-url. Prefer --auth-token-stdin: an argument is visible to anything that can read the process table")
 	credCreateCmd.Flags().Bool("auth-token-stdin", false, "Read the endpoint bearer token from stdin instead of --auth-token, so it never appears in argv")
@@ -740,4 +902,5 @@ func init() {
 	credentialCmd.AddCommand(credAuditCmd)
 	credentialCmd.AddCommand(credTestStoredCmd)
 	credentialCmd.AddCommand(credDefaultEnvVarCmd)
+	credentialCmd.AddCommand(credRefreshCmd)
 }

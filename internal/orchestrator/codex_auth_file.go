@@ -2,12 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // Codex's ChatGPT-subscription login is delivered as a FILE, not an env var,
@@ -75,7 +78,7 @@ func syncCodexAuthFile(
 	if !ok {
 		return removeCodexAuthFile(ctx, container, containerID, req.AgentSlug, logger)
 	}
-	f, err := codexauth.Parse(login.PlainValue)
+	f, err := codexFileFor(login)
 	if err != nil {
 		return fmt.Errorf("codex login %s: %w", login.ID, err)
 	}
@@ -89,9 +92,73 @@ func syncCodexAuthFile(
 	if logger != nil {
 		logger.Info("codex login delivered",
 			"agent_slug", req.AgentSlug, "credential_id", login.ID,
-			"plan", codexauth.PlanLabel(login.PlainValue), "path", codexauth.FileRel)
+			"plan", codexPlanLabel(login), "path", codexauth.FileRel)
 	}
 	return nil
+}
+
+// DeliverCodexLogin renders one ChatGPT login into a running crew container
+// for one agent — the re-render after a central refresh (PRD provider-logins
+// §5.3, §10.4). The API tier calls it with the credential it just rotated;
+// the run start calls syncCodexAuthFile with the whole delivery set. Both
+// go through the same renderer, so the file a refresh writes is the file a
+// run start would have written.
+func DeliverCodexLogin(ctx context.Context, container provider.ContainerProvider, containerID, agentSlug string, login Credential, logger *slog.Logger) error {
+	req := AgentRunRequest{AgentSlug: agentSlug, CLIAdapter: "CODEX_CLI", Credentials: []Credential{login}}
+	if _, ok := codexLoginCredential(req); !ok {
+		return fmt.Errorf("credential %s is not a deliverable ChatGPT login", login.ID)
+	}
+	return syncCodexAuthFile(ctx, container, containerID, req, logger)
+}
+
+// codexFileFor builds the auth.json Codex will read from either shape a login
+// arrives in (PRD provider-logins §10.2): a PROVIDER_LOGIN carries the access
+// token as its value and id_token / account_id as parts; the legacy
+// AI_CLI_TOKEN carries the whole file. Codex refuses a file missing any of
+// the three, so a login that cannot be rendered is refused here, before the
+// run starts on the dummy key.
+func codexFileFor(login Credential) (codexauth.File, error) {
+	if !login.isProviderLogin() {
+		return codexauth.Parse(login.PlainValue)
+	}
+	f := codexauth.File{Tokens: codexauth.Tokens{
+		AccessToken: strings.TrimSpace(login.PlainValue),
+		IDToken:     strings.TrimSpace(login.part(providerlogin.PartIDToken)),
+		AccountID:   strings.TrimSpace(login.part(providerlogin.PartAccountID)),
+	}}
+	switch {
+	case f.Tokens.AccessToken == "":
+		return codexauth.File{}, errors.New("login has no access token")
+	case f.Tokens.IDToken == "":
+		return codexauth.File{}, errors.New("login has no id_token part — Codex refuses a file without it; re-import the auth.json")
+	case f.Tokens.AccountID == "":
+		return codexauth.File{}, errors.New("login has no account_id part; re-import the auth.json")
+	}
+	return f, nil
+}
+
+// codexPlanLabel is the flat-rate plan label for a ChatGPT login. A
+// PROVIDER_LOGIN carries the plan as a part; the legacy blob and a bare
+// access token both yield it from the token's claim.
+func codexPlanLabel(login Credential) string {
+	if login.isProviderLogin() {
+		if plan := login.part(providerlogin.PartPlan); plan != "" {
+			return providerlogin.PlanLabel(codexauth.ProviderID, plan)
+		}
+	}
+	return codexauth.PlanLabel(login.PlainValue)
+}
+
+// anthropicPlanLabel is the flat-rate plan label for a Claude Code login.
+// A setup-token names no plan, so the legacy AI_CLI_TOKEN keeps the label it
+// has always had; a PROVIDER_LOGIN whose owner recorded the plan shows it.
+func anthropicPlanLabel(login Credential) string {
+	if login.isProviderLogin() {
+		if plan := login.part(providerlogin.PartPlan); plan != "" {
+			return providerlogin.PlanLabel("ANTHROPIC", plan)
+		}
+	}
+	return "Anthropic Max"
 }
 
 // removeCodexAuthFile deletes a previously delivered login. Best-effort in

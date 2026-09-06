@@ -401,7 +401,7 @@ POST /api/v1/agents?workspace_id={workspaceId}
 GET /api/v1/agents/{agentId}?workspace_id={workspaceId}
 ```
 
-**Response:** `200 OK` -- full agent object.
+**Response:** `200 OK` -- full agent object, plus `pays_with`: the provider login paying for this agent's model — `{ "credential_id", "name", "login" }` with the same `login` object the credentials API returns (see [Credentials → Response Fields](/api-reference/credentials#response-fields)), or `null` when nothing in the agent's resolved delivery is a login of its adapter's provider (`CLAUDE_CODE` → `ANTHROPIC`, `CODEX_CLI` → `OPENAI`, `GEMINI_CLI` → `GOOGLE`, `CURSOR_CLI` → `CURSOR`, `FACTORY_DROID` → `FACTORY`, `OPENCODE` → the agent's `llm_provider`). Derived on this route only; list rows carry `null`.
 
 | Status | Condition |
 |---|---|

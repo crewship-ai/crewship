@@ -287,6 +287,11 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if crewName != nil {
 		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}
+	llmProvider := ""
+	if a.LLMProvider != nil {
+		llmProvider = *a.LLMProvider
+	}
+	a.PaysWith = loadAgentPaysWith(r.Context(), h.db, h.logger, a.ID, a.CLIAdapter, llmProvider)
 
 	writeJSON(w, http.StatusOK, a)
 }

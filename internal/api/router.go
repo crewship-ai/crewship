@@ -107,8 +107,12 @@ type Router struct {
 	// (--no-docker, or a provider that failed to build). The name records its
 	// first consumer, not an exclusive owner; read it through activeContainer.
 	keeperContainer provider.ContainerProvider
-	keeperConfig    *config.KeeperConfig
-	keeperSettings  *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
+	// loginRefresher renews provider logins (docs/prd/provider-logins.md
+	// §5.3). Built in registerCrewRoutes; the server reads it through
+	// LoginRefresher to run it from the credential monitor's tick.
+	loginRefresher *ProviderLoginRefresher
+	keeperConfig   *config.KeeperConfig
+	keeperSettings *keepercfg.Store // runtime instance judge config layered over keeperConfig; nil → env values only
 	// keeperHandler is kept so the credential path's wiring is assertable. It is
 	// the seam the judge profile crosses, and a constructor call that is simply
 	// absent is invisible to any test that builds the handler itself.
@@ -638,6 +642,11 @@ func (r *Router) KeeperAuxSettings() *keepercfg.AuxStore {
 //
 // Prefer SetBuild: version alone cannot identify a build, because every
 // binary an ldflags-less `go build` has ever produced reports "dev".
+// LoginRefresher is the provider-login refresher the router built, for the
+// server to run on the credential monitor's tick (or standalone when there
+// is no monitor). nil before the routes are registered.
+func (r *Router) LoginRefresher() *ProviderLoginRefresher { return r.loginRefresher }
+
 func (r *Router) SetVersion(v string) {
 	r.SetBuild(v, "", "")
 }

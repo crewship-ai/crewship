@@ -328,6 +328,11 @@ type agentResponse struct {
 	UpdatedAt     string         `json:"updated_at"`
 	Crew          *agentCrewInfo `json:"crew"`
 	Count         agentCounts    `json:"_count"`
+	// PaysWith is the provider login this agent's model is paid with
+	// (docs/prd/provider-logins.md §10.3): derived from the agent's resolved
+	// credentials and its adapter's provider. Present on GET /agents/{id}
+	// only — null when nothing in the delivery pays for the adapter.
+	PaysWith *agentPaysWith `json:"pays_with"`
 	// Patch M3 — surfaces the agent's creator to the UI. The
 	// per-agent edit gate (canEditAgent) lets the user identified
 	// here edit/delete the agent without workspace ADMIN role; the

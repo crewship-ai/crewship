@@ -43,7 +43,7 @@ func TestCredSecretPaths(t *testing.T) {
 		{"AI_CLI_TOKEN", nil}, // ditto
 	}
 	for _, c := range cases {
-		got := credSecretPaths("writer", "GH_TOKEN", c.credType, "", nil)
+		got := credSecretPaths("writer", "GH_TOKEN", c.credType, "", "", nil)
 		if strings.Join(got, "|") != strings.Join(c.want, "|") {
 			t.Errorf("%s: paths = %v, want %v", c.credType, got, c.want)
 		}
@@ -60,7 +60,7 @@ func TestCredSecretPaths(t *testing.T) {
 // here would remove the wrong paths and, being a best-effort `rm -f`, would say
 // nothing about it.
 func TestCredSecretPaths_IncludesMultiPartFields(t *testing.T) {
-	got := credSecretPaths("writer", "AWS", "GENERIC_SECRET", "", []string{"region", "secret_access_key"})
+	got := credSecretPaths("writer", "AWS", "GENERIC_SECRET", "", "", []string{"region", "secret_access_key"})
 	want := []string{
 		"/secrets/writer/AWS",
 		"/secrets/writer/AWS_REGION",
@@ -72,29 +72,29 @@ func TestCredSecretPaths_IncludesMultiPartFields(t *testing.T) {
 
 	// A type with no on-disk form has no on-disk parts either: buildCredFileScript
 	// skips the whole credential before it ever looks at the fields.
-	if got := credSecretPaths("writer", "ANTHROPIC", "API_KEY", "", []string{"region"}); got != nil {
+	if got := credSecretPaths("writer", "ANTHROPIC", "API_KEY", "", "", []string{"region"}); got != nil {
 		t.Errorf("API_KEY paths = %v, want none — the credential itself never touches disk", got)
 	}
 
 	// An unsafe derived name is dropped rather than interpolated into the `rm`.
 	// Delivery would have refused to write it, so there is nothing to remove,
 	// and the one thing that must not happen is it reaching a shell.
-	if got := credSecretPaths("writer", "AWS", "SECRET", "", []string{"a;rm -rf /"}); strings.Join(got, "|") != "/secrets/writer/AWS" {
+	if got := credSecretPaths("writer", "AWS", "SECRET", "", "", []string{"a;rm -rf /"}); strings.Join(got, "|") != "/secrets/writer/AWS" {
 		t.Errorf("paths = %v, want only the primary — an unsafe part name must not reach the shell", got)
 	}
 }
 
 func TestBuildCredRemoveScript(t *testing.T) {
-	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET", "", nil); s != "rm -f '/secrets/writer/GH_TOKEN'" {
+	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET", "", "", nil); s != "rm -f '/secrets/writer/GH_TOKEN'" {
 		t.Errorf("SECRET script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "DB", "USERPASS", "", nil); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/DB_PASSWORD'" {
+	if s := buildCredRemoveScript("writer", "DB", "USERPASS", "", "", nil); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/DB_PASSWORD'" {
 		t.Errorf("USERPASS script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY", "", nil); s != "rm -f '/secrets/writer/ssh/KEY'" {
+	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY", "", "", nil); s != "rm -f '/secrets/writer/ssh/KEY'" {
 		t.Errorf("SSH_KEY script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "X", "API_KEY", "", nil); s != "" {
+	if s := buildCredRemoveScript("writer", "X", "API_KEY", "", "", nil); s != "" {
 		t.Errorf("API_KEY (no disk form) script = %q, want empty", s)
 	}
 }
@@ -196,15 +196,15 @@ func TestReconcileRevokedCredential_ExecError_Tolerated(t *testing.T) {
 // #2428: a Codex login is the one credential written outside /secrets — into
 // the agent's HOME, where Codex reads it — and revoke must reach it there.
 func TestCredSecretPaths_CodexLoginLivesInHome(t *testing.T) {
-	got := credSecretPaths("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "OPENAI", []string{"region"})
+	got := credSecretPaths("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "OPENAI", "", []string{"region"})
 	if strings.Join(got, "|") != "/crew/agents/reviewer/.codex/auth.json" {
 		t.Errorf("paths = %v", got)
 	}
 	// Same type, other vendor: still never on disk.
-	if got := credSecretPaths("reviewer", "CLAUDE_CODE_OAUTH_TOKEN", "AI_CLI_TOKEN", "ANTHROPIC", nil); got != nil {
+	if got := credSecretPaths("reviewer", "CLAUDE_CODE_OAUTH_TOKEN", "AI_CLI_TOKEN", "ANTHROPIC", "", nil); got != nil {
 		t.Errorf("Anthropic login must not map to a file: %v", got)
 	}
-	if s := buildCredRemoveScript("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "openai", nil); s != "rm -f '/crew/agents/reviewer/.codex/auth.json'" {
+	if s := buildCredRemoveScript("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "openai", "", nil); s != "rm -f '/crew/agents/reviewer/.codex/auth.json'" {
 		t.Errorf("remove script = %q", s)
 	}
 }
