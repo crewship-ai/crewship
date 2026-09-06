@@ -71,6 +71,15 @@ and a line, admits any truncation, and ends with
 reconciles the candidate count with the scan and, given a local checkout,
 checks that every cited path exists at the scanned commit.
 
+A scan that cannot run — no token, no map, no checkout — exits **zero** with
+`state: critical` and says why, so the routine still reaches the agent and
+the page still says something true. Every exit path of `docs_audit.sh` builds
+its `panel` in one place: the routine projects `.panel.state`, `.panel.label`
+and `.panel.sha_label` out of that document with `transform` steps, and a
+transform whose field is missing does not degrade — it fails the run and
+takes the review and both page panels with it. On a failure path `sha_label`
+says `<repo> @ not checked out` rather than inventing a commit.
+
 Casey's issue carries the human boundary: a confirmed finding that is a
 **security claim** — an allowlist or validation the docs promise and the
 code does not enforce — is escalated as a DECISION, not worded alone.
@@ -129,10 +138,13 @@ crewship seed verify --format json --strict
 ```
 
 See [`crewship seed`](/cli/seed#crewship-seed-verify) for the row-by-row
-contract. In short: scripts byte-identical to the seed, the probe against an
-independent read of the source, the agent's counts against the probe, no
-secret in the report, the notification in the inbox, the panels written by
-that run.
+contract, and [Demo use cases](/guides/demo-use-cases) for the per-pack
+script that shows the delivered files, runs the probe and calls `verify`
+as one unit (`scripts/demo/run.sh pack-ci-watch`). In short: scripts
+byte-identical to the seed, no routine of the pack already FAILED in this
+workspace, the probe against an independent read of the source, the agent's
+counts against the probe, no secret in the report, the notification in the
+inbox, the panels written by that run.
 
 ## Where the packs came from
 

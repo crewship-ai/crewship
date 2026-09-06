@@ -2524,6 +2524,13 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 	terminal := MarkTerminalInput{
 		RunID:      runID,
 		DurationMs: dur,
+		// Whether anyone in this run could have reported a §9.6 outcome —
+		// read off the definition this run actually executed (in.dsl is the
+		// pinned/head DSL runDSL ran, not whatever the pipeline says now),
+		// so an agentless routine settles to an honest SUCCEEDED instead of
+		// being flagged for a hand-off it had nobody to make. See
+		// MarkTerminalInput.HasOutcomeCapableStep.
+		HasOutcomeCapableStep: DSLHasOutcomeCapableStep(in.dsl),
 	}
 	if result == nil {
 		terminal.Status = RunStatusFailed

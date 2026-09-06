@@ -10,11 +10,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/net/websocket"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
 const covAgentID = "cagentaaaaaaaaaaaaaaaaaa"
@@ -64,8 +66,21 @@ func sendScriptedEvents(conn *websocket.Conn, events []cli.ChatEventPayload) err
 			}
 			continue
 		}
-		pb, _ := json.Marshal(ev)
-		mb, _ := json.Marshal(cli.WSMessage{Type: "chat_event", Payload: pb})
+		// Build the frame from the SERVER's own types, not the client's
+		// mirror of them. Marshalling cli.ChatEventPayload here would make
+		// every event test assert the CLI against its own belief about the
+		// wire — which is how the agent_busy hang stayed green in CI while
+		// failing against every real server (a run bounced off the per-agent
+		// lock hung for 200 s on dev3 with the client-shaped test passing).
+		// With wsproto.ServerMessage/ChatEvent, a field the server renames
+		// breaks this test instead of only breaking production.
+		mb, _ := json.Marshal(wsproto.ServerMessage{
+			Type: "chat_event",
+			Payload: wsproto.ChatEvent{
+				Type:    ev.Type,
+				Content: ev.Content,
+			},
+		})
 		if err := websocket.Message.Send(conn, string(mb)); err != nil {
 			return err
 		}
@@ -104,6 +119,21 @@ func newWSEchoHandler(cap *wsCapture, events []cli.ChatEventPayload, loop bool) 
 				cap.mu.Lock()
 				cap.sentContent = append(cap.sentContent, payload.Content)
 				cap.mu.Unlock()
+				// Session "busy-chat" reproduces a send bounced off the
+				// per-agent run lock: one sender-only agent_busy frame, no
+				// terminal event, and the connection stays OPEN — which is
+				// what makes a client that ignores the frame hang rather
+				// than see EOF. Keyed on the session id so a test opts in
+				// without a second handler.
+				if payload.SessionID == "busy-chat" {
+					if err := sendScriptedEvents(conn, []cli.ChatEventPayload{{
+						Type:    wsproto.AgentBusyEventType,
+						Content: "The agent is busy with another run right now. Please wait for it to finish.",
+					}}); err != nil {
+						return
+					}
+					continue
+				}
 				if err := sendScriptedEvents(conn, events); err != nil {
 					return
 				}
@@ -1020,4 +1050,77 @@ func TestRunListRunE_ErrorPaths(t *testing.T) {
 			t.Fatal("want decode error")
 		}
 	})
+}
+
+// TestRunCmdRunE_AgentBusyRejection pins the CLI half of the #2269 busy
+// bounce. The server rejects a send into a busy agent with a sender-only
+// `agent_busy` chat event and then sends NOTHING else — the busy branch in
+// internal/ws/client.go deliberately emits no terminal `done`, because a
+// `done` would travel the shared session channel and finalize the WINNING
+// sender's live turn mid-generation. So the busy frame IS the end of the
+// exchange, and a client that keeps waiting waits forever.
+//
+// Verified live on dev3 on 2026-09-05: two of three concurrent runs against
+// one agent produced no output at all and exited 124 on the caller's own
+// timeout, while the server logged both the chatbridge rejection and the
+// ws-layer `send rejected: agent busy`.
+func TestRunCmdRunE_AgentBusyRejection(t *testing.T) {
+	newRunServerCov(t, &wsCapture{}, []cli.ChatEventPayload{
+		{Type: wsproto.AgentBusyEventType, Content: "The agent is busy with another run right now. Please wait for it to finish."},
+	}, http.StatusOK, http.StatusOK)
+
+	setFlagCov(t, runCmd, "quiet", "true")
+	t.Cleanup(ResetAIFirstLatches)
+
+	_, err := captureStdoutCov(t, func() error {
+		return runCmd.RunE(runCmd, []string{"viktor", "ask it something"})
+	})
+	if err == nil {
+		t.Fatal("RunE returned nil: a bounced send must be a non-zero exit so " +
+			"`crewship run x y || alert` notices")
+	}
+	if !strings.Contains(err.Error(), "busy") {
+		t.Errorf("error %q does not mention the agent being busy — the caller "+
+			"cannot tell a busy bounce from a dropped connection", err)
+	}
+}
+
+// TestRunNoStream_AgentBusyRejection covers the OTHER event loop. `run` has
+// two: the streaming switch in cmd_run.go and collectAgentStream (shared
+// with `routine iterate`), which is what --no-stream and --wait actually
+// use. The first version of this fix patched only the streaming switch, the
+// unit test passed, and the live dev3 run still hung — because every
+// scripted event went through the path the test drove and none through the
+// path the flag selects. Both loops are pinned from here on.
+//
+// collectAgentStream gets timeout 0 from runNoStream ("block until the
+// server closes the stream"), so this is the strictest case: no deadline
+// exists to end the wait. The stub therefore keeps the connection OPEN
+// after the busy frame, exactly as the real server does, and the test
+// bounds itself instead — an unbounded wait is the bug under test, so it
+// must be reported, not inherited.
+func TestRunNoStream_AgentBusyRejection(t *testing.T) {
+	srv := newRunServerCov(t, &wsCapture{}, nil, http.StatusOK, http.StatusOK)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := captureStdoutCov(t, func() error {
+			return runNoStream(srv.URL, "ws-tok", covAgentID, "busy-chat", "hi", true, nil, nil, 0)
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("runNoStream returned nil for a bounced send")
+		}
+		if !strings.Contains(err.Error(), "busy") {
+			t.Errorf("error %q does not say the agent was busy", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runNoStream blocked on an agent_busy frame: with timeout 0 " +
+			"there is no deadline to save it, so a missed busy case is an " +
+			"unbounded hang (dev3 2026-09-05: 200 s, empty output, exit 124)")
+	}
 }

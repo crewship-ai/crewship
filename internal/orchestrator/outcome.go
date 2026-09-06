@@ -125,14 +125,37 @@ const ReasonNoOutcomeReported = "no outcome reported"
 //   - Anything else (a clean, technical completion) defers to the
 //     hand-off: a recognised value is trusted verbatim; nothing
 //     recognised defaults to FAILED with ReasonNoOutcomeReported — an
-//     absent outcome is a bug, not a silent success (§9.6).
+//     absent outcome is a bug, not a silent success (§9.6) — but ONLY
+//     when somebody could have reported one. See hasOutcomeCapableStep.
+//
+// hasOutcomeCapableStep says whether this run contained anything that
+// could have emitted a §9.6 hand-off — an agent. An assignment always
+// did (it IS an agent run), so it passes true. A routine run passes true
+// only when its definition holds an agent_run step — or a call_pipeline,
+// whose target may hold one. An `agentless: true` probe, or a routine
+// whose steps are only script / transform / notify / crewship, has nobody
+// who could ever report an outcome, so "no outcome reported" flags a bug
+// that is unfixable by construction: it completed cleanly, and the honest
+// §9.6 value for that is SUCCEEDED, with no stated reason to write into
+// error_message. Without this the whole routine half of the vocabulary
+// collapsed to FAILED — every clean routine run recorded as a failure,
+// `routine logs` printing "Error: no outcome reported" on the happy path,
+// and every SUCCEEDED-keyed consumer (the §19.3 successful-runs metric,
+// the B10 digest) structurally reading zero.
+//
+// SUCCEEDED rather than NO_CHANGE for that case because we know the run
+// executed its steps and cannot know whether they changed anything;
+// NO_CHANGE asserts more than the evidence supports. The two share a
+// routing row (idle, no inbox item) so the choice moves no consumer —
+// only the word a human reads.
 //
 // Returns the outcome to store, and — only when it defaulted because
-// nothing valid was reported — the reason string to write into the run's
-// error_message column IF that column is otherwise empty (see callers: a
-// technically-failed run already has a real error_message and must not
-// have it overwritten with this generic reason).
-func DeriveOutcome(status, reported string) (outcome string, defaultedReason string) {
+// nothing valid was reported AND someone was supposed to report — the
+// reason string to write into the run's error_message column IF that
+// column is otherwise empty (see callers: a technically-failed run
+// already has a real error_message and must not have it overwritten with
+// this generic reason).
+func DeriveOutcome(status, reported string, hasOutcomeCapableStep bool) (outcome string, defaultedReason string) {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
 	case "CANCELLED":
 		return OutcomeCancelled, ""
@@ -151,6 +174,16 @@ func DeriveOutcome(status, reported string) (outcome string, defaultedReason str
 		// wrong lane.
 		if ok && v != OutcomeCancelled {
 			return v, ""
+		}
+		if !hasOutcomeCapableStep {
+			// Nobody in this run could have reported an outcome, so there
+			// is no missing hand-off to flag and no reason to state: the
+			// run did its steps and none of them errored. Deliberately
+			// returns an empty reason — the callers write it into
+			// error_message, and a COMPLETED run carrying an error is what
+			// made `routine logs` print "Error: no outcome reported" on the
+			// happy path.
+			return OutcomeSucceeded, ""
 		}
 		return OutcomeFailed, ReasonNoOutcomeReported
 	}

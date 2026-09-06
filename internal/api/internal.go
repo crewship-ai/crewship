@@ -245,10 +245,11 @@ type mcpCredFieldEntry struct {
 
 // InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
 type InternalHandler struct {
-	db            *sql.DB
-	logger        *slog.Logger
-	internalToken string
-	keeperEnabled atomic.Bool
+	loginRefresher runStartRefresher
+	db             *sql.DB
+	logger         *slog.Logger
+	internalToken  string
+	keeperEnabled  atomic.Bool
 	// composioDefaultConnector mirrors config.ComposioConfig.DefaultConnector
 	// (COMPOSIO_DEFAULT_CONNECTOR). When true, resolveAgentMCPServers turns
 	// legacy (non-Composio) MCP servers off and injects a workspace-wide

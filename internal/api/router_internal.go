@@ -25,6 +25,7 @@ import (
 func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestrationHandlers) {
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
 	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
+	internal.loginRefresher = r.loginRefresher
 	if r.hub != nil {
 		internal.SetHub(r.hub)
 	}

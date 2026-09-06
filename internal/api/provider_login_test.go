@@ -736,15 +736,13 @@ func TestProviderLogin_RunStartRefreshesTheDeliveredValue(t *testing.T) {
 	execOrFatal(t, r.db, `INSERT INTO agents (id, workspace_id, name, slug, cli_adapter) VALUES ('ag-1', ?, 'A', 'a', 'CODEX_CLI')`, r.wsID)
 	execOrFatal(t, r.db, `INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name) VALUES ('ac-1', 'ag-1', ?, 'OPENAI_API_KEY')`, credID)
 
-	restore := SetRunStartLoginRefresherForTesting(r.rf)
-	defer restore()
 	if _, _, err := loadDeliveredCredentials(context.Background(), r.db, "ag-1"); err != nil {
 		t.Fatal(err)
 	}
 	if r.tokens.calls != 0 {
 		t.Fatal("read-only delivery lookup refreshed the login")
 	}
-	delivered, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1")
+	delivered, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1", r.rf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -766,7 +764,7 @@ func TestProviderLogin_RunStartRefreshesTheDeliveredValue(t *testing.T) {
 	}
 	// Far from expiry: no call.
 	calls := r.tokens.calls
-	if _, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1"); err != nil {
+	if _, _, err := loadDeliveredCredentialsForRun(context.Background(), r.db, "ag-1", r.rf); err != nil {
 		t.Fatal(err)
 	}
 	if r.tokens.calls != calls {

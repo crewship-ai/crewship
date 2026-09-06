@@ -497,6 +497,64 @@ type MarkTerminalInput struct {
 	CostUSD      float64
 	DurationMs   int64
 	EndedAt      time.Time
+	// HasOutcomeCapableStep says whether the definition this run executed
+	// contained a step that could have reported a §9.6 hand-off — see
+	// DSLHasOutcomeCapableStep, which is what the executor computes it
+	// with. It exists because orchestrator.DeriveOutcome cannot otherwise
+	// tell "the agent forgot to report" (a real bug worth flagging) from
+	// "there was no agent" (an agentless probe, where the flag would be
+	// unfixable by construction and every clean run recorded FAILED).
+	//
+	// The zero value is the agentless reading, and that is deliberate: the
+	// only caller that leaves it unset is the parked-run cancel path
+	// (internal/api/pipeline_runs.go), which passes status=cancelled — an
+	// outcome the hand-off never gets a say in.
+	HasOutcomeCapableStep bool
+}
+
+// DSLHasOutcomeCapableStep reports whether a routine definition contains a
+// step that could hand a §9.6 outcome back in the run's output — i.e.
+// whether "no outcome reported" is a bug worth flagging for this routine at
+// all (see MarkTerminalInput.HasOutcomeCapableStep).
+//
+// Two step kinds count:
+//
+//   - agent_run — the one that actually asks a model for a CHECKPOINT or
+//     HANDOFF block.
+//   - call_pipeline — its target resolves by slug at RUNTIME and may hold
+//     an agent_run, exactly the reason validateAgentless rejects it from an
+//     agentless routine. Unprovable statically, so it counts: fail closed
+//     to today's strict behaviour rather than silently forgiving a missing
+//     hand-off.
+//
+// foreach recurses into its body for the same reason agentlessSteps does —
+// an agent inside a fan-out is still an agent. Every other kind (http,
+// code, wait, transform, notify, script, query, crewship) produces step
+// output that is a tool result, not an agent's hand-off; a `crewship` verb
+// can wake an agent, but that agent runs as its OWN assignment and reports
+// its outcome there, never into this run's output.
+//
+// A nil DSL reads as "no agent" — a run with no definition to inspect
+// cannot have asked anyone for a hand-off.
+func DSLHasOutcomeCapableStep(dsl *DSL) bool {
+	if dsl == nil {
+		return false
+	}
+	return stepsHaveOutcomeCapableStep(dsl.Steps)
+}
+
+func stepsHaveOutcomeCapableStep(steps []Step) bool {
+	for _, st := range steps {
+		switch st.Type {
+		case StepAgentRun, StepCallPipeline:
+			return true
+		case StepForeach:
+			if st.Foreach != nil && stepsHaveOutcomeCapableStep(st.Foreach.Steps) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // deriveRunOutcome computes the §9.6 outcome for a terminal pipeline run
@@ -511,7 +569,12 @@ type MarkTerminalInput struct {
 // finishAssignment does for assignments — reusing the existing column
 // rather than adding a dedicated outcome_reason one (§9.4/§9.6). A run
 // that already has a real error message is never overwritten.
-func deriveRunOutcome(status RunStatus, output, errorMessage string) (outcome, resolvedErrorMessage string) {
+//
+// hasOutcomeCapableStep gates that default: it is only a bug to report no
+// outcome when the run held a step that could have reported one. An
+// agentless routine that ran clean settles SUCCEEDED with no reason —
+// see MarkTerminalInput.HasOutcomeCapableStep and DeriveOutcome.
+func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeCapableStep bool) (outcome, resolvedErrorMessage string) {
 	if status == RunStatusDryRunOK {
 		// A dry run is, by definition, one that made no real change — the
 		// closest of the seven values to what actually happened, and
@@ -526,7 +589,7 @@ func deriveRunOutcome(status RunStatus, output, errorMessage string) (outcome, r
 	case RunStatusCancelled:
 		technical = "cancelled"
 	}
-	outcome, reason := orchestrator.DeriveOutcome(technical, orchestrator.ReportedOutcome(output))
+	outcome, reason := orchestrator.DeriveOutcome(technical, orchestrator.ReportedOutcome(output), hasOutcomeCapableStep)
 	if reason != "" && errorMessage == "" {
 		errorMessage = reason
 	}
@@ -553,7 +616,7 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	// error_message the caller passed in) so the outcome landing here can
 	// never disagree with the row it lands on. May rewrite ErrorMessage —
 	// see deriveRunOutcome's doc comment for when and why.
-	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage)
+	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage, in.HasOutcomeCapableStep)
 	in.ErrorMessage = resolvedErrorMessage
 
 	var fp any

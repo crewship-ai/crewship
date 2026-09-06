@@ -54,6 +54,7 @@ type agentConfigResolver interface {
 }
 
 type AssignmentHandler struct {
+	loginRefresher runStartRefresher
 	// Serializes follow-up selection through claim attachment. Agent execution
 	// stays asynchronous; a fast completion waits before selecting again.
 	followUpMu      sync.Mutex
@@ -285,7 +286,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 	//	  "pending_oauth" as a real env value at the sub-agent boundary.
 	//	the #1373 lease gate — a lapsed lease handed over here is worse than at
 	//	  boot: the value crosses to an agent the lease was never issued to.
-	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID, h.loginRefresher)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}

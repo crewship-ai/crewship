@@ -17,6 +17,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
+// A routine that DID contain an agent (HasOutcomeCapableStep) and still
+// reported nothing keeps the strict §9.6 default — that is a real missing
+// hand-off. The agentless counterpart, where nobody could have reported
+// one, is TestMarkTerminal_AgentlessRunWithNoOutcome_IsSucceeded below.
 func TestMarkTerminal_NoOutcomeReported_DefaultsToFailedWithReason(t *testing.T) {
 	store, db := openRunsTestDB(t)
 	defer db.Close()
@@ -26,9 +30,10 @@ func TestMarkTerminal_NoOutcomeReported_DefaultsToFailedWithReason(t *testing.T)
 	}
 
 	if err := store.MarkTerminal(ctx, MarkTerminalInput{
-		RunID:  "run_no_outcome",
-		Status: RunStatusCompleted,
-		Output: "everything ran fine, nothing special to report",
+		RunID:                 "run_no_outcome",
+		Status:                RunStatusCompleted,
+		Output:                "everything ran fine, nothing special to report",
+		HasOutcomeCapableStep: true,
 	}); err != nil {
 		t.Fatalf("MarkTerminal: %v", err)
 	}
@@ -351,5 +356,166 @@ func TestMarkTerminal_NeedsHumanOutcome_MergesAcrossRunsOfSameRoutine(t *testing
 	}
 	if n != 1 {
 		t.Fatalf("two runs of the same routine, both NEEDS_HUMAN while the first is unresolved, should merge to ONE card, got %d", n)
+	}
+}
+
+// ── agentless runs settle honestly (§9.6) ──────────────────────────────
+
+// A routine with no agent in it has NOBODY who could report a hand-off,
+// so "no outcome reported" flags a bug that is unfixable by construction.
+// Every routine run in a freshly seeded workspace was landing FAILED on a
+// clean completion because of it — `routine logs` printed "Error: no
+// outcome reported" on the happy path, and every SUCCEEDED-keyed consumer
+// (the §19.3 successful-runs metric, the B10 digest) read a structural
+// zero. A clean agentless completion is SUCCEEDED, with no stated reason.
+func TestMarkTerminal_AgentlessRunWithNoOutcome_IsSucceeded(t *testing.T) {
+	store, db := openRunsTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	if err := store.Insert(ctx, &RunRecord{ID: "run_agentless", WorkspaceID: "ws_runs", PipelineID: "pln_a", PipelineSlug: "ci-probe"}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{
+		RunID:  "run_agentless",
+		Status: RunStatusCompleted,
+		Output: "probe ok: 3 checks passed",
+		// No agent_run step in the definition — the executor passes false.
+		HasOutcomeCapableStep: false,
+	}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	got, err := store.Get(ctx, "run_agentless")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != RunStatusCompleted {
+		t.Errorf("status = %q, want completed", got.Status)
+	}
+	if got.Outcome != orchestrator.OutcomeSucceeded {
+		t.Errorf("outcome = %q, want %q — an agentless routine that ran clean did not fail", got.Outcome, orchestrator.OutcomeSucceeded)
+	}
+	if got.ErrorMessage != "" {
+		t.Errorf("error_message = %q, want empty — there is no missing hand-off to state a reason for, and `routine logs` prints this as an Error", got.ErrorMessage)
+	}
+}
+
+// The agentless success must not start raising inbox items: SUCCEEDED
+// shares FAILED's "no item" routing row, and MarkTerminal's outcome-routed
+// inbox write is keyed off exactly that table.
+func TestMarkTerminal_AgentlessSuccess_CreatesNoInboxItem(t *testing.T) {
+	store, db := openRunsTestDBWithInbox(t)
+	defer db.Close()
+	ctx := context.Background()
+	if err := store.Insert(ctx, &RunRecord{ID: "run_agentless_ibx", WorkspaceID: "ws_runs", PipelineID: "pln_a", PipelineSlug: "ci-probe"}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{
+		RunID:  "run_agentless_ibx",
+		Status: RunStatusCompleted,
+		Output: "probe ok",
+	}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items`).Scan(&n); err != nil {
+		t.Fatalf("count inbox items: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("inbox items = %d, want 0 (§12: a SUCCEEDED run never creates one)", n)
+	}
+}
+
+// A recognised hand-off in the output is authoritative whether or not the
+// run is believed to have had an agent: the flag only decides the DEFAULT.
+// (An agentless routine cannot normally emit one, but a transform step
+// echoing a nested run's output could.)
+func TestMarkTerminal_AgentlessRunReportingAnOutcome_IsRespected(t *testing.T) {
+	store, db := openRunsTestDB(t)
+	defer db.Close()
+	ctx := context.Background()
+	if err := store.Insert(ctx, &RunRecord{ID: "run_agentless_reported", WorkspaceID: "ws_runs", PipelineID: "pln_a", PipelineSlug: "ci-probe"}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	output := "---HANDOFF---\nsummary: nothing to do\nconfidence: high\noutcome: NO_CHANGE\n---END HANDOFF---\n"
+	if err := store.MarkTerminal(ctx, MarkTerminalInput{RunID: "run_agentless_reported", Status: RunStatusCompleted, Output: output}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	got, err := store.Get(ctx, "run_agentless_reported")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Outcome != orchestrator.OutcomeNoChange {
+		t.Errorf("outcome = %q, want %q (a reported outcome wins over the default either way)", got.Outcome, orchestrator.OutcomeNoChange)
+	}
+}
+
+// DSLHasOutcomeCapableStep is what the executor feeds MarkTerminal, so the
+// step-kind list is the real boundary between "flag the missing hand-off"
+// and "there was nobody to hand one off".
+func TestDSLHasOutcomeCapableStep(t *testing.T) {
+	cases := []struct {
+		name string
+		dsl  *DSL
+		want bool
+	}{
+		{"nil dsl", nil, false},
+		{"no steps", &DSL{}, false},
+		{
+			"agentless probe (script + transform + notify)",
+			&DSL{Agentless: true, Steps: []Step{
+				{ID: "check", Type: StepScript},
+				{ID: "shape", Type: StepTransform},
+				{ID: "post", Type: StepNotify},
+			}},
+			false,
+		},
+		{
+			"crewship verb only — the woken agent reports in its OWN assignment",
+			&DSL{Steps: []Step{{ID: "mention", Type: StepCrewship}}},
+			false,
+		},
+		{
+			"http + code only",
+			&DSL{Steps: []Step{{ID: "fetch", Type: StepHTTP}, {ID: "calc", Type: StepCode}}},
+			false,
+		},
+		{
+			"an agent_run anywhere in the list",
+			&DSL{Steps: []Step{{ID: "fetch", Type: StepHTTP}, {ID: "think", Type: StepAgentRun}}},
+			true,
+		},
+		{
+			"call_pipeline — target resolves at runtime and may hold an agent",
+			&DSL{Steps: []Step{{ID: "sub", Type: StepCallPipeline}}},
+			true,
+		},
+		{
+			"agent_run nested in a foreach body",
+			&DSL{Steps: []Step{{ID: "fan", Type: StepForeach, Foreach: &ForeachStep{
+				Items: "{{ inputs.xs }}",
+				Steps: []Step{{ID: "think", Type: StepAgentRun}},
+			}}}},
+			true,
+		},
+		{
+			"agentless foreach body",
+			&DSL{Steps: []Step{{ID: "fan", Type: StepForeach, Foreach: &ForeachStep{
+				Items: "{{ inputs.xs }}",
+				Steps: []Step{{ID: "post", Type: StepNotify}},
+			}}}},
+			false,
+		},
+		{
+			"foreach with no body",
+			&DSL{Steps: []Step{{ID: "fan", Type: StepForeach}}},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DSLHasOutcomeCapableStep(tc.dsl); got != tc.want {
+				t.Errorf("DSLHasOutcomeCapableStep = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

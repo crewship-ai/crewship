@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
 
+- **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.
+
 - **Legacy provider visibility** (#2428) — list filters use the same whitespace normalization as the credential-ID permission guard, so padded legacy provider names cannot expose admin-only account metadata in lists.
 
 - **Provider-account notification privacy** (#2428) — refresh-failure alerts are addressed to current workspace administrators, not personally to a creator who may later be demoted. An upgrade backfill also restricts previously stored alerts, without deleting their history or changing unrelated inbox messages.
