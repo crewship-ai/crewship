@@ -78,7 +78,6 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// as revoke, for the re-render into running containers.
 	loginRefresher := NewProviderLoginRefresher(r.db, r.logger, r.keeperContainer)
 	creds.SetLoginRefresher(loginRefresher)
-	SetRunStartLoginRefresher(loginRefresher)
 	r.loginRefresher = loginRefresher
 	// Stash on the router so registerInternalRoutes can wire the
 	// /api/v1/internal/credentials Create + Rotate adapter against

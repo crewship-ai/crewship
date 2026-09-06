@@ -588,41 +588,21 @@ func (r *ProviderLoginRefresher) reRender(ctx context.Context, credID, wsID stri
 // PROVIDER_LOGIN row it is about to deliver.
 // ---------------------------------------------------------------------------
 
-// runStartRefresher is the process-wide hook, set once at boot before the
-// server accepts traffic (the same shape as inbox's external notifier). nil
-// means "deliver what is stored", which is what every test and `crewship
-// seed` gets.
+// runStartRefresher belongs to a router and is injected into its handlers
+// before they serve traffic. It must never be process-global: independent
+// routers can use different databases. nil means "deliver what is stored".
 type runStartRefresher interface {
 	EnsureFreshForRun(ctx context.Context, credID string) (string, error)
-}
-
-var runStartLoginRefresher runStartRefresher
-
-// SetRunStartLoginRefresher wires the production refresher.
-func SetRunStartLoginRefresher(r *ProviderLoginRefresher) {
-	if r == nil {
-		runStartLoginRefresher = nil
-		return
-	}
-	runStartLoginRefresher = r
-}
-
-// SetRunStartLoginRefresherForTesting swaps the hook and returns a restore.
-func SetRunStartLoginRefresherForTesting(r runStartRefresher) func() {
-	prev := runStartLoginRefresher
-	runStartLoginRefresher = r
-	return func() { runStartLoginRefresher = prev }
 }
 
 // loadDeliveredCredentialsForRun is the mutating boot/delegation loader.
 // Metadata views and refresh-file reconciliation use the read-only loader;
 // opening a Providers tab must never rotate credentials.
-func loadDeliveredCredentialsForRun(ctx context.Context, db *sql.DB, agentID string) ([]deliveredCredential, []deliveredSlotNotice, error) {
+func loadDeliveredCredentialsForRun(ctx context.Context, db *sql.DB, agentID string, hook runStartRefresher) ([]deliveredCredential, []deliveredSlotNotice, error) {
 	delivered, notices, err := loadDeliveredCredentials(ctx, db, agentID)
 	if err != nil {
 		return nil, nil, err
 	}
-	hook := runStartLoginRefresher
 	if hook == nil {
 		return delivered, notices, nil
 	}

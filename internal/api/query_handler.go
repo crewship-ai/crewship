@@ -21,13 +21,14 @@ import (
 
 // QueryHandler handles peer query, standup, and escalation API requests.
 type QueryHandler struct {
-	db            *sql.DB
-	orch          *orchestrator.Orchestrator
-	hub           *ws.Hub
-	logger        *slog.Logger
-	internalToken string
-	journal       journal.Emitter
-	provisioner   crewProvisioner
+	loginRefresher runStartRefresher
+	db             *sql.DB
+	orch           *orchestrator.Orchestrator
+	hub            *ws.Hub
+	logger         *slog.Logger
+	internalToken  string
+	journal        journal.Emitter
+	provisioner    crewProvisioner
 	// resolver funnels the peer-query run through the one request-builder
 	// (#810). nil → the legacy raw-SQL build (system_prompt_legacy, no MCP).
 	resolver agentConfigResolver
@@ -653,7 +654,7 @@ func (h *QueryHandler) finishQuery(
 // Three arrivals, three near-misses, one shared definition now. Do not spell the
 // query out here again.
 func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string) ([]orchestrator.Credential, error) {
-	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentialsForRun(ctx, h.db, agentID, h.loginRefresher)
 	if err != nil {
 		return nil, fmt.Errorf("query credentials: %w", err)
 	}
