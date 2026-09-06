@@ -145,8 +145,9 @@ var intgCrewCreateCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		fmt.Printf("Crew integration created: %s (%s)\n", created.Name, created.ID)
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			fmt.Printf("Crew integration created: %s (%s)\n", created.Name, created.ID)
+		})
 	},
 }
 

@@ -73,8 +73,9 @@ var missionCreateCmd = &cobra.Command{
 			return err
 		}
 
-		cli.PrintSuccess(fmt.Sprintf("Mission created: %s (%s)", created.Title, created.ID))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Mission created: %s (%s)", created.Title, created.ID))
+		})
 	},
 }
 

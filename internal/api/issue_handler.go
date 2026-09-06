@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -466,6 +467,70 @@ func (h *IssueHandler) validateStatusTransition(currentStatus, newStatus string)
 		}
 	}
 	return false
+}
+
+// issueTransitionRefusal builds the 400 body for a refused status change.
+//
+// "Invalid status transition from DONE to CANCELLED" is true and unhelpful: it
+// names the two statuses the caller already typed and nothing else. The
+// refusal itself is right — DONE means shipped, and cancelling shipped work is
+// not a state the tracker models — but a DONE issue created by mistake CAN
+// still be got rid of, via DONE → BACKLOG → CANCELLED → delete. The table
+// already allowed that the whole time; nothing said so, so the sparse graph
+// read as a dead end and the answer looked like "you are stuck with it".
+func issueTransitionRefusal(currentStatus, newStatus string) string {
+	msg := "Invalid status transition from " + currentStatus + " to " + newStatus
+	allowed := statuses.AllowedFrom(validIssueTransitions, currentStatus)
+	if len(allowed) == 0 {
+		if _, known := validIssueTransitions[currentStatus]; known {
+			return msg + ". " + currentStatus + " is terminal — it has no transitions out"
+		}
+		return msg
+	}
+	msg += ". From " + currentStatus + " you can go to: " + strings.Join(allowed, ", ")
+	if route := statuses.RouteTo(validIssueTransitions, currentStatus, newStatus); len(route) > 1 {
+		msg += ". To reach " + newStatus + ", go via " + strings.Join(route[:len(route)-1], " → ")
+	}
+	return msg
+}
+
+// issueDeleteRefusal explains a refused delete, and — where one exists — the
+// route to a status the issue CAN be deleted from.
+//
+// Only BACKLOG and CANCELLED are deletable, and that is deliberate: anything
+// that reached IN_PROGRESS has runs, comments and journal rows hanging off it,
+// and deleting the row orphans a history. The old message said only the rule,
+// which reads as "you are stuck with this issue forever" — and for a DONE
+// issue created by mistake, that was the conclusion an operator drew. It is
+// wrong: DONE → BACKLOG → delete works, and the transition table has always
+// allowed it.
+func issueDeleteRefusal(identifier, currentStatus string) string {
+	msg := "Only BACKLOG or CANCELLED issues can be deleted; " + identifier + " is " + currentStatus
+
+	// Prefer whichever deletable status is fewer hops away, so a DONE issue is
+	// told to reopen (one step) rather than to reopen AND cancel (two).
+	best := ""
+	var bestRoute []string
+	for _, target := range []string{"BACKLOG", "CANCELLED"} {
+		route := statuses.RouteTo(validIssueTransitions, currentStatus, target)
+		if route == nil {
+			continue
+		}
+		if bestRoute == nil || len(route) < len(bestRoute) {
+			best, bestRoute = target, route
+		}
+	}
+	if bestRoute == nil {
+		return msg + ". " + currentStatus + " has no transitions out, so this issue cannot be moved " +
+			"to a deletable status — it can only be left as it is"
+	}
+
+	steps := make([]string, 0, len(bestRoute))
+	for _, s := range bestRoute {
+		steps = append(steps, "crewship issue update "+identifier+" --status "+s)
+	}
+	return msg + ". Move it to " + best + " first, then delete:\n  " +
+		strings.Join(steps, "\n  ") + "\n  crewship issue delete " + identifier
 }
 
 // addIssueComment inserts a comment on an issue (used by best-effort flows

@@ -65,3 +65,66 @@ func IsValidTransition(transitions map[string][]string, current, target string) 
 	}
 	return false
 }
+
+// AllowedFrom returns the statuses reachable from current in ONE step, in the
+// table's own order. Nil for an unknown status, empty for a terminal sink.
+//
+// It exists so a refusal can say what IS allowed. "Invalid status transition
+// from DONE to CANCELLED" is true and useless: the caller is left to guess
+// whether the target is wrong, the source is wrong, or the whole idea is.
+func AllowedFrom(transitions map[string][]string, current string) []string {
+	targets, ok := transitions[current]
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(targets))
+	copy(out, targets)
+	return out
+}
+
+// RouteTo returns the shortest path of statuses from current to target,
+// EXCLUDING current and including target. Nil when no path exists.
+//
+// The reason this is worth having: the graph is deliberately sparse, and that
+// makes a legitimate goal look impossible. DONE→CANCELLED is refused because
+// cancelling shipped work is not a thing — but DONE→BACKLOG→CANCELLED is a
+// route the table already allows, and it is the answer to "I created this
+// issue by mistake and now I cannot get rid of it". Nothing surfaced it, so
+// the sparse table read as a dead end.
+//
+// Breadth-first, so the path returned is the shortest one; ties break on the
+// table's declaration order, which is the order a reader of the map would
+// have picked themselves.
+func RouteTo(transitions map[string][]string, current, target string) []string {
+	if current == target {
+		return []string{}
+	}
+	if _, ok := transitions[current]; !ok {
+		return nil
+	}
+	prev := map[string]string{current: ""}
+	queue := []string{current}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for _, next := range transitions[node] {
+			if _, seen := prev[next]; seen {
+				continue
+			}
+			prev[next] = node
+			if next == target {
+				// Walk back to current, then reverse.
+				var path []string
+				for s := next; s != current; s = prev[s] {
+					path = append(path, s)
+				}
+				for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+					path[i], path[j] = path[j], path[i]
+				}
+				return path
+			}
+			queue = append(queue, next)
+		}
+	}
+	return nil
+}

@@ -90,9 +90,14 @@ Examples:
 
 		var body struct {
 			Data []struct {
-				ID                string  `json:"id"`
-				AgentSlug         *string `json:"agent_slug"`
-				AgentName         *string `json:"agent_name"`
+				ID        string  `json:"id"`
+				AgentSlug *string `json:"agent_slug"`
+				AgentName *string `json:"agent_name"`
+				// Kind ("agent" | "pipeline") and PipelineSlug are what let
+				// the ACTOR column tell "we don't know who ran this" apart
+				// from "a routine ran it, and routines have no agent".
+				Kind              string  `json:"kind"`
+				PipelineSlug      *string `json:"pipeline_slug"`
 				ChatID            *string `json:"chat_id"`
 				Status            string  `json:"status"`
 				TriggerType       string  `json:"trigger_type"`
@@ -150,11 +155,22 @@ Examples:
 				if t, err := time.Parse(time.RFC3339, r.CreatedAt); err == nil {
 					ts = t.Format("2006-01-02 15:04")
 				}
+				// A routine run has no agent BY DESIGN — a schedule- or
+				// webhook-triggered run has no invoking agent to record — so
+				// "?" was answering a question nobody asked and hiding the
+				// one fact that column could carry. Name the routine instead,
+				// prefixed so a routine slug is never mistaken for an agent
+				// slug; "(routine)" when even the slug is unavailable.
 				slug := "?"
-				if r.AgentSlug != nil {
+				switch {
+				case r.AgentSlug != nil && *r.AgentSlug != "":
 					slug = *r.AgentSlug
-				} else if r.AgentName != nil {
+				case r.AgentName != nil && *r.AgentName != "":
 					slug = *r.AgentName
+				case r.Kind == "pipeline" && r.PipelineSlug != nil && *r.PipelineSlug != "":
+					slug = "↻ " + *r.PipelineSlug
+				case r.Kind == "pipeline":
+					slug = "↻ (routine)"
 				}
 				statusColor := cli.Gray
 				switch r.Status {
@@ -174,11 +190,18 @@ Examples:
 				} else if r.MissionID != nil && *r.MissionID != "" {
 					issue = *r.MissionID
 				}
-				fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-6s  %-8s",
+				// An empty trigger is a gap in the record, not a trigger
+				// called "". Say so rather than printing a blank column the
+				// reader has to guess at.
+				trigger := r.TriggerType
+				if trigger == "" {
+					trigger = "—"
+				}
+				fmt.Printf("%s%s%s  %s%-18s%s  %s%-10s%s  %-9s  %-8s",
 					cli.Dim, ts, cli.Reset,
 					cli.Bold, truncateString(slug, 18), cli.Reset,
 					statusColor, r.Status, cli.Reset,
-					r.TriggerType, issue)
+					trigger, issue)
 
 				if preview, ok := previews[r.ID]; ok {
 					fmt.Printf("  %q", truncateString(firstLine(preview), 60))

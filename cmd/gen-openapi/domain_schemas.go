@@ -84,7 +84,7 @@ func executionSchemaComponents() map[string]any {
 	waitpoint := obj(map[string]any{"token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_url": str()})
 	replayOutcome := obj(map[string]any{"source_run_id": str(), "new_run_id": str(), "status": str(), "error": str()})
 	failureGroup := obj(map[string]any{"fingerprint": str(), "count": integer(), "pipeline_slug": str(), "failed_at_step": str(), "sample_error": str(), "run_ids": arr(str())})
-	activeRun := obj(map[string]any{"run_id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(), "concurrency_key": str(), "started_at": timeString(), "cancel_requested": boolean()})
+	activeRun := obj(map[string]any{"run_id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "concurrency_key": str(), "started_at": timeString(), "cancel_requested": boolean()})
 	runRequest := obj(map[string]any{
 		"inputs": anyMap, "tier_override": str(), "triggered_via": str(), "triggered_by_id": str(), "idempotency_key": str(),
 		"tags": arr(str()), "metadata": anyMap, "delay_seconds": integer(), "ttl_seconds": integer(), "debounce_key": str(),

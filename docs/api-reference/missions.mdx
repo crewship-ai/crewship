@@ -539,6 +539,8 @@ GET /api/v1/mission-metrics?workspace_id={workspaceId}
 
 Aggregated mission metrics for the workspace. `total_missions` and `active_missions` are lifetime counts; the `*_24h` fields cover the trailing 24 hours.
 
+`total_tokens_24h` and `total_cost_24h` are **mission** totals: they sum the tokens and estimated cost of mission tasks completed in the window, and nothing else. Spend that happens outside a mission — chats, ad-hoc agent runs, routine runs — is not counted here, so a workspace can report `0` on both while it is genuinely spending money. That spend lives in the cost ledger, which the paymaster endpoints report (and `crewship cost` prints). A `0` here means "no mission task was recorded in the window", not "no spend".
+
 **Response:** `200 OK`
 
 ```json
