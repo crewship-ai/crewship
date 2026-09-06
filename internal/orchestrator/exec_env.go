@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // baseAgentEnv returns the agent-identity env entries shared by every exec
@@ -154,6 +155,15 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 // fence, the dummy provider keys — so this is the last-line check, and it must
 // stay a check rather than becoming an override.
 func appendCredentialFields(env []string, cred Credential, secretsToo bool) []string {
+	// A provider login's parts are the server's material, not the agent's
+	// (PRD provider-logins §0.3, §5.7): the refresh token is sealed, the id
+	// token is rendered into the Codex file, and plan/mode/expiry are
+	// bookkeeping. The login reaches the container only as its derivative —
+	// CLAUDE_CODE_OAUTH_TOKEN, $CODEX_HOME/auth.json, or the CredStore — so
+	// no part is ever exported, on either delivery path, under any name.
+	if cred.isProviderLogin() {
+		return env
+	}
 	for _, f := range cred.Fields {
 		if f.EnvVar == "" || f.Value == "" {
 			continue
@@ -252,6 +262,24 @@ const (
 // resolveEnvVar names the variable for a credential whose value may be
 // withheld, so an empty PlainValue is the caller's question, not this one's.
 func credentialOAuthKind(cred Credential) oauthKind {
+	// A PROVIDER_LOGIN (PRD provider-logins §10.2) says which it is in its
+	// own parts: mode api_key is a metered key and takes the API_KEY paths
+	// below (CredStore, routed provider block); mode subscription is the
+	// seat, and the provider decides the vendor. A provider with no login
+	// shape yet (Google, Cursor, Factory) cannot be created in subscription
+	// mode, so oauthNone there is the unreachable arm, not a delivery.
+	if cred.isProviderLogin() {
+		if cred.loginMode() == providerlogin.ModeAPIKey {
+			return oauthNone
+		}
+		switch providerlogin.Canonical(cred.Provider) {
+		case codexauth.ProviderID:
+			return oauthOpenAI
+		case "ANTHROPIC":
+			return oauthAnthropic
+		}
+		return oauthNone
+	}
 	if codexauth.IsLogin(cred.Type, cred.Provider) {
 		return oauthOpenAI
 	}
@@ -476,6 +504,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// when both are present, and the dummy key causes authentication failure.
 	hasOAuth := false
 	var oauthToken string
+	var oauthCred Credential
 	for _, cred := range req.Credentials {
 		// #2428: only a Claude Code login belongs in CLAUDE_CODE_OAUTH_TOKEN.
 		// An OpenAI (ChatGPT) login is the same AI_CLI_TOKEN type and takes
@@ -500,6 +529,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		}
 		hasOAuth = true
 		oauthToken = cred.PlainValue
+		oauthCred = cred
 		break
 	}
 
@@ -519,7 +549,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		// with cost=0 + confidence=unknown rather than fake $ figures, and
 		// $-budget enforcement is skipped.
 		env = append(env, "CREWSHIP_BILLING_MODE=flat_rate")
-		env = append(env, "CREWSHIP_SUBSCRIPTION_PLAN=Anthropic Max")
+		env = append(env, "CREWSHIP_SUBSCRIPTION_PLAN="+anthropicPlanLabel(oauthCred))
 	} else {
 		// API key mode: use reverse proxy via ANTHROPIC_BASE_URL for credential injection.
 		// The sidecar intercepts plain HTTP requests and injects the real API key.
@@ -555,7 +585,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		env = append(env, "CODEX_HOME="+codexHomeDir(req.AgentSlug))
 		if login, ok := codexLoginCredential(req); ok {
 			env = overrideEnv(env, "CREWSHIP_BILLING_MODE", "flat_rate")
-			env = overrideEnv(env, "CREWSHIP_SUBSCRIPTION_PLAN", codexauth.PlanLabel(login.PlainValue))
+			env = overrideEnv(env, "CREWSHIP_SUBSCRIPTION_PLAN", codexPlanLabel(login))
 		}
 	}
 
@@ -1390,9 +1420,17 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		if credentialOAuthKind(cred) != oauthAnthropic || cred.PlainValue == "" || !credEnvDeliverable(cred) {
 			continue
 		}
+		// Reported as AI_CLI_TOKEN whatever the row's type says — the
+		// shape-matched arm of credentialOAuthKind delivers an sk-ant-oat
+		// value of any type this way — except for a provider login, which
+		// is named as what it is.
+		exposedType := "AI_CLI_TOKEN"
+		if cred.isProviderLogin() {
+			exposedType = cred.Type
+		}
 		out = append(out, CredentialEnvExposure{
 			EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN",
-			Type:       "AI_CLI_TOKEN",
+			Type:       exposedType,
 			Reason:     "OAuth token authenticates inside an HTTPS CONNECT tunnel the sidecar cannot inject into, so it must live in the agent env",
 		})
 		markExposed(cred.ID)
@@ -1407,7 +1445,7 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 		if login, ok := codexLoginCredential(req); ok {
 			out = append(out, CredentialEnvExposure{
 				EnvVarName: codexauth.FileRel,
-				Type:       "AI_CLI_TOKEN",
+				Type:       login.Type,
 				Reason:     "Codex reads its ChatGPT login only from $CODEX_HOME/auth.json, so a short-lived access token is written there; the refresh token stays on the server",
 			})
 			markExposed(login.ID)
@@ -1525,7 +1563,9 @@ func AgentEnvCredentialExposures(req AgentRunRequest, keeperEnabled bool) []Cred
 	// credentials.username has never appeared here. Padding it with identifiers
 	// makes the exposures an operator MUST act on harder to see.
 	for _, cred := range req.Credentials {
-		if !exposedCreds[cred.ID] {
+		if !exposedCreds[cred.ID] || cred.isProviderLogin() {
+			// A login's parts are never delivered (appendCredentialFields),
+			// so there is nothing to report for them.
 			continue
 		}
 		for _, f := range cred.Fields {

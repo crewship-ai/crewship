@@ -68,6 +68,16 @@ var policies = map[string]TypePolicy{
 	"CERTIFICATE":    {Delivery: DeliveryFile, KeeperGated: false},
 	"API_KEY":        {Delivery: DeliveryProxy, KeeperGated: false},
 	"AI_CLI_TOKEN":   {Delivery: DeliveryEnv, KeeperGated: false},
+	// PROVIDER_LOGIN (docs/prd/provider-logins.md §5.1): a seat that pays
+	// for a model. Delivered per adapter as a DERIVATIVE — the env var
+	// Claude Code reads, the auth.json Codex reads, the sidecar CredStore
+	// for a metered key — never as its stored parts; the refresh token in
+	// particular never leaves the server. DeliveryEnv here means "has a
+	// channel" (the gate every selector consults); which channel is the
+	// orchestrator's per-adapter decision. Not Keeper-gated, like
+	// AI_CLI_TOKEN: the CLI reads it at start and a CONNECT tunnel cannot
+	// be mediated per request.
+	"PROVIDER_LOGIN": {Delivery: DeliveryEnv, KeeperGated: false},
 	"OAUTH2":         {Delivery: DeliveryEnv, KeeperGated: false},
 	"ENDPOINT_URL":   {Delivery: DeliveryEnv, KeeperGated: false},
 }

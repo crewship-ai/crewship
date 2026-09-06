@@ -511,7 +511,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		}
 		for _, f := range c.Fields {
 			creds[i].Fields = append(creds[i].Fields, orchestrator.CredentialField{
-				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+				Key: f.Key, EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
 			})
 		}
 	}

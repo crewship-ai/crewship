@@ -720,7 +720,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 		}
 		for _, f := range fields {
 			c.Fields = append(c.Fields, orchestrator.CredentialField{
-				EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
+				Key: f.Key, EnvVar: f.EnvVar, Value: f.Value, IsSecret: f.IsSecret,
 			})
 		}
 		creds = append(creds, c)
