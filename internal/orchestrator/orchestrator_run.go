@@ -1552,7 +1552,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// that did not land starts Codex on the dummy key, and a REMOVAL that did
 	// not land leaves a previous login in the persistent HOME paying for a run
 	// nobody assigned it to.
-	if req.CLIAdapter == "CODEX_CLI" &&
+	if flushErr != nil && req.CLIAdapter == "CODEX_CLI" &&
 		(batch.stepFailed("file:"+codexauth.FileRel) || batch.stepFailed("rm:"+codexauth.FileRel)) {
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("deliver Codex login for %s: %w", req.AgentSlug, flushErr)
