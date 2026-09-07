@@ -31,7 +31,7 @@ COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
 
-FROM golang:1.27.0-alpine AS backend
+FROM golang:1.27.1-alpine AS backend
 # This tag is the compiler for the shipped binary, and it is the one Go version
 # no pull-request check ever exercises: the image is built by release.yml and
 # nightly.yml only (#2064). Dependabot's `docker-images` group bumps it alone.
