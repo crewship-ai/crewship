@@ -49,7 +49,7 @@ func (s *Store) Create(ctx context.Context, pool Pool) error {
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("begin provider pool creation: %w", err)
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO provider_login_pools
@@ -76,7 +76,10 @@ func (s *Store) Create(ctx context.Context, pool Pool) error {
 	if err != nil && !errors.Is(err, ErrUnavailable) {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit provider pool creation: %w", err)
+	}
+	return nil
 }
 
 // Choose reserves a round-robin turn. Its first statement takes SQLite's write
@@ -89,7 +92,7 @@ func (s *Store) Choose(ctx context.Context, workspaceID, poolID string, now time
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Candidate{}, err
+		return Candidate{}, fmt.Errorf("begin provider pool selection: %w", err)
 	}
 	defer tx.Rollback()
 	var policy Policy
@@ -102,7 +105,7 @@ func (s *Store) Choose(ctx context.Context, workspaceID, poolID string, now time
 		return Candidate{}, ErrNotFound
 	}
 	if err != nil {
-		return Candidate{}, err
+		return Candidate{}, fmt.Errorf("reserve provider pool turn: %w", err)
 	}
 	candidates, err := loadCandidates(ctx, tx, workspaceID, poolID)
 	if err != nil {
@@ -115,10 +118,10 @@ func (s *Store) Choose(ctx context.Context, workspaceID, poolID string, now time
 	_, err = tx.ExecContext(ctx, `UPDATE provider_login_pool_members SET last_selected_seq = ?
 		WHERE pool_id = ? AND credential_id = ?`, seq, poolID, chosen.ID)
 	if err != nil {
-		return Candidate{}, err
+		return Candidate{}, fmt.Errorf("record provider pool selection: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return Candidate{}, err
+		return Candidate{}, fmt.Errorf("commit provider pool selection: %w", err)
 	}
 	chosen.LastSelected = seq
 	return chosen, nil
@@ -133,7 +136,7 @@ func (s *Store) Snapshot(ctx context.Context, workspaceID, poolID string) (Polic
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return Policy{}, nil, err
+		return Policy{}, nil, fmt.Errorf("begin provider pool snapshot: %w", err)
 	}
 	defer tx.Rollback()
 	var policy Policy
@@ -144,14 +147,14 @@ func (s *Store) Snapshot(ctx context.Context, workspaceID, poolID string) (Polic
 		return Policy{}, nil, ErrNotFound
 	}
 	if err != nil {
-		return Policy{}, nil, err
+		return Policy{}, nil, fmt.Errorf("read provider pool policy: %w", err)
 	}
 	candidates, err := loadCandidates(ctx, tx, workspaceID, poolID)
 	if err != nil {
 		return Policy{}, nil, err
 	}
 	if err = tx.Commit(); err != nil {
-		return Policy{}, nil, err
+		return Policy{}, nil, fmt.Errorf("commit provider pool snapshot: %w", err)
 	}
 	return policy, candidates, nil
 }
@@ -172,7 +175,7 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		LEFT JOIN provider_login_availability a ON a.credential_id = c.id
 		WHERE p.id = ? AND p.workspace_id = ? ORDER BY m.credential_id`, poolID, workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query provider pool members: %w", err)
 	}
 	defer rows.Close()
 	var candidates []Candidate
@@ -181,7 +184,7 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		var expires, cooldown, kind, credentialWorkspace, encryptedValue string
 		if err := rows.Scan(&c.ID, &c.OwnerID, &c.Provider, &c.Mode, &c.Priority, &c.LastSelected,
 			&c.Active, &c.Blocked, &expires, &cooldown, &kind, &credentialWorkspace, &encryptedValue); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan provider pool member: %w", err)
 		}
 		// Legacy subscription blobs can hide expiry inside encrypted auth.json.
 		// Require import as PROVIDER_LOGIN before pooling them: this metadata-
@@ -207,5 +210,8 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		}
 		candidates = append(candidates, c)
 	}
-	return candidates, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate provider pool members: %w", err)
+	}
+	return candidates, nil
 }

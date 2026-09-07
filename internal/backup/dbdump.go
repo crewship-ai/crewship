@@ -352,6 +352,9 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		// because the agents schema isn't strictly required to carry
 		// workspace_id directly (production does; the minimal test
 		// schemas in this package don't).
+		// Optional provider-pool creators are appended by DumpWorkspace
+		// after probing the live schema, so pre-pool databases retain
+		// this user scope rather than failing on an absent table.
 		return `id IN (
 			SELECT user_id FROM crew_members WHERE crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
 			UNION SELECT created_by FROM chats WHERE workspace_id = ? AND created_by IS NOT NULL
@@ -539,6 +542,18 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 		}
 		where, args, _ := workspaceFilterSQL(table, workspaceID)
+		if table == "users" {
+			hasPoolCreator, err := tableHasColumn(ctx, tx, "provider_login_pools", "created_by")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe provider pool creator scope: %w", err)
+			}
+			if hasPoolCreator {
+				where = "(" + where + `) OR id IN (
+					SELECT created_by FROM provider_login_pools
+					WHERE workspace_id = ? AND created_by IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
+		}
 		if where == "workspace_id = ?" {
 			// Confirm column presence. If absent, fall through to the
 			// discovery-based filter (transitively-scoped tables).

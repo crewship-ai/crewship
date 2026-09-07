@@ -34,7 +34,7 @@ func poolFixture(t *testing.T) (*Store, *sql.DB, string) {
 
 func execPoolSQL(t *testing.T, db *sql.DB, query string, args ...any) {
 	t.Helper()
-	if _, err := db.Exec(query, args...); err != nil {
+	if _, err := db.ExecContext(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -72,7 +72,7 @@ func TestStoreSelectionDurableAndReadOnly(t *testing.T) {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
 	var bindings int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM credential_bindings`).Scan(&bindings); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM credential_bindings`).Scan(&bindings); err != nil {
 		t.Fatal(err)
 	}
 	if bindings != 0 {
@@ -135,7 +135,7 @@ func TestStoreMembershipValidationAndRollback(t *testing.T) {
 				t.Fatalf("create=%v want=%v", err, tc.want)
 			}
 			var count int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM provider_login_pools`).Scan(&count); err != nil {
+			if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM provider_login_pools`).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if count != 0 {
@@ -184,13 +184,13 @@ func TestStoreTenantIsolationAndDatabaseGuards(t *testing.T) {
 		`UPDATE provider_login_pools SET workspace_id = 'foreign' WHERE id = 'pool'`,
 		`UPDATE credentials SET workspace_id = 'foreign' WHERE id = 'a'`,
 	} {
-		if _, err := db.Exec(query); err == nil {
+		if _, err := db.ExecContext(t.Context(), query); err == nil {
 			t.Fatalf("tenant guard accepted %s", query)
 		}
 	}
 	// Preserve one ordinary secret per scope/slot.
 	execPoolSQL(t, db, `INSERT INTO credential_bindings(id,workspace_id,credential_id,scope,slot) VALUES ('binding','ws','a','WORKSPACE','OPENAI_LOGIN')`)
-	if _, err := db.Exec(`INSERT INTO credential_bindings(id,workspace_id,credential_id,scope,slot) VALUES ('collision','ws','b','WORKSPACE','OPENAI_LOGIN')`); err == nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO credential_bindings(id,workspace_id,credential_id,scope,slot) VALUES ('collision','ws','b','WORKSPACE','OPENAI_LOGIN')`); err == nil {
 		t.Fatal("ordinary binding uniqueness was weakened")
 	}
 }
