@@ -116,6 +116,17 @@ quota windows. The store is an internal foundation; it does not establish that
 pooling or automatic failover works in dev3. No running agent is switched or
 automatically replayed by this change.
 
+Integration boundary for the next slice: despite its name,
+`loadDeliveredCredentialsForRun` is also used by the agent-configuration resolver.
+Calling `Choose` there would consume turns during configuration loads and would
+not guarantee selection for each actual run. Wire authorized selection at the
+orchestrator's run boundary, before sidecar/environment/auth-file construction.
+Native auth files currently live in the agent's shared HOME; overlapping runs
+must not rewrite that file with different pool accounts. Solve that lifecycle
+constraint (including detached execs) before enabling native pool bindings.
+Read-only payer metadata must identify a pool, not claim its next candidate is
+the credential paying for an already-running task.
+
 Verification entry points: `go test -race ./internal/providerpool -count=1`
 (selection, concurrent transactions, restart, tenant guards, stale observations),
 `go test ./internal/backup -count=1`, and the full Go verification loop. Record
