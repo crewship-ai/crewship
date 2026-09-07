@@ -77,7 +77,7 @@ describe("CreateIssueModal", () => {
   it("renders when open", () => {
     render(<CreateIssueModal {...defaultProps} />)
     expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("Add description...")).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("What should be done, what does a good result look like, and which files or constraints matter?")).toBeInTheDocument()
     expect(screen.getByText("Create issue")).toBeInTheDocument()
   })
 
@@ -143,7 +143,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(titleInput, { target: { value: "My test issue" } })
 
     // Fill description
-    const descInput = screen.getByPlaceholderText("Add description...")
+    const descInput = screen.getByPlaceholderText("What should be done, what does a good result look like, and which files or constraints matter?")
     fireEvent.change(descInput, { target: { value: "Test description" } })
 
     // Submit
@@ -276,7 +276,7 @@ describe("CreateIssueModal", () => {
     fireEvent.change(screen.getByPlaceholderText("Issue title"), {
       target: { value: "Shell issue" },
     })
-    fireEvent.change(screen.getByPlaceholderText("Add description..."), {
+    fireEvent.change(screen.getByPlaceholderText("What should be done, what does a good result look like, and which files or constraints matter?"), {
       target: { value: "Body text" },
     })
     fireEvent.click(screen.getByText("Create issue"))
@@ -507,7 +507,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     fireEvent.click(screen.getByText("Assignee"))
 
-    await waitFor(() => expect(screen.getByText(/could not be loaded/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Agents could not be loaded/i)).toBeInTheDocument())
     expect(screen.queryByText(/no agents/i)).toBeNull()
   })
 
@@ -518,7 +518,7 @@ describe("CreateIssueModal — identity and the empty assignee list", () => {
 
     render(<CreateIssueModal {...defaultProps} crews={emptyFirstCrews} />)
     fireEvent.click(screen.getByText("Assignee"))
-    await screen.findByText(/could not be loaded/i)
+    await screen.findByText(/Agents could not be loaded/i)
 
     // The retry has to be a control. Re-picking the crew that is already
     // picked sets the same id, so React bails out and the effect never

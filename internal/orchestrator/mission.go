@@ -290,8 +290,10 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 func (e *MissionEngine) StopMission(missionID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if ms, ok := e.active[missionID]; ok {
-		ms.cancel()
+	if ms, ok := e.active[missionID]; ok && ms != nil {
+		if ms.cancel != nil {
+			ms.cancel()
+		}
 		delete(e.active, missionID)
 		e.logger.Info("mission stopped", "mission_id", missionID)
 	}

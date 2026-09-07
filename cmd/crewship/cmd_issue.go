@@ -19,6 +19,12 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
+	WorkMode     string  `json:"work_mode" yaml:"work_mode"`
+	WorkRevision int     `json:"work_revision" yaml:"work_revision"`
+	WorkerUserID *string `json:"worker_user_id,omitempty" yaml:"worker_user_id,omitempty"`
+	WorkerName   *string `json:"worker_name,omitempty" yaml:"worker_name,omitempty"`
+	WorkNote     string  `json:"work_note" yaml:"work_note"`
+	WorkStopping bool    `json:"work_stopping" yaml:"work_stopping"`
 	ID           string  `json:"id" yaml:"id"`
 	CrewID       string  `json:"crew_id" yaml:"crew_id"`
 	CrewName     string  `json:"crew_name" yaml:"crew_name"`

@@ -49,6 +49,24 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		taskStatus = "CANCELLED"
 	}
 
+	// A clean process exit is not task success. Consume the persisted outcome;
+	// nullable legacy rows retain their historical technical-status behaviour.
+	var outcome sql.NullString
+	outcomeErr := e.db.QueryRowContext(ctx, `SELECT outcome FROM assignments WHERE id=?`, assignmentID).Scan(&outcome)
+	if outcomeErr != nil && !errors.Is(outcomeErr, sql.ErrNoRows) {
+		return fmt.Errorf("load assignment outcome: %w", outcomeErr)
+	}
+	if status == "COMPLETED" && outcome.Valid {
+		switch outcome.String {
+		case OutcomeNeedsHuman:
+			taskStatus = "AWAITING_APPROVAL"
+		case OutcomePartial, OutcomeFailed:
+			taskStatus = "FAILED"
+		case OutcomeCancelled:
+			taskStatus = "CANCELLED"
+		}
+	}
+
 	// Circuit breaker: track consecutive failures per agent
 	if assignedAgentID.Valid {
 		e.cbMu.Lock()
@@ -119,7 +137,9 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		_ = e.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, assignedAgentID.String).Scan(&agentName)
 
 		var commentBody string
-		if handoff.Parsed && handoff.Summary != "" {
+		if taskStatus == "AWAITING_APPROVAL" {
+			commentBody = fmt.Sprintf("**%s needs your input.**\n\n%s", agentName, handoff.Summary)
+		} else if handoff.Parsed && handoff.Summary != "" && taskStatus == "COMPLETED" {
 			commentBody = fmt.Sprintf("**%s completed their work** (confidence: %s)\n\n%s", agentName, handoff.Confidence, handoff.Summary)
 			if handoff.Artifacts != "" {
 				commentBody += "\n\n**Artifacts:** " + handoff.Artifacts

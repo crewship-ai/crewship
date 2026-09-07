@@ -197,6 +197,7 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/relations roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/review roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/start roleCreate
+POST /api/v1/crews/{crewId}/issues/{identifier}/work roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/stop roleCreate
 POST /api/v1/crews/{crewId}/members roleCreate
 POST /api/v1/crews/{crewId}/missions roleCreate

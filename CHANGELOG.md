@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
+
 - **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
 
 - **Provider onboarding safeguards** (#2428) — completing device sign-in saves the chosen crew access, validates the complete code response, and uses only committed UI callbacks. Disabled data requests cannot restore stale account details. Empty subscription usage remains a valid array response. OpenAI/Codex defaults stay on GPT-5.5; Astra remains selectable for accounts with access, rather than being forced during onboarding.

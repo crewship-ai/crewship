@@ -1,5 +1,8 @@
 "use client"
 
+import { useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
+import { MarkdownContent } from "./markdown-content"
 import Link from "next/link"
 import { ArrowUpRight, BookOpen, Play } from "lucide-react"
 
@@ -28,6 +31,8 @@ export interface IssueRun {
   ended_at?: string
   duration_ms: number
   result_summary?: string
+  result_truncated?: boolean
+  result_stale?: boolean
   error_message?: string
   outcome?: string
   source?: "task" | "mention" | "delegation"
@@ -164,12 +169,10 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                   </span>
                 )}
                 <div className="col-start-2 col-end-[-1] min-w-0 text-[11px]">
+                  {run.result_stale && <p className="text-warn">This result uses an earlier brief. Check it against the current requirements.</p>}
                   {run.error_message && <p className="break-words text-destructive/90">{run.error_message}</p>}
                   {run.result_summary?.trim() ? (
-                    <details className="text-muted-foreground">
-                      <summary className="cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Reported summary</summary>
-                      <p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{run.result_summary}</p>
-                    </details>
+                    <IssueRunResult issue={issue} run={run} />
                   ) : run.status === "COMPLETED" ? (
                     <p className="text-muted-foreground">No summary recorded.</p>
                   ) : null}
@@ -189,4 +192,25 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
       )}
     </DetailCard>
   )
+}
+
+function IssueRunResult({ issue, run }: { issue: Mission; run: IssueRun }) {
+ const [full, setFull] = useState<string | null>(null)
+ const [loading, setLoading] = useState(false)
+ const [error, setError] = useState(false)
+ async function load() {
+  if (!run.result_truncated || full !== null || loading) return
+  setLoading(true); setError(false)
+  try {
+   const res = await apiFetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier ?? issue.id)}/runs/${encodeURIComponent(run.id)}/result?workspace_id=${encodeURIComponent(issue.workspace_id)}`)
+   if (!res.ok) throw new Error("Result unavailable")
+   const body = await res.json(); setFull(body.result_summary)
+  } catch {setError(true)} finally {setLoading(false)}
+ }
+ return <details className="text-muted-foreground" onToggle={(event) => { if (event.currentTarget.open) void load() }}>
+  <summary className="cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Reported summary</summary>
+  <div className="mt-2 min-w-0 break-words [overflow-wrap:anywhere]"><MarkdownContent>{full ?? run.result_summary ?? ""}</MarkdownContent></div>
+  {loading && <p role="status">Loading complete result…</p>}
+  {error && <p role="alert">Only the preview is available. <button className="text-primary underline" onClick={() => void load()}>Retry full result</button></p>}
+ </details>
 }

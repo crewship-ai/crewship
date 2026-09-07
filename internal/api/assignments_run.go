@@ -1518,6 +1518,22 @@ func (h *AssignmentHandler) finishAssignment(
 					// landed in assignments.error_message + the run journal
 					// entry above, unsanitized, for operators.
 					commentBody = fmt.Sprintf("**%s encountered an issue.** %s", agentName, userFacingAssignmentError(errMsg))
+				} else if outcome == orchestrator.OutcomeNeedsHuman || outcome == orchestrator.OutcomePartial || outcome == orchestrator.OutcomeFailed {
+					label := "reported an incomplete result"
+					if outcome == orchestrator.OutcomeNeedsHuman {
+						label = "needs your input"
+					}
+					if outcome == orchestrator.OutcomeFailed {
+						label = "encountered an issue"
+					}
+					summary := orchestrator.ParseHandoff(result).Summary
+					if cp := orchestrator.ParseCheckpoint(result); cp.Blockers != "" {
+						summary = cp.Blockers
+					}
+					if summary == "" {
+						summary = defaultedReason
+					}
+					commentBody = fmt.Sprintf("**%s %s.**\n\n%s", agentName, label, summary)
 				} else if result != "" {
 					handoff := orchestrator.ParseHandoff(result)
 					if handoff.Parsed && handoff.Summary != "" {
@@ -1542,8 +1558,10 @@ func (h *AssignmentHandler) finishAssignment(
 					switch {
 					case status == "CANCELLED":
 						action = actionTaskCancelled
-					case errMsg != "":
+					case errMsg != "" || outcome == orchestrator.OutcomeFailed || outcome == orchestrator.OutcomePartial:
 						action = actionTaskFailed
+					case outcome == orchestrator.OutcomeNeedsHuman:
+						action = actionCommented
 					}
 					// Through the shared emitter, not a bare INSERT — the
 					// second of the two writers §9.1 (#2332/B1) named as

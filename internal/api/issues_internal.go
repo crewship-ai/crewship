@@ -282,6 +282,11 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "internal get issue", err)
 		return
 	}
+
+	if err := h.db.QueryRowContext(r.Context(), `SELECT mode,revision,worker_user_id,note FROM issue_work WHERE mission_id=?`, issue.ID).Scan(&issue.WorkMode, &issue.WorkRevision, &issue.WorkerUserID, &issue.WorkNote); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		internalError(w, r, h.logger, "read issue work", err)
+		return
+	}
 	issue.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
 	if authoredVia.Valid && authoredVia.String != "" {
 		issue.AuthoredVia = &authoredVia.String
@@ -584,6 +589,18 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 		internalError(w, r, h.logger, "find issue for update", err)
 		return
+	}
+
+	if req.Status != "" || req.AssigneeID != nil {
+		var held bool
+		if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
+			internalError(w, r, h.logger, "issue work guard", err)
+			return
+		}
+		if held {
+			writeProblem(w, r, 409, "This issue is held by a human. Post findings as a comment; the human decides when to hand it back.")
+			return
+		}
 	}
 	// #1365: a crew-bound (crwv1) token may only mutate its OWN crew's issues.
 	// The workspace check above is necessary but not sufficient — a sibling

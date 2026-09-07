@@ -17,15 +17,27 @@ try {
   await writeFile(entry, `
     import React, { useState } from 'react';
     import { createRoot } from 'react-dom/client';
+    import { IssueCardDetail } from '../components/features/issues/issue-card-detail';
+    import { IssueWorkPanel } from '../components/features/issues/issue-work-panel';
     import { IssueRunsCard } from '../components/features/issues/issue-runs-card';
     import { IssueWorkflowActions } from '../components/features/issues/issue-card-editors';
-    const human = { id: 'issue-human', identifier: 'OPS-1', title: 'Prepare the report', status: 'TODO', assignee_type: 'user', assignee_id: 'u1', owner: { id: 'u1', name: 'Petra' } };
+    const human = { id: 'issue-human', workspace_id: 'ws', crew_id: 'crew', identifier: 'OPS-1', title: 'Prepare the report', status: 'TODO', assignee_type: 'user', assignee_id: 'u1', owner: { id: 'u1', name: 'Petra' } };
     const delegated = { ...human, id: 'issue-agent', delegate: { id: 'a1', name: 'Jordan' } };
     const base = { id: 'r1', run_id: 'run-1', agent_name: 'Jordan', status: 'COMPLETED', duration_ms: 1000 };
     function Fixture() {
       const [action, setAction] = useState('');
+      if (location.search.includes('detail')) {
+        const issue = { ...delegated, title: 'Verify the report and publish the approved version', work_mode: 'human', worker_name: 'Petra', worker_user_id: 'u1', work_revision: 2, crew_name: 'Quality', crew_slug: 'quality', mission_type: 'issue', priority: 'high', created_at: '2026-09-07T08:00:00Z', updated_at: '2026-09-07T10:00:00Z', labels: [], description: '## Goal\\nPublish an accurate report that the client can verify.\\n\\n## Done when\\n- Every finding links to its evidence.\\n- Petra approves the final version.\\n- The published report is attached to this issue.' };
+        return <IssueCardDetail issue={issue} comments={[
+          {id:'c1',author_type:'agent',author_id:'a1',author_name:'Jordan',body:'The report is ready. Casey, please check each finding against the source.',created_at:'2026-09-07T09:00:00Z'},
+          {id:'c2',author_type:'agent',author_id:'a2',author_name:'Casey',body:'Checked all 12 findings. Corrected two references. The remaining findings match the source.',created_at:'2026-09-07T09:30:00Z'},
+          {id:'c3',author_type:'user',author_id:'u1',author_name:'Petra',body:'I took over the final review. I will hand this back for publishing after approval.',created_at:'2026-09-07T10:00:00Z'}
+        ]} activities={[]} relations={[]} runs={[{...base,outcome:'SUCCEEDED',result_summary:'12 findings verified. Two references corrected. The report is ready for the client review.'}]} workPanel={<IssueWorkPanel issue={issue} agents={[{id:'a1',name:'Jordan',slug:'jordan'}]} editable onChanged={async()=>{}} />} onSubmitComment={async()=>true} />;
+      }
+
       return <main className="mx-auto flex max-w-5xl flex-col gap-4 p-4">
         <h1 className="text-lg font-semibold">Issue work clarity</h1>
+        <section data-testid="work-panel"><IssueWorkPanel issue={{ ...human, work_mode: 'human', worker_name: 'Petra', work_revision: 2 }} agents={[{ id: 'a1', name: 'Jordan', slug: 'jordan' }]} editable onChanged={async () => {}} /></section>
         <section data-testid="human"><h2>Human-owned issue</h2><IssueWorkflowActions issue={human} onAction={setAction} /><IssueRunsCard issue={human} runs={[]} /></section>
         <section data-testid="delegated"><h2>Owner and agent delegate</h2><IssueWorkflowActions issue={delegated} onAction={setAction} /><p role="status">{action}</p></section>
         <section data-testid="results"><h2>Reported results</h2><IssueRunsCard issue={delegated} runs={[
@@ -57,6 +69,7 @@ try {
     })
     await page.route("**/*", async (route) => {
       const url = new URL(route.request().url())
+      if (url.pathname.endsWith("/members")) return route.fulfill({json:[{user_id:"u1",user:{full_name:"Petra"}}]})
       if (url.pathname === "/fixture.js") return route.fulfill({ contentType: "text/javascript", body: js })
       if (url.pathname === "/fixture.css") return route.fulfill({ contentType: "text/css", body: css })
       if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<!doctype html><html lang="en" class="dark"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Issues regression</title><link rel="stylesheet" href="/fixture.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>' })
@@ -78,10 +91,18 @@ try {
     await page.keyboard.press("Enter")
     assert.equal(await summary.locator("..").getAttribute("open"), "")
     assert.equal(await page.getByText(/Final evidence is preserved/).isVisible(), true)
+    await page.getByTestId("work-panel").getByRole("button", {name:"Hand off", exact:true}).click()
+    await page.getByLabel("Next worker").selectOption("agent:a1")
+    await page.getByTestId("work-panel").getByRole("textbox").fill("The report is checked. Publish the approved version and return its link.")
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `horizontal overflow at ${width}px`)
     assert.deepEqual(errors, [], `browser errors at ${width}px`)
     await page.screenshot({ path: `/tmp/issues-work-clarity-${width}.png`, fullPage: true })
     console.log(`PASS ${width}px: human/delegate actions, outcomes, keyboard, complete summary, no overflow`)
+    await page.goto("https://issues-fixture.test/?detail=1")
+    await page.getByRole("heading", {name:"Verify the report and publish the approved version", exact:true}).waitFor()
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `detail overflow at ${width}px`)
+    assert.deepEqual(errors, [], `detail browser errors at ${width}px`)
+    await page.screenshot({path:`/tmp/issues-detail-${width}.png`,fullPage:true})
     await page.close()
   }
 } finally {

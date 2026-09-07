@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"slices"
+	"strconv"
 	"time"
 )
 
@@ -25,6 +27,28 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Opt-in cursor pagination keeps legacy CLI consumers compatible.
+	// The browser always opts in and reads at most 100 comments per request.
+	pageSize, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	if pageSize < 0 || pageSize > 100 {
+		pageSize = 100
+	}
+	predicate := ""
+	args := []any{missionID}
+	if before := r.URL.Query().Get("before_id"); before != "" && pageSize > 0 {
+		var created string
+		if err := h.db.QueryRowContext(r.Context(), `SELECT created_at FROM mission_comments WHERE id=? AND mission_id=?`, before, missionID).Scan(&created); err != nil {
+			writeProblem(w, r, 400, "Comment cursor is no longer available; refresh the conversation")
+			return
+		}
+		predicate = " AND (mc.created_at < ? OR (mc.created_at = ? AND mc.id < ?))"
+		args = append(args, created, created, before)
+	}
+	order := " ORDER BY mc.created_at ASC,mc.id ASC"
+	if pageSize > 0 {
+		order = " ORDER BY mc.created_at DESC,mc.id DESC LIMIT ?"
+		args = append(args, pageSize+1)
+	}
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT mc.id, mc.mission_id, mc.author_type, mc.author_id,
 		       CASE
@@ -34,8 +58,7 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       mc.body, mc.created_at, mc.updated_at
 		FROM mission_comments mc
-		WHERE mc.mission_id = ?
-		ORDER BY mc.created_at ASC`, missionID)
+		WHERE mc.mission_id = ?`+predicate+order, args...)
 	if err != nil {
 		internalError(w, r, h.logger, "list comments", err)
 		return
@@ -57,6 +80,14 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pageSize > 0 {
+		more := len(result) > pageSize
+		if more {
+			result = result[:pageSize]
+		}
+		slices.Reverse(result)
+		w.Header().Set("X-Has-More", strconv.FormatBool(more))
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 

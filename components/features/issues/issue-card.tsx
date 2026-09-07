@@ -24,6 +24,8 @@ interface IssueCardProps {
 }
 
 export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardProps) {
+  // Current work wins over the legacy owner/delegate projection on the board.
+  if (issue.work_mode === "human") issue = { ...issue, assignee_type: "user", assignee_id: issue.worker_user_id, assignee_name: issue.worker_name }
   const overdue = isOverdue(issue.due_date, issue.status)
   const isUpdated = issue.updated_at && issue.updated_at !== issue.created_at
   const dateLabel = isUpdated ? "Updated" : "Created"
@@ -100,6 +102,7 @@ export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardPr
         </div>
       )}
 
+      {issue.work_mode === "human" && <p className="mb-1 text-[10px] text-warn">{issue.work_stopping ? "Taking over…" : "With a person"}</p>}
       {/* Row 4: date */}
       <div className="text-[10px] text-foreground/40">
         {dateLabel} {formatShortDate(dateValue)}

@@ -297,6 +297,12 @@ type issueResponse struct {
 	// old clients during the migration window. Nil when nobody occupies
 	// that slot. A UI must render these as two separate things and must
 	// never fall back to putting an agent in Owner's place.
+	WorkMode       string                 `json:"work_mode"`
+	WorkRevision   int                    `json:"work_revision"`
+	WorkerUserID   *string                `json:"worker_user_id,omitempty"`
+	WorkerName     *string                `json:"worker_name,omitempty"`
+	WorkNote       string                 `json:"work_note"`
+	WorkStopping   bool                   `json:"work_stopping"`
 	Owner          *issueOwnerResponse    `json:"owner,omitempty"`
 	Delegate       *issueDelegateResponse `json:"delegate,omitempty"`
 	DueDate        *string                `json:"due_date"`
@@ -596,8 +602,13 @@ func issueSelectQuery() string {
 		m.owner_user_id,
 		(SELECT full_name FROM users WHERE id = m.owner_user_id) AS owner_name,
 		m.delegate_agent_id,
-		(SELECT name FROM agents WHERE id = m.delegate_agent_id AND workspace_id = m.workspace_id) AS delegate_name
+		(SELECT name FROM agents WHERE id = m.delegate_agent_id AND workspace_id = m.workspace_id) AS delegate_name,
+ COALESCE(iw.mode,'agent'),COALESCE(iw.revision,0),iw.worker_user_id,
+ (SELECT u.full_name FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.id=iw.worker_user_id AND wm.workspace_id=m.workspace_id),
+ COALESCE(iw.note,''),
+ CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) ELSE 0 END
 	FROM missions m
+	LEFT JOIN issue_work iw ON iw.mission_id=m.id
 	LEFT JOIN crews c ON m.crew_id = c.id
 	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
 }
@@ -618,6 +629,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
 		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 		&ownerUserID, &ownerName, &delegateAgentID, &delegateName,
+		&issue.WorkMode, &issue.WorkRevision, &issue.WorkerUserID, &issue.WorkerName, &issue.WorkNote, &issue.WorkStopping,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}

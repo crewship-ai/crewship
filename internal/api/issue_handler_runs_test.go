@@ -384,3 +384,32 @@ func TestIssueRuns_FollowUpRun_SourceIsMention(t *testing.T) {
 	}
 	t.Fatalf("follow-up run %s missing from results; body=%s", followUpAssign, rr.Body.String())
 }
+
+func TestIssueRunResultReturnsFullStoredOutputAndFencesIssue(t *testing.T) {
+	h, user, ws, crew, lead, agent := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "TODO")
+	output := strings.Repeat("Complete evidence with unicode: ověřeno.\n", 500) + "THE FINAL RESULT"
+	seedMissionAssignment(t, h, ws, id, agent, "full-output", "COMPLETED", output, "", "")
+	req := issueRunsRequest(t, user, ws, crew, "ENG-1")
+	req.SetPathValue("runId", "full-output")
+	rr := httptest.NewRecorder()
+	h.RunResult(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("result: %d %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["result_summary"] != output {
+		t.Fatal("full result was truncated or changed")
+	}
+	seedIssue(t, h.db, ws, crew, lead, "ENG-2", "TODO")
+	req = issueRunsRequest(t, user, ws, crew, "ENG-2")
+	req.SetPathValue("runId", "full-output")
+	rr = httptest.NewRecorder()
+	h.RunResult(rr, req)
+	if rr.Code != 404 {
+		t.Fatalf("unrelated issue could read result: %d", rr.Code)
+	}
+}

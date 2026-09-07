@@ -98,6 +98,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.Get))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Delete)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/work", roleCreate, issues.Work)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", roleCreate, issues.Start)
 	// openapi: query hard:boolean
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", roleCreate, issues.Stop)
@@ -105,6 +106,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/activity", authed(wsCtx(http.HandlerFunc(issues.ListActivity))))
 	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs", authed(wsCtx(http.HandlerFunc(issues.ListRuns))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result", authed(wsCtx(http.HandlerFunc(issues.RunResult))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions", authed(wsCtx(http.HandlerFunc(issues.ListSessions))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints", authed(wsCtx(http.HandlerFunc(issues.ListCheckpoints))))
 	// B11 (§9.1/§14.1, #2368): the ordered event log a client's gap

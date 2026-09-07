@@ -7,9 +7,11 @@ Nová analýza kódu: `origin/main` @ `038117517`; první implementační část
 na větvi `feat/issues-work-clarity`, issue #2447. Routines se zde mění pouze
 v návrhu pravidel pro jejich zápisy/spouštění nad issue.
 
-**Stav:** návrh celého kontraktu; implementovaný první díl je popsaný na konci.
-Následující nový model lidského převzetí zatím není implementován. Existující
-testy dokazují konkrétní dílčí chování, nikoli celé uživatelské scénáře níže.
+**Stav:** původní návrh a audit před implementací. Rozšířená implementace #2449
+(převzetí člověkem, předání, výsledky, přílohy, formuláře a stránkování) je
+popsaná v [aktuálním handoffu](HANDOFF-2026-09-07-ISSUES-WORK.md).
+Níže uvedená matice zůstává návrhem cílových scénářů, nikoli tvrzením, že
+každý z nich prošel živým testem s agentem.
 
 ## Doporučení
 
@@ -21,7 +23,7 @@ technický způsob provedení má být dostupný až při rozbalení.
 Největší další investice má jít do **trvalého záznamu aktuální odpovědnosti
 za další krok a bezpečného předání**, nikoli do dalšího chatového panelu.
 
-## Co dnes kód opravdu dělá
+## Audit kódu před implementací
 
 | Oblast | Současný stav | Důsledek |
 |---|---|---|

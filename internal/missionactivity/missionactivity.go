@@ -82,6 +82,22 @@ func Emit(ctx context.Context, db *sql.DB, e Entry) (Written, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	written, err := EmitTx(ctx, tx, e)
+	if err != nil {
+		return Written{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Written{}, fmt.Errorf("missionactivity: commit: %w", err)
+	}
+	return written, nil
+}
+
+// EmitTx records an event in the same transaction as the change it describes.
+// The caller owns the transaction and commits only after all writes succeed.
+func EmitTx(ctx context.Context, tx *sql.Tx, e Entry) (Written, error) {
+	if e.ID == "" || e.MissionID == "" || e.ActorType == "" || e.Action == "" {
+		return Written{}, fmt.Errorf("missionactivity: required event fields missing")
+	}
 	// Some legacy callers pass a chat id as the mission id (issue_events.go's
 	// own comment on the same lookup) — ErrNoRows there is not this
 	// function's error to raise, it just means workspace/crew stay empty and
@@ -116,10 +132,6 @@ func Emit(ctx context.Context, db *sql.DB, e Entry) (Written, error) {
 		wsVal, seq, payloadVal, sourceKindVal, sourceIDVal,
 	); err != nil {
 		return Written{}, fmt.Errorf("missionactivity: insert: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return Written{}, fmt.Errorf("missionactivity: commit: %w", err)
 	}
 
 	return Written{Seq: seq, WorkspaceID: workspaceID.String, CrewID: crewID.String}, nil

@@ -238,10 +238,17 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
+	tx, txErr := h.db.BeginTx(r.Context(), nil)
+	if txErr != nil {
+		internalError(w, r, h.logger, "start: begin", txErr)
+		return
+	}
+	defer tx.Rollback()
+
 	// 1. Load issue
 	var missionID, status, title, leadAgentID string
 	var description, delegateAgentID sql.NullString
-	err := h.db.QueryRowContext(r.Context(), `
+	err := tx.QueryRowContext(r.Context(), `
 		SELECT id, status, title, description, delegate_agent_id, lead_agent_id
 		FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
 		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &delegateAgentID, &leadAgentID)
@@ -254,6 +261,15 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var held bool
+	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
+		internalError(w, r, h.logger, "start: work mode", err)
+		return
+	}
+	if held {
+		writeProblem(w, r, http.StatusConflict, "This issue is held by a human. Hand it back to an agent delegate before starting.")
+		return
+	}
 	// 2. Validate status
 	if status != "BACKLOG" && status != "TODO" {
 		writeProblem(w, r, http.StatusBadRequest, "Issue must be in BACKLOG or TODO to start (current: "+status+")")
@@ -275,7 +291,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var delegateSlug, delegateStatus, assigneeRole string
-	err = h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		`SELECT slug, COALESCE(status, ''), COALESCE(agent_role, '') FROM agents WHERE id = ? AND deleted_at IS NULL`,
 		delegateAgentID.String).Scan(&delegateSlug, &delegateStatus, &assigneeRole)
 	if err != nil {
@@ -297,10 +313,10 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 3b. Create synthetic chat so assignments can reference it (FK on chat_id)
 	var chatExists int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists)
+	_ = tx.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists)
 	if chatExists == 0 {
 		chatNow := time.Now().UTC().Format(time.RFC3339)
-		_, err = h.db.ExecContext(r.Context(), `
+		_, err = tx.ExecContext(r.Context(), `
 			INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
 			VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
 			missionID, leadAgentID, wsID, "Issue: "+title, chatNow, chatNow, chatNow)
@@ -313,15 +329,15 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Reset existing tasks to PENDING or create new one
 	var taskCount int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
+	_ = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
 	if taskCount > 0 {
 		// Reset existing tasks for re-run
 		resetNow := time.Now().UTC().Format(time.RFC3339)
-		_, _ = h.db.ExecContext(r.Context(), `
+		_, _ = tx.ExecContext(r.Context(), `
 			UPDATE mission_tasks SET status = 'PENDING', started_at = NULL, completed_at = NULL,
 			duration_ms = NULL, result_summary = NULL, error_message = NULL, assignment_id = NULL,
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
-			WHERE mission_id = ?`, resetNow, missionID)
+			WHERE mission_id = ? AND status NOT IN ('COMPLETED','SKIPPED')`, resetNow, missionID)
 	} else {
 		// If the delegate is a LEAD agent, skip creating a default task so
 		// the mission engine triggers lead planning (with sidecar and crew
@@ -337,7 +353,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			if description.Valid {
 				desc = description.String
 			}
-			_, err = h.db.ExecContext(r.Context(), `
+			_, err = tx.ExecContext(r.Context(), `
 				INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
 				VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
 				taskID, missionID, delegateAgentID.String, title, desc, now, now)
@@ -351,7 +367,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Update status → IN_PROGRESS (atomic CAS)
 	now := time.Now().UTC().Format(time.RFC3339)
-	res, err := h.db.ExecContext(r.Context(), `
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status IN ('BACKLOG', 'TODO')`,
 		now, missionID)
 	if err != nil {
@@ -364,6 +380,10 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "start: commit", err)
+		return
+	}
 	// 6. Start mission engine (async)
 	if h.missionEngine != nil {
 		finish := beginBackgroundWork()

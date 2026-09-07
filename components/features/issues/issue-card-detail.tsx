@@ -54,7 +54,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { formatDate, formatDurationDecimal, relTime, timeAgo } from "@/lib/time"
+import { formatDate, relTime, timeAgo } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { UserAvatar } from "@/components/ui/user-avatar"
@@ -95,7 +95,7 @@ import {
 } from "@/components/features/issues/issue-code-links-card"
 import { getCrewIconDef } from "@/lib/entities"
 import { entityHref } from "@/lib/entity-links"
-import { IssueRunsCard, issueRunLinks, type IssueRun } from "@/components/features/issues/issue-runs-card"
+import { IssueRunsCard, issueRunLinks, issueRunStatus, type IssueRun } from "@/components/features/issues/issue-runs-card"
 import { issueFacts, issuePriorityTone, issueStatusTone } from "@/lib/issue-facts"
 import { automationsForIssue, type Automation } from "@/lib/automations"
 import { runProvenance } from "@/lib/run-provenance"
@@ -115,6 +115,7 @@ export type { IssueRun } from "@/components/features/issues/issue-runs-card"
 interface Props {
   issue: Mission
   comments: IssueComment[]
+  olderComments?: React.ReactNode
   activities: IssueActivity[]
   relations: IssueRelation[]
   /** Newest first, as the endpoint returns them. */
@@ -134,6 +135,8 @@ interface Props {
    * that wiring is a second thing to keep correct.
    */
   actions?: React.ReactNode
+  workPanel?: React.ReactNode
+  filesPanel?: React.ReactNode
   /**
    * Agents that may be mentioned here, and that mentions already in the
    * comments resolve against. Without it a mention is just the text somebody
@@ -192,6 +195,7 @@ type FootTab = "comments" | "history"
 export function IssueCardDetail({
   issue,
   comments,
+  olderComments,
   activities,
   relations,
   runs = [],
@@ -206,6 +210,8 @@ export function IssueCardDetail({
   codeLinks = [],
   codeLinkEdit,
   runActivity,
+  workPanel,
+  filesPanel,
   automations = [],
   routineRuns = [],
 }: Props) {
@@ -309,11 +315,7 @@ export function IssueCardDetail({
               {actions && <div className="flex shrink-0 flex-col items-end gap-1.5">{actions}</div>}
             </div>
 
-            {issue.description && (
-              <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">
-                {firstParagraph(issue.description)}
-              </p>
-            )}
+
 
             <div className="flex flex-wrap items-center gap-1.5">
               <Pill tone={issueStatusTone(issue.status)}>
@@ -351,7 +353,8 @@ export function IssueCardDetail({
       </Appear>
 
       <Appear order={1}>
-        <StatStrip items={facts} />
+        {workPanel}
+        <details className="mt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Dates and issue details</summary><StatStrip items={facts} /></details>
       </Appear>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
@@ -374,6 +377,123 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
+          {/* Live agent work — exec, files, network, llm — while the issue is
+              running. Rendered by the host; nothing here when it is quiet. */}
+          {runActivity && <Appear order={5}>{runActivity}</Appear>}
+
+          {/* Every run on the issue — the first leg of the one timeline. It sat
+              in the rail as `runs[0]` alone; the rest were fetched and dropped. */}
+          <Appear order={6}>
+            <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
+          </Appear>
+      <span id="issue-conversation" className="scroll-mt-16" />
+      {/* Comments and history behind one switch, at the foot, full width —
+          the same arrangement Triggers/Versions uses on the routine card.
+          Both used to be cards here AND tabs in a drawer underneath. */}
+      <Appear order={9}>
+        <DetailCard
+          title={footTab === "comments" ? "Comments" : "History"}
+          icon={MessageSquare}
+          subtitle={String(footTab === "comments" ? comments.length : activities.length)}
+          action={
+            <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+              {(["comments", "history"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setFootTab(t)}
+                  aria-pressed={footTab === t}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
+                    footTab === t
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          {footTab === "comments" ? (
+            <div className="space-y-4">
+            {olderComments}
+            {comments.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">
+                {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
+              </p>
+            ) : (
+              <ul className="space-y-4">
+                {comments.map((c) => (
+                  <li key={c.id} className="flex gap-3">
+                    {c.author_type === "agent" ? (
+                      <AgentAvatar
+                        seed={c.author_id}
+                        className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
+                        alt=""
+                      />
+                    ) : (
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary">
+                        {(c.author_name ?? "?").charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[13px] font-medium text-foreground/90">
+                          {c.author_name ?? c.author_type}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {timeAgo(c.created_at)}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[13px] leading-relaxed text-foreground/85">
+                        <MarkdownContent compact mentions={mentions}>
+                          {c.body}
+                        </MarkdownContent>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* The composer is the whole point of the next step: an agent
+                becomes a participant when it is @mentioned here. */}
+            {onSubmitComment && (
+              <div className="border-t border-border/60 pt-4">
+                <CommentComposer
+                  agents={agents ?? []}
+                  onSubmit={onSubmitComment}
+                  authorInitial={viewerInitial ?? "U"}
+                />
+              </div>
+            )}
+            </div>
+          ) : activities.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">
+              {unavailable.includes("history") ? "Could not load the history — try again above." : "No recorded changes since this issue was opened."}
+            </p>
+          ) : (
+            <ul className="space-y-2 text-[12px]">
+              {[...activities]
+                .sort((x, y) => {
+                  // Newest first, whichever order the server listed them in
+                  // (the API answers oldest-first since seq-cursored resync).
+                  const sx = (x as { seq?: number }).seq
+                  const sy = (y as { seq?: number }).seq
+                  if (typeof sx === "number" && typeof sy === "number" && sx !== sy) return sy - sx
+                  return String(y.created_at ?? "").localeCompare(String(x.created_at ?? ""))
+                })
+                .map((a) => (
+                <ActivityRow key={a.id} activity={a} mentions={mentions} />
+              ))}
+            </ul>
+          )}
+        </DetailCard>
+      </Appear>
+
+          {filesPanel}
           {/* Links covers both directions an issue points: the relations a
               human drew, and the sub-issues that hang off it. They were two
               panels in two different screens, one of which could only read. */}
@@ -454,15 +574,7 @@ export function IssueCardDetail({
             />
           </Appear>
 
-          {/* Live agent work — exec, files, network, llm — while the issue is
-              running. Rendered by the host; nothing here when it is quiet. */}
-          {runActivity && <Appear order={5}>{runActivity}</Appear>}
 
-          {/* Every run on the issue — the first leg of the one timeline. It sat
-              in the rail as `runs[0]` alone; the rest were fetched and dropped. */}
-          <Appear order={6}>
-            <IssueRunsCard issue={issue} runs={runs} unavailable={unavailable.includes("runs")} />
-          </Appear>
         </div>
 
         {/* The rail follows the reader. A description longer than the rail
@@ -494,7 +606,7 @@ export function IssueCardDetail({
               first of all a thing that either worked or did not, and the
               wash says which before a word of it is read. */}
           <Appear order={4}>
-            <RelatedCard issue={issue} runs={runs} />
+            <details><summary className="cursor-pointer text-xs text-muted-foreground">Execution links</summary><RelatedCard issue={issue} runs={runs} /></details>
           </Appear>
 
           {/* One header, not two. The old rail wrapped a panel that drew its
@@ -585,13 +697,15 @@ export function IssueCardDetail({
             </DetailCard>
           </Appear>
 
+          <details open={Boolean(issue.routine_id || project || labels.length || myAutomations.length)} className="space-y-3">
+            <summary className="cursor-pointer text-xs text-muted-foreground">Project, routine and labels</summary>
           <Appear order={6}>
             <DetailCard
               title="Routine"
               icon={GitBranch}
               tone="purple"
               action={
-                edit?.runRoutine && issue.routine_slug ? (
+                edit?.runRoutine && issue.routine_slug && issue.work_mode !== "human" ? (
                   <RunRoutineButton onRun={() => void edit.runRoutine!()} busy={edit.busy} />
                 ) : undefined
               }
@@ -613,7 +727,7 @@ export function IssueCardDetail({
                     href={issue.routine_slug ? entityHref({ kind: "routine", slug: issue.routine_slug }) : undefined}
                   />
                 ) : null}
-                {issue.routine_name ? (
+                {issue.work_mode === "human" ? <p className="text-xs text-muted-foreground">Agent execution is paused while a person handles this issue.</p> : issue.routine_name ? (
                   <p className="text-[11px] text-muted-foreground">
                     Starting this issue runs that routine.
                   </p>
@@ -729,120 +843,16 @@ export function IssueCardDetail({
               )}
             </DetailCard>
           </Appear>
+          </details>
 
         </div>
       </div>
-
-      {/* Comments and history behind one switch, at the foot, full width —
-          the same arrangement Triggers/Versions uses on the routine card.
-          Both used to be cards here AND tabs in a drawer underneath. */}
-      <Appear order={9}>
-        <DetailCard
-          title={footTab === "comments" ? "Comments" : "History"}
-          icon={MessageSquare}
-          subtitle={String(footTab === "comments" ? comments.length : activities.length)}
-          action={
-            <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-              {(["comments", "history"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setFootTab(t)}
-                  aria-pressed={footTab === t}
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                    footTab === t
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-          }
-        >
-          {footTab === "comments" ? (
-            <div className="space-y-4">
-            {comments.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
-                {unavailable.includes("comments") ? "Could not load the comments — try again above." : "Nobody has said anything about this issue yet."}
-              </p>
-            ) : (
-              <ul className="space-y-4">
-                {comments.map((c) => (
-                  <li key={c.id} className="flex gap-3">
-                    {c.author_type === "agent" ? (
-                      <AgentAvatar
-                        seed={c.author_id}
-                        className="mt-0.5 h-7 w-7 shrink-0 rounded-full"
-                        alt=""
-                      />
-                    ) : (
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20 text-[11px] font-semibold text-primary">
-                        {(c.author_name ?? "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-[13px] font-medium text-foreground/90">
-                          {c.author_name ?? c.author_type}
-                        </span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {timeAgo(c.created_at)}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-[13px] leading-relaxed text-foreground/85">
-                        <MarkdownContent compact mentions={mentions}>
-                          {c.body}
-                        </MarkdownContent>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {/* The composer is the whole point of the next step: an agent
-                becomes a participant when it is @mentioned here. */}
-            {onSubmitComment && (
-              <div className="border-t border-border/60 pt-4">
-                <CommentComposer
-                  agents={agents ?? []}
-                  onSubmit={onSubmitComment}
-                  authorInitial={viewerInitial ?? "U"}
-                />
-              </div>
-            )}
-            </div>
-          ) : activities.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
-              {unavailable.includes("history") ? "Could not load the history — try again above." : "No recorded changes since this issue was opened."}
-            </p>
-          ) : (
-            <ul className="space-y-2 text-[12px]">
-              {[...activities]
-                .sort((x, y) => {
-                  // Newest first, whichever order the server listed them in
-                  // (the API answers oldest-first since seq-cursored resync).
-                  const sx = (x as { seq?: number }).seq
-                  const sy = (y as { seq?: number }).seq
-                  if (typeof sx === "number" && typeof sy === "number" && sx !== sy) return sy - sx
-                  return String(y.created_at ?? "").localeCompare(String(x.created_at ?? ""))
-                })
-                .map((a) => (
-                <ActivityRow key={a.id} activity={a} mentions={mentions} />
-              ))}
-            </ul>
-          )}
-        </DetailCard>
-      </Appear>
 
       {/* Metadata spans the width rather than sitting at the bottom of the
           rail: a rail taller than the main column leaves dead space beside it
           that a two-column grid has nothing to put in. */}
       <Appear order={10}>
-        <DetailCard title="Metadata">
+        <details><summary className="cursor-pointer text-xs text-muted-foreground">Technical details</summary><DetailCard title="Metadata">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] sm:grid-cols-3 xl:grid-cols-6">
             <Fact label="created" value={formatDate(issue.created_at)} />
             <Fact label="updated" value={relTime(issue.updated_at)} />
@@ -871,7 +881,7 @@ export function IssueCardDetail({
             <Fact label="crew" value={issue.crew_slug ?? issue.crew_name ?? "—"} />
             <Fact label="id" value={issue.id} mono />
           </dl>
-        </DetailCard>
+        </DetailCard></details>
       </Appear>
     </div>
   )
@@ -985,15 +995,15 @@ function AssigneeLink({ issue }: { issue: Mission }) {
 function RelatedCard({ issue, runs }: { issue: Mission; runs: IssueRun[] }) {
   const current = runs.find((r) => r.status === "RUNNING") ?? runs[0]
   const links = issueRunLinks(issue, current)
-  const runWord = current ? current.status.toLowerCase().replace(/_/g, " ") : ""
+  const runWord = current ? issueRunStatus(current).label : ""
   return (
     <DetailCard title="Related" icon={ArrowUpRight}>
       <dl className="space-y-0.5">
         <Row icon={Users} label="Crew">
           {issue.crew_name ? <CrewLink issue={issue} /> : <Muted>Unassigned</Muted>}
         </Row>
-        <Row icon={UserCircle2} label="Agent">
-          {issue.assignee_name ? <AssigneeLink issue={issue} /> : <Muted>Unassigned</Muted>}
+        <Row icon={UserCircle2} label={issue.work_mode === "human" ? "Worker" : "Agent"}>
+          {issue.work_mode === "human" ? issue.worker_name || "Human worker" : issue.delegate?.name ? issue.delegate.name : issue.assignee_name ? <AssigneeLink issue={issue} /> : <Muted>Unassigned</Muted>}
         </Row>
         <Row icon={Clock} label={current?.status === "RUNNING" ? "Current run" : "Latest run"}>
           {current ? (
@@ -1164,14 +1174,4 @@ function Fact({ label, value, mono }: { label: string; value: string; mono?: boo
       <dd className={cn("truncate text-foreground/85", mono && "font-mono text-[10px]")}>{value}</dd>
     </div>
   )
-}
-
-/**
- * The identity card carries a summary, not the whole brief — the full text
- * is one card below. Cutting at the first blank line keeps the summary the
- * author's own sentence rather than an arbitrary character count.
- */
-function firstParagraph(md: string): string {
-  const [first] = md.trim().split(/\n\s*\n/)
-  return first ?? md
 }

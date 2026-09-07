@@ -11,6 +11,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 
+import { ProjectMilestonesCard } from "./project-milestones-card"
 import { apiFetch } from "@/lib/api-fetch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ProjectCardDetail } from "@/components/features/issues/project-card-detail"
@@ -115,6 +116,7 @@ export function ProjectDetailSurface({
   )
 
   return (
+    <>
     <ProjectCardDetail
       project={project}
       stats={stats}
@@ -122,6 +124,8 @@ export function ProjectDetailSurface({
       actions={actions}
       edit={edit}
     />
+    <div className="px-4 pb-4"><ProjectMilestonesCard key={project.id} projectId={project.id} workspaceId={workspaceId} editable={editable} /></div>
+    </>
   )
 }
 

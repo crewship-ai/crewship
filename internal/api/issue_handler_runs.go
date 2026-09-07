@@ -22,19 +22,21 @@ import (
 // AgentSlug let the same client link the agent (`/crews?agent=<slug>`)
 // instead of printing a name it cannot follow.
 type issueRunDTO struct {
-	ID            string `json:"id"`
-	RunID         string `json:"run_id,omitempty"`
-	TraceID       string `json:"trace_id,omitempty"`
-	Status        string `json:"status"`
-	AgentID       string `json:"agent_id,omitempty"`
-	AgentSlug     string `json:"agent_slug,omitempty"`
-	AgentName     string `json:"agent_name,omitempty"`
-	Task          string `json:"task,omitempty"`
-	StartedAt     string `json:"started_at,omitempty"`
-	EndedAt       string `json:"ended_at,omitempty"`
-	DurationMs    int64  `json:"duration_ms"`
-	ResultSummary string `json:"result_summary,omitempty"`
-	ErrorMessage  string `json:"error_message,omitempty"`
+	ID              string `json:"id"`
+	RunID           string `json:"run_id,omitempty"`
+	TraceID         string `json:"trace_id,omitempty"`
+	Status          string `json:"status"`
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentSlug       string `json:"agent_slug,omitempty"`
+	AgentName       string `json:"agent_name,omitempty"`
+	Task            string `json:"task,omitempty"`
+	StartedAt       string `json:"started_at,omitempty"`
+	EndedAt         string `json:"ended_at,omitempty"`
+	DurationMs      int64  `json:"duration_ms"`
+	ResultSummary   string `json:"result_summary,omitempty"`
+	ResultStale     bool   `json:"result_stale,omitempty"`
+	ResultTruncated bool   `json:"result_truncated,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
 	// MissionID is the issue (mission) this run is attributed to —
 	// assignments.mission_id (#2256). Nullable: a legacy row written before
 	// that column existed, and never touched by the backfill migration
@@ -185,7 +187,8 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		           AND je.entry_type = 'run.started'
 		           AND json_extract(je.payload, '$.assignment_id') = a.id
 		         ORDER BY je.ts DESC LIMIT 1),
-		       COALESCE(a.started_at, a.created_at) AS sort_key
+		       COALESCE(a.started_at, a.created_at) AS sort_key,
+ COALESCE(a.issue_brief_revision != (SELECT brief_revision FROM issue_work WHERE mission_id=a.mission_id),0)
 		FROM assignments a
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id`+belongsToIssue+`
 		ORDER BY sort_key DESC, a.id DESC
@@ -205,7 +208,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		var sortKey sql.NullString
 		if err := rows.Scan(&dto.ID, &dto.Status, &started, &finished, &result,
 			&errMsg, &task, &dto.AgentName, &dto.AgentID, &dto.AgentSlug, &missionIDCol,
-			&dto.Outcome, &dto.HardStopResult, &dto.HardStopAt, &dto.Source, &runID, &sortKey); err != nil {
+			&dto.Outcome, &dto.HardStopResult, &dto.HardStopAt, &dto.Source, &runID, &sortKey, &dto.ResultStale); err != nil {
 			internalError(w, r, h.logger, "issue runs: scan", err)
 			return
 		}
@@ -221,6 +224,7 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		// result_summary is agent-authored prose; truncate hard like the
 		// routine run list so a verbose summary can't bloat the row.
 		dto.ResultSummary = truncateErrorForList(result.String)
+		dto.ResultTruncated = dto.ResultSummary != result.String
 		dto.ErrorMessage = truncateErrorForList(errMsg.String)
 		if s, ok := parseRunTime(started.String); ok {
 			if f, ok2 := parseRunTime(finished.String); ok2 && f.After(s) {
@@ -236,4 +240,24 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 
 	writeListMeta(w, total, limit, offset)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// RunResult returns the stored output only when opened. Lists stay bounded;
+// a truncated list preview must never masquerade as the complete result.
+func (h *IssueHandler) RunResult(w http.ResponseWriter, r *http.Request) {
+	var result, outcome, status string
+	err := h.db.QueryRowContext(r.Context(), `SELECT COALESCE(a.result_summary,''),COALESCE(a.outcome,''),a.status
+ FROM assignments a JOIN missions m ON m.workspace_id=a.workspace_id
+ WHERE m.identifier=? AND m.crew_id=? AND m.workspace_id=? AND a.id=?
+ AND (a.mission_id=m.id OR EXISTS(SELECT 1 FROM mission_tasks t WHERE t.mission_id=m.id AND t.assignment_id=a.id))`,
+		r.PathValue("identifier"), r.PathValue("crewId"), WorkspaceIDFromContext(r.Context()), r.PathValue("runId")).Scan(&result, &outcome, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeProblem(w, r, 404, "Run not found for this issue")
+		return
+	}
+	if err != nil {
+		internalError(w, r, h.logger, "issue result", err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"result_summary": result, "outcome": outcome, "status": status})
 }
