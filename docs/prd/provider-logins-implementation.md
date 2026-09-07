@@ -85,6 +85,47 @@ Opaque Claude setup-tokens no longer imply a Max plan. The environment and
 new ledger events say `Claude (plan unknown)` unless plan metadata was supplied.
 Existing historical ledger labels are not rewritten.
 
+## P-D foundation in progress — #2440 (2026-09-07)
+
+`internal/providerpool` adds the metadata-only selection/storage foundation:
+
+- A pool is a named set of accounts, **not a grant**. Creating it does not
+  create or alter `credential_bindings`; ordinary scope/slot uniqueness stays.
+- Lowest numeric priority first, then least-recently-selected sequence, with
+  account ID as a stable tie-breaker. A SQLite write transaction reserves each
+  turn; no in-memory cursor is lost on restart. Snapshot reads do not rotate.
+- Expired, revoked, cooling-down and intervention-blocked accounts cannot win.
+  An entirely unavailable pool returns an error, never the first cooled account.
+  Refresh must finish outside the selection transaction and before selection.
+- Provider, billing mode and owner are revalidated at every selection. Mixed
+  owners require explicit per-pool consent, even when one member is inactive.
+  Legacy subscription blobs need importing as `PROVIDER_LOGIN` before pooling;
+  their encrypted expiry cannot safely be inferred by this metadata-only store.
+- Typed observations persist cooldown deadlines or billing/authentication blocks;
+  no raw upstream message, token or invented quota percentage is stored.
+  Stale observations cannot shorten a deadline. Clearing uses a revision check
+  and retains a tombstone so an old success cannot clear a newer failure.
+- Membership has tenant checks in both the reader and database triggers,
+  including parent workspace changes. Pool definitions/members are included in
+  backup; instance-local availability observations are excluded from restore.
+
+**Not wired or shipped as a user feature yet:** pool CRUD/RBAC endpoints,
+CLI/UI management, scope/slot pool bindings, run-start authorization/selection,
+sidecar grantee reconciliation, provider-event observation producers and measured
+quota windows. The store is an internal foundation; it does not establish that
+pooling or automatic failover works in dev3. No running agent is switched or
+automatically replayed by this change.
+
+Verification entry points: `go test -race ./internal/providerpool -count=1`
+(selection, concurrent transactions, restart, tenant guards, stale observations),
+`go test ./internal/backup -count=1`, and the full Go verification loop. Record
+the actual results in the PR rather than treating these commands as evidence
+that they have run.
+
+Rate limits are not necessarily per key: OpenAI API limits can be shared by an
+organization/project and model family. A different key is not extra quota.
+See [OpenAI rate limits](https://developers.openai.com/api/docs/guides/rate-limits).
+
 ## Remaining design constraints
 
 P-D is not just wiring existing selection helpers. PRD section 5.4 assumes

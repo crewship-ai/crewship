@@ -167,6 +167,8 @@ var BackupTables = []string{
 	// credential_bindings references for CREW and AGENT scope.
 	"credential_bindings",
 	"credential_fields",
+	"provider_login_pools",
+	"provider_login_pool_members",
 	// Depth 3+: workspace via agents
 	"agent_skills",
 	"agent_mcp_bindings",
