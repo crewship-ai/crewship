@@ -98,3 +98,42 @@ func TestInboxAnswerAndTakeoverCommitOnlyWinningAction(t *testing.T) {
 		t.Fatalf("losing %s action leaked effects: runs=%d answers=%d want=%d", action, resumed, answers, want)
 	}
 }
+
+func TestInternalStatusUpdateCannotRacePastHumanTakeover(t *testing.T) {
+	h, ws, crew, agent, user := newInternalIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, agent, "ENG-1", "TODO")
+	issues := NewIssueHandler(h.db, nil, nil, h.logger)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	work, status := httptest.NewRecorder(), httptest.NewRecorder()
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		req := httptest.NewRequest("POST", "/", strings.NewReader(`{"operation_id":"take","revision":0,"action":"take_over"}`))
+		req.SetPathValue("crewId", crew)
+		req.SetPathValue("identifier", "ENG-1")
+		req = withWorkspaceUser(req, user, ws, "OWNER")
+		<-start
+		issues.Work(work, req)
+	}()
+	go func() {
+		defer workers.Done()
+		body, _ := json.Marshal(map[string]string{"workspace_id": ws, "agent_id": agent, "status": "IN_PROGRESS"})
+		req := httptest.NewRequest("PATCH", "/", bytes.NewReader(body))
+		req.SetPathValue("identifier", "ENG-1")
+		<-start
+		h.UpdateStatus(status, req)
+	}()
+	close(start)
+	workers.Wait()
+	if work.Code != 200 || (status.Code != 200 && status.Code != 409) {
+		t.Fatalf("takeover=%d %s status=%d %s", work.Code, work.Body.String(), status.Code, status.Body.String())
+	}
+	var mode, finalStatus string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT w.mode,m.status FROM missions m JOIN issue_work w ON w.mission_id=m.id WHERE m.id=?`, id).Scan(&mode, &finalStatus); err != nil {
+		t.Fatal(err)
+	}
+	if mode != "human" || finalStatus != "TODO" {
+		t.Fatalf("agent mutated human work: %s %s", mode, finalStatus)
+	}
+}

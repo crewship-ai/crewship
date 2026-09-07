@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Paperclip } from "lucide-react"
 import { DetailCard } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
@@ -10,18 +10,20 @@ import type { Mission } from "@/lib/types/mission"
 type IssueFile = { id: string; filename: string; size_bytes: number; uploaded_by_name?: string }
 
 export function IssueFilesCard({ issue, editable }: { issue: Mission; editable: boolean }) {
+ const latestLoad = useRef(0)
  const [files, setFiles] = useState<IssueFile[]>([])
  const [error, setError] = useState<string | null>(null)
  const [busy, setBusy] = useState(false)
  const base = `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier ?? issue.id)}/attachments`
  const qs = `workspace_id=${encodeURIComponent(issue.workspace_id)}`
  const load = useCallback(async (signal?: AbortSignal) => {
+  const request = ++latestLoad.current
   try {
    const res = await apiFetch(`${base}?${qs}`, { signal })
    if (!res.ok) throw new Error("Could not load files")
    const rows = await res.json()
-   if (!signal?.aborted) {setFiles(rows); setError(null)}
-  } catch { if (!signal?.aborted) setError("Could not load files") }
+   if (!signal?.aborted && request === latestLoad.current) {setFiles(rows); setError(null)}
+  } catch { if (!signal?.aborted && request === latestLoad.current) setError("Could not load files") }
  }, [base, qs])
  useEffect(() => {const controller = new AbortController(); void load(controller.signal); return () => controller.abort()}, [load, issue.updated_at])
  async function upload(file: File) {

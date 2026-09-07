@@ -1,13 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Milestone as MilestoneIcon } from "lucide-react"
 import { DetailCard } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { apiFetch } from "@/lib/api-fetch"
 import type { Milestone } from "@/lib/types/mission"
 
-export function ProjectMilestonesCard({ projectId, workspaceId, editable }: { projectId: string; workspaceId: string; editable: boolean }) {
+interface ProjectMilestonesCardProps { projectId: string; workspaceId: string; editable: boolean }
+
+export function ProjectMilestonesCard({ projectId, workspaceId, editable }: ProjectMilestonesCardProps) {
+ const latestLoad = useRef(0)
  const [items, setItems] = useState<Milestone[]>([])
  const [name, setName] = useState("")
  const [date, setDate] = useState("")
@@ -15,7 +18,8 @@ export function ProjectMilestonesCard({ projectId, workspaceId, editable }: { pr
  const [busy, setBusy] = useState(false)
  const url = `/api/v1/projects/${encodeURIComponent(projectId)}/milestones?workspace_id=${encodeURIComponent(workspaceId)}`
  const load = useCallback(async (signal?: AbortSignal) => {
-  try {const res = await apiFetch(url, { signal }); if(!res.ok) throw new Error(); const body = await res.json(); if(!signal?.aborted) {setItems(body); setError(null)}} catch {if(!signal?.aborted) setError("Could not load milestones")}
+  const request = ++latestLoad.current
+  try {const res = await apiFetch(url, { signal }); if(!res.ok) throw new Error(); const body = await res.json(); if(!signal?.aborted && request === latestLoad.current) {setItems(body); setError(null)}} catch {if(!signal?.aborted && request === latestLoad.current) setError("Could not load milestones")}
  },[url])
  useEffect(() => {const controller = new AbortController(); void load(controller.signal); return () => controller.abort()},[load])
  return <DetailCard title="Milestones" icon={MilestoneIcon}>

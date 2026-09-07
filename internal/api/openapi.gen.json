@@ -49836,6 +49836,7 @@
                       "type": "string"
                     },
                     "result_summary": {
+                      "description": "Full stored output, without the list preview truncation; may be empty.",
                       "type": "string"
                     },
                     "status": {

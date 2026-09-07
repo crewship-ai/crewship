@@ -976,7 +976,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	restoredMissions := map[string]bool{}
 	hasIssueWork, err := tableExistsTx(ctx, tx, "issue_work")
 	if err != nil {
-		return stats, err
+		return stats, fmt.Errorf("backup: probe issue_work: %w", err)
 	}
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
@@ -1036,7 +1036,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				if status != "COMPLETED" && status != "FAILED" && status != "CANCELLED" {
 					var held bool
 					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mode='human' AND (mission_id=? OR mission_id=? OR mission_id=?))`, row["mission_id"], row["chat_id"], row["group_id"]).Scan(&held); err != nil {
-						return stats, err
+						return stats, fmt.Errorf("backup: read held work: %w", err)
 					}
 					if held {
 						copy := make(map[string]any, len(row)+1)
@@ -1097,10 +1097,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 
 			// A mission insert creates its default work row. Replace only that
 			// generated row, never an existing target mission's work state.
+			replaceWork := false
 			if table == "issue_work" {
 				if missionID, ok := row["mission_id"].(string); ok && restoredMissions[missionID] {
+					replaceWork = true
 					if _, err := tx.ExecContext(ctx, `DELETE FROM issue_work WHERE mission_id=?`, missionID); err != nil {
-						return stats, err
+						return stats, fmt.Errorf("backup: replace generated work: %w", err)
 					}
 				}
 			}
@@ -1125,6 +1127,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				)
 				args = append(args, row[guard.column])
 			}
+			if replaceWork {
+				query = strings.Replace(query, "INSERT OR IGNORE", "INSERT", 1)
+			}
 			res, err := tx.ExecContext(ctx, query, args...)
 			if err != nil {
 				return stats, fmt.Errorf("backup: insert into %s: %w", table, err)
@@ -1137,6 +1142,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				stats.RowsInserted += int(n)
 				tableInserted += int(n)
 				landed = n > 0
+			}
+			if replaceWork && !landed {
+				return stats, fmt.Errorf("backup: replacement issue work did not insert")
 			}
 			if table == "missions" && landed {
 				if id, ok := row["id"].(string); ok {

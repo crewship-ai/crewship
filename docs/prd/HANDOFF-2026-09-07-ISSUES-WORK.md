@@ -1,7 +1,7 @@
 # Issues: práce lidí a agentů
 
 Implementace #2449 na větvi `feat/issues-work-clarity`, navazuje na první část
-#2447 v PR #2448. Výchozí analýza je v
+issue #2447 v PR #2448. Výchozí analýza je v
 [issues-human-agent-work-contract-2026-09-07.md](issues-human-agent-work-contract-2026-09-07.md).
 Tento dokument popisuje skutečně implementované chování, nikoli všechny
 rozšiřující scénáře původního návrhu.
@@ -77,6 +77,9 @@ Dokončení procesu s outcome NEEDS_HUMAN pozastaví plán na lidský vstup.
 PARTIAL/FAILED se nepovažují za dokončenou závislost. Lidská odpověď naváže
 nový assignment na čekající krok původního plánu, aby výsledek odpovědi
 nezůstal v nesouvisejícím komentářovém běhu. Starý běh zůstává v historii.
+Pokud starý plán obsahuje více čekajících kroků stejného agenta ve stejném
+chatu, neurčitá odpověď se odmítne bez změny kteréhokoli kroku; předání musí
+nejprve jednoznačně určit další práci.
 
 Revize zadání se uloží při vytvoření assignmentu. Změna názvu nebo zadání
 zvýší revizi; UI upozorní, pokud výsledek vychází ze starší verze. Jde o
@@ -102,7 +105,7 @@ končily pod lidským převzetím, se obnoví jako zrušené.
 
 ## Ověření
 
-- Regrese UI: 321 testů Issues, filtrů a vytvářecích formulářů.
+- Regrese UI: 322 testů Issues, filtrů a vytvářecích formulářů.
 - API: předání, idempotence, souběžná převzetí a odpověď proti převzetí,
   změněné zadání, neplatný příjemce, Inbox takeover,
   pokračování čekajícího kroku a celý výsledek se správnou vazbou na issue.
@@ -114,4 +117,20 @@ končily pod lidským převzetím, se obnoví jako zrušené.
   390/820/1440 px, ovládání klávesnicí, čitelný výstup a kompletní detail.
   Jde o izolovanou fixture; nezakládá živé klientské úkoly a nespouští LLM.
 
-Finální stav celorepozitářových kontrol a nasazení je uveden v PR #2448.
+Celá Go sada prošla; po opravách z review znovu prošly celé balíčky API,
+backup, orchestrator, generátor OpenAPI a docs-inventory. Prošly také `go vet`,
+frontend lint (0 chyb), statický export, migration lint, agents-invariants
+ a přísná dokumentační kontrola. Změny nejsou nasazené do živé instance.
+Aktuální stav CI a následného review je v PR #2448.
+
+Review doplnilo ochranu před starší odpovědí při načítání příloh/milníků,
+atomickou kontrolu lidského převzetí u agentních aktualizací, odmítnutí
+nejednoznačné odpovědi, správnou aktivitu při NEEDS_HUMAN a rollback při
+neplatném obnovení pracovního stavu. Stáří výsledku se porovnává s právě
+otevřeným issue i u historických vazeb; celý výstup má explicitní read guard.
+
+Dvě připomínky nevyžadovaly navrženou změnu: `assignmentMatch` už vyřazuje
+COMPLETED/FAILED/CANCELLED a nový test nyní před předáním ukládá skutečný
+historický běh. Celý výstup se vrací v existujícím poli `result_summary`;
+endpoint jej nekrátí, což ověřuje test dlouhého Unicode textu. Schéma i API
+dokumentace význam tohoto pole nyní výslovně vysvětlují.

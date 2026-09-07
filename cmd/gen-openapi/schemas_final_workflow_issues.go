@@ -123,7 +123,7 @@ func finalWorkflowIssueSchemaCatalog() map[string]DomainSchema {
 				"target_id": str(), "note": map[string]any{"type": "string", "maxLength": 20000},
 			}}, Response: obj(map[string]any{"revision": integer(), "status": str(), "replayed": boolean()}),
 		},
-		"GET /api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result": {Response: obj(map[string]any{"result_summary": str(), "outcome": str(), "status": str()})},
+		"GET /api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result": {Response: obj(map[string]any{"result_summary": map[string]any{"type": "string", "description": "Full stored output, without the list preview truncation; may be empty."}, "outcome": str(), "status": str()})},
 		"GET /api/v1/crews/{crewId}/issues/{identifier}/events":              {Response: issueEventsPage},
 		"POST /api/v1/crews/{crewId}/issues":                                 {Response: ref("Issue")}, "GET /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")}, "PATCH /api/v1/crews/{crewId}/issues/{identifier}": {Response: ref("Issue")},
 		"POST /api/v1/crews/{crewId}/issues/{identifier}/review": {Response: obj(map[string]any{"status": str(), "action": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/start": {Response: obj(map[string]any{"status": str(), "identifier": str()})}, "POST /api/v1/crews/{crewId}/issues/{identifier}/stop": {Response: obj(map[string]any{"status": str(), "identifier": str(), "runs_stopped": integer(), "hard": boolean()})}, "PATCH /api/v1/issues/bulk": {Response: obj(map[string]any{"updated": integer()})},

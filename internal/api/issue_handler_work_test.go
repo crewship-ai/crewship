@@ -11,6 +11,10 @@ import (
 func TestIssueWork_TransferReceiptAndFence(t *testing.T) {
 	h, user, ws, crew, lead, agent := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "TODO")
+	seedMissionAssignment(t, h, ws, id, agent, "finished-history", "COMPLETED", "Verified result", "", "")
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE assignments SET mission_id=? WHERE id='finished-history'`, id); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := h.db.Exec(`UPDATE missions SET delegate_agent_id=?,owner_user_id=? WHERE id=?`, agent, user, id); err != nil {
 		t.Fatal(err)
 	}
@@ -206,5 +210,33 @@ func TestInternalIssueWorkCannotTakeHumanWork(t *testing.T) {
 	}
 	if authorType != "agent" || authorID != agent {
 		t.Fatalf("incorrect handoff author: %s %s", authorType, authorID)
+	}
+}
+
+func TestIssueWorkRejectsReplyWithMultipleWaitingTasks(t *testing.T) {
+	h, user, ws, crew, lead, agent := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "IN_PROGRESS")
+	for _, run := range []string{"first-input", "second-input"} {
+		seedMissionAssignment(t, h, ws, id, agent, run, "COMPLETED", "Question", "", "")
+		if _, err := h.db.ExecContext(t.Context(), `UPDATE assignments SET outcome='NEEDS_HUMAN',mission_id=?,chat_id='chat-first-input' WHERE id=?`, id, run); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.db.ExecContext(t.Context(), `UPDATE mission_tasks SET status='AWAITING_APPROVAL' WHERE assignment_id=?`, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := h.db.ExecContext(t.Context(), `INSERT INTO assignments(id,workspace_id,mission_id,assigned_by_id,assigned_to_id,created_by_user_id,chat_id,task,status) VALUES('ambiguous-answer',?,?,?,?,?,'chat-first-input','Answer','PENDING')`, ws, id, lead, agent, user)
+	if err == nil || !strings.Contains(err.Error(), "multiple waiting tasks") {
+		t.Fatalf("ambiguous reply was accepted: %v", err)
+	}
+	var waiting, inserted int
+	if err := h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id=? AND status='AWAITING_APPROVAL'`, id).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM assignments WHERE id='ambiguous-answer'`).Scan(&inserted); err != nil {
+		t.Fatal(err)
+	}
+	if waiting != 2 || inserted != 0 {
+		t.Fatalf("partial resume: waiting=%d inserted=%d", waiting, inserted)
 	}
 }

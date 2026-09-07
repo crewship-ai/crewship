@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { IssueFilesCard } from "../issue-files-card"
 import { ProjectMilestonesCard } from "../project-milestones-card"
@@ -56,4 +56,16 @@ describe("Issue deliverables", () => {
     expect(screen.queryByLabelText("Attach a file")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Add milestone" })).not.toBeInTheDocument()
   })
+})
+
+it("keeps the uploaded deliverable when an older initial load finishes later", async () => {
+  let completeOld!: (value: unknown) => void
+  fetchMock.mockReturnValueOnce(new Promise((resolve) => { completeOld = resolve }))
+    .mockResolvedValueOnce({ ok: true })
+    .mockResolvedValueOnce({ ok: true, json: async () => [{ id: "new", filename: "verified.txt", size_bytes: 5 }] })
+  render(<IssueFilesCard issue={issue} editable />)
+  fireEvent.change(screen.getByLabelText("Attach a file"), { target: { files: [new File(["check"], "verified.txt")] } })
+  await screen.findByRole("button", { name: "verified.txt" })
+  await act(async () => completeOld({ ok: true, json: async () => [] }))
+  expect(screen.getByRole("button", { name: "verified.txt" })).toBeInTheDocument()
 })

@@ -73,3 +73,12 @@ CREATE INDEX issue_comments_cursor ON mission_comments(mission_id,created_at,id)
 
 -- The cursor index covers the old mission-only lookup as well.
 DROP INDEX idx_mission_comments_mission;
+
+-- A reply may resume one waiting step, never several tasks sharing a chat.
+-- Ambiguous legacy plans must be clarified before any new assignment lands.
+CREATE TRIGGER issue_work_reply_unambiguous BEFORE INSERT ON assignments
+WHEN NEW.created_by_user_id IS NOT NULL AND NEW.mission_id IS NOT NULL
+AND (SELECT COUNT(*) FROM mission_tasks t JOIN assignments a ON a.id=t.assignment_id
+ WHERE t.mission_id=NEW.mission_id AND t.assigned_agent_id=NEW.assigned_to_id
+ AND t.status='AWAITING_APPROVAL' AND a.outcome='NEEDS_HUMAN' AND a.chat_id=NEW.chat_id)>1
+BEGIN SELECT RAISE(ABORT,'reply matches multiple waiting tasks; clarify the work handoff'); END;

@@ -188,11 +188,11 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		           AND json_extract(je.payload, '$.assignment_id') = a.id
 		         ORDER BY je.ts DESC LIMIT 1),
 		       COALESCE(a.started_at, a.created_at) AS sort_key,
- COALESCE(a.issue_brief_revision != (SELECT brief_revision FROM issue_work WHERE mission_id=a.mission_id),0)
+ COALESCE(a.issue_brief_revision != (SELECT brief_revision FROM issue_work WHERE mission_id=?),0)
 		FROM assignments a
 		LEFT JOIN agents ag ON ag.id = a.assigned_to_id`+belongsToIssue+`
 		ORDER BY sort_key DESC, a.id DESC
-		LIMIT ? OFFSET ?`, missionID, missionID, missionID, wsID, missionID, missionID, limit, offset)
+		LIMIT ? OFFSET ?`, missionID, missionID, missionID, missionID, wsID, missionID, missionID, limit, offset)
 	if err != nil {
 		internalError(w, r, h.logger, "issue runs: query", err)
 		return
@@ -245,6 +245,9 @@ func (h *IssueHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 // RunResult returns the stored output only when opened. Lists stay bounded;
 // a truncated list preview must never masquerade as the complete result.
 func (h *IssueHandler) RunResult(w http.ResponseWriter, r *http.Request) {
+	if !requireRole(w, r, "read") {
+		return
+	}
 	var result, outcome, status string
 	err := h.db.QueryRowContext(r.Context(), `SELECT COALESCE(a.result_summary,''),COALESCE(a.outcome,''),a.status
  FROM assignments a JOIN missions m ON m.workspace_id=a.workspace_id

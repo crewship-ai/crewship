@@ -591,17 +591,6 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if req.Status != "" || req.AssigneeID != nil {
-		var held bool
-		if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
-			internalError(w, r, h.logger, "issue work guard", err)
-			return
-		}
-		if held {
-			writeProblem(w, r, 409, "This issue is held by a human. Post findings as a comment; the human decides when to hand it back.")
-			return
-		}
-	}
 	// #1365: a crew-bound (crwv1) token may only mutate its OWN crew's issues.
 	// The workspace check above is necessary but not sufficient — a sibling
 	// crew shares the tenant, and issue CREATE already enforces this boundary.
@@ -768,6 +757,17 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		defer tx.Rollback() //nolint:errcheck
+		if req.Status != "" || req.AssigneeID != nil {
+			var held bool
+			if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mission_id=? AND mode='human')`, missionID).Scan(&held); err != nil {
+				internalError(w, r, h.logger, "issue work guard", err)
+				return
+			}
+			if held {
+				writeProblem(w, r, 409, "This issue is held by a human. Post findings as a comment; the human decides when to hand it back.")
+				return
+			}
+		}
 
 		if !ub.Empty() {
 			query, args := ub.Build("missions", "id = ?", missionID)

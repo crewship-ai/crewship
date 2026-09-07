@@ -231,6 +231,35 @@ crewship issue labels
 
 ---
 
+## `crewship issue work`
+
+Take over an issue, hand it to a person or agent, or submit human work for
+review. Requires workspace `OWNER`, `ADMIN`, or `MANAGER` access. The owner
+stays accountable even when the current worker changes.
+
+```bash
+crewship issue work ENG-42
+crewship issue work ENG-42 --action handoff_human --target user_123 --note "Verify the attached report"
+crewship issue work ENG-42 --action handoff_agent --target agent_123 --note "Publish the approved version"
+crewship issue work ENG-42 --action submit --note "Verified all findings against the source"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--action` | string | `take_over` | `take_over`, `handoff_human`, `handoff_agent`, or `submit` |
+| `--target` | string | — | Workspace user or agent ID; required for a handoff |
+| `--note` | string | — | Result, verification or next instructions; required except takeover |
+| `--operation-id` | string | Generated | Stable operation ID when retrying the same request |
+| `--revision` | integer | Current issue revision | Expected `work_revision`; pin this along with operation ID for an exact retry |
+
+An exact retry returns the saved receipt. A changed request under the same ID
+or a stale revision fails with a conflict. Human takeover fences new agent
+work and requests cancellation of active runs. Handback and submission wait
+until those runs have stopped. Handing back to an agent prepares a new step;
+use `crewship issue start` to execute it. `submit` moves human work to review.
+
+---
+
 ## `crewship issue start`
 
 Start an issue -- dispatches work to the assigned agent.

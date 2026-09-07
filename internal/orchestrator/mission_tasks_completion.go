@@ -178,6 +178,8 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			action := "task_completed"
 			if taskStatus == "FAILED" {
 				action = "task_failed"
+			} else if taskStatus == "AWAITING_APPROVAL" {
+				action = "commented"
 			}
 			if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
 				ID:        generateID(),
