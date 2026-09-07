@@ -226,9 +226,9 @@ var credCreateCmd = &cobra.Command{
 		// and the conflict the operator had been warned about never fired. The
 		// row was created with the app details and no token, which is a
 		// legal-looking OAUTH2 row that nobody asked for.
-		if anyOAuthAppFlagSet(flags) && (flags.Changed("value") || valueStdin) {
+		if anyOAuthAppFlagSet(flags) && (flags.Changed("value") || valueStdin || flags.Changed("from-file")) {
 			return cli.WithExitCode(fmt.Errorf(
-				"--value/--value-stdin cannot be combined with the --oauth-* flags: an OAuth credential's "+
+				"--value/--value-stdin/--from-file cannot be combined with the --oauth-* flags: an OAuth credential's "+
 					"value is the access token the flow fetches, and the row is created empty so "+
 					"`crewship oauth connect` can fill it. Drop one of the two"), cli.ExitValidation)
 		}
@@ -274,11 +274,15 @@ var credCreateCmd = &cobra.Command{
 			if flags.Changed("value") || valueStdin {
 				return cli.WithExitCode(fmt.Errorf("--from-file cannot be combined with --value or --value-stdin"), cli.ExitValidation)
 			}
-			b, err := os.ReadFile(fromFile)
+			file, err := os.Open(fromFile)
 			if err != nil {
 				return cli.WithExitCode(fmt.Errorf("read --from-file: %w", err), cli.ExitValidation)
 			}
-			value = strings.TrimRight(string(b), "\r\n")
+			defer file.Close()
+			value, err = readCredentialValue(file, "--from-file")
+			if err != nil {
+				return cli.WithExitCode(err, cli.ExitValidation)
+			}
 		}
 		loginMode, _ := flags.GetString("mode")
 		isProviderLogin := strings.EqualFold(credType, providerlogin.Type)

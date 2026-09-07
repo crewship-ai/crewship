@@ -59,9 +59,11 @@ start.
 <Warning>
 A Google access token lives about **one hour**, and the delivered file cannot
 renew itself — that is the point of the placeholder. Central refresh from the
-stored refresh token (`docs/prd/provider-logins.md` §5.3) is what makes a
-Google login usable for a long run; until it lands, a run that outlives the
-token fails on its next request. The file shape is taken from the Gemini CLI
+stored refresh token is available for `PROVIDER_LOGIN` imports when the server's
+`CREWSHIP_GEMINI_OAUTH_CLIENT_ID` and `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` match
+the client that issued the grant. Without that configuration, automatic refresh
+is unavailable. Refresh re-renders the file; uninterrupted use by an already
+running CLI is not a verified guarantee. The file shape is taken from the Gemini CLI
 source (`packages/core/src/code_assist/oauth2.ts`), not measured against a
 running binary — the CLI is not installed on the dev box.
 </Warning>

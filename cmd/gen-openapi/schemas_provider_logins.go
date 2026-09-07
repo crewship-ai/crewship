@@ -50,9 +50,8 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	}
 
 	routes := map[string]DomainSchema{
-		"POST /api/v1/credentials/{credentialId}/refresh": {Request: object(map[string]any{}), Response: object(map[string]any{"login": ref("ProviderLogin")}, "login")},
-		"POST /api/v1/provider-logins/device":             {Request: ref("ProviderLoginDeviceStartRequest"), Response: ref("ProviderLoginDeviceStart")},
-		"GET /api/v1/provider-logins/device/{deviceId}":   {Response: ref("ProviderLoginDeviceStatus")},
+		"POST /api/v1/provider-logins/device":           {Request: ref("ProviderLoginDeviceStartRequest"), Response: ref("ProviderLoginDeviceStart")},
+		"GET /api/v1/provider-logins/device/{deviceId}": {Response: ref("ProviderLoginDeviceStatus")},
 	}
 	return routes, components
 }

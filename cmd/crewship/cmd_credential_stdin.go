@@ -22,20 +22,25 @@ import (
 // a value the server would refuse is
 // refused here without buffering an unbounded pipe first.
 func readValueStdin() (string, error) {
+	return readCredentialValue(os.Stdin, "stdin")
+}
+
+// readCredentialValue applies the same bounded import contract to files and stdin.
+func readCredentialValue(input io.Reader, source string) (string, error) {
 	const maxValueStdinBytes = 64 * 1024
-	b, err := io.ReadAll(io.LimitReader(os.Stdin, maxValueStdinBytes+3))
+	b, err := io.ReadAll(io.LimitReader(input, maxValueStdinBytes+3))
 	if err != nil {
-		return "", fmt.Errorf("read value from stdin: %w", err)
+		return "", fmt.Errorf("read value from %s: %w", source, err)
 	}
 	if len(b) > maxValueStdinBytes+2 {
-		return "", fmt.Errorf("stdin value is too long (max %d bytes)", maxValueStdinBytes)
+		return "", fmt.Errorf("%s value is too long (max %d bytes)", source, maxValueStdinBytes)
 	}
 	value := string(b)
 	if strings.HasSuffix(value, "\n") {
 		value = strings.TrimSuffix(strings.TrimSuffix(value, "\n"), "\r")
 	}
 	if len(value) > maxValueStdinBytes {
-		return "", fmt.Errorf("stdin value is too long (max %d bytes)", maxValueStdinBytes)
+		return "", fmt.Errorf("%s value is too long (max %d bytes)", source, maxValueStdinBytes)
 	}
 	return value, nil
 }

@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider sign-in reliability** (#2428) — CLI imports reject conflicting OAuth options and oversized files; account summaries retain usage timestamps and explain restricted access or missing refresh configuration. Device-code waiting stops at expiry, and completed sign-ins retain their result across server shutdown.
+
 - **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.
 
 - **Legacy provider visibility** (#2428) — list filters use the same whitespace normalization as the credential-ID permission guard, so padded legacy provider names cannot expose admin-only account metadata in lists.

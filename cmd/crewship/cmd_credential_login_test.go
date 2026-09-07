@@ -68,6 +68,7 @@ func TestCredCreateCmd_ProviderLoginValidation(t *testing.T) {
 		{"needs a model provider", map[string]string{"name": "x", "type": "PROVIDER_LOGIN", "provider": "GITHUB", "value": "v"}, "needs --provider"},
 		{"from-file with value", map[string]string{"name": "x", "type": "PROVIDER_LOGIN", "provider": "OPENAI", "value": "v", "from-file": "/nonexistent"}, "cannot be combined"},
 		{"from-file missing", map[string]string{"name": "x", "type": "PROVIDER_LOGIN", "provider": "OPENAI", "from-file": "/nonexistent/auth.json"}, "read --from-file"},
+		{"from-file with OAuth app", map[string]string{"name": "x", "type": "OAUTH2", "oauth-client-id": "client", "oauth-auth-url": "https://example.test/auth", "oauth-token-url": "https://example.test/token", "from-file": "/nonexistent/auth.json"}, "cannot be combined"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,6 +78,27 @@ func TestCredCreateCmd_ProviderLoginValidation(t *testing.T) {
 			err := credCreateCmd.RunE(credCreateCmd, nil)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestCredCreateCmd_FromFileRejectsOversizeBeforeHTTP(t *testing.T) {
+	for _, suffix := range []string{"x", "\n\n\nsecret-suffix"} {
+		t.Run(suffix, func(t *testing.T) {
+			stub := covStub(t)
+			stub.OnPost("/api/v1/credentials", func(r *http.Request, body []byte) (int, []byte, string) {
+				t.Error("oversized credential reached HTTP")
+				return 400, []byte(`{"error":"unexpected request"}`), "application/json"
+			})
+			path := filepath.Join(t.TempDir(), "credential.txt")
+			if err := os.WriteFile(path, []byte(strings.Repeat("x", 64*1024)+suffix), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			covResetFlags(t, credCreateCmd)
+			covSetFlags(t, credCreateCmd, map[string]string{"name": "test", "type": "SECRET", "from-file": path})
+			if err := credCreateCmd.RunE(credCreateCmd, nil); err == nil || !strings.Contains(err.Error(), "too long") {
+				t.Fatalf("oversized file not refused: %v", err)
 			}
 		})
 	}
@@ -176,5 +198,62 @@ func TestAgentGetCmd_PaysWith(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestAgentGetCmd_RestrictedPayer(t *testing.T) {
+	stub := covStub(t)
+	agentID := "cagent00000000000000000a"
+	stub.OnGet("/api/v1/agents/"+agentID, clitest.JSONResponse(200, map[string]any{
+		"id": agentID, "pays_with": map[string]any{"provider": "OPENAI", "restricted": true},
+	}))
+	out, err := captureStdout(t, func() error { return agentGetCmd.RunE(agentGetCmd, []string{agentID}) })
+	if err != nil || !strings.Contains(out, "OPENAI (restricted)") {
+		t.Fatalf("restricted payer not explained: %v\n%s", err, out)
+	}
+}
+
+func TestCredentialCLI_ShowsUnavailableRefreshReason(t *testing.T) {
+	for _, view := range []string{"get", "list"} {
+		t.Run(view, func(t *testing.T) {
+			stub := covStub(t)
+			login := loginObject("none")
+			login["refresh"] = map[string]any{"supported": false, "error": "Google OAuth configuration required"}
+			cred := map[string]any{"id": loginCredIDCli, "name": "google", "type": "PROVIDER_LOGIN", "provider": "GOOGLE", "login": login}
+			var out string
+			var err error
+			if view == "get" {
+				stub.OnGet("/api/v1/credentials/"+loginCredIDCli, clitest.JSONResponse(200, cred))
+				out, err = captureStdout(t, func() error { return credGetCmd.RunE(credGetCmd, []string{loginCredIDCli}) })
+			} else {
+				stub.OnGet("/api/v1/credentials", clitest.JSONResponse(200, []any{cred}))
+				covResetFlags(t, credListCmd)
+				covSetFlags(t, credListCmd, map[string]string{"kind": "provider_login"})
+				out, err = captureStdout(t, func() error { return credListCmd.RunE(credListCmd, nil) })
+			}
+			if err != nil || !strings.Contains(out, "Google OAuth configuration required") {
+				t.Fatalf("configuration error not shown: %v\n%s", err, out)
+			}
+		})
+	}
+}
+
+func TestCredLoginCmd_ExpiredPendingStopsWaiting(t *testing.T) {
+	stub := covStub(t)
+	stub.OnPost("/api/v1/provider-logins/device", func(r *http.Request, body []byte) (int, []byte, string) {
+		return 201, []byte(`{"device_id":"expired-device","expires_at":"2000-01-01T00:00:00Z","interval_s":1}`), "application/json"
+	})
+	reads := 0
+	stub.OnGet("/api/v1/provider-logins/device/expired-device", func(r *http.Request, body []byte) (int, []byte, string) {
+		reads++
+		if reads == 1 {
+			return 200, []byte(`{"status":"pending"}`), "application/json"
+		}
+		return 200, []byte(`{"status":"denied","error":"kept polling after expiry"}`), "application/json"
+	})
+	covResetFlags(t, credLoginCmd)
+	covSetFlags(t, credLoginCmd, map[string]string{"provider": "OPENAI"})
+	if err := credLoginCmd.RunE(credLoginCmd, nil); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired pending login did not stop: %v", err)
 	}
 }
