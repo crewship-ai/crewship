@@ -5,6 +5,21 @@ the session report and PR #2430. The session report remains untracked.
 
 ## Acceptance scope
 
+### Pool API review follow-up (2026-09-07, PR #2450)
+
+The create operation now declares its required JSON body and 400 validation
+response through route-specific OpenAPI metadata. Other operations retain their
+existing body requirements. CLI pool create/list/get and every new flag are
+documented in the user-facing credential reference; the strict documentation
+inventory passes (the earlier inventory unit tests did not exercise this gate).
+
+Normal duplicate-name writers were already serialized by immediate transactions:
+a two-connection, twenty-create regression passes even before this fix. The
+insert now also maps the specific workspace/name conflict to `ErrConflict`,
+without swallowing other constraint errors. A test-only trigger exercises that
+insert-time branch and rollback; this test failed before the fix and now passes.
+This remains administrative definition management, not runtime pool enablement.
+
 ### Provider-first UI follow-up
 
 User's 2026-09-06 screenshots exposed provider selection hidden in the decorative

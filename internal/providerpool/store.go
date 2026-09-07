@@ -78,12 +78,19 @@ func (s *Store) Create(ctx context.Context, pool Pool) error {
 	if duplicate {
 		return ErrConflict
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO provider_login_pools
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO provider_login_pools
 		(id, workspace_id, name, provider, mode, allow_cross_owner, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, pool.ID, pool.WorkspaceID, strings.TrimSpace(pool.Name),
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, name) DO NOTHING`, pool.ID, pool.WorkspaceID, strings.TrimSpace(pool.Name),
 		providerlogin.Canonical(pool.Policy.Provider), pool.Policy.Mode, pool.Policy.AllowCrossOwner, pool.CreatedBy)
 	if err != nil {
 		return fmt.Errorf("create provider pool: %w", err)
+	}
+	count, err := inserted.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check provider pool insert: %w", err)
+	}
+	if count == 0 {
+		return ErrConflict
 	}
 	for _, member := range pool.Members {
 		_, err = tx.ExecContext(ctx, `INSERT INTO provider_login_pool_members (pool_id, credential_id, priority)

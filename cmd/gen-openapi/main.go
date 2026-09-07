@@ -497,6 +497,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		if schema.Request != nil {
 			merged.Request = schema.Request
 		}
+		merged.RequestRequired = merged.RequestRequired || schema.RequestRequired
 		if schema.RequestMedia != nil {
 			merged.RequestMedia = schema.RequestMedia
 		}
@@ -572,6 +573,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	existing.RequestRequired = existing.RequestRequired || incoming.RequestRequired
 	if incoming.Request != nil {
 		existing.Request = incoming.Request
 	}
@@ -593,14 +595,19 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 func requestBodyForRoute(rt route) map[string]any {
 	request := requestSchema(rt)
 	media := []string{"application/json"}
-	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.RequestMedia != nil {
+	schema := routeSchemaCatalog()[rt.method+" "+rt.path]
+	if schema.RequestMedia != nil {
 		media = schema.RequestMedia
 	}
 	content := make(map[string]any, len(media))
 	for _, mediaType := range media {
 		content[mediaType] = map[string]any{"schema": request}
 	}
-	return map[string]any{"content": content}
+	body := map[string]any{"content": content}
+	if schema.RequestRequired {
+		body["required"] = true
+	}
+	return body
 }
 
 func remainingAuthIntegrationsSchemaCatalogRoutes() map[string]DomainSchema {

@@ -72,7 +72,7 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	components["ProviderPoolCreateRequest"].(map[string]any)["additionalProperties"] = false
 
 	routes := map[string]DomainSchema{
-		"POST /api/v1/provider-logins/pools":            {Request: ref("ProviderPoolCreateRequest"), Response: ref("ProviderPool")},
+		"POST /api/v1/provider-logins/pools":            {Request: ref("ProviderPoolCreateRequest"), RequestRequired: true, Response: ref("ProviderPool")},
 		"GET /api/v1/provider-logins/pools":             {Response: ref("ProviderPoolPage")},
 		"GET /api/v1/provider-logins/pools/{poolId}":    {Response: ref("ProviderPool")},
 		"POST /api/v1/provider-logins/device":           {Request: ref("ProviderLoginDeviceStartRequest"), Response: ref("ProviderLoginDeviceStart")},

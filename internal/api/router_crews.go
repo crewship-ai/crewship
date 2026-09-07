@@ -436,6 +436,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	providerPools := NewProviderPoolHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/provider-logins/pools", authed(wsCtx(http.HandlerFunc(providerPools.List))))
 	r.mux.Handle("GET /api/v1/provider-logins/pools/{poolId}", authed(wsCtx(http.HandlerFunc(providerPools.Get))))
+	// openapi: responses 400
 	r.authedMut("POST", "/api/v1/provider-logins/pools", roleManage, providerPools.Create)
 
 	// Device-code sign-in to a model provider (#2428, PRD provider-logins

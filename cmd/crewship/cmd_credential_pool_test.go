@@ -75,13 +75,22 @@ func TestCredentialPoolCLI(t *testing.T) {
 
 func TestCredentialPoolCLIValidation(t *testing.T) {
 	stub := covStub(t)
-	for _, extra := range [][]string{{}, {"--member", "account=x"}, {"--member", "account", "--member", "account"}} {
-		cmd := newCredentialPoolCmd()
-		args := []string{"create", "--name", "Team", "--provider", "OPENAI", "--mode", "api_key"}
-		cmd.SetArgs(append(args, extra...))
-		if err := cmd.Execute(); err == nil {
-			t.Fatal("invalid members accepted")
-		}
+	for _, tc := range []struct {
+		name  string
+		extra []string
+	}{
+		{"missing member", nil},
+		{"noninteger priority", []string{"--member", "account=x"}},
+		{"duplicate member", []string{"--member", "account", "--member", "account"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newCredentialPoolCmd()
+			args := []string{"create", "--name", "Team", "--provider", "OPENAI", "--mode", "api_key"}
+			cmd.SetArgs(append(args, tc.extra...))
+			if err := cmd.Execute(); err == nil {
+				t.Fatal("invalid members accepted")
+			}
+		})
 	}
 	if len(stub.CallsFor("POST", "/api/v1/provider-logins/pools")) != 0 {
 		t.Fatal("invalid request sent")
