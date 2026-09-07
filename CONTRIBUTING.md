@@ -106,10 +106,10 @@ Thirteen files name the Go version, and they must all name the same one:
 
 | Where | Line |
 |---|---|
-| `go.mod` | `toolchain go1.27.0` — the anchor everything else is checked against |
-| `Dockerfile` | `FROM golang:1.27.0-alpine` — the compiler for the **shipped** binary |
-| ten workflows | `GO_VERSION: "1.27.0"` |
-| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.0"` |
+| `go.mod` | `toolchain go1.27.1` — the anchor everything else is checked against |
+| `Dockerfile` | `FROM golang:1.27.1-alpine` — the compiler for the **shipped** binary |
+| ten workflows | `GO_VERSION: "1.27.1"` |
+| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.1"` |
 
 `scripts/go-toolchain-pin.sh` parses all of them and fails on disagreement;
 it runs in CI's `Shell` job on every PR. Run it before you push:
@@ -120,9 +120,12 @@ bash scripts/go-toolchain-pin.sh
 
 Two things it deliberately does **not** do, both worth knowing:
 
-- **It ignores `go.mod`'s `go` directive.** That stays at 1.26 on purpose —
-  the language floor is a promise to consumers and is not the same decision
-  as which compiler builds the release (#2060).
+- **It ignores `go.mod`'s `go` directive.** The language floor is a promise
+  to consumers and is not the same decision as which compiler builds the
+  release (#2060), so it does not ride along with a toolchain bump. It moves
+  only when a dependency forces it — which is why it reads 1.27 today:
+  shoutrrr v0.19.0 declares `go 1.27`, and the go command refuses a main
+  module whose floor is below its dependencies'.
 - **It does not build the image.** The root `Dockerfile` is built by
   `release.yml` and `nightly.yml` only, so image-only breakage (a missing
   `COPY`, a `pnpm prisma generate` regression) is still first caught by
@@ -136,10 +139,10 @@ it fails backwards — bump the `FROM` tag, forget the literal, and Go downloads
 the *old* toolchain and undoes the bump with CI still green.
 
 Do not expect the image build to catch drift for you. Under `local` the
-`toolchain` directive is ignored outright, so `toolchain go1.27.1` against a
-`golang:1.27.0-alpine` base builds silently with 1.27.0 and exits 0. Only the
-`go` directive can fail a build, and it deliberately sits at 1.26. The static
-check is the only thing that sees this.
+`toolchain` directive is ignored outright, so `toolchain go1.27.2` against a
+`golang:1.27.1-alpine` base builds silently with 1.27.1 and exits 0. Only the
+`go` directive can fail a build, and it tracks the language floor rather than
+this pin. The static check is the only thing that sees this.
 
 Bumping the toolchain also means **re-checking the analyser pins**.
 `golangci-lint` and `govulncheck` each vendor `golang.org/x/tools`, and an
@@ -147,35 +150,43 @@ Bumping the toolchain also means **re-checking the analyser pins**.
 syntax it does not know — 1.26 → 1.27 needed both to move. Their pins carry
 comments saying so; the guard cannot check this one for you.
 
-### Version ceilings in `pnpm.overrides`
+### Why `@sentry/nextjs` is aliased in `vitest.config.ts`
 
-Most entries under `pnpm.overrides` in `package.json` are security *floors*
-(`"ws": ">=8.21.0"`) — raise a transitive dependency past a known CVE. One is
-a **ceiling**, and it means the opposite:
+Every entry under `pnpm.overrides` in `package.json` is a security *floor*
+(`"ws": ">=8.21.0"`) — raise a transitive dependency past a known CVE. There
+is no ceiling among them, and there should not be one: a ceiling freezes a
+package at whatever version last worked and hides the reason it stopped.
 
-| Override | Why |
-|---|---|
-| `"@sentry/nextjs": "<10.72.0"` | 10.72.0 does not import under a DOM test environment |
+`@sentry/nextjs` carried one (`"<10.72.0"`) from 2026-08-31 to 2026-09-07.
+The fault it was working around is real and still upstream: the SDK's `node`
+export condition reaches a vendored bundler plugin that picks its
+Node-vs-browser branch on `typeof document === 'undefined'`. Under `happy-dom`
+a `document` exists, so it takes the browser branch, builds an `http:` URL
+from `document.baseURI`, and hands it to `fileURLToPath` — which throws
+`TypeError: The URL must be of scheme file` at module scope. Anything that
+transitively imports `@sentry/nextjs` then fails to load at all: on #2444 that
+was twelve suites, every assertion inside them still passing, which reads like
+anything but a dependency problem.
 
-JSON has no comments, so the reason cannot live next to the pin. It is this:
-the SDK's `node` export condition reaches a vendored bundler plugin that picks
-its Node-vs-browser branch on `typeof document === 'undefined'`. Under
-`happy-dom` a `document` exists, so it takes the browser branch, builds an
-`http:` URL from `document.baseURI`, and hands it to `fileURLToPath` — which
-throws `TypeError: The URL must be of scheme file` at module scope. Anything
-that transitively imports `@sentry/nextjs` then fails to load at all.
+Production was never affected — `next build` and the server runtime have no
+`document`, so they take the Node branch — and that is the tell. The suite runs
+under `happy-dom`, so a component importing the SDK should get the same client
+build the browser bundle gets, not the Node one. `vitest.config.ts` now says so
+directly, with the entry the package's own `browser` export condition names:
 
-Production is unaffected: `next build` and the server runtime have no
-`document`, so they take the Node branch. This is a test-environment fault
-only, which is exactly why it reached us through a lockfile regeneration
-rather than through a bump anyone reviewed — no `package.json` spec changed.
+```ts
+'@sentry/nextjs': path.resolve(__dirname, 'node_modules/@sentry/nextjs/build/esm/index.client.js'),
+```
 
-To lift it, drop the line, `pnpm install`, and run `pnpm test`. If
-`lib/__tests__/sentry-scrub.test.ts` still loads, upstream fixed it and the
-ceiling can go. Do not raise the ceiling to chase a version without running
-that; the failure mode is eleven unrelated suites failing to import, with
-every assertion in them still passing, which reads like anything but a
-dependency problem.
+That client build is browser code and imports `next/router` extensionless,
+which Node's ESM resolver rejects, so it is also listed in
+`test.server.deps.inline` to route it through Vite's resolver — the one the
+Next bundler stands in for at runtime.
+
+If a future bump breaks the import again, check that entry path against the
+package's `exports` map before reaching for a version pin. The alias fails
+loudly (every Sentry-importing suite stops loading); a ceiling fails quietly,
+by never moving.
 
 ## Verify any change
 

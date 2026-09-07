@@ -2,7 +2,7 @@ module github.com/crewship-ai/crewship
 
 go 1.27
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	cel.dev/cel-go v0.32.0

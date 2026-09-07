@@ -49,10 +49,11 @@ FROM golang:1.27.1-alpine AS backend
 #
 # What `local` does NOT do — verified against this image, not assumed — is
 # object when go.mod's `toolchain` names something else. That directive is
-# ignored outright under `local`, so a `toolchain go1.27.1` against this 1.27.0
-# tag builds happily and silently with 1.27.0. Only the `go` DIRECTIVE can fail
-# the build ("go.mod requires go >= 1.28; running go 1.27.0"), and that line
-# deliberately sits at 1.26. So nothing at build time will ever tell us these
+# ignored outright under `local`, so a `toolchain go1.27.2` against this 1.27.1
+# tag builds happily and silently with 1.27.1. Only the `go` DIRECTIVE can fail
+# the build ("go.mod requires go >= 1.28; running go 1.27.1"), and that line
+# tracks the language floor, which moves only when a dependency forces it and
+# so cannot be relied on here. So nothing at build time will ever tell us these
 # two files disagree — which is exactly why the disagreement is checked
 # statically instead, by scripts/go-toolchain-pin.sh, on every PR.
 #
