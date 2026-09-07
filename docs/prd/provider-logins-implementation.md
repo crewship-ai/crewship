@@ -143,6 +143,45 @@ See [OpenAI rate limits](https://developers.openai.com/api/docs/guides/rate-limi
 
 ## Remaining design constraints
 
+### P-D administrative API slice — #2440
+
+The follow-up API exposes `POST /api/v1/provider-logins/pools`,
+`GET /api/v1/provider-logins/pools` and `GET /api/v1/provider-logins/pools/{poolId}`.
+All three require OWNER/ADMIN; creation additionally uses the route's
+`credentials:write` scope for scoped CLI tokens. Creation takes `name`,
+`provider`, `mode`, optional `allow_cross_owner` (default false), and `members`
+containing `credential_id` and optional integer `priority` (default zero).
+Unknown fields and bodies over 64 KiB are rejected. One to 100 members are
+allowed; IDs and names are checked within the same immediate transaction as
+creation. Missing and foreign-workspace member IDs produce the same 400 error.
+Duplicate workspace-local names produce 409 without changing the existing set.
+
+Lists return `{items, next_cursor}` with at most 100 definitions; pass a non-null
+cursor as `?after=...`. A definition includes its member count; the detail also
+includes member IDs/priorities, including revoked accounts for diagnosis.
+These explicit response DTOs never include token material or internal request
+generation fingerprints. Reads do not rotate accounts. Creation uses the
+existing best-effort administrative audit (not a transactional audit guarantee).
+
+CLI counterparts are `credential pool list [--after <cursor>]`,
+`credential pool get <pool-id>` and:
+
+```sh
+crewship credential pool create --name "OpenAI accounts" --provider OPENAI \
+  --mode api_key --member ACCOUNT_ID --member OTHER_ACCOUNT_ID=10
+```
+
+Replace the example IDs with credential IDs, not tokens. Lower numeric priority wins. Cross-owner
+consent is never implied: use `--allow-cross-owner` only intentionally. JSON
+output preserves pagination metadata; human output warns that these definitions
+do not grant access. CLI tests use a stub server, not dev3 accounts.
+
+This is not complete pool CRUD: edit/delete, UI, scope
+bindings, run-start selection and observation producers remain follow-up work.
+No pool created through this API authorizes credential delivery or changes an
+existing agent's payer. Role, scope, tenant, pagination, validation, audit and
+non-disclosure regressions live in `internal/api/provider_pool_test.go`.
+
 P-D is not just wiring existing selection helpers. PRD section 5.4 assumes
 several bindings can share a scope and slot, but the shipped unique index
 `idx_credential_bindings_slot` in migration `20260728135240` prevents that.

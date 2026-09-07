@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider pool definitions** (#2440) — owners/admins can create, list and inspect explicit account sets through the API and `credential pool create/list/get`. Creation requires credential write scope for scoped CLI tokens; cross-workspace members are rejected. This prepares pool management only: it does not assign accounts, enable runtime failover or add pool controls to the UI.
+
 - **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
 
 - **Provider onboarding safeguards** (#2428) — completing device sign-in saves the chosen crew access, validates the complete code response, and uses only committed UI callbacks. Disabled data requests cannot restore stale account details. Empty subscription usage remains a valid array response. OpenAI/Codex defaults stay on GPT-5.5; Astra remains selectable for accounts with access, rather than being forced during onboarding.
