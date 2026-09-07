@@ -10,7 +10,6 @@ package api
 // chatbridge auto-provision).
 
 import (
-	"context"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -434,7 +433,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Device-code sign-in to a model provider (#2428, PRD provider-logins
 	// §10.3). Start creates a credential at the end, so it is gated inline
-	// exactly like POST /api/v1/credentials (role-or-capability); Status
+	// to OWNER/ADMIN for provider accounts; Status
 	// reads the caller's own row and needs no workspace context. The
 	// pollers for sign-ins left pending by a previous process are resumed
 	// here, off the request path.
@@ -445,7 +444,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	resumeDone := beginBackgroundWork()
 	go func() {
 		defer resumeDone()
-		providerLogins.ResumePending(context.Background())
+		providerLogins.ResumePending(providerLogins.ctx)
 	}()
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/test", roleCreate, creds.TestStored)
 	// Force a provider-login refresh now (docs/prd/provider-logins.md §10.3);

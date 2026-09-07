@@ -399,6 +399,13 @@ func (h *ProviderLoginHandler) poll(row deviceLoginRow) {
 // makes it idempotent: a poller and a Status read racing to expire the same
 // row cannot flip a completed one.
 func (h *ProviderLoginHandler) finish(ctx context.Context, id, status, credentialID, errText string) {
+	if status == deviceLoginStatusComplete {
+		// The credential is already committed. Persist the terminal result even
+		// if shutdown cancelled the poller between create and finish.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), deviceLoginCallTimeout)
+		defer cancel()
+	}
 	var credArg, errArg any
 	if credentialID != "" {
 		credArg = credentialID

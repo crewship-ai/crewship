@@ -118,7 +118,8 @@ func TestAgentCredentialMetadataVisibility(t *testing.T) {
 			if !strings.Contains(body, "visible-key") {
 				t.Fatalf("visible row missing: %s", body)
 			}
-			if strings.Contains(body, hidden) != canRole(role, "update") {
+			wantVisible := role == "OWNER" || role == "ADMIN"
+			if strings.Contains(body, hidden) != wantVisible {
 				t.Fatalf("%s hidden row policy: %s", role, body)
 			}
 		}

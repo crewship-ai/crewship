@@ -83,6 +83,28 @@ func (f deviceLoginFixture) waitFor(t *testing.T, deviceID string) deviceLoginSt
 	return deviceLoginStatusResponse{}
 }
 
+func TestDeviceLogin_CompletedResultSurvivesShutdown(t *testing.T) {
+	f := newDeviceLoginFixture(t)
+	rr := f.start(t, `{"provider":"OPENAI"}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
+	}
+	var started deviceLoginStartResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	f.h.Stop()
+	seedCredentialEnc(t, f.h.db, f.wsID, f.userID, "completed-login", "completed-login", "fake")
+	f.h.finish(f.h.ctx, started.DeviceID, deviceLoginStatusComplete, "completed-login", "")
+	var status, credentialID string
+	if err := f.h.db.QueryRowContext(context.Background(), `SELECT status, COALESCE(credential_id, '') FROM provider_device_logins WHERE id = ?`, started.DeviceID).Scan(&status, &credentialID); err != nil {
+		t.Fatal(err)
+	}
+	if status != deviceLoginStatusComplete || credentialID != "completed-login" {
+		t.Fatalf("committed credential lost on shutdown: status=%q credential=%q", status, credentialID)
+	}
+}
+
 func TestDeviceLogin_StartReturnsCodeAndPersists(t *testing.T) {
 	f := newDeviceLoginFixture(t)
 	rr := f.start(t, `{"provider":"openai"}`)

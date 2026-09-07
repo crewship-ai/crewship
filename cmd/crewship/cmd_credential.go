@@ -98,9 +98,9 @@ func loginPairs(l *credLogin) [][]string {
 		if l.Refresh.NextAt != nil {
 			refresh += ", next " + *l.Refresh.NextAt
 		}
-		if l.Refresh.Error != nil {
-			refresh += " — " + *l.Refresh.Error
-		}
+	}
+	if l.Refresh.Error != nil && *l.Refresh.Error != "" {
+		refresh += " — " + *l.Refresh.Error
 	}
 	return [][]string{
 		{"Mode", l.Mode},
@@ -282,6 +282,9 @@ every page. --search and --tag filter server-side.`,
 				refresh := l.Refresh.Status
 				if !l.Refresh.Supported {
 					refresh = "—"
+				}
+				if l.Refresh.Error != nil && *l.Refresh.Error != "" {
+					refresh += " — " + *l.Refresh.Error
 				}
 				rows = append(rows, []string{c.ID, c.Name, l.Provider, l.Mode, val(l.PlanLabel), val(l.OwnerEmail), val(l.ExpiresAt), refresh, fmt.Sprintf("%d", l.PaysFor.Agents)})
 			}
@@ -780,14 +783,15 @@ var credDefaultEnvVarCmd = &cobra.Command{
 // login's new state. 409 while another refresh is in flight.
 var credRefreshCmd = &cobra.Command{
 	Use:   "refresh <name-or-id>",
-	Short: "Refresh a provider login's access token now (ChatGPT logins)",
+	Short: "Refresh a configured provider login's access token now",
 	Long: `Refresh a provider login's access token now.
 
-Only a subscription login with a stored refresh token (a ChatGPT auth.json
-imported as --type PROVIDER_LOGIN) can be refreshed; a Claude setup-token
-and an API key have no refresh flow. The server refreshes such logins on
-its own 24 h before expiry and before a run start with less than 48 h left;
-this command is for forcing one, e.g. after the login was marked
+Only a subscription login with a stored refresh token and a configured
+provider refresh flow can be refreshed. A setup-token and an API key have no
+refresh flow. Google imports additionally require matching server OAuth
+client configuration. The server refreshes eligible logins before expiry
+and checks freshness at run start, using provider-specific windows.
+This command forces a refresh, e.g. after the login was marked
 needs_relogin and re-imported.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

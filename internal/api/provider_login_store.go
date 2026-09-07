@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -48,7 +49,7 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 		if p.secret {
 			enc, err := encryption.Encrypt(p.value)
 			if err != nil {
-				return err
+				return fmt.Errorf("encrypt provider login part %s: %w", p.key, err)
 			}
 			ciphertext = enc
 		} else {
@@ -58,7 +59,7 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 			INSERT INTO credential_fields (credential_id, key, value, encrypted_value, is_secret, ordinal)
 			VALUES (?, ?, ?, ?, ?, ?)`,
 			credID, p.key, cleartext, ciphertext, boolToInt(p.secret), ordinal); err != nil {
-			return err
+			return fmt.Errorf("store provider login part %s: %w", p.key, err)
 		}
 		ordinal++
 	}
@@ -66,7 +67,7 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE credentials SET sensitivity = ? WHERE id = ?`, SensitivitySealed, credID); err != nil {
-		return err
+		return fmt.Errorf("seal provider login: %w", err)
 	}
 	nextAt := ""
 	if !l.ExpiresAt.IsZero() {
@@ -77,5 +78,8 @@ func storeProviderLoginParts(ctx context.Context, tx *sql.Tx, credID string, l p
 		ON CONFLICT(credential_id) DO UPDATE SET status = excluded.status, next_at = excluded.next_at,
 			error = NULL, failures = 0, in_progress_until = NULL, updated_at = excluded.updated_at`,
 		credID, providerlogin.StatusOK, nextAt, now)
-	return err
+	if err != nil {
+		return fmt.Errorf("seed provider login refresh: %w", err)
+	}
+	return nil
 }

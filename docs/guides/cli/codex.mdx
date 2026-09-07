@@ -99,10 +99,11 @@ token's `chatgpt_plan_type` claim ("ChatGPT Plus"). Model policy on the
 credential is not enforced in this mode.
 
 <Warning>
-ChatGPT access tokens live **10 days**. Central refresh from the stored
-refresh token is the next increment (`docs/prd/provider-logins.md` §5.3); until
-it lands, paste a fresh `auth.json` when the token expires. `CODEX_API_KEY` is
-never set by Crewship — it would override the login.
+For a `PROVIDER_LOGIN` with a stored refresh token, Crewship renews the login
+centrally before its reported expiry and checks freshness at run start.
+If refresh cannot recover and the account shows `needs_relogin`, sign in again.
+Legacy access-only imports cannot renew automatically. `CODEX_API_KEY` is never
+set by Crewship — it would override the login.
 </Warning>
 
 Credential-backed `OPENROUTER` and `OPENAI_COMPAT` models use Codex's native

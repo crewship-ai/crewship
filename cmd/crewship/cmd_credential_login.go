@@ -44,7 +44,7 @@ credential in the workspace.
 
 The command prints a one-time code and a URL. Open the URL in any browser,
 sign in to the provider account that pays for the model, enter the code, and
-come back: the server finishes the sign-in, stores the login as an AI_CLI_TOKEN
+come back: the server finishes the sign-in, stores the login as a PROVIDER_LOGIN
 credential owned by you, and the command prints it.
 
 Only OpenAI (ChatGPT plans, for the Codex adapter) offers this today:
@@ -110,7 +110,11 @@ refresh token never leaves the server — see the Codex CLI guide.`,
 			interval = deviceLoginPollFloor
 		}
 		fmt.Fprint(os.Stderr, "Waiting for the sign-in to finish")
-		final, err := waitForDeviceLogin(client, started.DeviceID, interval)
+		expires, err := time.Parse(time.RFC3339, started.ExpiresAt)
+		if err != nil {
+			return fmt.Errorf("invalid device sign-in expiry: %w", err)
+		}
+		final, err := waitForDeviceLogin(client, started.DeviceID, interval, expires)
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
 			return err
@@ -158,7 +162,7 @@ var credLoginStatusCmd = &cobra.Command{
 // waitForDeviceLogin polls the status until it leaves pending. A transport
 // error is retried a few times before it is reported — a server restart in
 // the middle of a sign-in resumes the flow, and the CLI should outlive it.
-func waitForDeviceLogin(client *cli.Client, deviceID string, interval time.Duration) (deviceLoginStatus, error) {
+func waitForDeviceLogin(client *cli.Client, deviceID string, interval time.Duration, expires time.Time) (deviceLoginStatus, error) {
 	failures := 0
 	for {
 		st, _, err := readDeviceLoginStatus(client, deviceID)
@@ -173,8 +177,12 @@ func waitForDeviceLogin(client *cli.Client, deviceID string, interval time.Durat
 				return st, nil
 			}
 		}
+		remaining := time.Until(expires)
+		if remaining <= 0 {
+			return deviceLoginStatus{Status: "expired"}, nil
+		}
 		fmt.Fprint(os.Stderr, ".")
-		time.Sleep(interval)
+		time.Sleep(min(interval, remaining))
 	}
 }
 

@@ -39140,15 +39140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "login": {
-                      "$ref": "#/components/schemas/ProviderLogin"
-                    }
-                  },
-                  "required": [
-                    "login"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProviderLoginRefreshResponse"
                 }
               }
             },

@@ -140,7 +140,9 @@ var agentGetCmd = &cobra.Command{
 		// and refresh state, so a run that is about to fail on an expired
 		// seat is visible before it starts.
 		paysWith := "— (no provider login in this agent's delivery)"
-		if agent.PaysWith != nil {
+		if agent.PaysWith != nil && agent.PaysWith.Restricted {
+			paysWith = agent.PaysWith.Provider + " (restricted)"
+		} else if agent.PaysWith != nil {
 			paysWith = agent.PaysWith.Name + " (" + agent.PaysWith.CredentialID + ")"
 			if l := agent.PaysWith.Login; l != nil {
 				if l.PlanLabel != nil && *l.PlanLabel != "" {
@@ -329,6 +331,8 @@ type agentDetailResponse struct {
 	// provider-logins §10.3); null when nothing in its delivery pays for
 	// its adapter.
 	PaysWith *struct {
+		Provider     string     `json:"provider,omitempty"`
+		Restricted   bool       `json:"restricted,omitempty"`
 		CredentialID string     `json:"credential_id"`
 		Name         string     `json:"name"`
 		Login        *credLogin `json:"login"`

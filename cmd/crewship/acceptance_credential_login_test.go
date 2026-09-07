@@ -166,7 +166,10 @@ func TestAcceptance_CredentialLogin_ProviderRequired(t *testing.T) {
 	if err == nil || !strings.Contains(out, "--provider") {
 		t.Fatalf("want a validation error naming --provider; err=%v output=%s", err, out)
 	}
-	if stub.started != nil {
+	stub.mu.Lock()
+	started := stub.started
+	stub.mu.Unlock()
+	if started != nil {
 		t.Errorf("the server was called without a provider")
 	}
 }

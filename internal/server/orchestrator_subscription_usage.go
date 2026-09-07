@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -19,6 +20,9 @@ func newSubscriptionUsageRecorder(db *sql.DB, j journal.Emitter) func(context.Co
 			CachedInputTokens: usage.CachedInputTokens, CacheCreationTokens: usage.CacheCreationTokens,
 			Tags: map[string]any{"source": "subscription_cli", "run_id": usage.RunID},
 		})
-		return err
+		if err != nil {
+			return fmt.Errorf("record subscription usage: %w", err)
+		}
+		return nil
 	}
 }

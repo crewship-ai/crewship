@@ -366,6 +366,10 @@ func loadLoginPaysFor(ctx context.Context, db *sql.DB, ids []string) (map[string
 		p.Agents = n
 		out[id] = p
 	}
+	if err := agentRows.Err(); err != nil {
+		agentRows.Close()
+		return nil, fmt.Errorf("iterate payer agents: %w", err)
+	}
 	agentRows.Close()
 
 	crewRows, err := db.QueryContext(ctx, `
@@ -430,6 +434,10 @@ func listProviderLogins(ctx context.Context, db *sql.DB, logger *slog.Logger, wo
 		sources[c.ID] = src
 		statuses[c.ID] = status
 		creds = append(creds, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate provider logins: %w", err)
 	}
 	rows.Close()
 	attachLoginViews(ctx, db, logger, creds, sources)

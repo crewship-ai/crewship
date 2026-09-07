@@ -58,18 +58,21 @@ func visibleCredentialNames(r *http.Request, db *sql.DB, workspaceID string) (ma
 	rows, err := db.QueryContext(r.Context(), `SELECT c.id, COALESCE(c.name, '') FROM credentials c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL`+filter, append([]any{workspaceID}, args...)...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query visible credential names: %w", err)
 	}
 	defer rows.Close()
 	out := map[string]string{}
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan visible credential name: %w", err)
 		}
 		out[id] = name
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate visible credential names: %w", err)
+	}
+	return out, nil
 }
 
 // Batch / junction-table loaders for CredentialHandler. Lifted out of

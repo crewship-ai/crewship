@@ -7,8 +7,8 @@ package api
 // access token with an expiry. Refresh tokens ROTATE (each refresh returns a
 // new one and kills the old), which is why this is a state machine with a
 // lock and not a helper: two refreshes of one login in the same second are
-// one working login and one dead one. The rules are CLIProxyAPI's, which
-// exist for exactly this race:
+// one working login and one dead one. The rules below implement a
+// single-flight claim with rotation to prevent this race:
 //
 //   - single-flight per login: provider_login_refresh.in_progress_until is
 //     claimed with one conditional UPDATE; a second caller sees 0 rows and

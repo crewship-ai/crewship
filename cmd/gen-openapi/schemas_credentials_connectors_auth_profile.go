@@ -115,7 +115,7 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"DELETE /api/v1/credentials/{credentialId}":       {Response: ref("StatusResponse")},
 		"POST /api/v1/credentials/test":                   {Request: ref("CredentialCreateRequest"), Response: ref("CredentialProbeResponse")},
 		"POST /api/v1/credentials/{credentialId}/test":    {Response: ref("CredentialProbeResponse")},
-		"POST /api/v1/credentials/{credentialId}/refresh": {Response: ref("ProviderLoginRefreshResponse")},
+		"POST /api/v1/credentials/{credentialId}/refresh": {Request: object(map[string]any{}), Response: ref("ProviderLoginRefreshResponse")},
 		"GET /api/v1/credentials/{credentialId}/fields":   {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Request: ref("CredentialFieldRequest"), Response: ref("CredentialField")},
 		"GET /api/v1/credentials/bindings": {Response: ref("CredentialBindingList")}, "POST /api/v1/credentials/bindings": {Request: ref("CredentialBindingRequest"), Response: ref("CredentialBinding")},
 		"GET /api/v1/credentials/{credentialId}/rotations": {Response: array(ref("CredentialRotation"))}, "POST /api/v1/credentials/{credentialId}/rotate": {Request: ref("CredentialRotationRequest"), Response: ref("CredentialRotation")},
