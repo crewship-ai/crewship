@@ -170,6 +170,29 @@ Primary-source starting points for P-F:
 
 Neither `copilot` nor `grok` was found on this host's PATH during this checkpoint.
 
+### Grok binary-only probe (2026-09-07)
+
+The official [installer source](https://x.ai/cli/install.sh) resolves the stable
+artifact to `https://x.ai/cli/grok-1.0.13-linux-x86_64.gz`. The installer was
+**read, not executed** (it changes shell configuration and reads local auth).
+Downloaded/decompressed binary SHA-256:
+`edf79521581bb5e6b95abef848491a6a742e860da3e237ebe86a280d30dce4c1`.
+
+In a disposable Alpine container with no network, no credentials, read-only
+rootfs, dropped capabilities and UID 1001, it reported
+`grok 1.0.13 (5e9a58528b76)`. `--no-auto-update --no-memory --help` exited 0;
+an invented flag before `--help` exited 2 (negative control). Its own help says
+`streaming-json` is ACP-session-update NDJSON, distinct from the separate
+`streaming-messages-json` format. The unauthenticated headless invocation emitted
+a JSON `type: error` / `message` envelope and exited 1, not a successful run.
+
+Local evidence: `/tmp/grok-1.0.13-help.log`, `/tmp/grok-1.0.13-flags.log`,
+`/tmp/grok-1.0.13-control.log`, `/tmp/grok-1.0.13-offline-stream.log`.
+This verifies binary/flag/error-shape compatibility only. Successful message,
+tool and usage streams, MCP/tool isolation, authentication, billing and an
+installed Crewship adapter remain unverified/unimplemented. No real provider
+account or paid model call was used.
+
 ## Integration verification checkpoint
 
 - Device login completion now creates a split/sealed `PROVIDER_LOGIN`, not a
