@@ -94,6 +94,16 @@ agentů na tom jede a jestli jsi u limitu.
 | B5 | Label plánu natvrdo `"Anthropic Max"`; billing mód se odvozuje z jediné větve | `exec_env.go:471` | Paymaster ukazuje špatný plán pro cokoli mimo Anthropic |
 | B6 | Katalog modelů: doporučený Codex model je od 2026-09-03 **GPT-6-Astra**, my nabízíme `gpt-5.5`; `pinnedNpmVersion` je `0.128.0`, reálně `0.153.2` | `config/models.json`, `cli_adapter_versions_test.go` | — |
 
+**Upřesnění B6 po review (2026-09-07):** Astra je v katalogu volitelná,
+nikoli automatický default. Dostupnost závisí na účtu, způsobu přihlášení a
+rolloutu; OpenAI/Codex ponechává jako konzervativní výchozí volbu `gpt-5.5`,
+aby onboarding nenutil model, ke kterému účet nemusí mít přístup. Starší
+katalogové modely mohou vyžadovat API klíč. Zdroj:
+[oficiální modely Codex](https://learn.chatgpt.com/docs/models).
+Ověření kontraktu: `lib/__tests__/model-catalog.test.ts` a
+`internal/api/onboarding_setup_crew_test.go`. Dostupnost konkrétního účtu tím
+není ověřena a existujícím agentům se jejich explicitní model nepřepisuje.
+
 ### 1.3 Proč to není „zkopíruj auth.json do všech kontejnerů"
 
 Refresh tokeny u OAuth providerů **rotují**: každá obnova vrátí nový refresh token

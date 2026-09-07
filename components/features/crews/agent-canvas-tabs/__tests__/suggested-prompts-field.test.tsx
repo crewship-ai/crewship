@@ -13,6 +13,12 @@ import type { AgentRecord } from "@/components/features/crews/agent-canvas-tabs/
 // asserts the marks appear AND that the save still fires with the raw text.
 // =============================================================================
 
+// The "Pays with" row reads the caller's abilities; the real hook asks the
+// workspace store, which asks the network.
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ abilities: { can: () => true }, role: "OWNER", capabilities: [], hasCapability: () => false, loading: false }),
+}))
+
 vi.mock("@/components/features/agents/agent-learning-toggle", () => ({
   AgentLearningToggle: () => <div data-testid="learning-toggle" />,
 }))

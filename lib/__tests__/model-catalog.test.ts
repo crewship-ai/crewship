@@ -18,6 +18,11 @@ import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelLabel, getModelsForAdapter } fr
 // offered, and no picker can carry a model id of its own.
 
 describe("config/models.json", () => {
+  it("keeps Astra opt-in while Codex uses the compatible existing default", () => {
+    expect(adapterDefaultModel("CODEX_CLI")).toBe("gpt-5.5")
+    expect(providerDefaultModel("openai")).toBe("gpt-5.5")
+    expect(adapterModels("CODEX_CLI").some((model) => model.id === "gpt-6-astra")).toBe(true)
+  })
   it("is the same file the Go side embeds", () => {
     const onDisk = JSON.parse(readFileSync(join(process.cwd(), "config", "models.json"), "utf8"))
     expect(MODEL_CATALOG.version).toBe(onDisk.version)

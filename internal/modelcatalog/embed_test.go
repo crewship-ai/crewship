@@ -95,6 +95,7 @@ func TestDefault_MustExistModels(t *testing.T) {
 		{"anthropic", "claude-sonnet-4-6"},
 		{"anthropic", "claude-haiku-4-5"},
 		{"openai", "gpt-5.5"},
+		{"openai", "gpt-6-astra"},
 		{"openai", "gpt-5.4-mini"},
 		{"openai", "gpt-5.4-nano"},
 		{"openai", "o3-pro"},
@@ -105,8 +106,8 @@ func TestDefault_MustExistModels(t *testing.T) {
 		{"google", "gemini-2.5-pro"},
 		{"google", "gemini-2.5-flash"},
 		{"google", "gemini-2.5-flash-lite"},
-		{"deepseek", "deepseek-chat"},
-		{"deepseek", "deepseek-reasoner"},
+		{"deepseek", "deepseek-v4-flash"},
+		{"deepseek", "deepseek-v4-pro"},
 		{"amazon-bedrock", "us.anthropic.claude-opus-4-7"},
 		{"openrouter", "anthropic/claude-fable-5"},
 	}

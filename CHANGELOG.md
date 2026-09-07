@@ -11,6 +11,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
+
+- **Provider onboarding safeguards** (#2428) — completing device sign-in saves the chosen crew access, validates the complete code response, and uses only committed UI callbacks. Disabled data requests cannot restore stale account details. Empty subscription usage remains a valid array response. OpenAI/Codex defaults stay on GPT-5.5; Astra remains selectable for accounts with access, rather than being forced during onboarding.
+
 - **Provider sign-in reliability** (#2428) — CLI imports reject conflicting OAuth options and oversized files; account summaries retain usage timestamps and explain restricted access or missing refresh configuration. Device-code waiting stops at expiry, and completed sign-ins retain their result across server shutdown.
 
 - **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.
@@ -36,6 +40,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
 
 ### Fixed
+
+- **Gemini refresh configuration** (#2428) — remove bundled OAuth client credentials. Operators configure the matching client through server-only environment variables; missing configuration disables refresh without invalidating a stored user grant and is explicitly reported in account details.
+
+- **Credential review hardening** (#2428) — reject oversized piped values even when the limit is followed by a newline; device-code sign-in no longer offers an owner change that is not saved; failed provider-account swaps attempt to restore the previous binding, refresh actual assignment state, and report failed recovery explicitly.
+- **Provider account administration** (#2428) — provider accounts, including legacy provider API keys and CLI logins, are restricted to workspace owners/admins in both the API and console. Other roles see only the agent's provider brand. Agent credential/binding lists now respect credential visibility, tenant boundaries and deleted rows without exposing hidden binding winners in warning messages.
+
+- **Codex silently lost every Crewship MCP tool** (#2428) — the sidecar acknowledged an MCP notification with an empty `200`, which carries no `Content-Type`; Codex's MCP client treats that as a fatal transport error, kills the worker and drops the server, so `crewship-memory`, `crewship-routines` and `crewship-notify` were announced at initialize and gone one message later, leaving only log noise. Notifications now answer `202 Accepted` with an empty body, as the streamable-HTTP transport asks. Claude Code's client tolerated the empty `200`, which is why the two adapters disagreed about whether Crewship's own tools exist.
+- **A restricted crew no longer refuses two hosts a Codex run needs** (#2428) — `ab.chatgpt.com` (the feature-flag service Codex calls at startup) and `*.oaiusercontent.com` (session content) are OpenAI's own and are now on the default allowlist beside `chatgpt.com`, which is exact-match. Neither refusal was fatal, but each printed a proxy warning and a CLI error, so a working agent looked broken in its own transcript.
+- **An MCP server the crew's network policy blocks is no longer written into the agent's CLI config** (#2428) — the sidecar already refuses to connect to it, so the config entry only made every CLI dial a host the container proxy rejects; Codex retried three times per run and printed a fatal transport error each time, which read like a Crewship failure rather than a crew policy doing its job.
+- **Codex API-key runs never reached the sidecar** (#2428) — Crewship pointed Codex at the loopback proxy with `OPENAI_BASE_URL`, a variable the Codex binary no longer reads, so every request went straight to `api.openai.com` carrying the dummy key and ended in a 401 the sidecar never saw. Codex's built-in `openai` provider cannot be overridden either, so the route is now a per-run custom `model_provider` block (`base_url` on the sidecar's `/openai/v1`), the same mechanism already used for OpenRouter and OpenAI-compatible endpoints. An OpenAI login is also no longer mistaken for a Claude one: OAuth detection reads the provider, not just the type, so it is never written to `CLAUDE_CODE_OAUTH_TOKEN` or labelled "Anthropic Max".
 
 - **`crewship run` and `crewship ask` no longer hang forever against a busy
   agent.** An agent serves one run at a time, and since #2269 a send that

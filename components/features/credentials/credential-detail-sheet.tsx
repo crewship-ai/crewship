@@ -59,7 +59,11 @@ import { Capability } from "@/lib/capabilities"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { hasLogin, paysForLabel, type ProviderLogin } from "@/lib/credentials/provider-logins"
 import { RevealDialog } from "./reveal-dialog"
+import { AssignLoginDialog } from "./assign-login-dialog"
+import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
+import { DetailDisclosure } from "./detail-disclosure"
 
 interface CredentialSummary {
   id: string
@@ -114,6 +118,9 @@ interface CredentialSummary {
    *  server, which the badge renders as unclassified rather than as L1. */
   security_level?: number
   security_level_label?: string
+  /** The seat this row is, when it pays for a model — PRD provider-logins
+   *  §10.1. Absent on a secret and on a server that predates the tab. */
+  login?: ProviderLogin | null
 }
 
 interface AuditEvent {
@@ -220,11 +227,17 @@ export interface CredentialDetailSheetProps {
    *  cuid before this: an identifier nobody recognises, in the one place the
    *  page is meant to say WHO can read the secret. */
   crewsById?: Record<string, CredentialCrewRef>
+  /** Provider logins only: opens the wizard's sign-in step for this seat's
+   *  provider and mode. Without it the Re-login action is not offered. */
+  onRelogin?: (cred: CredentialSummary) => void
+  /** Provider logins only: open with the Assign dialog already up — the
+   *  Providers list's own Assign button lands here. */
+  assignOnOpen?: boolean
 }
 
 export function CredentialDetailSheet({
   workspaceId, credential, open, onOpenChange, onRefresh, onRotate, onEdit, onBack,
-  toolGaps = [], readinessKnown = false, crewsById = {},
+  toolGaps = [], readinessKnown = false, crewsById = {}, onRelogin, assignOnOpen = false,
 }: CredentialDetailSheetProps) {
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
@@ -237,6 +250,9 @@ export function CredentialDetailSheet({
   const [fieldsLoading, setFieldsLoading] = React.useState(false)
   const [bindings, setBindings] = React.useState<BindingRow[]>([])
   const [assignments, setAssignments] = React.useState<AssignmentRow[]>([])
+  const [accessLoading, setAccessLoading] = React.useState(false)
+  const [accessError, setAccessError] = React.useState(false)
+  const [accessCoverage, setAccessCoverage] = React.useState({ checked: 0, total: 0, unavailable: 0 })
   const [revealEnabled, setRevealEnabled] = React.useState(false)
   const [revealOpen, setRevealOpen] = React.useState(false)
   // The classification a PUT .../sensitivity last returned. Starts unset and
@@ -245,6 +261,10 @@ export function CredentialDetailSheet({
   const [sensitivity, setSensitivity] = React.useState<string | null>(null)
   const [sensitivitySaving, setSensitivitySaving] = React.useState(false)
   const [sensitivityError, setSensitivityError] = React.useState<string | null>(null)
+  // The `login` a Refresh-now returned. Wins over the list payload so the
+  // status pill and the expiry follow the refresh without a page reload.
+  const [loginOverride, setLoginOverride] = React.useState<ProviderLogin | null>(null)
+  const [assignOpen, setAssignOpen] = React.useState(false)
 
   // Hide affordances users can't perform rather than letting them
   // click through to a 403. Mirrors the backend gating exactly:
@@ -259,13 +279,15 @@ export function CredentialDetailSheet({
   // the value-update flow — and see Rotate only when explicitly
   // granted credential.rotate (#1034).
   const { abilities, hasCapability } = useAbilities()
-  const canUpdate = abilities.can("update", "Credential")
+  const canUpdate = abilities.can("update", "Credential") && (!credential?.login || abilities.can("manage", "Credential"))
   const canRotate = abilities.can("manage", "Credential") || hasCapability(Capability.CredentialRotate)
   const canDelete = abilities.can("delete", "Credential")
   // Lowering a classification is OWNER/ADMIN (credentials_reveal.go
   // SetSensitivity: the lower branch re-checks with "manage"); raising is
   // MANAGER+. Two gates because the server has two.
   const canLowerSensitivity = abilities.can("manage", "Credential")
+  // POST /credentials/bindings is roleManage, like the wizard's slot step.
+  const canBind = abilities.can("manage", "Credential")
 
   const effectiveSensitivity = sensitivity ?? credential?.sensitivity ?? null
 
@@ -315,8 +337,13 @@ export function CredentialDetailSheet({
       setSensitivityError(null)
       setRevealEnabled(false)
       setRevealOpen(false)
+      setAssignOpen(false)
     }
-  }, [open, credential])
+    // A refresh's answer belongs to the seat it refreshed, not the next one
+    // opened in the rail.
+    setLoginOverride(null)
+    if (open && credential && assignOnOpen && hasLogin(credential)) setAssignOpen(true)
+  }, [open, credential, assignOnOpen])
 
   // The workspace reveal switch. MANAGER+ may read it (GetPolicy's own gate),
   // so anyone below "update" is never asked — a 403 here would be read as
@@ -372,15 +399,17 @@ export function CredentialDetailSheet({
       .catch(() => !cancelled && setFields([]))
       .finally(() => !cancelled && setFieldsLoading(false))
 
+    setAccessLoading(true); setAccessError(false); setBindings([]); setAssignments([])
     apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&credential_id=${cid}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body: { bindings?: BindingRow[] } | null) =>
-        !cancelled && setBindings(Array.isArray(body?.bindings) ? body.bindings : []))
-      .catch(() => !cancelled && setBindings([]))
-
-    void loadAssignments(workspaceId, credential)
-      .then((rows) => !cancelled && setAssignments(rows))
-      .catch(() => !cancelled && setAssignments([]))
+      .then(async (r) => { if (!r.ok) throw new Error(); return r.json() })
+      .then(async (body: { bindings?: BindingRow[] }) => {
+        const slots = Array.isArray(body?.bindings) ? body.bindings : []
+        if (!cancelled) setBindings(slots)
+        return loadAssignments(workspaceId, credential, slots)
+      })
+      .then((result) => { if (!cancelled) { setAssignments(result.rows); setAccessCoverage(result) } })
+      .catch(() => { if (!cancelled) setAccessError(true) })
+      .finally(() => { if (!cancelled) setAccessLoading(false) })
 
     if (canRotate) {
       apiFetch(`/api/v1/credentials/${cid}/rotations?workspace_id=${ws}`)
@@ -395,6 +424,11 @@ export function CredentialDetailSheet({
   }, [open, credential, workspaceId, canRotate, canUpdate])
 
   if (!credential) return null
+
+  // The seat view. `loginOverride` is what the last Refresh-now returned.
+  const loginRow = loginOverride ? { ...credential, login: loginOverride } : credential
+  const seat = hasLogin(loginRow) ? loginRow : null
+  const accountId = fields.find((f) => f.key === "account_id" && !f.is_secret)?.value ?? null
 
   const brand = getBrand(credential.provider)
   const BrandIcon = brand.Icon
@@ -421,14 +455,12 @@ export function CredentialDetailSheet({
         ? `Needs ${missingTools.join(", ")}`
         : "Tool missing"
       : readinessKnown
-        ? "Ready"
-        : "Readiness unknown"
+        ? "Tools available"
+        : "Tools not checked"
 
-  // The figures band. Same six-slot shape as the issue's, answering the
-  // questions a vault gets asked instead of the ones a tracker does.
-  const expiryDays = daysUntilExpiry(credential)
+  // Keep the summary aligned with the provider's refreshed login metadata.
+  const expiryDays = daysUntilExpiry(seat ? { ...credential, token_expires_at: seat.login.expires_at } : credential)
   const facts: StatItem[] = [
-    { label: "Created", value: formatRelativeTime(credential.created_at) },
     {
       label: "Last used",
       value: credential.last_used_at ? formatRelativeTime(credential.last_used_at) : "never",
@@ -447,9 +479,8 @@ export function CredentialDetailSheet({
               : "default",
     },
     { label: "Used by", value: credential._count_agent_credentials || "—" },
-    { label: "Fields", value: fields.length || "—" },
     {
-      label: "Readiness",
+      label: "Tools",
       value: readinessLabel,
       tone: toolGaps.length > 0 ? "warn" : readinessKnown ? "success" : "default",
     },
@@ -565,23 +596,9 @@ export function CredentialDetailSheet({
             </span>
           </div>
         )}
-        {/* One page, no tabs.
-         *
-         * It had five: Overview, Fields, Used by, Audit, Settings. Tabs are a
-         * way of admitting a screen holds more than fits, and this one does
-         * not — a credential is a value, its parts, who can read it, how hard
-         * it is guarded, and what has happened to it. Five of those five are
-         * things you want to see AT ONCE when you are deciding whether to
-         * rotate something, and behind a tab each of them costs a click plus
-         * the memory of what the other tab said.
-         *
-         * The shape is the issue detail's, deliberately and to the pixel where
-         * the content allows: identity card, figures band, then a wide column
-         * of the substance beside a narrow column of properties. Two screens in
-         * one product that both mean "here is one thing in full" should not
-         * look like two products. Everything is built from the same
-         * components/ui/detail kit, so they cannot drift apart by accident.
-         */}
+        {/* One reading column: identity, health and usage first. Secondary
+            history and protection stay accessible through disclosures, using
+            the same detail kit as the rest of the product. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-4 p-4">
             {/* ── Identity ─────────────────────────────────────────────── */}
@@ -703,6 +720,44 @@ export function CredentialDetailSheet({
                       </Pill>
                     ))}
                   </div>
+
+                  {/* A seat's verbs, in the header where the wireframe puts
+                      them: Assign · Test · Re-login · Revoke. Revoke is the
+                      same delete the danger zone offers, named the way a seat
+                      is taken away rather than the way a row is removed. */}
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="connection-verification">
+                    <FlaskConical className="h-3.5 w-3.5 shrink-0" />
+                    {testResult
+                      ? testResult.valid ? "Connection check passed just now." : "Connection check did not pass. See the test result."
+                      : credential.testable && (!seat || seat.login.mode !== "subscription") && credential.last_checked_at && credential.status === "ACTIVE" && !credential.last_error
+                        ? `Last connection check passed ${formatRelativeTime(credential.last_checked_at)}. This does not guarantee the next request will succeed.`
+                        : "Connection not verified. Tool availability and token expiry do not confirm that a login works."}
+                  </p>
+                  {seat && (
+                    <ProviderLoginActions
+                      credential={seat}
+                      testable={Boolean(credential.testable)}
+                      testing={testing}
+                      canUpdate={canUpdate}
+                      canBind={canBind}
+                      canDelete={canDelete}
+                      onAssign={() => setAssignOpen(true)}
+                      onTest={handleTest}
+                      onRelogin={onRelogin ? () => onRelogin(credential) : undefined}
+                      onRevoke={() => setConfirmDelete(true)}
+                    />
+                  )}
+                  {seat && testResult && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 text-[11px]",
+                        testResult.valid ? "text-success" : "text-destructive",
+                      )}
+                    >
+                      {testResult.valid ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                    </span>
+                  )}
                 </div>
               </DetailCard>
             </Appear>
@@ -712,9 +767,9 @@ export function CredentialDetailSheet({
               <StatStrip items={facts} />
             </Appear>
 
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="flex flex-col gap-4">
               {/* ── The substance ─────────────────────────────────────── */}
-              <div className="flex flex-col gap-4 xl:col-span-2 2xl:col-span-3">
+              <div className="flex flex-col gap-4">
                 {credential.last_error && (
                   <Appear order={2}>
                     <DetailCard title="Last error" icon={AlertTriangle} tone="destructive">
@@ -723,6 +778,24 @@ export function CredentialDetailSheet({
                       </p>
                     </DetailCard>
                   </Appear>
+                )}
+
+                {/* The seat's own sections come first: what a provider login
+                    is asked about — whose, which plan, how much of the window
+                    is left, when it expires — is answered here, and the
+                    value/fields/audit cards below are what it has in common
+                    with every other row. */}
+                {seat && (
+                  <ProviderLoginCards
+                    workspaceId={workspaceId}
+                    credential={seat}
+                    accountId={accountId}
+                    canUpdate={canUpdate}
+                    onLoginChange={(next) => {
+                      setLoginOverride(next)
+                      onRefresh()
+                    }}
+                  />
                 )}
 
                 {/*
@@ -735,7 +808,7 @@ export function CredentialDetailSheet({
                   is what keeps the reveal count low enough that each one is
                   worth investigating.
                 */}
-                <Appear order={3}>
+                {!seat && <Appear order={3}>
                   <DetailCard
                     title="Value"
                     icon={KeyRound}
@@ -749,7 +822,9 @@ export function CredentialDetailSheet({
                       // brand .cli like the badge above: that flag marks the
                       // CLIs Crewship drives in the container, which excluded
                       // GitHub/GitLab/Vercel despite real probes.
-                      credential.testable && canUpdate ? (
+                      // A seat's Test lives in its header action row (and a
+                      // subscription has none — see ProviderLoginActions).
+                      credential.testable && canUpdate && !seat ? (
                         <span className="inline-flex items-center gap-2">
                           {testResult && (
                             <span
@@ -784,13 +859,13 @@ export function CredentialDetailSheet({
 
                     {canRotate && (
                       <div className="mt-2.5 space-y-1.5">
-                        <Button size="sm" className="w-full justify-start" onClick={() => onRotate(credential)}>
+                        <Button size="sm" variant="outline" onClick={() => onRotate(credential)}>
                           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                          Rotate and show the new value
+                          Replace with grace period
                         </Button>
                         <p className="text-[10px] text-muted-foreground">
-                          Mints a new value, shows it once, and lets the old one drain through the
-                          grace window. Nothing existing is disclosed.
+                          Paste a replacement you obtained from the issuing service. The grace period
+                          applies in Crewship only; it does not extend validity at the provider.
                         </p>
                       </div>
                     )}
@@ -851,7 +926,7 @@ export function CredentialDetailSheet({
                       </p>
                     )}
                   </DetailCard>
-                </Appear>
+                </Appear>}
 
                 {/*
                   Fields. A secret part is listed by KEY and marked "secret" —
@@ -862,7 +937,7 @@ export function CredentialDetailSheet({
                   (region, account id) ARE shown, which is the entire reason
                   they are stored in the clear.
                 */}
-                <Appear order={4}>
+                {(fieldsLoading || fields.length > 0) && <Appear order={4}>
                   <DetailCard
                     title="Fields"
                     icon={ListTree}
@@ -903,15 +978,29 @@ export function CredentialDetailSheet({
                       </dl>
                     )}
                   </DetailCard>
-                </Appear>
+                </Appear>}
 
                 <Appear order={5}>
                   <DetailCard
-                    title="Used by"
+                    title={seat ? "Pays for" : "Used by"}
                     icon={Users}
                     subtitle={
-                      credential._count_agent_credentials > 0
-                        ? `${credential._count_agent_credentials}`
+                      seat
+                        ? paysForLabel(seat.login.pays_for)
+                        : credential._count_agent_credentials > 0
+                          ? `${credential._count_agent_credentials}`
+                          : undefined
+                    }
+                    action={
+                      seat && canBind ? (
+                        <button type="button" onClick={() => setAssignOpen(true)} className="text-primary hover:underline">
+                          Assign to agent →
+                        </button>
+                      ) : undefined
+                    }
+                    footer={
+                      seat
+                        ? "Assignments below determine which agents can use this account. Automatic account failover is not available yet."
                         : undefined
                     }
                   >
@@ -919,9 +1008,17 @@ export function CredentialDetailSheet({
                         answer to "which env var will the container actually
                         see", which before P3 had no answer short of booting
                         the agent. */}
+                    <div className="mb-4 space-y-2 text-xs" data-testid="credential-access-summary">
+                      <p><span className="font-medium">Management:</span> {seat ? "only workspace owners and admins can view and manage provider accounts." : "owners and admins manage credentials; managers can edit them. Reading a secret requires separate reveal permission and workspace policy."}</p>
+                      <p><span className="font-medium">Your access:</span> {canUpdate ? "Edit details" : "Read visible metadata"}{canBind ? " · Manage assignments" : ""}{canReveal ? " · Reveal permitted" : " · Secret hidden"}.</p>
+                      <p><span className="font-medium">Credential scope:</span> {credential.scope === "CREW" ? "Selected crews" : "Workspace"}. Scope is not a successful connection check; runtime access also depends on assignments, Keeper and policy.</p>
+                      {accessLoading ? <p role="status">Checking visible assignments…</p>
+                        : accessError ? <p role="alert" className="text-warn">Access could not be fully loaded. An empty list does not mean nobody has access.</p>
+                          : <p className="text-muted-foreground">Checked {accessCoverage.checked} of {accessCoverage.total} candidate agents visible to you.{accessCoverage.unavailable > 0 ? ` ${accessCoverage.unavailable} lookups unavailable.` : ""} This is not a complete effective-access audit.</p>}
+                    </div>
                     {bindings.length > 0 && (
                       <div className="mb-3 space-y-1.5">
-                        <FieldLabel>Slots</FieldLabel>
+                        <FieldLabel>Delivery bindings — technical names, independent of the display label</FieldLabel>
                         <ul className="space-y-1">
                           {bindings.map((b) => {
                             const crew = b.crew_id ? crewsById[b.crew_id] : undefined
@@ -989,10 +1086,10 @@ export function CredentialDetailSheet({
                               title={
                                 a.grantSource === "crew"
                                   ? "Inherited from the crew — unlink the crew to take it away"
-                                  : "Granted to this agent directly"
+                                  : a.grantSource === "explicit" ? "Granted to this agent directly" : a.grantSource === "binding" ? "Resolved from a delivery binding — review the bindings above" : "Grant source was not identified by this view"
                               }
                             >
-                              {a.grantSource === "crew" ? "crew grant" : "explicit"}
+                              {a.grantSource === "crew" ? "crew grant" : a.grantSource === "explicit" ? "explicit" : a.grantSource === "binding" ? "delivery binding" : "source unconfirmed"}
                             </Badge>
                             {a.expiresAt && (
                               <Badge
@@ -1026,11 +1123,11 @@ export function CredentialDetailSheet({
                           </li>
                         ))}
                       </ul>
-                    ) : (
+                    ) : !accessLoading && !accessError && accessCoverage.unavailable === 0 && accessCoverage.checked === accessCoverage.total ? (
                       <p className="text-[12px] text-muted-foreground">
-                        No agent holds this credential yet.
+                        No matching grants were reported by the checked agents.
                       </p>
-                    )}
+                    ) : null}
 
                     {credential.mcp_used && (
                       <p className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
@@ -1047,6 +1144,7 @@ export function CredentialDetailSheet({
                     and false statement. */}
                 {canUpdate && (
                   <Appear order={6}>
+                    <DetailDisclosure title="Activity history" icon={Activity}>
                     <DetailCard
                       title="Audit"
                       icon={Activity}
@@ -1104,12 +1202,14 @@ export function CredentialDetailSheet({
                         </ul>
                       )}
                     </DetailCard>
+                    </DetailDisclosure>
                   </Appear>
                 )}
               </div>
 
               {/* ── Properties ────────────────────────────────────────── */}
               <div className="flex flex-col gap-4">
+                <DetailDisclosure title="Properties & protection" icon={ShieldCheck}>
                 <Appear order={7}>
                   <DetailCard title="Properties">
                     <dl className="space-y-0.5">
@@ -1209,7 +1309,7 @@ export function CredentialDetailSheet({
                     remove. */}
                 <Appear order={9}>
                   <DetailCard
-                    title="Readiness"
+                    title="Tool availability"
                     icon={toolGaps.length > 0 ? PackageX : CheckCircle2}
                     tone={readinessTone}
                   >
@@ -1242,10 +1342,11 @@ export function CredentialDetailSheet({
                       <>
                         <div className="flex items-center gap-2 text-success">
                           <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                          <span className="text-[13px]">Ready</span>
+                          <span className="text-[13px]">Tools available</span>
                         </div>
                         <p className="mt-2 text-[11px] text-muted-foreground">
                           Every crew that can use this credential also has the CLI that reads it.
+                          {" "}This checks tool availability, not whether the secret or the external connection works.
                         </p>
                       </>
                     ) : (
@@ -1324,7 +1425,7 @@ export function CredentialDetailSheet({
                     lets an oncall MEMBER replace a leaked token without blanket
                     vault reach. Nesting it hid the action from precisely that
                     tier. */}
-                {canRotate && (
+                {canRotate && !seat && (
                   <Appear order={11}>
                     <DetailCard
                       title="Rotation"
@@ -1396,7 +1497,7 @@ export function CredentialDetailSheet({
                   </Appear>
                 )}
 
-                {canDelete && (
+                {canDelete && !seat && (
                   <Appear order={13}>
                     <DetailCard
                       title="Danger zone"
@@ -1416,11 +1517,25 @@ export function CredentialDetailSheet({
                     </DetailCard>
                   </Appear>
                 )}
+                </DetailDisclosure>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {seat && (
+        <AssignLoginDialog
+          workspaceId={workspaceId}
+          credential={seat}
+          open={assignOpen}
+          onOpenChange={setAssignOpen}
+          onAssigned={(agent) => {
+            toast.success(`${agent.name} now pays with ${credential.name}`)
+            onRefresh()
+          }}
+        />
+      )}
 
       <RevealDialog
         workspaceId={workspaceId}
@@ -1475,18 +1590,23 @@ export function CredentialDetailSheet({
 async function loadAssignments(
   workspaceId: string,
   credential: CredentialSummary,
-): Promise<AssignmentRow[]> {
+  bindings: BindingRow[],
+): Promise<{ rows: AssignmentRow[]; checked: number; total: number; unavailable: number }> {
   const res = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
-  if (!res.ok) return []
+  if (!res.ok) throw new Error("Agents unavailable")
   const agents = await res.json()
-  if (!Array.isArray(agents)) return []
+  if (!Array.isArray(agents)) throw new Error("Agents unavailable")
 
   const crewIds = new Set(credential.crew_ids ?? [])
   const names = new Set(credential.agent_names ?? [])
-  const candidates = (agents as { id?: string; name?: string; crew_id?: string | null }[])
+  const ids = new Set([...(credential.agent_ids ?? []), ...bindings.flatMap((b) => b.agent_id ? [b.agent_id] : [])])
+  for (const b of bindings) if (b.crew_id) crewIds.add(b.crew_id)
+  const workspaceBinding = bindings.some((b) => b.scope.toUpperCase() === "WORKSPACE")
+  const allCandidates = (agents as { id?: string; name?: string; crew_id?: string | null }[])
     .filter((a) => typeof a?.id === "string")
-    .filter((a) => names.has(a.name ?? "") || (a.crew_id ? crewIds.has(a.crew_id) : false))
-    .slice(0, MAX_ASSIGNMENT_LOOKUPS)
+    .filter((a) => workspaceBinding || ids.has(a.id!) || names.has(a.name ?? "") || (a.crew_id ? crewIds.has(a.crew_id) : false))
+  const candidates = allCandidates.slice(0, MAX_ASSIGNMENT_LOOKUPS)
+  let unavailable = 0
 
   const rows: AssignmentRow[] = []
   await Promise.all(
@@ -1496,9 +1616,9 @@ async function loadAssignments(
           `/api/v1/agents/${encodeURIComponent(agent.id!)}/credentials` +
             `?workspace_id=${encodeURIComponent(workspaceId)}`,
         )
-        if (!r.ok) return
+        if (!r.ok) { unavailable++; return }
         const list = await r.json()
-        if (!Array.isArray(list)) return
+        if (!Array.isArray(list)) { unavailable++; return }
         for (const row of list as {
           credential_id?: string
           env_var_name?: string
@@ -1510,17 +1630,18 @@ async function loadAssignments(
           rows.push({
             agentName: agent.name ?? agent.id!,
             envVarName: row.env_var_name ?? "",
-            grantSource: row.grant_source ?? "explicit",
+            grantSource: row.grant_source ?? "unknown",
             expiresAt: row.expires_at,
             expired: Boolean(row.expired),
           })
         }
       } catch {
+        unavailable++
         // One unreachable agent must not blank the whole list.
       }
     }),
   )
-  return rows.sort((a, b) => a.agentName.localeCompare(b.agentName))
+  return { rows: rows.sort((a, b) => a.agentName.localeCompare(b.agentName)), checked: candidates.length - unavailable, total: allCandidates.length, unavailable }
 }
 
 /**

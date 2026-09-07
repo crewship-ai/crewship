@@ -16,11 +16,14 @@ import {
   getItemType,
   itemTypeForCredentialType,
   extraFieldsFor,
+  providerLoginCredentialType,
+  providerLoginPresentation,
 } from "../item-types"
 
 describe("catalog integrity", () => {
-  it("offers exactly the six shapes the PRD scoped, and no brand catalog", () => {
+  it("offers the six shapes the PRD scoped plus the provider login (#2428), and no brand catalog", () => {
     expect(ITEM_TYPE_KEYS).toEqual([
+      "PROVIDER_LOGIN",
       "TOKEN",
       "LOGIN",
       "KEYPAIR",
@@ -112,7 +115,7 @@ describe("itemTypeForCredentialType — reading an existing row back", () => {
     ["CERTIFICATE", "CERTIFICATE"],
     ["CLI_TOKEN", "TOKEN"],
     ["API_KEY", "TOKEN"],
-    ["AI_CLI_TOKEN", "TOKEN"],
+    ["AI_CLI_TOKEN", "PROVIDER_LOGIN"],
   ] as const)("maps %s back to %s", (server, item) => {
     expect(itemTypeForCredentialType(server)).toBe(item)
   })
@@ -164,5 +167,36 @@ describe("extraFieldsFor", () => {
       ],
     )
     expect(out).toEqual([{ key: "kept", value: "v", is_secret: true, ordinal: 0 }])
+  })
+})
+
+// #2428: the provider login is the one shape whose server type and value box
+// depend on the brand and on how the seat pays.
+describe("provider login", () => {
+  it("is stored as PROVIDER_LOGIN in both modes — the mode is its own field (§10.2)", () => {
+    expect(providerLoginCredentialType("subscription")).toBe("PROVIDER_LOGIN")
+    expect(providerLoginCredentialType("api_key")).toBe("PROVIDER_LOGIN")
+    expect(itemTypeForCredentialType("PROVIDER_LOGIN")).toBe("PROVIDER_LOGIN")
+    // The rows written before the type existed still open as the same shape.
+    expect(itemTypeForCredentialType("AI_CLI_TOKEN")).toBe("PROVIDER_LOGIN")
+  })
+
+  it("asks Codex for the whole auth.json and Claude Code for a setup token", () => {
+    const codex = providerLoginPresentation("OPENAI", "subscription")
+    expect(codex.multiline).toBe(true)
+    expect(codex.label).toMatch(/auth\.json/)
+    expect(codex.slot).toBe("OPENAI_API_KEY")
+    expect(codex.supported).toBe(true)
+
+    const claude = providerLoginPresentation("anthropic", "subscription")
+    expect(claude.multiline).toBe(false)
+    expect(claude.slot).toBe("CLAUDE_CODE_OAUTH_TOKEN")
+
+    const cursor = providerLoginPresentation("CURSOR", "subscription")
+    expect(cursor.supported).toBe(false)
+    expect(providerLoginPresentation("CURSOR", "api_key")).toMatchObject({ supported: true, slot: "CURSOR_API_KEY" })
+    expect(providerLoginPresentation("", "subscription").supported).toBe(false)
+    expect(providerLoginPresentation("NONE", "api_key").supported).toBe(false)
+    expect(providerLoginPresentation("NOTION", "api_key").supported).toBe(false)
   })
 })

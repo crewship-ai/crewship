@@ -15,6 +15,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { AddCredentialWizard } from "../add-credential-wizard"
+import { LOGIN_PROVIDERS } from "@/lib/credentials/login-providers"
+import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
@@ -71,10 +73,13 @@ beforeEach(() => {
 })
 
 describe("step 1 — the shape decides the form, not the brand", () => {
-  it("offers exactly the six item types the PRD scoped", () => {
+  it("offers six secret types, with provider onboarding in its own flow", () => {
     renderWizard()
+    expect(screen.queryByRole("button", { name: /^provider login/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("group", { name: /choose.*provider/i })).not.toBeInTheDocument()
     for (const label of ["Token", "Login", "Key pair", "SSH key", "File", "Certificate"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument()
+      // Anchored: "Login" must not also match the "Provider login" tile.
+      expect(screen.getByRole("button", { name: new RegExp("^" + label, "i") })).toBeInTheDocument()
     }
   })
 
@@ -152,7 +157,7 @@ describe("the step bar", () => {
 // decide whether it is usable are: the tiles reflow, the body scrolls without
 // taking the actions with it, and the actions are big enough to hit.
 describe("layout on a phone", () => {
-  it("reflows the six shapes two-up, and three-up once there is room", () => {
+  it("reflows the shapes two-up, and three-up once there is room", () => {
     renderWizard()
     const grid = screen.getByTestId("shape-grid")
     expect(grid.className).toContain("grid-cols-2")
@@ -230,6 +235,256 @@ describe("the brand icon is offered up front", () => {
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
     expect(bodyOf(createCall)).toMatchObject({ provider: "NOTION" })
+  })
+})
+
+describe("provider login (#2428)", () => {
+  function renderWizard() {
+    const onSuccess = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" initial={{ itemType: "PROVIDER_LOGIN" }} onSuccess={onSuccess} onCancel={() => {}} />)
+    return { onSuccess }
+  }
+
+  function pickShape(_label: RegExp) {
+    // Provider selection advances directly; retained for older scenarios.
+  }
+
+  it.each(LOGIN_PROVIDERS)("prepares $key with its own key instructions and account name", (p) => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${p.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }))
+    if (p.key === "OPENAI") fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
+    if (p.key === "OPENAI" || p.key === "ANTHROPIC") fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue(p.label)
+    expect(screen.getByRole("link", { name: /get api key/i })).toHaveAttribute("href", providerConnectionGuide(p.key)!.url)
+    expect(screen.getByText(providerConnectionGuide(p.key)!.instruction)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
+  })
+
+  it("keeps a draft when returning to the same provider, but clears the key for another", () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
+    fireEvent.change(screen.getByLabelText(/^API key$/), { target: { value: "fixture-key" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "My production account" } })
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
+    expect(screen.getByLabelText(/^API key$/)).toHaveValue("fixture-key")
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Groq / }))
+    expect(screen.getByLabelText(/^API key$/)).toHaveValue("")
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("My production account")
+  })
+
+  it("starts directly with a provider, without using a decorative brand picker", () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
+    expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
+    expect(screen.getByText("Connect ChatGPT / OpenAI")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.queryByRole("button", { name: /provider: openai/i })).not.toBeInTheDocument()
+  })
+
+  it("gives Gemini its own file import and clears the token when switching to Grok", () => {
+    renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /^Gemini \/ Google/i }))
+    expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^Google account/i }))
+    fireEvent.change(screen.getByLabelText(/Gemini login/), { target: { value: "old-google-token" } })
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/i }))
+    expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
+    expect(screen.queryByRole("button", { name: /^Subscription/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Sign in with a code/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/Uses Grok through OpenCode/)).toBeInTheDocument()
+  })
+
+  it("saves a Grok account with the xAI provider and API-key mode", async () => {
+    const { onSuccess } = renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/i }))
+    fireEvent.change(screen.getByLabelText(/^API key$/i), { target: { value: "fixture-xai-key" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "Grok account" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.queryByRole("group", { name: "How closely Keeper guards it" })).not.toBeInTheDocument()
+    expect(screen.getByText("Account protection")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ provider: "XAI", type: "PROVIDER_LOGIN", mode: "api_key", value: "fixture-xai-key" })
+  })
+
+  function pickOpenAI() {
+    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
+    fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
+  }
+
+  it("will not continue without a provider — the server routes by it", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /save secret/i })).not.toBeInTheDocument()
+  })
+
+  it("stores a ChatGPT login as PROVIDER_LOGIN · OPENAI · subscription and asks for the whole auth.json", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    const box = screen.getByLabelText(/codex login \(auth\.json\)/i)
+    expect(box.tagName).toBe("TEXTAREA")
+    expect(screen.getByText(/paste the contents of ~\/\.codex\/auth\.json/i)).toBeInTheDocument()
+    fireEvent.change(box, { target: { value: '{"tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"x"}}' } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    // Contract §10.2: the type is PROVIDER_LOGIN, the mode is its own field,
+    // the value is exactly what was pasted — the server splits it into parts.
+    expect(bodyOf(createCall)).toMatchObject({ type: "PROVIDER_LOGIN", provider: "OPENAI", mode: "subscription" })
+    expect(bodyOf(createCall).value).toContain('"refresh_token":"r"')
+  })
+
+  it("stores the same seat as PROVIDER_LOGIN · api_key when the operator picks a metered key", async () => {
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    fireEvent.change(screen.getByLabelText(/^api key$/i), { target: { value: "sk-proj-abc" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "OpenAI API" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ type: "PROVIDER_LOGIN", provider: "OPENAI", mode: "api_key" })
+  })
+
+  it("offers a sign-in choice only where a device flow exists — OpenAI subscription, not Anthropic, not a key", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    expect(screen.getByRole("button", { name: /import from codex cli/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
+    expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps the setup-token paste for Anthropic — there is no device flow to offer", () => {
+    renderWizard()
+    pickShape(/provider login/i)
+    fireEvent.click(screen.getByRole("button", { name: /^Claude \/ Anthropic/i }))
+    expect(screen.getByLabelText(/^setup token$/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
+  })
+
+  it.each(["WORKSPACE", "CREW"])("device sign-in persists %s access without a second create", async (scope) => {
+    // Starting the flow answers with a code; the first poll says pending, the
+    // second says the login exists. The wizard then has a credential id and
+    // must not POST a second row — only name it and bind it.
+    h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string }) => {
+      const u = String(url)
+      if (u.startsWith("/api/v1/provider-logins/device?") && init?.method === "POST") {
+        return ok({ device_id: "dev_1", user_code: "ABCD-EFGH", verification_url: "https://auth.openai.com/device", expires_at: new Date(Date.now() + 600_000).toISOString(), interval_s: 1 })
+      }
+      if (u.startsWith("/api/v1/provider-logins/device/dev_1")) {
+        polls.count += 1
+        return ok(polls.count < 2 ? { status: "pending" } : { status: "complete", credential_id: "cred_dev" })
+      }
+      if (u.startsWith("/api/v1/credentials/cred_dev?") && init?.method === "PATCH") return ok({ id: "cred_dev" })
+      if (u.startsWith("/api/v1/crews?")) return ok([{ id: "crew-one", name: "Engineering" }])
+      if (u.startsWith("/api/v1/credentials/bindings")) return ok({ id: "b1" }, 201)
+      if (u.startsWith("/api/v1/workspaces/")) return ok([])
+      return ok({ id: "cred_new" }, 201)
+    })
+    const polls = { count: 0 }
+    const onSuccess = vi.fn()
+    render(<AddCredentialWizard workspaceId="ws1" initial={{ itemType: "PROVIDER_LOGIN" }} onSuccess={onSuccess} onCancel={() => {}} devicePollMs={5} />)
+    pickShape(/provider login/i)
+    pickOpenAI()
+    fireEvent.click(screen.getByRole("button", { name: /sign in with a code/i }))
+
+    // The code, large and copyable, and the page to open.
+    expect(await screen.findByTestId("device-user-code")).toHaveTextContent("ABCD-EFGH")
+    expect(screen.getByRole("link", { name: /open auth\.openai\.com/i })).toHaveAttribute("href", "https://auth.openai.com/device")
+    // No paste box while a code is live — the value never comes through here.
+    expect(screen.queryByLabelText(/codex login \(auth\.json\)/i)).not.toBeInTheDocument()
+    // The step is held until the sign-in lands.
+    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
+
+    await screen.findByText("Signed in. Continue to choose access for this account.")
+    const starts = () => h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/provider-logins/device?") && init?.method === "POST").length
+    const startsBeforeBack = starts()
+    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
+    expect(screen.getByRole("button", { name: /^Claude \/ Anthropic/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
+    expect(screen.getByText("Signed in. Continue to choose access for this account.")).toBeInTheDocument()
+    expect(starts()).toBe(startsBeforeBack)
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    if (scope === "CREW") {
+      fireEvent.click(screen.getByRole("button", { name: /selected crews/i }))
+      fireEvent.click(screen.getByRole("combobox"))
+      fireEvent.click(await screen.findByRole("option", { name: "Engineering" }))
+      fireEvent.keyDown(screen.getByPlaceholderText("Search crews…"), { key: "Escape" })
+      fireEvent.change(screen.getByLabelText(/slot/i), { target: { value: "" } })
+    }
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+
+    const creates = h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/credentials?") && (init as { method?: string })?.method === "POST")
+    expect(creates).toHaveLength(0)
+    const patch = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/cred_dev?"))!
+    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana", scope })
+    const bind = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/bindings"))!
+    if (scope === "CREW") {
+      expect(bodyOf(patch).crew_ids).toEqual(["crew-one"])
+      expect(bind).toBeUndefined()
+    } else {
+      expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "WORKSPACE" })
+    }
+  })
+
+  it("names the owner: the members list, defaulting to the person signed in", async () => {
+    h.apiFetch.mockImplementation(async (url: unknown) => {
+      if (String(url).startsWith("/api/v1/workspaces/ws1/members")) {
+        return ok([
+          { id: "m1", role: "OWNER", user: { id: "u_pavel", email: "pavel@unify.cz", full_name: null } },
+          { id: "m2", role: "MEMBER", user: { id: "u_jana", email: "jana@unify.cz", full_name: null } },
+        ])
+      }
+      return ok({ id: "cred_new" }, 201)
+    })
+    const { onSuccess } = renderWizard()
+    pickShape(/provider login/i)
+    pickOpenAI()
+    // A text box naming the signed-in person until the members arrive, then
+    // a select over them.
+    await waitFor(() => expect(screen.getByLabelText(/^owner$/i).tagName).toBe("SELECT"))
+    fireEvent.change(screen.getByLabelText(/^owner$/i), { target: { value: "u_jana" } })
+    fireEvent.change(screen.getByLabelText(/codex login \(auth\.json\)/i), { target: { value: "{}" } })
+    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(createCall)).toMatchObject({ owner_user_id: "u_jana" })
+  })
+
+  it("Re-login opens on the sign-in step with the seat's provider and mode chosen", () => {
+    render(
+      <AddCredentialWizard
+        workspaceId="ws1"
+        onSuccess={() => {}}
+        onCancel={() => {}}
+        initial={{ itemType: "PROVIDER_LOGIN", provider: "OPENAI", loginMode: "subscription", signIn: "device", step: "values", name: "ChatGPT Plus · jana" }}
+      />,
+    )
+    expect(screen.getByRole("button", { name: /connect/i })).toHaveAttribute("aria-current", "step")
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("ChatGPT Plus · jana")
+    expect(screen.getByTestId("device-sign-in")).toBeInTheDocument()
+    expect(screen.queryByLabelText(/^owner$/i)).not.toBeInTheDocument()
   })
 })
 

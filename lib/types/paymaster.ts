@@ -69,6 +69,7 @@ export type TopSpendersResponse = z.infer<typeof topSpendersResponseSchema>
  * (e.g. "Anthropic Max"), or "unknown" for pre-migration / mis-tagged rows.
  */
 export const subscriptionUsageRowSchema = z.object({
+  credential_id: z.string().optional(),
   subscription_plan: z.string(),
   provider: z.string(),
   call_count: z.number(),
@@ -78,8 +79,21 @@ export const subscriptionUsageRowSchema = z.object({
 })
 export type SubscriptionUsageRow = z.infer<typeof subscriptionUsageRowSchema>
 
+export const subscriptionLoginSchema = z.object({
+  credential_id: z.string(),
+  name: z.string(),
+  login: z.object({
+    mode: z.string(),
+    provider: z.string(),
+    plan_label: z.string().nullable().optional(),
+    owner_email: z.string().nullable().optional(),
+  }).optional(),
+})
+export type SubscriptionLogin = z.infer<typeof subscriptionLoginSchema>
+
 export const subscriptionUsageResponseSchema = z.object({
   rows: z.array(subscriptionUsageRowSchema),
+  logins: z.array(subscriptionLoginSchema).optional(),
   since: z.string().optional(),
   until: z.string().optional(),
 })

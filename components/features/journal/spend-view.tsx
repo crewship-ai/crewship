@@ -18,6 +18,7 @@ import {
 } from "@/hooks/use-paymaster"
 import type { PaymasterRange } from "@/lib/types/paymaster"
 import { cn } from "@/lib/utils"
+import { useAbilities } from "@/hooks/use-abilities"
 
 /**
  * Paymaster dashboard — aggregates LLM spend across crews, agents, and
@@ -28,6 +29,8 @@ import { cn } from "@/lib/utils"
  * `docs/design/patterns.md` #2.
  */
 export function SpendView() {
+  const { abilities } = useAbilities()
+  const canViewProviderAccounts = abilities.can("manage", "Credential")
   const searchParams = useSearchParams()
   const [range, setRange] = useState<PaymasterRange>("7d")
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(
@@ -47,7 +50,7 @@ export function SpendView() {
   const crewSpend = useCrewSpend(range, true, reloadKey)
   const agentSpend = useAgentSpend(selectedCrewId, range, reloadKey)
   const topSpenders = useTopSpenders(range, 10, reloadKey)
-  const subscriptions = useSubscriptionUsage(range, reloadKey)
+  const subscriptions = useSubscriptionUsage(range, reloadKey, canViewProviderAccounts)
 
   // If either endpoint 404s we still want the "not configured" fallback
   // rather than showing half a dashboard with confusing empty cards —
@@ -329,14 +332,15 @@ export function SpendView() {
               </Card>
             </section>
 
-            <section>
+            {canViewProviderAccounts && <section>
               <SubscriptionsPanel
                 rows={subscriptionRows}
+                logins={subscriptions.data?.logins}
                 loading={subscriptions.loading && subscriptionRows.length === 0}
                 error={subscriptions.error}
                 notConfigured={subscriptions.notConfigured}
               />
-            </section>
+            </section>}
           </div>
         </main>
       </div>

@@ -99,11 +99,12 @@ export function useTopSpenders(range: PaymasterRange, limit = 10, reloadKey = 0)
 export function useSubscriptionUsage(
   range: PaymasterRange,
   reloadKey = 0,
+  enabled = true,
 ): FetchState<SubscriptionUsageResponse> {
   const liveKey = usePaymasterLiveKey()
   const { data, loading, error, notConfigured } = useApiResource<SubscriptionUsageResponse>(
     `/api/v1/paymaster/subscriptions?range=${range}`,
-    { schema: subscriptionUsageResponseSchema, fallback: { rows: [] }, reloadKey: reloadKey + liveKey },
+    { schema: subscriptionUsageResponseSchema, fallback: { rows: [] }, enabled, resetOnDisable: true, reloadKey: reloadKey + liveKey },
   )
   return { data, loading, error, notConfigured }
 }
