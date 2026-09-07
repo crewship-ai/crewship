@@ -177,7 +177,7 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 }
 
 // SubscriptionUsage serves GET /api/v1/paymaster/subscriptions
-// Returns one row per (subscription_plan, provider) with call counts,
+// Returns one row per (credential_id, subscription_plan, provider) with call counts,
 // token totals, and last-used timestamp. Drives the "Subscription plans"
 // panel on the Paymaster dashboard — the surface that finally tells
 // operators which flat-rate credentials are active alongside the
@@ -194,6 +194,10 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
+		return
+	}
 	since, until := parseWindow(r)
 	rows, err := paymaster.SubscriptionUsageByPlan(r.Context(), h.db, workspaceID, since, until)
 	if err != nil {
@@ -201,7 +205,16 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "since": since, "until": until})
+	// The seats behind the usage rows (docs/prd/provider-logins.md §5.5):
+	// every provider login in the workspace with its owner, plan and refresh
+	// state, so the panel keys its rows per login rather than per provider.
+	// Usage carries the exact credential id when known. Historical rows have
+	// none and must never be attributed by matching a plan label.
+	logins, err := listProviderLogins(r.Context(), h.db, h.logger, workspaceID)
+	if err != nil {
+		h.logger.Warn("paymaster subscription-usage: logins", "err", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "logins": logins, "since": since, "until": until})
 }
 
 // parseWindow accepts ?since=<RFC3339>&until=<RFC3339> or ?range=7d|24h|1h

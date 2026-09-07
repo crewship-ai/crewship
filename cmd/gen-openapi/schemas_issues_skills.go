@@ -110,9 +110,28 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"last_error": nullable("string"), "last_used_at": nullable("string"), "last_used_ips": stringArray(), "tags": stringArray(),
 		"created_at": str(), "updated_at": str(), "_count_agent_credentials": integer(), "agent_names": stringArray(), "agent_ids": stringArray(), "mcp_used": boolean(),
 		"created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"), "provisioned_for_service": nullable("string"),
+		"login": ref("ProviderLogin"),
 	}, "id", "name", "type", "provider", "status", "scope", "crew_ids", "testable", "sensitivity", "security_level", "security_level_label", "last_used_ips", "tags", "created_at", "updated_at", "_count_agent_credentials", "agent_names", "agent_ids", "mcp_used",
 		"description", "crew_id", "account_label", "account_email", "username", "token_expires_at",
 		"last_checked_at", "last_error", "last_used_at", "created_by_actor_type", "created_by_actor_id", "provisioned_for_service")
+
+	// Provider login (docs/prd/provider-logins.md §10.1): the seat a model is
+	// paid with, on PROVIDER_LOGIN rows and derived on AI_CLI_TOKEN / API_KEY
+	// rows of a model provider. Absent on every other credential.
+	providerLoginRefresh := obj(map[string]any{
+		"supported": boolean(), "status": str(), "last_at": nullable("string"), "next_at": nullable("string"), "error": nullable("string"),
+	}, "supported", "status", "last_at", "next_at", "error")
+	providerLoginQuota := map[string]any{"type": "object", "nullable": true, "properties": map[string]any{
+		"window_5h_pct": integer(), "window_weekly_pct": integer(), "resets_at": str(),
+	}}
+	providerLoginDelivery := obj(map[string]any{"kind": str(), "target": str()}, "kind", "target")
+	providerLoginPaysFor := obj(map[string]any{"agents": integer(), "crews": integer()}, "agents", "crews")
+	providerLogin := obj(map[string]any{
+		"mode": str(), "provider": str(), "plan": nullable("string"), "plan_label": nullable("string"),
+		"owner_user_id": nullable("string"), "owner_email": nullable("string"), "expires_at": nullable("string"),
+		"refresh": providerLoginRefresh, "quota": providerLoginQuota, "delivery": providerLoginDelivery, "pays_for": providerLoginPaysFor,
+	}, "mode", "provider", "plan", "plan_label", "owner_user_id", "owner_email", "expires_at", "refresh", "quota", "delivery", "pays_for")
+	providerLoginRefreshResponse := obj(map[string]any{"login": ref("ProviderLogin")}, "login")
 
 	credentialField := obj(map[string]any{
 		"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable("string"), "created_at": str(), "updated_at": str(),
@@ -152,6 +171,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"token_expires_at": nullable("string"), "security_level": nullable("integer"), "created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"),
 		"provisioned_for_service": nullable("string"), "username": nullable("string"), "oauth_client_id": nullable("string"), "oauth_client_secret": nullable("string"),
 		"oauth_auth_url": nullable("string"), "oauth_token_url": nullable("string"), "oauth_scopes": nullable("string"), "pending": boolean(),
+		"mode": nullable("string"),
 	}, "name", "value")
 	credentialFieldRequest := request(map[string]any{"key": str(), "value": str(), "is_secret": boolean(), "ordinal": integer()}, "value")
 	credentialBindingRequest := request(map[string]any{"credential_id": str(), "scope": str(), "crew_id": str(), "agent_id": str(), "slot": str()}, "credential_id", "scope", "slot")
@@ -164,6 +184,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"Label": label, "LabelList": arrayOf(ref("Label")),
 		"Skill": skill, "SkillDetail": skillDetail, "SkillList": arrayOf(ref("Skill")), "InstalledSkillAgent": installedAgent,
 		"Credential": credential, "CredentialList": arrayOf(ref("Credential")),
+		"ProviderLogin": providerLogin, "ProviderLoginRefreshResponse": providerLoginRefreshResponse,
 		"CredentialPage":  obj(map[string]any{"credentials": arrayOf(ref("Credential")), "next_cursor": nullable("string"), "limit": integer()}, "credentials", "limit"),
 		"CredentialField": credentialField, "CredentialFieldList": arrayOf(ref("CredentialField")),
 		"CredentialBinding": credentialBinding, "CredentialBindingList": obj(map[string]any{"bindings": arrayOf(ref("CredentialBinding"))}, "bindings"),

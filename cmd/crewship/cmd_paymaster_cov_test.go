@@ -243,8 +243,8 @@ func TestPaymasterSubscriptionsRunE_Rows(t *testing.T) {
 	covSetFlagCli5(t, paymasterSubscriptionsCmd, "until", "2026-06-12T00:00:00Z")
 	stub.OnGet("/api/v1/paymaster/subscriptions", clitest.JSONResponse(200, map[string]any{
 		"rows": []map[string]any{{
-			"plan": "max-20x", "provider": "ANTHROPIC", "call_count": 12,
-			"input_tokens": 900, "output_tokens": 100, "last_used_at": "2026-06-11T22:00:00Z",
+			"credential_id": "login-a", "subscription_plan": "max-20x", "provider": "ANTHROPIC", "call_count": 12,
+			"input_tokens": 900, "output_tokens": 100, "last_ts": "2026-06-11T22:00:00Z",
 		}},
 	}))
 
@@ -255,7 +255,7 @@ func TestPaymasterSubscriptionsRunE_Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	for _, want := range []string{"max-20x", "ANTHROPIC", "12", "1000", "2026-06-11T22:00:00Z"} {
+	for _, want := range []string{"login-a", "max-20x", "ANTHROPIC", "12", "1000", "2026-06-11T22:00:00Z"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("subscriptions table missing %q; got:\n%s", want, out)
 		}
@@ -280,7 +280,7 @@ func TestPaymasterSubscriptionsRunE_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, "no subscription credentials configured") {
+	if !strings.Contains(out, "no subscription usage recorded") {
 		t.Errorf("expected empty-state hint; got:\n%s", out)
 	}
 }
@@ -289,7 +289,7 @@ func TestPaymasterSubscriptionsRunE_JSON(t *testing.T) {
 	stub := covSetupCli5(t)
 	flagFormat = "json"
 	stub.OnGet("/api/v1/paymaster/subscriptions", clitest.JSONResponse(200, map[string]any{
-		"rows": []map[string]any{{"plan": "pro", "provider": "ANTHROPIC", "call_count": 1}},
+		"rows": []map[string]any{{"credential_id": "login-a", "subscription_plan": "pro", "provider": "ANTHROPIC", "call_count": 1}},
 	}))
 
 	var err error
@@ -303,7 +303,7 @@ func TestPaymasterSubscriptionsRunE_JSON(t *testing.T) {
 	if jsonErr := json.Unmarshal([]byte(out), &rows); jsonErr != nil {
 		t.Fatalf("not JSON: %v\n%s", jsonErr, out)
 	}
-	if len(rows) != 1 || rows[0]["plan"] != "pro" {
+	if len(rows) != 1 || rows[0]["subscription_plan"] != "pro" || rows[0]["credential_id"] != "login-a" {
 		t.Errorf("rows = %v", rows)
 	}
 }
@@ -427,7 +427,7 @@ func TestPaymasterSubscriptionsRunE_YAML(t *testing.T) {
 	stub := covSetupCli5(t)
 	flagFormat = "yaml"
 	stub.OnGet("/api/v1/paymaster/subscriptions", clitest.JSONResponse(200, map[string]any{
-		"rows": []map[string]any{{"plan": "pro", "provider": "ANTHROPIC"}},
+		"rows": []map[string]any{{"subscription_plan": "pro", "provider": "ANTHROPIC"}},
 	}))
 
 	var err error

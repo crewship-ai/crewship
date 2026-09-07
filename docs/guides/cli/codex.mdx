@@ -6,7 +6,7 @@ stability: experimental
 tag: Experimental
 ---
 
-`@openai/codex` (Rust port, v0.128.0+). Distributed as an npm package wrapping a per-platform Rust binary.
+`@openai/codex` (Rust port, v0.153.2 verified). Distributed as an npm package wrapping a per-platform Rust binary.
 
 ## Install
 
@@ -19,16 +19,92 @@ Pre-installed in every seeded crew container via Crewship's
 
 ## Auth
 
-API key only (BYO). Subscription path (ChatGPT Plus/Pro via `codex login`) not yet wired in Crewship.
+Two paths, both measured against `codex-cli 0.153.2`. Codex is **not** Claude
+Code: it has no environment variable for a subscription login, and the one it
+has for API keys (`CODEX_API_KEY`) *overrides* a stored login.
 
-| Type | Env var | Format |
-|---|---|---|
-| API key | `OPENAI_API_KEY` | `sk-…` |
-| Service account | `OPENAI_API_KEY` | `sk-svcacct-…` |
+| Credential | Type · provider | What the agent receives | Billing |
+|---|---|---|---|
+| OpenAI API key (`sk-…`, `sk-svcacct-…`) | `API_KEY` · `OPENAI` | a disposable `OPENAI_API_KEY` plus a per-run `model_provider` block pointing Codex at the sidecar; the real key is injected there | metered |
+| ChatGPT plan (Plus / Pro / Business) | `PROVIDER_LOGIN` · `OPENAI` · mode `subscription` (or the older `AI_CLI_TOKEN` · `OPENAI` blob) | `$CODEX_HOME/auth.json`, rendered from the login with a **placeholder refresh token**; the server refreshes the access token centrally | `flat_rate`, plan read from the token |
+| OpenAI API key stored as a seat | `PROVIDER_LOGIN` · `OPENAI` · mode `api_key` | exactly as `API_KEY` above | metered |
 
-With the sidecar enabled, Crewship puts only a disposable `OPENAI_API_KEY` in
-the agent environment and points Codex at the loopback reverse proxy. The
-sidecar injects the real OpenAI key after the request leaves the agent process.
+### API key
+
+Codex reaches its provider only through its own `model_providers` config —
+`OPENAI_BASE_URL` no longer exists in the binary, and the built-in `openai`
+provider refuses to be overridden. Crewship therefore emits a custom provider
+per run:
+
+```
+--config model_provider="crewship"
+--config model_providers.crewship.base_url="http://127.0.0.1:9119/openai/v1"
+--config model_providers.crewship.env_key="OPENAI_API_KEY"
+--config model_providers.crewship.wire_api="responses"
+```
+
+The `OPENAI_API_KEY` in the environment is a dummy; the sidecar replaces it
+with the real key from its CredStore. The real key never enters the container.
+
+### ChatGPT plan
+
+Run `codex login` on your own machine, then store the **whole**
+`~/.codex/auth.json` as a credential:
+
+```bash
+crewship credential create --name "ChatGPT Plus · jana" \
+  --type PROVIDER_LOGIN --provider OPENAI --mode subscription --from-file ~/.codex/auth.json
+crewship credential assign "ChatGPT Plus · jana" codex-reviewer --env-var-name OPENAI_API_KEY
+crewship credential get "ChatGPT Plus · jana"       # plan, owner, expiry, refresh state
+```
+
+The server splits the file: the access token becomes the credential's value,
+`refresh_token` and `id_token` become secret parts (the refresh token is
+sealed — never revealed, never delivered), `account_id`, `plan`, `expires_at`
+and `mode` identifier parts. The older form — the whole file stored as
+`--type AI_CLI_TOKEN --provider OPENAI` — still works and is delivered the
+same way, but it has no owner, no expiry badge and no central refresh; see
+[Provider logins](/guides/credentials#provider-logins).
+
+The slot name on `assign` is the binding's identity, not something Codex
+reads — the login is never exported as a variable.
+
+Or skip the paste: `crewship credential login --provider OPENAI` prints a
+one-time code and a URL, you enter the code in OpenAI's device page, and the
+server finishes the sign-in itself — no `codex` binary involved — and stores
+the resulting `auth.json` as the same kind of credential, named after the
+plan and account. See [Sign in with a code](/guides/credentials#sign-in-with-a-code).
+
+In the dashboard, *Add secret* → shape **Provider login** → brand **OpenAI**
+→ **Subscription** takes the same file; **API key** on the same tile stores a
+metered key instead. A bare access token is refused at submit time: Codex
+insists on `id_token`, `access_token`, `refresh_token` and `account_id` all
+being present, so only the file `codex login` writes can be delivered.
+
+At every run start Crewship renders the login into the agent's
+`$CODEX_HOME/auth.json` (`/crew/agents/<slug>/.codex/auth.json`, mode 0600)
+with the real id/access tokens and account id, **`refresh_token` replaced by
+`rt.crewship-managed-no-refresh`**, and `last_refresh` stamped now. Codex only
+touches the refresh token when the access token nears expiry, so the file
+authenticates normally — and because no container ever holds a real refresh
+token, one login can be assigned to any number of agents without the
+containers rotating (and invalidating) each other's tokens. Revoking the
+credential removes the file from running containers; unassigning it removes
+the file at the next run start.
+
+Subscription traffic goes to `chatgpt.com` through the sidecar's CONNECT
+tunnel, exactly like Claude Code's OAuth mode: the sidecar cannot meter it, so
+the run is billed `flat_rate` with `CREWSHIP_SUBSCRIPTION_PLAN` set from the
+token's `chatgpt_plan_type` claim ("ChatGPT Plus"). Model policy on the
+credential is not enforced in this mode.
+
+<Warning>
+For a `PROVIDER_LOGIN` with a stored refresh token, Crewship renews the login
+centrally before its reported expiry and checks freshness at run start.
+If refresh cannot recover and the account shows `needs_relogin`, sign in again.
+Legacy access-only imports cannot renew automatically. `CODEX_API_KEY` is never
+set by Crewship — it would override the login.
+</Warning>
 
 Credential-backed `OPENROUTER` and `OPENAI_COMPAT` models use Codex's native
 custom `model_provider` configuration for that invocation. For example,

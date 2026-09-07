@@ -111,11 +111,12 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 	credentialRoutes := map[string]DomainSchema{
 		"GET /api/v1/credentials": {Response: ref("CredentialList")}, "POST /api/v1/credentials": {Request: ref("CredentialCreateRequest"), Response: credential},
 		"GET /api/v1/credentials/{credentialId}": {Response: credential}, "PATCH /api/v1/credentials/{credentialId}": {Request: ref("CredentialCreateRequest"), Response: credential},
-		"PUT /api/v1/credentials/{credentialId}":        {Request: ref("CredentialCreateRequest"), Response: credential},
-		"DELETE /api/v1/credentials/{credentialId}":     {Response: ref("StatusResponse")},
-		"POST /api/v1/credentials/test":                 {Request: ref("CredentialCreateRequest"), Response: ref("CredentialProbeResponse")},
-		"POST /api/v1/credentials/{credentialId}/test":  {Response: ref("CredentialProbeResponse")},
-		"GET /api/v1/credentials/{credentialId}/fields": {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Request: ref("CredentialFieldRequest"), Response: ref("CredentialField")},
+		"PUT /api/v1/credentials/{credentialId}":          {Request: ref("CredentialCreateRequest"), Response: credential},
+		"DELETE /api/v1/credentials/{credentialId}":       {Response: ref("StatusResponse")},
+		"POST /api/v1/credentials/test":                   {Request: ref("CredentialCreateRequest"), Response: ref("CredentialProbeResponse")},
+		"POST /api/v1/credentials/{credentialId}/test":    {Response: ref("CredentialProbeResponse")},
+		"POST /api/v1/credentials/{credentialId}/refresh": {Request: object(map[string]any{}), Response: ref("ProviderLoginRefreshResponse")},
+		"GET /api/v1/credentials/{credentialId}/fields":   {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Request: ref("CredentialFieldRequest"), Response: ref("CredentialField")},
 		"GET /api/v1/credentials/bindings": {Response: ref("CredentialBindingList")}, "POST /api/v1/credentials/bindings": {Request: ref("CredentialBindingRequest"), Response: ref("CredentialBinding")},
 		"GET /api/v1/credentials/{credentialId}/rotations": {Response: array(ref("CredentialRotation"))}, "POST /api/v1/credentials/{credentialId}/rotate": {Request: ref("CredentialRotationRequest"), Response: ref("CredentialRotation")},
 	}

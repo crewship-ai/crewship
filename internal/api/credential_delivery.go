@@ -232,10 +232,11 @@ type deliveredCredential struct {
 // than the thing we derived from it. Never a value: this is a map, not a
 // reveal (§2.6 L9).
 type deliveredSlotNotice struct {
-	CredentialID string
-	Requested    string
-	Delivered    string
-	Reason       string
+	CredentialID            string
+	ConflictingCredentialID string
+	Requested               string
+	Delivered               string
+	Reason                  string
 }
 
 // logHandleOnlyWithheld is the one line every delivery path writes when it
@@ -300,6 +301,24 @@ func logHandleOnlyWithheld(logger *slog.Logger, agentID, envVar string) {
 // three boot/delegation paths log it, the resolution view reports it to the
 // operator.
 func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) ([]deliveredCredential, []deliveredSlotNotice, error) {
+	// One snapshot covers the access token, its companions and grants. A
+	// concurrent central refresh must not mix two token generations.
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	out, notices, err := loadDeliveredCredentialSnapshot(ctx, tx, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return out, notices, nil
+}
+
+func loadDeliveredCredentialSnapshot(ctx context.Context, db sqlQuerier, agentID string) ([]deliveredCredential, []deliveredSlotNotice, error) {
 	rows, err := db.QueryContext(ctx, agentDeliveredCredentialsSQL,
 		agentID, agentID, leaseComparisonNow())
 	if err != nil {
@@ -341,6 +360,7 @@ func loadDeliveredCredentials(ctx context.Context, db *sql.DB, agentID string) (
 	// open read cursor, and holding one across a second query is how a delivery
 	// path acquires a deadlock nobody can reproduce.
 	rows.Close()
+
 	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
 		return nil, nil, err
 	}

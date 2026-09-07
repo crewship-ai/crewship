@@ -806,6 +806,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// below shares the same instance; the internal-side POST/GET are
 	// registered in router_internal.go.
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	assign.loginRefresher = r.loginRefresher
 	assign.SetJournal(r.Journal())
 	// #810: route mission / sidecar-assign dispatch through the one
 	// request-builder so sub-agents get the assembled prompt + MCP + skills
@@ -841,6 +842,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Public side registered here; internal-auth POST endpoints live in
 	// router_internal.go using the same instance.
 	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	queries.loginRefresher = r.loginRefresher
 	queries.SetJournal(r.Journal())
 	// Exposed for the boot path's escalation expiry sweeper — same instance,
 	// so an expiry it writes wakes the waiters this handler registered.

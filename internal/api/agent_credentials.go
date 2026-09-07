@@ -61,6 +61,12 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	visible, err := visibleCredentialNames(r, h.db, workspaceID)
+	if err != nil {
+		replyInternalError(w, h.logger, "agent credential visibility", err)
+		return
+	}
+
 	// COALESCE the nullable text columns: a credential may legitimately have a
 	// NULL provider/type/status (e.g. a SECRET with no provider, or a row mid
 	// lifecycle), and ac.env_var_name/created_at can be NULL on older rows.
@@ -191,6 +197,9 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 			&c.LeaseSource, &c.LeaseIssuedAt, &c.GrantSource); err != nil {
 			replyInternalError(w, h.logger, "scan agent credential", err)
 			return
+		}
+		if _, ok := visible[c.CredentialID]; !ok {
+			continue
 		}
 		// A lease with expires_at at or before now has lapsed; injection paths
 		// refuse it, so surface it as expired to the CLI/UI.

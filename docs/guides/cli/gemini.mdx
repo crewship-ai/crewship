@@ -23,6 +23,51 @@ npm install -g @google/gemini-cli
 
 Crewship's `apiKeyEnvVarsForAdapter("GEMINI_CLI")` accepts either; both are mirrored to the container env so any version of `gemini-cli` finds its key.
 
+### Google account login
+
+A Google AI Pro / Ultra subscription is a **file**, not a variable: Gemini CLI
+reads its "Login with Google" session only from `~/.gemini/oauth_creds.json`
+(the `google-auth-library` credentials object — `access_token`,
+`refresh_token`, `scope`, `token_type`, `id_token`, `expiry_date` in
+milliseconds). Sign in with `gemini` on your own machine, then store the
+**whole** file as a credential:
+
+```bash
+crewship credential create --name "Google AI Pro · jana" \
+  --type AI_CLI_TOKEN --provider GOOGLE --value-stdin < ~/.gemini/oauth_creds.json
+crewship credential assign "Google AI Pro · jana" researcher --env-var-name GEMINI_API_KEY
+```
+
+The slot name on `assign` is the binding's identity, not something Gemini
+reads. A bare token is refused at submit time: the file needs `access_token`,
+`refresh_token` and `expiry_date`, and only the file the CLI wrote has all
+three.
+
+At every run start Crewship renders the login into the agent's
+`~/.gemini/oauth_creds.json` (`/crew/agents/<slug>/.gemini/oauth_creds.json`,
+mode 0600) with the real access and id tokens and **`refresh_token` replaced
+by `1//crewship-managed-no-refresh`**, sets `GOOGLE_GENAI_USE_GCA=true` — the
+variable a headless `gemini` run selects the Google-login path with — and
+carries **no** `GEMINI_API_KEY` / `GOOGLE_API_KEY`, because a key in the
+environment wins over the login file. The run is billed `flat_rate` with
+`CREWSHIP_SUBSCRIPTION_PLAN` set to "Google AI Pro" / "Google AI Ultra" when
+the stored file names its tier in a `plan` field, and "Google AI" otherwise
+(Google's tokens carry no plan claim). Revoking the credential removes the file
+from running containers; unassigning it removes the file at the next run
+start.
+
+<Warning>
+A Google access token lives about **one hour**, and the delivered file cannot
+renew itself — that is the point of the placeholder. Central refresh from the
+stored refresh token is available for `PROVIDER_LOGIN` imports when the server's
+`CREWSHIP_GEMINI_OAUTH_CLIENT_ID` and `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` match
+the client that issued the grant. Without that configuration, automatic refresh
+is unavailable. Refresh re-renders the file; uninterrupted use by an already
+running CLI is not a verified guarantee. The file shape is taken from the Gemini CLI
+source (`packages/core/src/code_assist/oauth2.ts`), not measured against a
+running binary — the CLI is not installed on the dev box.
+</Warning>
+
 ## Models
 
 | API string | Tier |

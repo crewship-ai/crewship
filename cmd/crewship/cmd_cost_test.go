@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,29 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+func TestFetchSubscriptionUsage_PreservesCredentialAttribution(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"rows":[{"credential_id":"login-a","subscription_plan":"Plus","provider":"openai","last_ts":"2026-09-06T12:34:56Z"},{"credential_id":"login-b","subscription_plan":"Plus","provider":"openai"}]}`))
+	}))
+	defer srv.Close()
+	rows, err := fetchSubscriptionUsage(cli.NewClient(srv.URL, "t", ""), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].LastUsedAt == nil || *rows[0].LastUsedAt != "2026-09-06T12:34:56Z" || rows[1].LastUsedAt != nil {
+		t.Fatalf("API last_ts was not preserved in CLI rows: %+v", rows)
+	}
+	body, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"login-a", "login-b"} {
+		if !strings.Contains(string(body), `"credential_id":"`+id+`"`) {
+			t.Errorf("CLI JSON lost credential %s: %s", id, body)
+		}
+	}
+}
 
 func TestFetchTopSpenders_Decodes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

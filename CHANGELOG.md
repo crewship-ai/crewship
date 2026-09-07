@@ -11,6 +11,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider sign-in reliability** (#2428) — CLI imports reject conflicting OAuth options and oversized files; account summaries retain usage timestamps and explain restricted access or missing refresh configuration. Device-code waiting stops at expiry, and completed sign-ins retain their result across server shutdown.
+
+- **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.
+
+- **Legacy provider visibility** (#2428) — list filters use the same whitespace normalization as the credential-ID permission guard, so padded legacy provider names cannot expose admin-only account metadata in lists.
+
+- **Provider-account notification privacy** (#2428) — refresh-failure alerts are addressed to current workspace administrators, not personally to a creator who may later be demoted. An upgrade backfill also restricts previously stored alerts, without deleting their history or changing unrelated inbox messages.
+
+- **Provider-login API and CLI** (#2428) — normalized account storage, server-driven device sign-in, centralized refresh with stale-write protection, provider-specific account status, and usage attribution. `credential login`, status and refresh commands use the same server contract; bounded stdin imports accept complete auth files without truncation.
+
+- ⚠️ **Behaviour change: provider account administration** (#2428) — only workspace owners/admins may administer provider accounts, including legacy provider API keys and CLI logins. Ordinary-secret capabilities remain separate. Agent credential/binding reads omit inaccessible metadata after delivery resolution; lower roles see only a provider brand in payer summaries. Imported Gemini refresh requires matching server-side OAuth client configuration and reports configuration-required status when unavailable.
+
 - **Provider-login runtime foundations** (#2428) — adapter-specific Codex and Gemini auth-file delivery with server-retained refresh tokens, normalized login parsing and refresh clients, and credential-attributed usage storage. Generated auth files are withheld from the Files API. Google refresh requires an operator-supplied OAuth client matching the imported grant.
 
 - **Codex runtime compatibility** (#2428) — route metered keys through the sidecar-backed model provider, recognize structured terminal errors, acknowledge MCP notifications with HTTP 202, and omit MCP endpoints blocked by crew network policy. OAuth refresh and device-flow libraries are included here; public onboarding and administration arrive in the dependent API/UI changes.

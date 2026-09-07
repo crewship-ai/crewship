@@ -136,7 +136,9 @@ func scopeForRoute(pattern string) string {
 		// deploy), so it shares that resource's scope rather than inventing
 		// a new one.
 		return "crews:write"
-	case "credentials", "credential-rotations":
+	case "credentials", "credential-rotations", "provider-logins":
+		// A device-code sign-in ends in a credential create (#2428), so a
+		// token scoped to credentials may start one.
 		return "credentials:write"
 	case "skills":
 		return "skills:write"
@@ -247,7 +249,7 @@ func (r *Router) authedMut(method, pattern, role string, h http.HandlerFunc) {
 	}
 	r.recordMut(method, pattern, role, scope)
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(role, scope, h))))
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.providerAccountPolicy(r.requireRoleScopeMW(role, scope, h)))))
 }
 
 // authedSelfMut registers a session-scoped mutation route that has no

@@ -77,12 +77,13 @@ type topSpenderRow struct {
 }
 
 type subUsageRow struct {
-	Plan       string  `json:"subscription_plan"`
-	Provider   string  `json:"provider"`
-	CallCount  int64   `json:"call_count"`
-	InTokens   int64   `json:"input_tokens"`
-	OutTokens  int64   `json:"output_tokens"`
-	LastUsedAt *string `json:"last_used_at"`
+	CredentialID string  `json:"credential_id,omitempty"`
+	Plan         string  `json:"subscription_plan"`
+	Provider     string  `json:"provider"`
+	CallCount    int64   `json:"call_count"`
+	InTokens     int64   `json:"input_tokens"`
+	OutTokens    int64   `json:"output_tokens"`
+	LastUsedAt   *string `json:"last_used_at"`
 }
 
 func fetchTopSpenders(c *cli.Client, rng string, limit int) ([]topSpenderRow, error) {
@@ -144,12 +145,28 @@ func fetchSubscriptionUsage(c *cli.Client, rng string) ([]subUsageRow, error) {
 		return nil, err
 	}
 	var body struct {
-		Rows []subUsageRow `json:"rows"`
+		Rows []struct {
+			CredentialID string  `json:"credential_id"`
+			Plan         string  `json:"subscription_plan"`
+			Provider     string  `json:"provider"`
+			CallCount    int64   `json:"call_count"`
+			InTokens     int64   `json:"input_tokens"`
+			OutTokens    int64   `json:"output_tokens"`
+			LastTS       *string `json:"last_ts"`
+		} `json:"rows"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err
 	}
-	return body.Rows, nil
+	rows := make([]subUsageRow, len(body.Rows))
+	for i, row := range body.Rows {
+		rows[i] = subUsageRow{
+			CredentialID: row.CredentialID, Plan: row.Plan, Provider: row.Provider,
+			CallCount: row.CallCount, InTokens: row.InTokens, OutTokens: row.OutTokens,
+			LastUsedAt: row.LastTS,
+		}
+	}
+	return rows, nil
 }
 
 func printCostHeader(rng string, crews []crewSpendRow) {

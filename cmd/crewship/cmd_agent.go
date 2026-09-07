@@ -136,6 +136,27 @@ var agentGetCmd = &cobra.Command{
 			{"Skills", fmt.Sprintf("%d", agent.Count.Skills)},
 			{"Credentials", fmt.Sprintf("%d", agent.Count.Credentials)},
 		}
+		// What the model is paid with: the login's name plus its plan, owner
+		// and refresh state, so a run that is about to fail on an expired
+		// seat is visible before it starts.
+		paysWith := "— (no provider login in this agent's delivery)"
+		if agent.PaysWith != nil && agent.PaysWith.Restricted {
+			paysWith = agent.PaysWith.Provider + " (restricted)"
+		} else if agent.PaysWith != nil {
+			paysWith = agent.PaysWith.Name + " (" + agent.PaysWith.CredentialID + ")"
+			if l := agent.PaysWith.Login; l != nil {
+				if l.PlanLabel != nil && *l.PlanLabel != "" {
+					paysWith += " · " + *l.PlanLabel
+				}
+				if l.OwnerEmail != nil && *l.OwnerEmail != "" {
+					paysWith += " · " + *l.OwnerEmail
+				}
+				if l.Refresh.Supported {
+					paysWith += " · refresh " + l.Refresh.Status
+				}
+			}
+		}
+		pairs = append(pairs, []string{"Pays with", paysWith})
 		if agent.RoleTitle != nil {
 			pairs = append([][]string{pairs[0], pairs[1], pairs[2], {"Role Title", *agent.RoleTitle}}, pairs[3:]...)
 		}
@@ -306,6 +327,16 @@ type agentDetailResponse struct {
 	TimeoutSeconds int             `json:"timeout_seconds"`
 	CreatedAt      string          `json:"created_at"`
 	Crew           *agentCrewShort `json:"crew"`
+	// PaysWith is the provider login the agent's model is paid with (PRD
+	// provider-logins §10.3); null when nothing in its delivery pays for
+	// its adapter.
+	PaysWith *struct {
+		Provider     string     `json:"provider,omitempty"`
+		Restricted   bool       `json:"restricted,omitempty"`
+		CredentialID string     `json:"credential_id"`
+		Name         string     `json:"name"`
+		Login        *credLogin `json:"login"`
+	} `json:"pays_with"`
 	// Schedule (cron) fields — the read side of the `agent update
 	// --schedule-*` flags. The API always returns these; surfacing them
 	// here lets an operator confirm a cron landed (and see last/next run)
