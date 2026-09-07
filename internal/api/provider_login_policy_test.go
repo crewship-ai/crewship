@@ -118,7 +118,9 @@ func TestAgentCredentialMetadataVisibility(t *testing.T) {
 			if !strings.Contains(body, "visible-key") {
 				t.Fatalf("visible row missing: %s", body)
 			}
-			wantVisible := role == "OWNER" || role == "ADMIN"
+			// These are ordinary GitHub secrets, not model-provider accounts:
+			// managers retain the existing secret-management permission.
+			wantVisible := role == "OWNER" || role == "ADMIN" || role == "MANAGER"
 			if strings.Contains(body, hidden) != wantVisible {
 				t.Fatalf("%s hidden row policy: %s", role, body)
 			}
