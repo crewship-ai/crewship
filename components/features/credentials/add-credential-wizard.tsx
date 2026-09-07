@@ -417,8 +417,8 @@ export function AddCredentialWizard({
 
       if (deviceCredentialId) {
         // The sign-in created the row (§10.3: the device status names it).
-        // What is left is the name the person typed; the value never came
-        // through this browser.
+        // Persist the chosen account details and access; the value never
+        // came through this browser.
         credentialId = deviceCredentialId
         try {
           const pr = await apiFetch(
@@ -426,12 +426,12 @@ export function AddCredentialWizard({
             {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: name.trim(), tags }),
+              body: JSON.stringify({ name: name.trim(), tags, scope, ...(scope === "CREW" ? { crew_ids: crewIds } : {}) }),
             },
           )
-          if (!pr.ok) problems.push(`name (HTTP ${pr.status})`)
+          if (!pr.ok) problems.push(`account details and access (HTTP ${pr.status})`)
         } catch {
-          problems.push("name")
+          problems.push("account details and access")
         }
       } else {
         const body: Record<string, unknown> = {

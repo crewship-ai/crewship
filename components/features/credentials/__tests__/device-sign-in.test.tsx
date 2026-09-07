@@ -3,7 +3,8 @@
 // and `waitFor` sees every transition the way a browser would.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import * as React from "react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { DeviceSignIn } from "../device-sign-in"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
@@ -59,6 +60,50 @@ beforeEach(() => {
 })
 
 describe("the flow", () => {
+  it.each([
+    { expires_at: "not-a-date" }, { interval_s: "fast" }, { interval_s: 0 },
+    { interval_s: Number.POSITIVE_INFINITY }, { interval_s: -1 }, { interval_s: 2_147_484 }, { verification_url: "" },
+    { verification_url: "javascript:alert(1)" }, { device_id: 42 }, { user_code: [] },
+  ])("rejects a malformed start payload before polling: %j", async (invalid) => {
+    h.apiFetch.mockResolvedValue(ok({ ...START, ...invalid }))
+    const { onComplete } = renderIt()
+    expect(await screen.findByRole("alert")).toHaveTextContent(/invalid sign-in details/i)
+    expect(screen.queryByTestId("device-user-code")).not.toBeInTheDocument()
+    expect(h.apiFetch).toHaveBeenCalledTimes(1)
+    expect(onComplete).not.toHaveBeenCalled()
+  })
+
+  it("does not invoke callbacks from a discarded concurrent render", async () => {
+    let resolvePoll!: (value: Response) => void
+    const pending = new Promise<Response>((resolve) => { resolvePoll = resolve })
+    h.apiFetch.mockImplementation((_url: unknown, init?: { method?: string }) => init?.method === "POST" ? Promise.resolve(ok(START)) : pending)
+    const committed = vi.fn()
+    const discarded = vi.fn()
+    let attempted = false
+    const never = new Promise<void>(() => {})
+    function Suspend({ active }: { active: boolean }) {
+      if (active) { attempted = true; throw never }
+      return null
+    }
+    function Harness() {
+      const [suspend, setSuspend] = React.useState(false)
+      return <>
+        <button onClick={() => React.startTransition(() => setSuspend(true))}>Suspend update</button>
+        <React.Suspense fallback={<span>Loading</span>}>
+          <DeviceSignIn workspaceId="ws1" provider="OPENAI" mode="subscription" onComplete={suspend ? discarded : committed} pollIntervalMs={5} />
+          <Suspend active={suspend} />
+        </React.Suspense>
+      </>
+    }
+    render(<Harness />)
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole("button", { name: "Suspend update" }))
+    await waitFor(() => expect(attempted).toBe(true))
+    await act(async () => resolvePoll(ok({ status: "complete", credential_id: "cred_committed" })))
+    expect(committed).toHaveBeenCalledWith("cred_committed")
+    expect(discarded).not.toHaveBeenCalled()
+  })
+
   it("asks for a code with the provider and mode, then shows it big with the page to open", async () => {
     script([{ status: "pending" }])
     renderIt()

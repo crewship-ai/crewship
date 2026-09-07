@@ -34,6 +34,26 @@ afterEach(() => {
 })
 
 describe("useApiResource", () => {
+  it.each(["response", "body"])("disabling invalidates a pending %s", async (stage) => {
+    const response = deferred<Response>()
+    const body = deferred<unknown>()
+    const fetchMock = global.fetch as ReturnType<typeof vi.fn>
+    fetchMock.mockReturnValue(stage === "response" ? response.promise : Promise.resolve({ ok: true, status: 200, json: () => body.promise }))
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useApiResource<Rows>("/api/v1/thing", { schema: rowSchema, enabled, resetOnDisable: true }),
+      { initialProps: { enabled: true } },
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    rerender({ enabled: false })
+    expect(result.current.data).toBeNull()
+    await act(async () => {
+      response.resolve(okJSON({ rows: [{ id: "private" }] }))
+      body.resolve({ rows: [{ id: "private" }] })
+    })
+    expect(result.current.data).toBeNull()
+    expect(result.current.loading).toBe(false)
+  })
+
   it("loads and parses a successful response", async () => {
     const body = { rows: [{ id: "a" }, { id: "b" }] }
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(okJSON(body))

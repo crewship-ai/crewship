@@ -53,7 +53,7 @@ describe("LLM models per provider", () => {
       // can't silently shift the UI default. The literal values mirror
       // CLI_ADAPTERS[*].defaultModel exactly — update both files together.
       expect(defaultModelForProvider("ANTHROPIC")).toBe("claude-sonnet-5")
-      expect(defaultModelForProvider("OPENAI")).toBe("gpt-6-astra")
+      expect(defaultModelForProvider("OPENAI")).toBe("gpt-5.5")
       expect(defaultModelForProvider("GOOGLE")).toBe("gemini-2.5-pro")
       expect(defaultModelForProvider("CURSOR")).toBe("composer")
       expect(defaultModelForProvider("FACTORY")).toBe("claude-sonnet-5")

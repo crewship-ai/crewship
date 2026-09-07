@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
 
+- **Provider onboarding safeguards** (#2428) — completing device sign-in saves the chosen crew access, validates the complete code response, and uses only committed UI callbacks. Disabled data requests cannot restore stale account details. Empty subscription usage remains a valid array response. OpenAI/Codex defaults stay on GPT-5.5; Astra remains selectable for accounts with access, rather than being forced during onboarding.
+
 - **Provider sign-in reliability** (#2428) — CLI imports reject conflicting OAuth options and oversized files; account summaries retain usage timestamps and explain restricted access or missing refresh configuration. Device-code waiting stops at expiry, and completed sign-ins retain their result across server shutdown.
 
 - **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.

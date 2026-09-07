@@ -105,8 +105,9 @@ export function useApiResource<T>(
   const runFetch = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     const currentUrl = urlRef.current
     if (!enabledRef.current || currentUrl == null) {
-      // Disabled: never bump reqId (we aren't firing). Either reset to a
-      // clean snapshot or just drop the spinner, preserving prior data.
+      // Invalidate in-flight responses, including bodies still being read,
+      // so an old request cannot restore data after access is disabled.
+      ++reqIdRef.current
       if (resetOnDisableRef.current) {
         setState({ data: null, loading: false, error: null, notConfigured: false })
       } else {

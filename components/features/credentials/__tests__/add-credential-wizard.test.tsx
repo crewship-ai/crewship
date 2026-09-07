@@ -378,7 +378,7 @@ describe("provider login (#2428)", () => {
     expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
   })
 
-  it("signs in with a code: asks for one, polls until complete, then saves without a create", async () => {
+  it.each(["WORKSPACE", "CREW"])("device sign-in persists %s access without a second create", async (scope) => {
     // Starting the flow answers with a code; the first poll says pending, the
     // second says the login exists. The wizard then has a credential id and
     // must not POST a second row — only name it and bind it.
@@ -392,6 +392,7 @@ describe("provider login (#2428)", () => {
         return ok(polls.count < 2 ? { status: "pending" } : { status: "complete", credential_id: "cred_dev" })
       }
       if (u.startsWith("/api/v1/credentials/cred_dev?") && init?.method === "PATCH") return ok({ id: "cred_dev" })
+      if (u.startsWith("/api/v1/crews?")) return ok([{ id: "crew-one", name: "Engineering" }])
       if (u.startsWith("/api/v1/credentials/bindings")) return ok({ id: "b1" }, 201)
       if (u.startsWith("/api/v1/workspaces/")) return ok([])
       return ok({ id: "cred_new" }, 201)
@@ -421,15 +422,27 @@ describe("provider login (#2428)", () => {
     expect(starts()).toBe(startsBeforeBack)
     fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    if (scope === "CREW") {
+      fireEvent.click(screen.getByRole("button", { name: /selected crews/i }))
+      fireEvent.click(screen.getByRole("combobox"))
+      fireEvent.click(await screen.findByRole("option", { name: "Engineering" }))
+      fireEvent.keyDown(screen.getByPlaceholderText("Search crews…"), { key: "Escape" })
+      fireEvent.change(screen.getByLabelText(/slot/i), { target: { value: "" } })
+    }
     fireEvent.click(screen.getByRole("button", { name: /save login/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
 
     const creates = h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/credentials?") && (init as { method?: string })?.method === "POST")
     expect(creates).toHaveLength(0)
     const patch = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/cred_dev?"))!
-    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana" })
+    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana", scope })
     const bind = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/bindings"))!
-    expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "WORKSPACE" })
+    if (scope === "CREW") {
+      expect(bodyOf(patch).crew_ids).toEqual(["crew-one"])
+      expect(bind).toBeUndefined()
+    } else {
+      expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "WORKSPACE" })
+    }
   })
 
   it("names the owner: the members list, defaulting to the person signed in", async () => {

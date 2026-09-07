@@ -60,8 +60,8 @@ function serve(seats: LoginCredential[], bindings: unknown[] = []) {
   h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string }) => {
     const u = String(url)
     if (u.startsWith("/api/v1/credentials?") && u.includes("kind=provider_login")) return ok(seats)
-    if (u.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings })
     if (u.startsWith("/api/v1/credentials/bindings") && init?.method === "POST") return ok({ id: "b_new" }, 201)
+    if (u.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings })
     if (u.startsWith("/api/v1/credentials/bindings/") && init?.method === "DELETE") return ok({})
     throw new Error(`unexpected ${u}`)
   })

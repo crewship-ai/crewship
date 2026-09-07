@@ -214,6 +214,14 @@ func (h *PaymasterHandler) SubscriptionUsage(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		h.logger.Warn("paymaster subscription-usage: logins", "err", err)
 	}
+	// Keep the array contract even for an empty workspace or an unavailable
+	// login lookup; the latter must not discard successfully queried usage.
+	if rows == nil {
+		rows = []paymaster.SubscriptionUsage{}
+	}
+	if logins == nil {
+		logins = []providerLoginRow{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"rows": rows, "logins": logins, "since": since, "until": until})
 }
 

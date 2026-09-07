@@ -36,6 +36,23 @@ export interface DeviceStart {
   interval_s: number
 }
 
+function isDeviceStart(value: unknown): value is DeviceStart {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const start = value as Record<string, unknown>
+  for (const key of ["device_id", "user_code", "verification_url", "expires_at"]) {
+    if (typeof start[key] !== "string" || !start[key].trim()) return false
+  }
+  if (!Number.isFinite(Date.parse(start.expires_at as string))) return false
+  // Browsers overflow longer setTimeout delays into near-immediate polling.
+  if (typeof start.interval_s !== "number" || !Number.isFinite(start.interval_s) || start.interval_s <= 0 || start.interval_s > 2_147_483) return false
+  try {
+    const url = new URL(start.verification_url as string)
+    return url.protocol === "https:" || url.protocol === "http:"
+  } catch {
+    return false
+  }
+}
+
 export type DeviceStatus = "pending" | "complete" | "expired" | "denied"
 
 export interface DeviceSignInProps {
@@ -64,9 +81,11 @@ export function DeviceSignIn({ workspaceId, provider, mode, onComplete, onStateC
   const [attempt, setAttempt] = React.useState(0)
   const [copied, setCopied] = React.useState(false)
   const onCompleteRef = React.useRef(onComplete)
-  onCompleteRef.current = onComplete
   const onStateRef = React.useRef(onStateChange)
-  onStateRef.current = onStateChange
+  React.useLayoutEffect(() => {
+    onCompleteRef.current = onComplete
+    onStateRef.current = onStateChange
+  }, [onComplete, onStateChange])
 
   const brand = getBrand(provider)
   const ws = encodeURIComponent(workspaceId)
@@ -139,10 +158,10 @@ export function DeviceSignIn({ workspaceId, provider, mode, onComplete, onStateC
           })
           return
         }
-        const start = (await r.json()) as DeviceStart
+        const start: unknown = await r.json()
         if (cancelled) return
-        if (!start?.device_id || !start.user_code) {
-          setPhase({ kind: "error", message: "The server answered without a code." })
+        if (!isDeviceStart(start)) {
+          setPhase({ kind: "error", message: "The server returned invalid sign-in details." })
           return
         }
         setPhase({ kind: "pending", start })
