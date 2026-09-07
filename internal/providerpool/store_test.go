@@ -352,3 +352,34 @@ func TestStoreUnavailableDoesNotConsumeTurn(t *testing.T) {
 		t.Fatalf("needs_relogin selected: %+v %v", got, err)
 	}
 }
+
+func TestStoreConcurrentObservations(t *testing.T) {
+	s, _, _ := poolFixture(t)
+	ctx := context.Background()
+	now := time.Now()
+	const events = 20
+	errs := make(chan error, events)
+	var wg sync.WaitGroup
+	for i := range events {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			// Same timestamp exercises distinct revisions and max-deadline
+			// merging regardless of which concurrent transaction wins first.
+			errs <- s.RecordObservation(ctx, "ws", "a", Observation{
+				At: now, CooldownUntil: now.Add(time.Duration(i+1) * time.Minute), Source: "provider_http",
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ReadObservation(ctx, "ws", "a")
+	if err != nil || got.Revision != events || !got.CooldownUntil.Equal(now.Add(events*time.Minute)) {
+		t.Fatalf("concurrent observation lost: %+v %v", got, err)
+	}
+}

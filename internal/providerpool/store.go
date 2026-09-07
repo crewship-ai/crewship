@@ -33,6 +33,9 @@ type Member struct {
 
 type Store struct{ db *sql.DB }
 
+// NewStore uses the application's database.Open handle: foreign keys, WAL,
+// busy timeout and immediate write transactions are part of its contract.
+// Read-only snapshots explicitly request a deferred/read-only transaction.
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
 // Create is atomic, including member validation. Role authorization and audit
