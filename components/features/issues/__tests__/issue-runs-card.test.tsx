@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within, fireEvent } from "@testing-library/react"
 
 import { IssueRunsCard, issueRunLinks, issueRunsEmptyCopy, type IssueRun } from "@/components/features/issues/issue-runs-card"
 import type { Mission } from "@/lib/types/mission"
@@ -39,7 +39,8 @@ describe("IssueRunsCard", () => {
     render(<IssueRunsCard issue={issue} runs={runs} />)
     expect(screen.getAllByTestId("issue-run-row")).toHaveLength(3)
     expect(screen.getByText("Running")).toBeInTheDocument()
-    expect(screen.getByText("Done")).toBeInTheDocument()
+    expect(screen.getByText("Outcome not reported")).toBeInTheDocument()
+    expect(screen.queryByText("Done")).not.toBeInTheDocument()
     expect(screen.getByText("Pending")).toBeInTheDocument()
 
     const openRun = screen.getAllByRole("link", { name: /open run/i })
@@ -52,7 +53,61 @@ describe("IssueRunsCard", () => {
 
   it("says what will appear and how when nothing has run", () => {
     render(<IssueRunsCard issue={{ ...issue, status: "TODO" } as Mission} runs={[]} />)
-    expect(screen.getByText(issueRunsEmptyCopy("TODO"))).toBeInTheDocument()
+    expect(screen.getByText(issueRunsEmptyCopy({ ...issue, status: "TODO" }))).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /all runs/i })).toBeNull()
+  })
+
+  it.each([
+    ["FAILED", "Failed", "danger"],
+    ["NEEDS_HUMAN", "Needs human input", "warn"],
+    ["PARTIAL", "Partial result", "warn"],
+    ["SUCCEEDED", "Reported success", "success"],
+    ["WORK_CREATED", "Work created", "blue"],
+    ["NO_CHANGE", "No changes", "muted"],
+    ["", "Outcome not reported", "muted"],
+    ["future_value", "Outcome not reported", "muted"],
+  ])("shows the work result for a completed process: %s", (outcome, label, tone) => {
+    render(<IssueRunsCard issue={issue} runs={[{ ...runs[1], outcome }]} />)
+    expect(screen.getByText(label)).toHaveAttribute("data-tone", tone)
+    expect(screen.queryByText("Done")).not.toBeInTheDocument()
+  })
+
+  it.each(["RUNNING", "QUEUED", "FAILED", "CANCELLED"])("does not let a success report override process state %s", (status) => {
+    render(<IssueRunsCard issue={issue} runs={[{ ...runs[1], status, outcome: "SUCCEEDED" }]} />)
+    expect(screen.queryByText("Reported success")).not.toBeInTheDocument()
+  })
+
+  it("keeps failure and the reported summary together, with the full summary available", () => {
+    const summary = "Partial findings. ".repeat(80) + "Final detail that must remain readable."
+    render(<IssueRunsCard issue={issue} runs={[{ ...runs[1], outcome: "FAILED", error_message: "no outcome reported", result_summary: summary }]} />)
+    const row = screen.getByTestId("issue-run-row")
+    expect(within(row).getByText("Failed")).toBeInTheDocument()
+    expect(within(row).getByText("no outcome reported")).toBeInTheDocument()
+    fireEvent.click(within(row).getByText("Reported summary"))
+    expect(within(row).getByText(summary)).toBeInTheDocument()
+  })
+
+  it("does not use prompt scaffolding as a task title", () => {
+    render(<IssueRunsCard issue={{ ...issue, title: "Review the report" }} runs={[{ ...runs[1], task: "[MISSION]\nInstructions: internal execution prompt", source: "mention" }]} />)
+    expect(screen.getByText("Review the report")).toBeInTheDocument()
+    expect(screen.getByText(/From a message/)).toBeInTheDocument()
+    expect(screen.queryByText(/internal execution prompt/)).not.toBeInTheDocument()
+  })
+
+  it("does not infer a deliverable from a successful report", () => {
+    render(<IssueRunsCard issue={issue} runs={[{ ...runs[1], outcome: "SUCCEEDED", result_summary: "" }]} />)
+    expect(screen.getByText("Reported success")).toBeInTheDocument()
+    expect(screen.getByText("No summary recorded.")).toBeInTheDocument()
+  })
+
+  it("does not ask a human-only issue to start an agent", () => {
+    render(<IssueRunsCard issue={{ ...issue, status: "TODO", assignee_type: "user", assignee_id: "u1", owner: { id: "u1", name: "Marta" } }} runs={[]} />)
+    expect(screen.getByText(/human owner; an agent delegate is optional/)).toBeInTheDocument()
+    expect(screen.queryByText(/Start work/)).not.toBeInTheDocument()
+  })
+
+  it("can start delegated work while preserving its human owner", () => {
+    render(<IssueRunsCard issue={{ ...issue, status: "TODO", owner: { id: "u1", name: "Marta" }, delegate: { id: "a1", name: "Robin" } }} runs={[]} />)
+    expect(screen.getByText(/Start work to hand this issue to its agent/)).toBeInTheDocument()
   })
 })
