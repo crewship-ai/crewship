@@ -19,7 +19,8 @@ rozšiřující scénáře původního návrhu.
   a odevzdání jsou do ukončení běhů zablokované. Předání člověku vytvoří
   právě jednu adresovanou kartu v jeho Inboxu s odkazem na issue.
 - Tabule zachovává rozložení. U převzatého úkolu ukazuje aktuálního člověka
-  a příznak lidské práce.
+  a příznak lidské práce. Seznam, sidebar, hledání a filtr Workers používají
+  stejného aktuálního řešitele, takže lze dohledat práci předanou člověku.
 - Výsledek rozlišuje technický běh a skutečné outcome. Celý uložený text se
   načítá až při rozbalení; výsledek ze staršího zadání je označen.
 - Přílohy lze v detailu přidat a stáhnout. New issue nabízí členy workspace
@@ -101,7 +102,7 @@ končily pod lidským převzetím, se obnoví jako zrušené.
 
 ## Ověření
 
-- Regrese UI: 289 testů Issues a vytvářecích formulářů.
+- Regrese UI: 321 testů Issues, filtrů a vytvářecích formulářů.
 - API: předání, idempotence, souběžná převzetí a odpověď proti převzetí,
   změněné zadání, neplatný příjemce, Inbox takeover,
   pokračování čekajícího kroku a celý výsledek se správnou vazbou na issue.

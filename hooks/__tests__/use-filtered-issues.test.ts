@@ -157,3 +157,12 @@ describe("useFilteredIssues — issue #320 saved-view vs project-detail separati
     expect(result.current.visible.map((i) => i.id)).toEqual(["i3"])
   })
 })
+
+it("finds the current human worker instead of the previous agent after takeover", () => {
+  const held = issue({ id: "held", assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_user_id: "person", worker_name: "Petra" })
+  const args = { issues: [held], search: "Petra", selectedProjectId: null, filterProjectId: null, filterCrewId: null, filterAgentId: "person", filterStatuses: [], filterPriority: null }
+  const { result, rerender } = renderHook((props) => useFilteredIssues(props), { initialProps: args })
+  expect(result.current.visible.map((row) => row.id)).toEqual(["held"])
+  rerender({ ...args, search: "", filterAgentId: "agent" })
+  expect(result.current.visible).toEqual([])
+})
