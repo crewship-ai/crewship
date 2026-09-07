@@ -11,6 +11,13 @@ export default defineConfig({
     exclude: ['node_modules', 'e2e', '.claude/worktrees'],
     testTimeout: 30000,
     hookTimeout: 30000,
+    server: {
+      // The client build aliased below is browser code: it imports
+      // `next/router` extensionless, which Node's ESM resolver rejects.
+      // Inlining routes it through Vite's resolver, the same one the Next
+      // bundler stands in for at runtime.
+      deps: { inline: [/@sentry\/nextjs/] },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
@@ -72,6 +79,19 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, ''),
+      // The suite runs under happy-dom, so a component importing
+      // `@sentry/nextjs` must get the same client build the browser bundle
+      // gets. Node resolution would hand it `index.server.js`, which pulls in
+      // the vendored webpack plugin; that plugin branches on `typeof document`
+      // and, seeing happy-dom's, resolves its loader against `document.baseURI`
+      // — an http: URL that `fileURLToPath` rejects with "The URL must be of
+      // scheme file". Twelve suites died on the import in @sentry/nextjs 10.72+
+      // (#2444) before this alias; the package.json "browser" condition names
+      // this exact entry.
+      '@sentry/nextjs': path.resolve(
+        __dirname,
+        'node_modules/@sentry/nextjs/build/esm/index.client.js',
+      ),
     },
   },
 })

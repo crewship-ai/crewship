@@ -43,10 +43,16 @@
 #
 # WHAT IS NOT CHECKED
 #
-#   go.mod's `go` directive. It stays at 1.26 deliberately (#2060): the
-#   language floor is a separate promise to consumers, and nothing in the tree
-#   needs 1.27 semantics. Folding it in here would force the two to move
-#   together and quietly raise the floor on every toolchain bump.
+#   go.mod's `go` directive. It is the language floor — a separate promise to
+#   consumers from "what compiles the release" — and it moves only when
+#   something forces it. Folding it in here would force the two to move
+#   together and quietly raise the floor on every toolchain bump, which is
+#   precisely what we do not want.
+#
+#   It sat at 1.26 from #2060 until a dependency raised it: shoutrrr v0.19.0
+#   declares `go 1.27`, and the go command refuses a main module whose floor is
+#   below its dependencies', so the 2026-09-07 batch moved it to 1.27. That is
+#   the only reason it should ever move.
 #
 # WHY `GOTOOLCHAIN=local` AND NOT `GOTOOLCHAIN=go1.27.0`
 #
@@ -80,7 +86,8 @@
 #                                                 (running go 1.27.0)", exit 1
 #
 #   Under `local` the `toolchain` directive is ignored outright. Only the `go`
-#   directive can fail a build, and that one deliberately stays at 1.26. So no
+#   directive can fail a build, and that one tracks the language floor, not
+#   this pin — it only ever moves when a dependency forces it. So no
 #   image build — not even the nightly one — will ever report that go.mod and
 #   the Dockerfile name different toolchains. Nothing at run time can catch
 #   this; it has to be read off the source, which is what follows.
