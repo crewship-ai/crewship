@@ -265,7 +265,7 @@ export function IssueCardDetail({
                       onSave={(next) => void edit.patch({ title: next })}
                     />
                   ) : (
-                    <h1 className="truncate text-lg font-semibold tracking-tight">{issue.title}</h1>
+                    <h1 className="break-words text-lg font-semibold tracking-tight">{issue.title}</h1>
                   )}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <span className="font-mono">{issue.identifier ?? issue.id.slice(0, 8)}</span>

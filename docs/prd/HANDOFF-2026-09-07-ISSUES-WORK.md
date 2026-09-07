@@ -102,7 +102,8 @@ končily pod lidským převzetím, se obnoví jako zrušené.
 ## Ověření
 
 - Regrese UI: 289 testů Issues a vytvářecích formulářů.
-- API: předání, idempotence, změněné zadání, neplatný příjemce, Inbox takeover,
+- API: předání, idempotence, souběžná převzetí a odpověď proti převzetí,
+  změněné zadání, neplatný příjemce, Inbox takeover,
   pokračování čekajícího kroku a celý výsledek se správnou vazbou na issue.
 - Databázový scénář s 10 000 komentáři ověřuje omezené čtení a stabilitu
   kurzoru při nové zprávě; nejde o měření produkčních latencí.

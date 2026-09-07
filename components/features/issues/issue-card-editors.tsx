@@ -808,7 +808,7 @@ export function TitleEditor({
 
   return (
     <span className="group/title flex min-w-0 items-center gap-1.5">
-      <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
+      <h1 className="break-words text-lg font-semibold tracking-tight">{title}</h1>
       <button
         type="button"
         aria-label="Edit title"
