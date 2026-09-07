@@ -31,6 +31,7 @@ type Policy struct {
 // not a temporary rate limit. LastSelected is a monotonically increasing pool
 // sequence, not wall-clock time; simultaneous run starts need distinct turns.
 type Candidate struct {
+	Generation    string
 	ID            string
 	OwnerID       string
 	Provider      string

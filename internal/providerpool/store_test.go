@@ -202,7 +202,7 @@ func TestStoreAvailabilityPersistenceAndStaleObservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	obs := Observation{At: now, CooldownUntil: now.Add(time.Hour), Source: "native_cli"}
+	obs := Observation{Generation: Generation("test-ciphertext-never-decrypted"), At: now, CooldownUntil: now.Add(time.Hour), Source: "native_cli"}
 	if err := s.RecordObservation(ctx, "foreign", "a", obs); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross tenant observation: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestStoreEqualTimestampObservationCannotEraseStrongerFailure(t *testing.T) 
 	s, _, _ := poolFixture(t)
 	ctx := context.Background()
 	now := time.Now()
-	obs := Observation{At: now, CooldownUntil: now.Add(time.Second), Source: "provider_http"}
+	obs := Observation{Generation: Generation("test-ciphertext-never-decrypted"), At: now, CooldownUntil: now.Add(time.Second), Source: "provider_http"}
 	if err := s.RecordObservation(ctx, "ws", "a", obs); err != nil {
 		t.Fatal(err)
 	}
@@ -304,6 +304,7 @@ func TestStoreInvalidObservations(t *testing.T) {
 		{At: now, Source: "provider_http", BlockedReason: "raw-secret-error-message"},
 	} {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			obs.Generation = Generation("test-ciphertext-never-decrypted")
 			if err := s.RecordObservation(context.Background(), "ws", "a", obs); !errors.Is(err, ErrInvalid) {
 				t.Fatalf("invalid observation: %v", err)
 			}
@@ -335,7 +336,7 @@ func TestStoreUnavailableDoesNotConsumeTurn(t *testing.T) {
 	}
 	now := time.Now()
 	for _, id := range []string{"a", "b"} {
-		if err := s.RecordObservation(ctx, "ws", id, Observation{At: now, CooldownUntil: now.Add(time.Minute), Source: "native_cli"}); err != nil {
+		if err := s.RecordObservation(ctx, "ws", id, Observation{Generation: Generation("test-ciphertext-never-decrypted"), At: now, CooldownUntil: now.Add(time.Minute), Source: "native_cli"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -367,7 +368,8 @@ func TestStoreConcurrentObservations(t *testing.T) {
 			// Same timestamp exercises distinct revisions and max-deadline
 			// merging regardless of which concurrent transaction wins first.
 			errs <- s.RecordObservation(ctx, "ws", "a", Observation{
-				At: now, CooldownUntil: now.Add(time.Duration(i+1) * time.Minute), Source: "provider_http",
+				Generation: Generation("test-ciphertext-never-decrypted"),
+				At:         now, CooldownUntil: now.Add(time.Duration(i+1) * time.Minute), Source: "provider_http",
 			})
 		}(i)
 	}
@@ -381,5 +383,44 @@ func TestStoreConcurrentObservations(t *testing.T) {
 	got, err := s.ReadObservation(ctx, "ws", "a")
 	if err != nil || got.Revision != events || !got.CooldownUntil.Equal(now.Add(events*time.Minute)) {
 		t.Fatalf("concurrent observation lost: %+v %v", got, err)
+	}
+}
+
+func TestStoreLateOldTokenFailureCannotBlockReplacement(t *testing.T) {
+	s, db, _ := poolFixture(t)
+	ctx := context.Background()
+	if err := s.Create(ctx, fixturePool()); err != nil {
+		t.Fatal(err)
+	}
+	_, candidates, err := s.Snapshot(ctx, "ws", "pool")
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("snapshot: %v", err)
+	}
+	old := candidates[0].Generation
+	if old == "" {
+		t.Fatal("delivery snapshot omitted access-material generation")
+	}
+	// A failure from the old request arrives AFTER refresh/re-import.
+	execPoolSQL(t, db, `UPDATE credentials SET encrypted_value = 'replacement-ciphertext' WHERE id = 'a'`)
+	err = s.RecordObservation(ctx, "ws", "a", Observation{Generation: old, At: time.Now(), BlockedReason: "authentication", Source: "native_cli"})
+	if !errors.Is(err, ErrSuperseded) {
+		t.Fatal("late old-token failure was applied to the replacement login")
+	}
+	if _, err := s.ReadObservation(ctx, "ws", "a"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale failure persisted: %v", err)
+	}
+	current, err := s.Choose(ctx, "ws", "pool", time.Now())
+	if err != nil || current.ID != "a" || current.Generation == old {
+		t.Fatalf("replacement not usable: %+v %v", current, err)
+	}
+	if err := s.RecordObservation(ctx, "ws", "a", Observation{At: time.Now(), BlockedReason: "authentication", Source: "native_cli"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing generation accepted: %v", err)
+	}
+	if err := s.RecordObservation(ctx, "ws", "a", Observation{Generation: current.Generation, At: time.Now(), BlockedReason: "authentication", Source: "native_cli"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err = s.Choose(ctx, "ws", "pool", time.Now())
+	if err != nil || current.ID != "b" {
+		t.Fatalf("current-generation failure ignored: %+v %v", current, err)
 	}
 }

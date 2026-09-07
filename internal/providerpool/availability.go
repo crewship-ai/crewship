@@ -2,7 +2,9 @@ package providerpool
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -15,6 +17,10 @@ import (
 // an explicit clear after intervention. This says nothing about quota usage
 // percentages or whether another key shares the same project-level limit.
 type Observation struct {
+	// Generation must be captured with the encrypted access material used
+	// for the request. A late old-token failure must not block a new login.
+	// Write-only provenance: it is not persisted or populated on reads.
+	Generation string
 	// Revision is set by ReadObservation, not supplied by the event producer.
 	Revision      int64
 	At            time.Time
@@ -25,8 +31,18 @@ type Observation struct {
 
 const observationTimeLayout = "2006-01-02T15:04:05.000000000Z"
 
+var ErrSuperseded = errors.New("provider observation belongs to replaced access material")
+
+// Generation fingerprints encrypted access material without decrypting it.
+// It is provenance metadata, not an authentication credential. Delivery must
+// carry it from the same snapshot as the value sent to the provider.
+func Generation(encryptedValue string) string {
+	sum := sha256.Sum256([]byte(encryptedValue))
+	return hex.EncodeToString(sum[:])
+}
+
 func (s *Store) RecordObservation(ctx context.Context, workspaceID, credentialID string, observation Observation) error {
-	if workspaceID == "" || credentialID == "" || observation.At.IsZero() ||
+	if workspaceID == "" || credentialID == "" || observation.Generation == "" || observation.At.IsZero() ||
 		(observation.Source != "provider_http" && observation.Source != "native_cli") ||
 		(observation.BlockedReason != "" && observation.BlockedReason != "billing" && observation.BlockedReason != "authentication") ||
 		(observation.CooldownUntil.IsZero() && observation.BlockedReason == "") ||
@@ -38,9 +54,9 @@ func (s *Store) RecordObservation(ctx context.Context, workspaceID, credentialID
 		return err
 	}
 	defer tx.Rollback()
-	var provider, kind string
-	err = tx.QueryRowContext(ctx, `SELECT provider, type FROM credentials WHERE id = ? AND workspace_id = ?
-		AND deleted_at IS NULL`, credentialID, workspaceID).Scan(&provider, &kind)
+	var provider, kind, encryptedValue string
+	err = tx.QueryRowContext(ctx, `SELECT provider, type, encrypted_value FROM credentials WHERE id = ? AND workspace_id = ?
+		AND deleted_at IS NULL`, credentialID, workspaceID).Scan(&provider, &kind, &encryptedValue)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -49,6 +65,11 @@ func (s *Store) RecordObservation(ctx context.Context, workspaceID, credentialID
 	}
 	if !providerlogin.IsProvider(provider) || (kind != "PROVIDER_LOGIN" && kind != "API_KEY" && kind != "AI_CLI_TOKEN") {
 		return ErrInvalid
+	}
+	// This comparison and the write share the same immediate transaction.
+	// Refresh/re-import cannot replace the access material between them.
+	if Generation(encryptedValue) != observation.Generation {
+		return ErrSuperseded
 	}
 	var cooldown, blocked any
 	if !observation.CooldownUntil.IsZero() {
@@ -79,6 +100,8 @@ func (s *Store) RecordObservation(ctx context.Context, workspaceID, credentialID
 
 // ClearObservation is compare-and-clear, for a verified re-login/intervention.
 // A successful old request must not erase a newer rate limit or auth failure.
+// Capture the revision BEFORE the verification starts; fetching a fresh
+// revision to clear an old verification result would defeat this guard.
 // False means nothing matched, including a different workspace; it reveals no
 // cross-tenant existence information. Mere metadata reads never call this.
 func (s *Store) ClearObservation(ctx context.Context, workspaceID, credentialID string, revision int64) (bool, error) {

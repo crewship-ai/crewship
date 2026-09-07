@@ -162,7 +162,7 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		(c.status = 'ACTIVE' AND c.deleted_at IS NULL),
 		(COALESCE(r.status, '') = 'needs_relogin' OR a.blocked_reason IS NOT NULL),
 		COALESCE(NULLIF(exp.value, ''), c.token_expires_at, ''), COALESCE(a.cooldown_until, ''), c.type,
-		c.workspace_id
+		c.workspace_id, c.encrypted_value
 		FROM provider_login_pool_members m
 		JOIN provider_login_pools p ON p.id = m.pool_id
 		JOIN credentials c ON c.id = m.credential_id
@@ -178,9 +178,9 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 	var candidates []Candidate
 	for rows.Next() {
 		var c Candidate
-		var expires, cooldown, kind, credentialWorkspace string
+		var expires, cooldown, kind, credentialWorkspace, encryptedValue string
 		if err := rows.Scan(&c.ID, &c.OwnerID, &c.Provider, &c.Mode, &c.Priority, &c.LastSelected,
-			&c.Active, &c.Blocked, &expires, &cooldown, &kind, &credentialWorkspace); err != nil {
+			&c.Active, &c.Blocked, &expires, &cooldown, &kind, &credentialWorkspace, &encryptedValue); err != nil {
 			return nil, err
 		}
 		// Legacy subscription blobs can hide expiry inside encrypted auth.json.
@@ -192,6 +192,7 @@ func loadCandidates(ctx context.Context, tx *sql.Tx, workspaceID, poolID string)
 		if kind == "API_KEY" {
 			c.Mode = providerlogin.ModeAPIKey
 		}
+		c.Generation = Generation(encryptedValue)
 		if expires != "" {
 			c.ExpiresAt, err = time.Parse(time.RFC3339Nano, expires)
 			if err != nil {

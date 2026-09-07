@@ -105,6 +105,10 @@ Existing historical ledger labels are not rewritten.
   no raw upstream message, token or invented quota percentage is stored.
   Stale observations cannot shorten a deadline. Clearing uses a revision check
   and retains a tombstone so an old success cannot clear a newer failure.
+  Observations also carry a fingerprint of the encrypted access material used
+  by the request, checked transactionally; a late failure after refresh or
+  re-import cannot block the replacement token. The store hashes ciphertext
+  for this provenance check, but never decrypts or returns secret values.
 - Membership has tenant checks in both the reader and database triggers,
   including parent workspace changes. Pool definitions/members are included in
   backup; instance-local availability observations are excluded from restore.
