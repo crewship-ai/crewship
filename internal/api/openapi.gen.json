@@ -8990,6 +8990,122 @@
         ],
         "type": "object"
       },
+      "ProviderPool": {
+        "properties": {
+          "allow_cross_owner": {
+            "type": "boolean"
+          },
+          "created_by": {
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "member_count": {
+            "type": "integer"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderPoolMember"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "mode",
+          "allow_cross_owner",
+          "created_by",
+          "member_count"
+        ],
+        "type": "object"
+      },
+      "ProviderPoolCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_cross_owner": {
+            "default": false,
+            "type": "boolean"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderPoolMember"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "subscription",
+              "api_key"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "mode",
+          "members"
+        ],
+        "type": "object"
+      },
+      "ProviderPoolMember": {
+        "additionalProperties": false,
+        "properties": {
+          "credential_id": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential_id"
+        ],
+        "type": "object"
+      },
+      "ProviderPoolPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderPool"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
       "RecipeInstallRequest": {
         "properties": {
           "account_labels": {
@@ -83543,7 +83659,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProviderPoolPage"
                 }
               }
             },
@@ -83625,7 +83741,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/ProviderPoolCreateRequest"
               }
             }
           }
@@ -83635,7 +83751,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProviderPool"
                 }
               }
             },
@@ -83645,7 +83761,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProviderPool"
                 }
               }
             },
@@ -83731,7 +83847,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProviderPool"
                 }
               }
             },
