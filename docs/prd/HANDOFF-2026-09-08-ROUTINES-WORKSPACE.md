@@ -480,3 +480,48 @@ shared /dev/shm filled and both complete packages passed on disk rerun (55.602s 
 under shared memory pressure; actual dev1 Turbopack production builds passed,
 followed by embed sync and Go/sidecar builds. Peer WIP was restored after deployment.
 PR #2460 remains unmerged and requires a current-head review.
+
+## Credentials-style authoring popup
+
+Application `9029ac92c` deployed only on dev1. The internal vertical editor rail
+is replaced with the real shared CreateSurfaceSteps used by Credentials. The
+main RoutinesExplorer is unchanged. Four freely navigable recipe sections use a
+compact 800px shell; Code is separate and returns to the last visual section.
+Back/Continue stay in the footer, with Validate & Save on the final section.
+Keyboard submission follows that same primary action. Code has one return
+action. The shared stepper defaults remain gated for dependent wizards such as
+Credentials; only Routines opts into forward jumping.
+
+Overview retains icon/name, team, agent avatars and the form builder, with
+counted questions/results in thin disclosure rows. Existing schedule changes
+still explicitly apply immediately; recipe saving, versioning, access controls,
+calendar behavior and runtime contracts are unchanged. Code and Overview stay
+mounted during navigation. Failed appearance persistence retains its single-save
+retry behavior.
+
+Live browser verification on dev1 covered editing and new creation, draft-name
+preservation, Code return, List/Graph and approval inspector, Schedule/Validate
+navigation, keyboard Continue, and 390px mobile navigation without horizontal
+overflow. Navigation issued zero recipe saves and there were no page errors.
+The original playground was not saved or executed. Evidence:
+`/tmp/routines-credentials-final-live.log` and
+`/tmp/routines-credentials-{overview,steps,step-detail,schedule,mobile,new}.png`.
+
+Verification: 327 tests across Routines, CreateSurface and Credentials passed;
+the final footer refinement passed its five focused editor tests and lint.
+TypeScript passed; full ESLint has zero errors and the existing 32 warnings.
+Actual dev1 production exports, embedded UI sync and Go/sidecar builds passed.
+Peer WIP was restored after both deployments. PR #2460 remains unmerged; CodeRabbit is rate-limited. CI run
+34255196551 (application 9029ac92c) fails the tsformat proximity lint on existing
+RFC3339Nano SQL writes in issue_routine_start.go, pipeline_artifacts.go,
+issue_execution.go, step_executions.go and pipeline/store.go. These files were
+unchanged by this popup refinement; some overlap preserved peer WIP. The finding
+also affected the prior application head. Do not interpret passing local tests
+or vet as a green CI verdict. Raw job evidence is in
+/tmp/routines-credentials-ci-go-lint.log; no backend timestamp changes were mixed
+into this UI deployment.
+
+Full backend verification for this refinement completed successfully: all 135
+Go test packages passed on dedicated disk TMPDIR (API 758.175s, database
+813.160s), with no rerun needed. Full go vet passed. Logs:
+/tmp/routines-credentials-go.log and /tmp/routines-credentials-vet.log.

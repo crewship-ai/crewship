@@ -389,3 +389,21 @@ Unsupported cron stays intact in Advanced. One-time scheduling uses an English
 calendar picker plus time. Repeating schedules are primary, one-time starts
 secondary, event triggers expandable. Scheduling still uses existing APIs; no
 new database representation or execution contract is introduced.
+
+## Sjednocení popupu s Credentials
+
+Upřesnění uživatele: editor má používat stejný design jako Credentials / Add
+secret. Sdílený CreateSurfaceSteps nahrazuje pouze vnitřní svislou navigaci
+editoru; hlavní levý RoutinesExplorer se nemění. Horní kroky Overview, Steps,
+Schedule, Validate lze přímo přepínat, protože nejde o závislé odpovědi.
+Credentials zachovávají dosavadní zákaz přeskakování budoucích kroků.
+
+Popup má šířku 800 px pro graf a inspektor, společné záhlaví, pole a patičku.
+Code je samostatné tlačítko s návratem do poslední sekce. Back / Continue jsou
+v patičce; Validate & Save se objeví v posledním kroku. Klávesová zkratka
+odpovídá aktuálnímu hlavnímu tlačítku. Přecházení sekcí neukládá ani nespouští
+rutinu. Rozepsaný kód i přehled zůstávají při navigaci zachované. Výjimka pro
+plánování existující rutiny je nadále viditelná: změny plánu platí ihned.
+
+Start form a Results jsou kompaktní rozbalitelné řádky. Ikona/barva, tým,
+avatary agentů, List/Graph, inspektor kroku i kalendář zůstávají zachované.
