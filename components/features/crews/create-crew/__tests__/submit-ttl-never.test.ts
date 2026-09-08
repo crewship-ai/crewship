@@ -64,6 +64,7 @@ const WS = "ws_123"
 function baseState(overrides: Partial<WizardState> = {}): WizardState {
   return {
     ...INITIAL_STATE,
+    provider: "OPENAI",
     name: "Engineering",
     slug: "engineering",
     ...overrides,

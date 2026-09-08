@@ -70,6 +70,7 @@ describe("CreateAgentDialog", () => {
 
   function renderDialog(
     overrides: Partial<Parameters<typeof CreateAgentDialog>[0]> = {},
+    chooseProvider = true,
   ) {
     const props = {
       workspaceId: "ws-1",
@@ -81,8 +82,28 @@ describe("CreateAgentDialog", () => {
       ...overrides,
     }
     const utils = render(<CreateAgentDialog {...props} />)
+    if (!props.agent && chooseProvider) {
+      fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
+      fireEvent.click(screen.getByRole("radio", { name: "Anthropic", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Identity", exact: true }))
+    }
     return { ...utils, props }
   }
+
+  it("requires an explicit provider choice before creating, including the keyboard shortcut", async () => {
+    const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Test", slug: "test" }), { status: 201 }))
+    renderDialog({}, false)
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Test" } })
+    fireEvent.click(screen.getByRole("button", { name: "Choose provider", exact: true }))
+    expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0)
+    fireEvent.keyDown(document.querySelector('[data-slot="dialog-content"]')!, { key: "Enter", ctrlKey: true })
+    expect(agentsPost(spy)).toBeUndefined()
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI", exact: true }))
+    expect(screen.getByRole("radio", { name: /Codex/ })).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Create agent", exact: true }))
+    await waitFor(() => expect(agentsPost(spy)).toBeDefined())
+    expect(JSON.parse((agentsPost(spy)![1] as RequestInit).body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
+  })
 
   it("renders header + footer with disabled Create when name is empty", () => {
     renderDialog()

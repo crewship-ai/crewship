@@ -10,6 +10,7 @@ import {
   CreateSurfaceBody,
   CreateSurfaceDisclosure,
   CreateSurfaceFooter,
+  CreateSurfaceSection,
   CreateSurfaceHeader,
   CreateSurfacePicker,
   CreateSurfaceRefusal,
@@ -27,6 +28,7 @@ import { ImportCrewPanel } from "./create-crew/import-panel"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { CREW_ICON_CATEGORIES, GRADIENT_PALETTES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
 import { asCrewColor } from "./create-crew/types"
+import { ProviderPicker } from "./create-agent/agent-model-settings"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
 import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
@@ -105,7 +107,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
   const submittingRef = useRef(false)
 
   const submit = async () => {
-    if (submittingRef.current || busy) return
+    if (submittingRef.current || busy || (!crew && state.mode === "browse" && !state.provider)) return
     submittingRef.current = true
     setBusy(true)
     setRefusal(null)
@@ -307,6 +309,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
           />
         )}
         {!panel && crew && <div hidden={section === "identity"}><StepContainer state={state} setState={setState} activeSection={(section === "identity" ? "environment" : section) as EnvironmentSection} onPickImage={() => setPanel("image")} /></div>}
+        {!panel && !crew && step === 4 && state.mode === "browse" && <CreateSurfaceSection title="Model provider" icon={Cpu} accent="teal" hint="Choose the provider for this team's agents. Its matching runner is installed automatically; connect an account before the first run.">
+          <ProviderPicker value={state.provider} onChange={provider => setState({ provider })} />
+        </CreateSurfaceSection>}
         {!panel && !crew && (step === 4 || step === 3) && (
           <CreateSurfaceDisclosure key={String(environmentOpen)} label="Environment and runtime" icon={Cpu} accent="teal" defaultOpen={environmentOpen || step === 3}>
             <StepContainer state={state} setState={setState} onPickImage={() => { setEnvironmentOpen(true); setPanel("image") }} />
@@ -335,7 +340,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
               ? undefined
               : crew ? "⌘+Enter to save · Esc cancel"
               : step === 4
-                ? "⌘+Enter to confirm · Esc cancel"
+                ? state.mode === "browse" && !state.provider ? "Choose a provider for the agents" : "⌘+Enter to confirm · Esc cancel"
                 : "⌘+Enter to continue"
           }
           // Inside the panel, Cancel means "back out of the panel" — the same
@@ -377,6 +382,7 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
     if (s.mode === "browse") return !!s.pickedTemplateSlug
     return true // empty
   }
+  if (step === 4 && s.mode === "browse") return !!s.provider
   // step === 3 (Container) is always valid: image and tooling are optional,
   // an empty allowlist still permits provider APIs and platform connections, and the
   // sizing chips cannot produce a zero — CustomNumberChip refuses anything

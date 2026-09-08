@@ -88,6 +88,9 @@ type deployCrewResult struct {
 // per-agent defaults. The zero value deploys the template verbatim, which is
 // what every caller that has nothing to override passes.
 type deployOverrides struct {
+	// CLIAdapter opts into replacing the whole execution configuration.
+	// Model-only onboarding overrides retain their original provider filter.
+	CLIAdapter string
 	// LLMModel replaces CrewTemplateAgent.LLMModel — but only on agents whose
 	// llm_provider matches Provider. Writing a Gemini model id onto a
 	// CLAUDE_CODE agent breaks it outright, which is strictly worse than the
@@ -167,6 +170,9 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 
 	var agentIDs []string
 	for _, a := range agents {
+		if overrides.CLIAdapter != "" {
+			a.CLIAdapter, a.LLMProvider, a.LLMModel = overrides.CLIAdapter, overrides.Provider, overrides.LLMModel
+		}
 		agentID := generateCUID()
 		agentIDs = append(agentIDs, agentID)
 		// #1072/#1029: store the webhook secret encrypted at rest (fail-open
@@ -360,9 +366,10 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 
 // CrewTemplateHandler provides endpoints for listing and applying crew templates.
 type CrewTemplateHandler struct {
-	db      *sql.DB
-	logger  *slog.Logger
-	journal journal.Emitter
+	provisioner agentProvisionEnqueuer
+	db          *sql.DB
+	logger      *slog.Logger
+	journal     journal.Emitter
 }
 
 // NewCrewTemplateHandler creates a CrewTemplateHandler with the given database and logger.
@@ -487,6 +494,8 @@ func (h *CrewTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
+func (h *CrewTemplateHandler) SetProvisioner(p agentProvisionEnqueuer) { h.provisioner = p }
+
 // Deploy handles POST /api/v1/crew-templates/{slug}/deploy
 // Creates a crew + all agents from the template in a single transaction.
 func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
@@ -499,8 +508,11 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var body struct {
-		CrewName string `json:"crew_name"`
-		CrewSlug string `json:"crew_slug"`
+		CrewName   string `json:"crew_name"`
+		CrewSlug   string `json:"crew_slug"`
+		Provider   string `json:"llm_provider"`
+		CLIAdapter string `json:"cli_adapter"`
+		LLMModel   string `json:"llm_model"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -512,7 +524,17 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug, deployOverrides{})
+	var overrides deployOverrides
+	if body.Provider != "" || body.CLIAdapter != "" || body.LLMModel != "" {
+		provider, ok := resolveLLMProvider(body.Provider)
+		matching := map[string]string{"ANTHROPIC": "CLAUDE_CODE", "OPENAI": "CODEX_CLI", "GOOGLE": "GEMINI_CLI", "CURSOR": "CURSOR_CLI", "FACTORY": "FACTORY_DROID", "OLLAMA": "OPENCODE"}
+		if !ok || strings.TrimSpace(body.Provider) == "" || matching[provider.provider] != body.CLIAdapter || strings.TrimSpace(body.LLMModel) == "" {
+			writeProblem(w, r, http.StatusBadRequest, "Choose a provider, its matching runner and a model")
+			return
+		}
+		overrides = deployOverrides{Provider: provider.provider, CLIAdapter: body.CLIAdapter, LLMModel: strings.TrimSpace(body.LLMModel)}
+	}
+	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug, overrides)
 	if err != nil {
 		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
@@ -534,6 +556,11 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		"agents", result.AgentCount,
 	)
 
+	if h.provisioner != nil && result.AgentCount > 0 {
+		if _, err := h.provisioner.EnqueueForCrew(context.Background(), result.CrewID, wsID); err != nil {
+			h.logger.Warn("template crew preparation could not be enqueued", "crew_id", result.CrewID, "error", err)
+		}
+	}
 	writeJSON(w, http.StatusCreated, result)
 }
 

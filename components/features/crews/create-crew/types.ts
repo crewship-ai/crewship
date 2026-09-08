@@ -1,3 +1,4 @@
+import type { LLMProvider } from "@/lib/entities"
 import type { CrewTemplateAgent } from "./api"
 
 export type WizardStep = 1 | 2 | 3 | 4
@@ -101,6 +102,8 @@ export interface WizardState {
   pickedTemplateSlug: string | null
   pickedTemplateMeta: { name: string; agentCount: number; agents: { name: string; agent_role: string }[] } | null
 
+  provider: LLMProvider | null
+
   // Step 3 — Runtime
   memoryMB: number
   cpus: number
@@ -126,6 +129,7 @@ export const INITIAL_STATE: WizardState = {
   mode: "browse",
   pickedTemplateSlug: null,
   pickedTemplateMeta: null,
+  provider: null,
   memoryMB: 4096,
   cpus: 2,
   ttlHours: null,

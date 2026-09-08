@@ -69,7 +69,7 @@ func TestEnsureCrewImageHasAdapter(t *testing.T) {
 		adapter      string
 		wantRebuild  bool
 	}{
-		{"no image yet: the first build reads the agents", "", "", "CLAUDE_CODE", false},
+		{"no image yet: start the first build on create", "", "", "CLAUDE_CODE", true},
 		{"image verified for the adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"]}`, "CLAUDE_CODE", false},
 		{"image verified for another adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"]}`, "CODEX_CLI", true},
 		{"image built before verification existed", "crewship-cache:abc", `{"loginPath":"/usr/bin"}`, "CLAUDE_CODE", true},
@@ -186,6 +186,38 @@ func TestCrewImageReady(t *testing.T) {
 			}
 			if needs != tc.wantNeeds || ready != tc.wantReady {
 				t.Errorf("needsBuild=%v ready=%v, want %v/%v", needs, ready, tc.wantNeeds, tc.wantReady)
+			}
+		})
+	}
+}
+
+func TestCrewPreparationChangedDuringBuild(t *testing.T) {
+	for _, tc := range []struct {
+		name                         string
+		addAgent, changeConfig, want bool
+	}{
+		{"unchanged successful build does not loop", false, false, false},
+		{"Codex added while Claude was building", true, false, true},
+		{"environment changed while building", false, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newCovACRig(t)
+			const cfg = `{"image":"debian:bookworm"}`
+			if _, err := rig.db.Exec(`UPDATE crews SET devcontainer_config = ?, mise_config = NULL, runtime_image = NULL WHERE id = ?`, cfg, rig.crewID); err != nil {
+				t.Fatal(err)
+			}
+			createAgentWith(t, rig, "claude", "CLAUDE_CODE")
+			if tc.addAgent {
+				createAgentWith(t, rig, "codex", "CODEX_CLI")
+			}
+			if tc.changeConfig {
+				if _, err := rig.db.Exec(`UPDATE crews SET mise_config = '[tools]' WHERE id = ?`, rig.crewID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := crewPreparationChanged(context.Background(), rig.db, rig.crewID, rig.wsID, cfg, "", "", []string{"CLAUDE_CODE"})
+			if err != nil || got != tc.want {
+				t.Fatalf("changed=%v err=%v, want %v", got, err, tc.want)
 			}
 		})
 	}

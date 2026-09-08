@@ -107,6 +107,7 @@ export function CreateAgentDialog({
   useAvatarStylesVersion()
   const router = useRouter()
   const [section, setSection] = useState("identity")
+  const [providerConfirmed, setProviderConfirmed] = useState(!!agent)
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [persona, setPersona] = useState<string | null | undefined>(undefined)
   const [baseline, setBaseline] = useState<AgentDraft | null>(null)
@@ -141,6 +142,7 @@ export function CreateAgentDialog({
     if (open && !wasOpenRef.current) {
       const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
       setSection("identity")
+      setProviderConfirmed(!!agent)
       setDraft(next)
       setBaseline(next)
       setExtra({})
@@ -172,12 +174,13 @@ export function CreateAgentDialog({
     draft.selectedPersona !== null &&
     draft.editedPersonaPrompt === null &&
     !draft.customPrompt.trim()
-  const valid = isIdentityValid(draft)
+  const valid = isIdentityValid(draft) && (!!agent || !providerConfirmed || !!draft.llmModel.trim())
   // What's blocking submit? Shown to the user as an inline hint so they
   // don't have to guess why Create is disabled. Mirrors isIdentityValid
   // — keep the order matching so the hint reflects the first failing rule.
   const validationHint: string | null = (() => {
     if (valid) return null
+    if (!agent && providerConfirmed && !draft.llmModel.trim()) return "Choose a model in Model and execution"
     const trimmedName = draft.name.trim()
     if (trimmedName.length < 2) return "Name must be at least 2 characters"
     if (trimmedName.length > 100) return "Name is too long (max 100 characters)"
@@ -193,6 +196,7 @@ export function CreateAgentDialog({
 
   const handlePickPersona = useCallback((persona: AgentPersona) => {
     setDraft((d) => applyPersonaDefaults(d, persona))
+    setProviderConfirmed(false)
     setBrowserOpen(false)
   }, [])
 
@@ -222,6 +226,7 @@ export function CreateAgentDialog({
 
   const submit = useCallback(async () => {
     if (submittingRef.current) return
+    if (!agent && !providerConfirmed) { setSection("model"); return }
     submittingRef.current = true
     setSubmitting(true)
     setRefusal(null)
@@ -306,7 +311,7 @@ export function CreateAgentDialog({
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [agent, persona, baseline, extra, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, providerConfirmed, persona, baseline, extra, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -713,7 +718,7 @@ WORK STYLE: …`}
           </CreateSurfaceSection>
           </EditorPanel>
           <EditorPanel active={section === "model"}>
-            <AgentModelSettings workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
+            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
               {draft.agentRole === "LEAD" && (
                 <CreateSurfaceField label="Lead mode" htmlFor="agent-lead-mode">
                   <select
@@ -754,9 +759,9 @@ WORK STYLE: …`}
         <CreateSurfaceFooter
           hint={validationHint ? <span className="text-warn">{validationHint}</span> : undefined}
           onCancel={() => onOpenChange(false)}
-          primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : "Create agent"}
+          primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : !providerConfirmed ? "Choose provider" : "Create agent"}
           primaryIcon={ArrowRight}
-          primaryDisabled={!valid}
+          primaryDisabled={!valid || (!agent && !providerConfirmed && section === "model")}
           busy={submitting}
           onPrimary={() => void submit()}
         />
