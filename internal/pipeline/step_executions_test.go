@@ -66,4 +66,18 @@ func TestExecutionHistory_AttemptsImmutableAndItemsDistinct(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("attempt = %d", count)
 	}
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	_, stopped, err := store.start(cancelledCtx, "run", "script", "script", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err = store.finish(cancelledCtx, stopped, "partial", errors.New("script process group stopped")); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	if err = db.QueryRow(`SELECT status FROM pipeline_step_executions WHERE id=?`, stopped).Scan(&status); err != nil || status != "cancelled" {
+		t.Fatalf("lost cancellation: %s %v", status, err)
+	}
+
 }

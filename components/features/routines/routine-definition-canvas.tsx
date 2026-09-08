@@ -102,7 +102,7 @@ export function RoutineDefinitionCanvas({
         waitpointTokensByStepId={NO_TOKENS}
         heatmapBuckets={NO_BUCKETS}
         stepMetrics={NO_METRICS}
-        initialFocus="start"
+        initialFocus="all"
         centerOnSelect
         focusStepId={focusStepId}
         recenterOnResize

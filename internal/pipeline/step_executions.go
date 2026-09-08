@@ -68,7 +68,7 @@ func (s *ExecutionStore) finish(ctx context.Context, id, output string, runErr e
 		if errors.As(runErr, &suspended) {
 			status = "waiting"
 		}
-		if errors.Is(runErr, context.Canceled) {
+		if errors.Is(runErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			status = "cancelled"
 		}
 	}
