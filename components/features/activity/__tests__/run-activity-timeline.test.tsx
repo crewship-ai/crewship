@@ -10,12 +10,14 @@ let mockError: string | null = null
 let mockCursor: string | null = null
 const mockLoadMore = vi.fn()
 const mockRefresh = vi.fn()
+const mockPrepend = vi.fn()
+let mockOnEntry: ((entry: JournalEntry) => void) | undefined
 
 vi.mock("@/hooks/use-journal-list", () => ({
   useJournalList: () => ({
     entries: mockEntries,
     loading: mockLoading,
-    prependLive: () => {},
+    prependLive: mockPrepend,
     nextCursor: mockCursor,
     loadingMore: false,
     error: mockError,
@@ -25,7 +27,7 @@ vi.mock("@/hooks/use-journal-list", () => ({
 }))
 
 vi.mock("@/hooks/use-journal-stream", () => ({
-  useJournalStream: () => ({ status: "connected", lastError: null }),
+  useJournalStream: ({ onEntry }: { onEntry: (entry: JournalEntry) => void }) => { mockOnEntry = onEntry; return { status: "connected", lastError: null } },
 }))
 
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
@@ -166,4 +168,21 @@ describe("routine activity controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load older events" }))
     expect(mockLoadMore).toHaveBeenCalled()
   })
+})
+
+
+it("counts journal events separately from recipe steps and names execution completion", () => {
+  mockError = null; mockCursor = null; mockEntries = [entry({ entry_type: "pipeline.run.completed", ts: "2026-06-26T10:31:09Z" })]
+  render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls card hideWhenEmpty={false} />)
+  expect(screen.getByText("1 event")).toBeInTheDocument()
+  expect(screen.getByText("Execution completed")).toBeInTheDocument()
+})
+
+it("ignores live events from other runs while accepting all supported run references", () => {
+  mockError = null; mockEntries = []; mockPrepend.mockClear()
+  render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls hideWhenEmpty={false} />)
+  mockOnEntry?.(entry({ entry_type: "pipeline.run.started", ts: "2026-06-26T10:31:00Z", actor_id: "run_other" }))
+  expect(mockPrepend).not.toHaveBeenCalled()
+  for (const reference of [{ actor_id: "run_1" }, { trace_id: "run_1" }, { payload: { run_id: "run_1" } }]) mockOnEntry?.(entry({ entry_type: "pipeline.run.started", ts: "2026-06-26T10:31:00Z", ...reference }))
+  expect(mockPrepend).toHaveBeenCalledTimes(3)
 })

@@ -129,13 +129,19 @@ export function RunActivityTimeline({
     (entry: JournalEntry) => {
       if (params.trace_id && entry.trace_id !== params.trace_id) return
       if (params.mission_id && entry.mission_id !== params.mission_id) return
+      if (params.run_id && entry.trace_id !== params.run_id && entry.actor_id !== params.run_id && entry.payload?.run_id !== params.run_id) return
       prependLive(entry)
     },
-    [params.trace_id, params.mission_id, prependLive],
+    [params.trace_id, params.mission_id, params.run_id, prependLive],
   )
   useJournalStream({ workspaceId, params: stableParams, enabled: enabled && live, onEntry })
 
-  const rows = useMemo(() => humanizeRun(entries), [entries])
+  const rows = useMemo(() => {
+    const rows = humanizeRun(entries)
+    if (!showControls) return rows
+    const completed = new Set(entries.filter(e => e.entry_type === "pipeline.run.completed").map(e => e.id))
+    return rows.map(row => completed.has(row.id) ? { ...row, title: "Execution completed", detail: "The result verdict is shown in Run summary." } : row)
+  }, [entries, showControls])
   // Extracted from the raw entries, NOT from `rows` — a verdict is generated
   // AFTER the run finishes, so by wall-clock timestamp it would otherwise
   // sort to the end of `rows`. It's rendered as a pinned header instead (see
@@ -149,7 +155,7 @@ export function RunActivityTimeline({
   if (!enabled) return null
   if (hideWhenEmpty && !loading && rows.length === 0 && !running && !(showControls && error)) return null
 
-  const rail = <RunActivityRail rows={rows} verdict={verdict} running={running} loading={loading} title={title} card={card} className={className} defaultExpanded={showControls} />
+  const rail = <RunActivityRail rows={rows} verdict={verdict} running={running} loading={loading} title={title} card={card} className={className} defaultExpanded={showControls} rowNoun={showControls ? "event" : "step"} />
   if (!showControls) return rail
   return <div className="space-y-3">
     {error && <p role="alert" className="rounded-xl border border-destructive/20 bg-card p-4 text-sm text-destructive">Activity could not be loaded. <button className="underline" onClick={() => void refresh()}>Retry</button></p>}
@@ -160,6 +166,7 @@ export function RunActivityTimeline({
 
 interface RunActivityRailProps {
   defaultExpanded?: boolean
+  rowNoun?: "step" | "event"
   rows: RunActivityRow[]
   /** LLM-generated outcome verdict (#1403) — pinned as the rail's first,
    * always-visible row. When present, the step timeline below it starts
@@ -205,6 +212,7 @@ export function RunActivityRail({
   rows,
   verdict,
   defaultExpanded = false,
+  rowNoun = "step",
   running = false,
   waiting = false,
   loading = false,
@@ -282,7 +290,7 @@ export function RunActivityRail({
     return (
       <DetailCard
         title={title}
-        subtitle={rows.length > 0 ? `${rows.length} ${rows.length === 1 ? "step" : "steps"}` : undefined}
+        subtitle={rows.length > 0 ? `${rows.length} ${rowNoun}${rows.length === 1 ? "" : "s"}` : undefined}
         action={status}
         className={className}
         data-testid="run-activity"
@@ -303,7 +311,7 @@ export function RunActivityRail({
           {status}
         </div>
         {rows.length > 0 && (
-          <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} steps</span>
+          <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} {rowNoun}{rows.length === 1 ? "" : "s"}</span>
         )}
       </div>
       {body}
