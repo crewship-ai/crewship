@@ -8,7 +8,8 @@ import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
+import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
+import { RoutineAgentLink } from "./routine-agent-link"
 import { DetailCard } from "@/components/ui/detail"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { isRoutineTestFixture } from "@/lib/routine-filters"
@@ -23,6 +24,7 @@ export function RoutineIdentityHeader({ routine, workspaceId, onChanged, onEdit,
   routine: RoutineIdentity; workspaceId: string; onChanged?: () => void; onEdit?: () => void; actions?: ReactNode; children?: ReactNode
 }) {
   const { role } = useAbilities()
+  const { agents } = useWorkspaceAgentDirectory(workspaceId)
   const [appearance, setAppearance] = useState(() => ({ icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine) }))
   const [saving, setSaving] = useState(false)
   useEffect(() => setAppearance({ icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine) }), [routine.slug, routine.icon, routine.color]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -44,7 +46,7 @@ export function RoutineIdentityHeader({ routine, workspaceId, onChanged, onEdit,
         {roleAtLeast(role, "MANAGER") ? <div aria-busy={saving} className={saving ? "pointer-events-none opacity-70" : ""}><CrewIconPopover {...appearance} size="lg" onIconChange={icon => void save({ icon })} onColorChange={color => void save({ color })} /></div> : <CrewIcon {...appearance} size="lg" />}
         <div className="min-w-0"><h1 className="break-words text-lg font-semibold tracking-tight">{routine.name || routine.slug}</h1><div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           {routine.head_version != null && <span>Current recipe · v{routine.head_version}</span>}
-          {agent && <Link href="/crews" className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2 hover:text-foreground"><AgentAvatar seed={agent} className="h-4 w-4" alt="" />{agent}</Link>}
+          {agent && <RoutineAgentLink slug={agent} agent={agents?.find(a => a.slug === agent)} workspaceId={workspaceId} />}
         </div></div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">{roleAtLeast(role, "MANAGER") && (onEdit ? <Button variant="outline" size="sm" onClick={onEdit}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Button> : <Button variant="outline" size="sm" asChild><Link href={`/routines?${new URLSearchParams({ slug: routine.slug, view: "edit" })}`}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Link></Button>)}{actions}</div>

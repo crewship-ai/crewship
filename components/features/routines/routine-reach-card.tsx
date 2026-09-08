@@ -1,12 +1,11 @@
 "use client"
 
-import * as React from "react"
 import Link from "next/link"
 import { ArrowUpRight, Bell, Bot } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { apiFetch } from "@/lib/api-fetch"
-import { readThrough } from "@/lib/stale-cache"
+import { useWorkspaceAgentDirectory, type WorkspaceAgentIdentity } from "@/hooks/use-workspace-agent-directory"
+import { RoutineAgentLink } from "./routine-agent-link"
 import { cn } from "@/lib/utils"
 import { useAgentReach } from "@/hooks/use-agent-reach"
 import { ProviderMark } from "@/components/features/integrations/provider-marks"
@@ -31,37 +30,6 @@ const MODE_STYLE: Record<string, string> = {
   custom: "border-warn/25 bg-warn/10 text-warn",
 }
 
-interface AgentLite {
-  id: string
-  name: string
-  slug: string
-}
-
-/** Resolve the manifest's agent slugs to ids — the reach lookups are by id. */
-function useAgentsBySlug(workspaceId: string | undefined) {
-  const [agents, setAgents] = React.useState<AgentLite[] | null>(null)
-
-  React.useEffect(() => {
-    if (!workspaceId) return
-    let live = true
-    const { value, fresh } = readThrough(`agents:${workspaceId}:list`, async () => {
-      const r = await apiFetch(`/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (!r.ok) throw new Error(String(r.status))
-      return (await r.json()) as AgentLite[]
-    })
-    if (value) setAgents(value)
-    fresh.then(
-      (v) => live && setAgents(v),
-      () => live && setAgents((prev) => prev ?? []),
-    )
-    return () => {
-      live = false
-    }
-  }, [workspaceId])
-
-  return agents
-}
-
 export function RoutineReachCard({
   workspaceId,
   agentSlugs,
@@ -71,7 +39,7 @@ export function RoutineReachCard({
   /** Agent slugs the routine invokes, from its manifest. */
   agentSlugs: string[]
 }) {
-  const agents = useAgentsBySlug(workspaceId)
+  const { agents, error } = useWorkspaceAgentDirectory(workspaceId)
 
   // An agentless routine reaches nothing through an agent, and a panel saying
   // so is noise on a page that already says the routine is agentless.
@@ -99,7 +67,7 @@ export function RoutineReachCard({
         </Link>
       </div>
 
-      {agents === null ? (
+      {error && !agents ? <p role="status" className="px-4 py-3 text-xs text-muted-foreground">Agent details are temporarily unavailable.</p> : agents === null ? (
         <div className="space-y-2 px-4 py-3">
           <Skeleton className="h-4 w-44 rounded" />
           <Skeleton className="h-4 w-32 rounded" />
@@ -126,13 +94,12 @@ export function RoutineReachCard({
   )
 }
 
-function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: AgentLite }) {
+function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: WorkspaceAgentIdentity }) {
   const { toolkits, channels, loading } = useAgentReach(workspaceId, agent.id)
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-      <span className="text-xs font-medium text-foreground/85">{agent.name}</span>
-      <span className="font-mono text-[10px] text-muted-foreground/60">@{agent.slug}</span>
+      <RoutineAgentLink slug={agent.slug} agent={agent} workspaceId={workspaceId} />
 
       {loading ? (
         <Skeleton className="h-4 w-24 rounded" />

@@ -48,6 +48,8 @@ vi.mock("next/link", () => ({
   ),
 }))
 
+vi.mock("@/hooks/use-workspace-agent-directory", () => ({ useWorkspaceAgentDirectory: () => ({ agents: [], error: false }) }))
+
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 
 // The graph and the code editor are heavy, unrelated, and mocked everywhere
@@ -273,5 +275,31 @@ describe("what a routine writes back to Crewship", () => {
       }),
     )
     expect(screen.getByTestId("routine-crewship-actions")).toHaveTextContent("issue.create")
+  })
+})
+
+
+describe("routine access and starting points", () => {
+  it("distinguishes timed starts from webhook starts and opens their management", () => {
+    renderCard()
+    expect(screen.getByText("When it runs")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^schedules$/i }).querySelector("svg")).not.toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit schedules", exact: true }))
+    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))
+    expect(screen.getByText(/Let another service start/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Manage webhooks", exact: true }))
+    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
+  })
+  it("links credential requirements to accounts without inventing an assigned credential", () => {
+    renderCard(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "cli_token", scope: "github" }, { type: "cli_token", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
+    expect(screen.getAllByRole("link", { name: /github|gitlab/i }).filter(link => link.getAttribute("href") === "/credentials")).toHaveLength(2)
+    expect(screen.getByText(/Accounts are resolved when the run starts/)).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute("href", "/crews?agent=morgan")
+    const host = screen.getByText("api.github.com")
+    expect(host.closest("details")).not.toHaveAttribute("open")
+    fireEvent.click(screen.getByText("Allowed network hosts"))
+    expect(host.closest("details")).toHaveAttribute("open")
   })
 })

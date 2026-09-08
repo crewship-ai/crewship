@@ -67,6 +67,19 @@ describe("client routine workspace", () => {
 })
 
 
+describe("readable recipe", () => {
+  it("distinguishes work types and explains required inputs without revealing defaults", () => {
+    const { container } = render(<RoutineWorkOverview definition={{ inputs: [{ name: "max_stale_hours", type: "number", required: true, default: 24 }, { name: "token", type: "string", default: "private-value" }], outputs: [{ name: "change_report", type: "string" }], steps: [{ id: "probe", type: "script" }, { id: "red_state", type: "transform", needs: ["probe"] }] }} />)
+    expect(screen.getByText("Max stale hours")).toBeInTheDocument()
+    expect(screen.getByText("Required")).toBeInTheDocument()
+    expect(screen.getByText("Change report")).toBeInTheDocument()
+    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
+    expect(container.querySelector('[data-step-kind="script"] svg')).not.toBeNull()
+    expect(container.querySelector('[data-step-kind="transform"] svg')).not.toBeNull()
+    expect(screen.getAllByText("Run a script").length).toBeGreaterThan(0)
+  })
+})
+
 describe("recorded result rendering", () => {
   it("renders Markdown tables and strips executable HTML", () => {
     const { container } = render(<RoutineResultContent output={"| Service | State |\n| --- | --- |\n| API | Available |\n\n<script>alert('x')</script>"} />)
