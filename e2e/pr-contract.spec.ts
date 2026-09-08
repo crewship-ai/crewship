@@ -8,7 +8,7 @@ test("PR browser contract subset", async ({ page }) => {
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
-    await expect(page.getByRole("heading", { name: "Crews & agents" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible()
   })
 
   await test.step("agent create dialog is reachable", async () => {
