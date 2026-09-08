@@ -344,3 +344,62 @@ The full Go suite passed all 135 packages on this implementation as well
 (`/tmp/routines-author-go.log`, TMPDIR=/dev/shm, -p 3, -timeout=40m).
 PR #2460 remains unmerged and requires actual review; CodeRabbit has reported
 rate limiting rather than a completed review.
+
+## Prepared answers and Overview consolidation (2026-09-08)
+
+Application commit `0b562689b` adds editable question definitions in Overview,
+with short/long text, one/multiple choice, custom single-choice answers,
+whole/decimal numbers, boolean and JSON object/list controls. Question labels,
+variable names, help, required flags, typed defaults and numeric bounds are
+editable; defaults can be cleared and the real start form previewed. Preview
+answers remain local. Inputs/Outputs navigation was removed; expected outputs
+are compact cards in Overview. Steps exposes declared script/code configuration.
+
+Optional InputSpec widget/options/allow_custom/placeholder metadata survives the
+stored definition/version JSON; no migration is required. Shared form mapping
+and the Chat slash catalog carry it. Array-valued multiselects use JSON encoding,
+preserving comma-containing choices without changing the older Ask-form encoding.
+New form metadata opts into static/default/type/choice/required/bounds validation;
+unannotated legacy inputs retain their historical contract. The Run API checks
+before enqueue, and executor entry plus nested execution check before step work.
+Answers remain literal data, referenced by recipe authors via inputs variables.
+
+Focused verification: 42 frontend files / 386 tests passed, including question
+creation, typed multiple-choice defaults, custom answers, comma preservation,
+invalid choices and legacy form behavior. New Go choice/default/type/schema and
+Chat-mapping tests passed; full API passed (177.294s). TypeScript, go vet, ESLint
+(0 errors, 32 existing warnings), changed-file lint and production export passed.
+The commit-time golangci gate passed after an unrelated parallel lint released
+its lock. Backup before the isolated live fixture:
+`/tmp/crewship-dev1-before-survey-20260908/crewship.db` (0600).
+
+Full verification then passed 648 frontend files / 8,021 tests and all 135 Go
+packages (database 523.724s), with go vet clean. Follow-up `8eda95134` makes long
+run forms scroll within the viewport and names the one-time confirmation
+Schedule rather than Run; its final 31 Routines files / 214 tests, TypeScript
+and changed-file lint passed.
+
+The live manual, agentless fixture `test-routines-survey-20260908` was authored
+through the UI, including a question-label/help edit, and saved with typed
+choices/defaults. Invalid single-choice input returned HTTP 400 before dispatch.
+Run `run_cmtst5x73000387ce1e93` completed with output
+`["Support","Research, Europe"]` and outcome SUCCEEDED. The browser verified
+that its request carried count as number 3, confirm as boolean false, teams as a
+JSON list and a permitted custom string. The first harness expected an uppercase
+status but the endpoint correctly returns lowercase completed; that assertion
+was a harness error, not a routine failure.
+
+Final live verification (`/tmp/routines-survey-final-live.log`) confirmed the
+completed output, the Chat slash catalog's options/default/data-type mapping,
+and one-time scheduling through the same form. Chat exposure was temporarily
+opted into for this fixture and restored afterwards; no Chat message was sent.
+Scheduled inputs retained period Month, two teams (including Research, Europe),
+custom text, numeric count 4 and boolean false. Pending
+`pnd_cmtstebep000bae2ef19e` was cancelled after inspection. No future test start
+remains, and the user's Incident timeline pending event was unchanged.
+Phone 390px fits the complete form; no browser page errors. Screenshots:
+`/tmp/routines-survey-builder.png`, `/tmp/routines-survey-run.png`,
+`/tmp/routines-survey-schedule.png`, `/tmp/routines-survey-mobile.png`.
+Final dev1 application is `8eda95134`; main-clone peer Go verification WIP was
+restored after both deployments and was not shipped. PR #2460 remains unmerged
+and still requires actual current-head review.
