@@ -26,6 +26,7 @@ import (
 // the operator the person "signs in with their existing password" — an
 // account with no password at all. Found on dev3 against the real server.
 func TestMemberInvite_PrintsTheLinkWheneverTheServerIssuesOne(t *testing.T) {
+	guardCLIState(t)
 	cases := []struct {
 		name        string
 		createdUser bool
@@ -100,6 +101,7 @@ func TestMemberInvite_PrintsTheLinkWheneverTheServerIssuesOne(t *testing.T) {
 // Both provisioning commands must remain scriptable: machine output includes
 // every response field and never mixes success prose into either stream.
 func TestWorkspaceProvision_MachineFormats(t *testing.T) {
+	guardCLIState(t)
 	for _, format := range []string{"json", "yaml", "ndjson", "quiet"} {
 		for _, scenario := range []string{"new member", "unclaimed member", "claimed member", "workspace"} {
 			t.Run(format+"/"+scenario, func(t *testing.T) {
@@ -164,6 +166,7 @@ func TestWorkspaceProvision_MachineFormats(t *testing.T) {
 }
 
 func TestMemberProvisionCreateOnlyFlag(t *testing.T) {
+	guardCLIState(t)
 	stub := clitest.NewStubServer()
 	stub.OnGet("/openapi.json", clitest.JSONResponse(200, map[string]any{"components": map[string]any{"schemas": map[string]any{"FinalCoreProvisionMemberRequest": map[string]any{"properties": map[string]any{"create_only": map[string]any{"type": "boolean"}}}}}}))
 	defer stub.Close()
@@ -194,6 +197,7 @@ func TestMemberProvisionCreateOnlyFlag(t *testing.T) {
 }
 
 func TestMemberProvisionCreateOnlyRefusesOldServer(t *testing.T) {
+	guardCLIState(t)
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	setStubCLI(t, stub.URL())

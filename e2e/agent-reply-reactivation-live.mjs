@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Dev2 saved-opt-in regression: one real reply, one recipient tab, native audio.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/agent-reply-reactivation-live.mjs
 import { chromium, expect } from '@playwright/test';
@@ -5,14 +6,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const statePath=process.env.TEAM_CHAT_STATE;if(!statePath)throw new Error('TEAM_CHAT_STATE required');
-assert.equal((await fs.stat(statePath)).mode&0o077,0);
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
+const state = await readPrivateJson(statePath);
 const base='https://crewship-dev2.unifylab.cz';
 const chatId=process.env.AGENT_SOUND_CHAT_ID||'cmtsftvcj0002380b7512';
 const browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
 const page=await ctx.newPage();
 const report={server:base,chat_id:chatId,checks:[],page_errors:[],audio_evidence:'Native oscillator started in a running AudioContext after an ordinary composer gesture; no post-reload Activate/Preview.'};
-const artifacts=path.resolve('docs/prd/reports/assets/agent-reply-sounds-dev2');await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('agent-reply-reactivation-live');
 page.on('pageerror',e=>report.page_errors.push(e.message));
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 function passed(check){report.checks.push(check);console.log('PASS',check);}
@@ -42,5 +42,5 @@ try{
  await page.screenshot({path:path.join(artifacts,'mobile-profile-settings.png'),fullPage:true});
  assert.deepEqual(report.page_errors,[]);passed('Mobile profile menu shows actual Viewer role/workspace and opens inline sound settings without overflow');
  report.status='passed';report.artifacts=artifacts;
-}catch(error){report.status='failed';report.error=error.message;console.error('Reactivation QA failed:',error.message);await page.screenshot({path:'/tmp/agent-reply-reactivation-live-failure.png',fullPage:true});process.exitCode=1;}
-finally{await fs.writeFile('/tmp/agent-reply-reactivation-live-report.json',JSON.stringify(report,null,2));await ctx.close();await browser.close();}
+}catch(error){report.status='failed';report.error=error.message;console.error('Reactivation QA failed:',error.message);await page.screenshot({path:path.join(artifacts, 'agent-reply-reactivation-live-failure.png'),fullPage:true});process.exitCode=1;}
+finally{await fs.writeFile(path.join(artifacts, 'agent-reply-reactivation-live-report.json'),JSON.stringify(report,null,2));await ctx.close();await browser.close();}

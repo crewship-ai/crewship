@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Opt-in live Dev2 verification. Passwords are read only from protected seed state.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/team-chat-live.mjs
 // Uses normal password + CSRF authentication; no minted/copy-pasted owner tokens.
@@ -8,15 +9,12 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;
 if (!statePath) throw new Error('TEAM_CHAT_STATE must identify protected seed state');
-const stat=await fs.stat(statePath);
-assert.equal(stat.mode & 0o077,0,'Seed credentials must be private');
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
+const state = await readPrivateJson(statePath);
 assert.ok(state.channel_id && state.workspace_id);
 const base='https://crewship-dev2.unifylab.cz';
 const roles={thomas:'ADMIN',paul:'MANAGER',peter:'MEMBER',anna:'MANAGER',sofia:'MEMBER',emma:'VIEWER'};
 const report={server:base,workspace_id:state.workspace_id,channel_id:state.channel_id,checks:[],actors:[],page_errors:[]};
-const artifacts=path.resolve('docs/prd/reports/assets/chat-seed-team-dev2');
-await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('team-chat-live');
 const browser=await chromium.launch({headless:true});
 const contexts=[];
 async function boundedWait(ms,actor){
@@ -105,6 +103,6 @@ try{
  assert.deepEqual(report.page_errors,[]);passed('Emma VIEWER sees six loaded portraits, roster and responsive Chat without browser errors');
  report.status='passed';report.artifacts=artifacts;
 }finally{
- await fs.writeFile('/tmp/chat-seed-team-live-validation.json',JSON.stringify(report,null,2));
+ await fs.writeFile(path.join(artifacts, 'chat-seed-team-live-validation.json'),JSON.stringify(report,null,2));
  for(const ctx of contexts)await ctx.close();await browser.close();
 }

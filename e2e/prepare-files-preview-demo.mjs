@@ -1,12 +1,12 @@
+import { createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Explicit Dev2-only fixture upload; synthetic QA documents, not agent-generated output.
 import { chromium } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 const directory=`preview-demo-${new Date().toISOString().slice(0,10)}-${crypto.randomUUID().slice(0,8)}`;
-const local=await fs.mkdtemp(path.join(os.tmpdir(),'crewship-files-preview-'));
+const local=await createPrivateArtifacts('files-preview-demo');
 const browser=await chromium.launch({headless:true});
 try {
  const page=await browser.newPage({viewport:{width:900,height:500}});
@@ -20,6 +20,8 @@ try {
  const crew_file=`shared/${directory}/crew-demo-preview.pdf`;
  execFileSync('/tmp/crewship-2-dev',['--profile','dev2','--server','http://localhost:8082','crew','files','save','copy-site',crew_file,'--file',path.join(local,'demo-preview.pdf')],{stdio:['ignore','pipe','pipe']});
  const manifest={crew_file,server:'https://crewship-dev2.unifylab.cz',agent_slug:'ma-ena',directory,local,files,description:'Synthetic QA fixtures uploaded with owner CLI; no agent model execution.'};
- await fs.writeFile('/tmp/files-preview-demo-manifest.json',JSON.stringify(manifest,null,2));
+ const manifestPath = path.join(local, 'files-preview-demo-manifest.json');
+ await fs.writeFile(manifestPath,JSON.stringify(manifest,null,2),{mode:0o600,flag:'wx'});
+ console.log(`FILES_PREVIEW_MANIFEST=${manifestPath}`);
  console.log(JSON.stringify(manifest,null,2));
 } finally {await browser.close();}

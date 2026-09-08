@@ -13,6 +13,18 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
+// Resolve the test runner's system temp aliases (for example macOS /var →
+// /private/var), so fixtures satisfy the production no-symlink state policy.
+// Explicit symlinks created by security tests remain unresolved and rejected.
+func teamSeedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 type teamSeedFakeUser struct{ Email, Name, Role, Password, Avatar string }
 type teamSeedRig struct {
 	noCapability                                    bool
@@ -176,7 +188,7 @@ func newTeamSeedRig(t *testing.T) *teamSeedRig {
 func TestSeedTeamChatIndependentActorsIdempotentPrivateStateAndNoOwnerChanges(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	client := cli.NewClient(rig.server.URL, "owner", covWS)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	result, err := seedTeamChat(t.Context(), client, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +253,7 @@ func TestSeedTeamChatRefusesUnownedOrRoleDriftBeforeMutations(t *testing.T) {
 	person := teamSeedPeople(covWS)[0]
 	rig.users[person.Key] = &teamSeedFakeUser{Email: person.Email, Role: person.Role}
 	rig.member[person.Key] = true
-	if _, err := seedTeamChat(t.Context(), client, t.TempDir()); err == nil || !strings.Contains(err.Error(), "refusing takeover") {
+	if _, err := seedTeamChat(t.Context(), client, teamSeedTempDir(t)); err == nil || !strings.Contains(err.Error(), "refusing takeover") {
 		t.Fatalf("collision accepted: %v", err)
 	}
 	if rig.mutations != 0 {
@@ -249,7 +261,7 @@ func TestSeedTeamChatRefusesUnownedOrRoleDriftBeforeMutations(t *testing.T) {
 	}
 	delete(rig.users, person.Key)
 	delete(rig.member, person.Key)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	if _, err := seedTeamChat(t.Context(), client, dir); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +277,7 @@ func TestSeedTeamChatRefusesUnownedOrRoleDriftBeforeMutations(t *testing.T) {
 func TestSeedTeamChatRecoversOwnedMembershipAndDeletedRoomWithoutPasswordReset(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	client := cli.NewClient(rig.server.URL, "owner", covWS)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	result, err := seedTeamChat(t.Context(), client, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -281,15 +293,15 @@ func TestSeedTeamChatRecoversOwnedMembershipAndDeletedRoomWithoutPasswordReset(t
 	}
 }
 func TestSeedTeamChatPrivatePathRejectsGitAndSymlinks(t *testing.T) {
-	base := t.TempDir()
+	base := teamSeedTempDir(t)
 	if err := os.Mkdir(filepath.Join(base, ".git"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teamSeedPrivateState(filepath.Join(base, "secrets"), "http://server", covWS); err == nil {
 		t.Fatal("accepted Git state")
 	}
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(t.TempDir(), link); err != nil {
+	link := filepath.Join(teamSeedTempDir(t), "link")
+	if err := os.Symlink(teamSeedTempDir(t), link); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := teamSeedPrivateState(link, "http://server", covWS); err == nil {
@@ -300,7 +312,7 @@ func TestSeedTeamChatPrivatePathRejectsGitAndSymlinks(t *testing.T) {
 func TestSeedTeamChatOldServerRejectedBeforeAnyMutation(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	rig.noCapability = true
-	_, err := seedTeamChat(t.Context(), cli.NewClient(rig.server.URL, "owner", covWS), t.TempDir())
+	_, err := seedTeamChat(t.Context(), cli.NewClient(rig.server.URL, "owner", covWS), teamSeedTempDir(t))
 	if err == nil || !strings.Contains(err.Error(), "upgrade") {
 		t.Fatalf("old server accepted: %v", err)
 	}
@@ -312,7 +324,7 @@ func TestSeedTeamChatOldServerRejectedBeforeAnyMutation(t *testing.T) {
 func TestSeedTeamChatFailedOwnedLoginNeverResetsPassword(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	client := cli.NewClient(rig.server.URL, "owner", covWS)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	if _, err := seedTeamChat(t.Context(), client, dir); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +339,7 @@ func TestSeedTeamChatFailedOwnedLoginNeverResetsPassword(t *testing.T) {
 func TestSeedTeamChatStateLockStopsParallelMutations(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	client := cli.NewClient(rig.server.URL, "owner", covWS)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	result, err := seedTeamChat(t.Context(), client, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -346,7 +358,7 @@ func TestSeedTeamChatStateLockStopsParallelMutations(t *testing.T) {
 func TestSeedTeamChatRecoversLostSetupAcknowledgementWithoutReset(t *testing.T) {
 	rig := newTeamSeedRig(t)
 	client := cli.NewClient(rig.server.URL, "owner", covWS)
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	result, err := seedTeamChat(t.Context(), client, dir)
 	if err != nil {
 		t.Fatal(err)

@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Public Dev2 read-only settings QA using Emma's normal credentials.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/notification-sound-settings-live.mjs
 import { chromium, expect } from '@playwright/test';
@@ -5,13 +6,12 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;if(!statePath)throw new Error('TEAM_CHAT_STATE required');
-assert.equal((await fs.stat(statePath)).mode&0o077,0);
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
+const state = await readPrivateJson(statePath);
 const base='https://crewship-dev2.unifylab.cz';
 const browser=await chromium.launch({headless:true});
 const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
 const report={server:base,checks:[],page_errors:[],audio_evidence:'Native oscillator starts in running AudioContext; physical speakers not measured.'};
-const artifacts=path.resolve('docs/prd/reports/assets/sounds-settings-dev2');await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('notification-sound-settings-live');
 function passed(check){report.checks.push(check);console.log('PASS',check);}
 async function request(url,options={}){
  for(let n=0;n<5;n++){
@@ -75,5 +75,5 @@ try{
  await page.screenshot({path:path.join(artifacts,'mobile.png'),fullPage:true});
  assert.deepEqual(report.page_errors,[]);passed('Mobile Settings navigation reaches the same inline controls without overflow or runtime errors');
  report.status='passed';report.artifacts=artifacts;
-}catch(error){report.status='failed';report.error=error.message;console.error(error.message);await page.screenshot({path:'/tmp/notification-sound-settings-live-failure.png',fullPage:true});process.exitCode=1;}
-finally{await fs.writeFile('/tmp/notification-sound-settings-live-report.json',JSON.stringify(report,null,2));await ctx.close();await browser.close();}
+}catch(error){report.status='failed';report.error=error.message;console.error(error.message);await page.screenshot({path:path.join(artifacts, 'notification-sound-settings-live-failure.png'),fullPage:true});process.exitCode=1;}
+finally{await fs.writeFile(path.join(artifacts, 'notification-sound-settings-live-report.json'),JSON.stringify(report,null,2));await ctx.close();await browser.close();}

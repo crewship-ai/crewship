@@ -64,13 +64,10 @@ func (m *conversationLoadMeasurements) summary() map[string]conversationLoadMetr
 	return out
 }
 
-// Opt-in acceptance, not a benchmark/SLA: exercise real authenticated HTTP on
+// Acceptance, not a benchmark/SLA: exercise real authenticated HTTP on
 // an isolated migrated SQLite WAL file, with the production five-connection pool.
-// CREWSHIP_CHAT_LOAD_ACCEPTANCE=1 go test ./internal/api -run '^TestWorkspaceConversationsHTTP100Active$' -count=1 -v -timeout=5m
+// go test ./internal/api -run '^TestWorkspaceConversationsHTTP100Active$' -count=1 -v -timeout=5m
 func TestWorkspaceConversationsHTTP100Active(t *testing.T) {
-	if os.Getenv("CREWSHIP_CHAT_LOAD_ACCEPTANCE") != "1" {
-		t.Skip("opt in with CREWSHIP_CHAT_LOAD_ACCEPTANCE=1; isolated 100-user HTTP acceptance")
-	}
 	const users = 100
 	const rounds = 2
 	started := time.Now()

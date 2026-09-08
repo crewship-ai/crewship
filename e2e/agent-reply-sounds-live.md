@@ -20,5 +20,7 @@ of a duplicate Inbox chime. Returning to history remains silent. The profile-men
 shortcut is also exercised on mobile.
 
 This measures native audio playback requests, not physical speaker audibility.
-Report: `/tmp/agent-reply-sounds-live-report.json`.
-Screenshots: `docs/prd/reports/assets/agent-reply-sounds-dev2/`.
+Report: `agent-reply-sounds-live-report.json` inside the private run directory printed as `Artifacts: …`.
+Screenshots: `Artifacts: …` run directory.
+
+Each run creates a unique mode-0700 artifact directory. Reports and screenshots stay there; inspect and sanitize them before copying selected evidence into tracked documentation. Credential state must be a regular mode-0600 file owned by the current user; symlinks are rejected.

@@ -28,6 +28,8 @@ ADMIN/MANAGER/MEMBER/VIEWER are checked using the workspace member API.
 
 The normally authenticated Emma browser renders the public channel and checks
 loaded portraits, the People dialog, mobile overflow and uncaught errors.
-Screenshots go to `docs/prd/reports/assets/chat-seed-team-dev2/`; a report without
-credentials goes to `/tmp/chat-seed-team-live-validation.json`. Login sessions
+Screenshots go to `Artifacts: …` run directory; a report without
+credentials goes to `chat-seed-team-live-validation.json` inside the private run directory printed as `Artifacts: …`. Login sessions
 and normal read cursors are the only fresh state created by validation.
+
+Each run creates a unique mode-0700 artifact directory. Reports and screenshots stay there; inspect and sanitize them before copying selected evidence into tracked documentation. Credential state must be a regular mode-0600 file owned by the current user; symlinks are rejected.

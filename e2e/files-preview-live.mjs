@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Dev2-only acceptance. Fixtures are synthetic uploads, never agent-generated claims.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/files-preview-live.mjs
 import {chromium,expect} from '@playwright/test';
@@ -6,11 +7,11 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import crypto from 'node:crypto';
 const statePath=process.env.TEAM_CHAT_STATE;assert.ok(statePath,'TEAM_CHAT_STATE required');
-assert.equal((await fs.stat(statePath)).mode&0o077,0);
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
-const manifest=JSON.parse(await fs.readFile(process.env.FILES_PREVIEW_MANIFEST??'/tmp/files-preview-demo-manifest.json','utf8'));
+const state = await readPrivateJson(statePath);
+if (!process.env.FILES_PREVIEW_MANIFEST) throw new Error('FILES_PREVIEW_MANIFEST must point to the printed fixture manifest');
+const manifest = await readPrivateJson(process.env.FILES_PREVIEW_MANIFEST);
 const base='https://crewship-dev2.unifylab.cz';assert.equal(manifest.server,base);
-const artifacts=path.resolve('docs/prd/reports/assets/files-preview-dev2');await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('files-preview-live');
 const report={server:base,user_id:state.accounts.emma.user_id,fixture_directory:manifest.directory,fixture_origin:'Synthetic QA PDF/image/code uploaded by supported owner CLI; no agent execution.',checks:[],page_errors:[],failed_resources:[],pdf_assets:[]};
 const browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1500,height:1000}});const page=await context.newPage();
 page.on('request',r=>{if(r.url().includes('/pdfjs/'))report.pdf_assets.push(r.url());});
@@ -62,5 +63,5 @@ try{
  const mobilePDF=page.getByRole('region',{name:'Preview demo-preview.pdf'});await expect(mobilePDF.getByText('Page 1 of 2',{exact:true})).toBeVisible({timeout:30000});await expect(mobilePDF.getByText('Rendering PDF…')).not.toBeVisible();await mobilePDF.getByRole('button',{name:'Next page',exact:true}).click();await expect(mobilePDF.getByText('Page 2 of 2',{exact:true})).toBeVisible();await expect(mobilePDF.getByText('Rendering PDF…')).not.toBeVisible();
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(artifacts,'mobile-preview.png'),fullPage:true});pass('At 390px mobile width, Files tab opens PDF preview, renders page two and does not overflow the document');
  assert.deepEqual(report.page_errors,[]);assert.deepEqual(report.failed_resources,[]);report.status='passed';
-}catch(error){report.status='failed';report.error=error.message;console.error('Files preview QA failed:',error.message);await page.screenshot({path:'/tmp/files-preview-live-failure.png',fullPage:true});process.exitCode=1;}
-finally{await fs.writeFile('/tmp/files-preview-live-report.json',JSON.stringify(report,null,2));await context.close();await browser.close();}
+}catch(error){report.status='failed';report.error=error.message;console.error('Files preview QA failed:',error.message);await page.screenshot({path:path.join(artifacts, 'files-preview-live-failure.png'),fullPage:true});process.exitCode=1;}
+finally{await fs.writeFile(path.join(artifacts, 'files-preview-live-report.json'),JSON.stringify(report,null,2));await context.close();await browser.close();}

@@ -1,7 +1,8 @@
 package api
 
 // Local browser harness: isolated migrated SQLite + real authentication/router/WS.
-// Enabled only by an explicit output path; no live instance data or agent execution.
+// With an explicit output path it waits for the browser; normal tests verify
+// the fixture through HTTP and exit. No live instance data or agent execution.
 import (
 	"context"
 	"encoding/json"
@@ -21,8 +22,9 @@ import (
 
 func TestWorkspaceConversationManualBrowser(t *testing.T) {
 	output := os.Getenv("CHAT_BROWSER_HARNESS")
-	if output == "" {
-		t.Skip("set CHAT_BROWSER_HARNESS to enable the isolated browser fixture")
+	manual := output != ""
+	if !manual {
+		output = filepath.Join(t.TempDir(), "fixture.json")
 	}
 	db := setupTestDB(t)
 	owner := seedTestUser(t, db)
@@ -112,6 +114,28 @@ func TestWorkspaceConversationManualBrowser(t *testing.T) {
 	}
 	defer os.Remove(output)
 	defer os.Remove(output + ".stop")
+	if !manual {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/conversations?workspace_id="+workspace, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+tokens[owner])
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("authenticated fixture request: HTTP %d", response.StatusCode)
+		}
+		var body struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {

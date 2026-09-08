@@ -11,6 +11,7 @@ import (
 )
 
 func TestChatRoomAPIContracts(t *testing.T) {
+	guardCLIState(t)
 	tests := []struct {
 		name                                string
 		args                                []string
@@ -107,6 +108,7 @@ func TestChatRoomAPIContracts(t *testing.T) {
 }
 
 func TestChatRoomRejectsInvalidInputBeforeRequest(t *testing.T) {
+	guardCLIState(t)
 	for _, args := range [][]string{
 		{"continue", "room", "--title", "Team"}, {"continue", "room", "--member", "u3"},
 		{"activity", "room", "--issues=true"}, {"activity", "room", "--routines=false"},
@@ -136,6 +138,7 @@ func TestChatRoomRejectsInvalidInputBeforeRequest(t *testing.T) {
 }
 
 func TestChatRoomSurfacesServerErrors(t *testing.T) {
+	guardCLIState(t)
 	for _, code := range []int{401, 403, 404, 409, 429, 500} {
 		t.Run(http.StatusText(code), func(t *testing.T) {
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +160,7 @@ func TestChatRoomSurfacesServerErrors(t *testing.T) {
 }
 
 func TestChatRoomRetryKeepsIdentityAndMentions(t *testing.T) {
+	guardCLIState(t)
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -189,6 +193,7 @@ func TestChatRoomRetryKeepsIdentityAndMentions(t *testing.T) {
 }
 
 func TestChatRoomOutputFormatsAndEscapedIDs(t *testing.T) {
+	guardCLIState(t)
 	for _, format := range []string{"json", "yaml", "ndjson", "quiet", "table"} {
 		t.Run(format, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +230,7 @@ func TestChatRoomOutputFormatsAndEscapedIDs(t *testing.T) {
 }
 
 func TestChatRoomRegisteredAlongsideLegacySessions(t *testing.T) {
+	guardCLIState(t)
 	for _, path := range [][]string{{"chat", "room", "send"}, {"chat", "rooms", "participants", "list"}, {"chat", "create"}, {"chat", "list"}, {"chat", "stream"}} {
 		c, remaining, err := rootCmd.Find(path)
 		if err != nil || len(remaining) != 0 || c.RunE == nil {

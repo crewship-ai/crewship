@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Isolated browser-only Inbox sound fixture on Dev2. No fake inbox rows are
 // written to the server. Real password login, WebSocket handshake and native
 // Web Audio stay intact; only authorized unread-list responses/events are varied.
@@ -8,12 +9,10 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 const statePath = process.env.TEAM_CHAT_STATE;
 if (!statePath) throw new Error('TEAM_CHAT_STATE must point to private demo credentials');
-assert.equal((await fs.stat(statePath)).mode & 0o077, 0);
-const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+const state = await readPrivateJson(statePath);
 const base = 'https://crewship-dev2.unifylab.cz';
 const report = { server: base, fixture: 'browser-only-authorized-inbox', checks: [], page_errors: [], audio_evidence: 'Original native OscillatorNode.start calls, not physical speaker output. Inbox rows and invalidation frames are simulated only in this browser.' };
-const artifacts = path.resolve('docs/prd/reports/assets/notification-sounds-inbox');
-await fs.mkdir(artifacts, { recursive: true });
+const artifacts = await createPrivateArtifacts('notification-sounds-inbox');
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -132,9 +131,9 @@ try {
 } catch (error) {
   report.status = 'failed'; report.error = error.message;
   console.error('Isolated Inbox browser test failed:', error.message);
-  if (page) await page.screenshot({ path: '/tmp/notification-sounds-inbox-failure.png', fullPage: true });
+  if (page) await page.screenshot({ path: path.join(artifacts, 'notification-sounds-inbox-failure.png'), fullPage: true });
   process.exitCode = 1;
 } finally {
-  await fs.writeFile('/tmp/notification-sounds-inbox-report.json', JSON.stringify(report, null, 2));
+  await fs.writeFile(path.join(artifacts, 'notification-sounds-inbox-report.json'), JSON.stringify(report, null, 2));
   await context.close(); await browser.close();
 }

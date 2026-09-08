@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Opt-in Dev2 acceptance: two real Mařena replies, native Web Audio, demo Emma only.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/agent-reply-sounds-live.mjs
 import { chromium, expect } from '@playwright/test';
@@ -5,12 +6,11 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;if(!statePath)throw new Error('TEAM_CHAT_STATE required');
-assert.equal((await fs.stat(statePath)).mode&0o077,0);
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
+const state = await readPrivateJson(statePath);
 const base='https://crewship-dev2.unifylab.cz';
 const report={server:base,user_id:state.accounts.emma.user_id,checks:[],page_errors:[],audio_evidence:'Native oscillator starts in running AudioContexts; physical output not measured.'};
 const browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
-const artifacts=path.resolve('docs/prd/reports/assets/agent-reply-sounds-dev2');await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('agent-reply-sounds-live');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function request(url,options={}){for(let n=0;n<5;n++){const r=await ctx.request.fetch(url,options);if(r.status()!==429)return r;let ms=Math.max(Number(r.headers()['retry-after']||60)*1000,1000);assert.ok(Number.isFinite(ms)&&ms<=300000);while(ms>0){console.log('WAIT: respecting authentication Retry-After');const part=Math.min(ms,20000);await wait(part);ms-=part;}}throw new Error('Authentication rate limit persisted');}
 async function api(endpoint,data){const r=await request(base+'/api/v1/'+endpoint+(endpoint.includes('?')?'&':'?')+'workspace_id='+state.workspace_id,{method:data?'POST':'GET',...(data?{data}:{})});assert.ok(r.ok(),`Demo API ${endpoint.split('?')[0]} returned ${r.status()}`);return r.status()===204?null:r.json();}
@@ -49,5 +49,5 @@ try{
  await a.setViewportSize({width:390,height:844});await settings(a);await expect(a.getByRole('region',{name:'Notification sounds'})).toBeVisible();assert.ok(await a.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await a.screenshot({path:path.join(artifacts,'mobile-profile-settings.png'),fullPage:true});
  assert.deepEqual(report.page_errors,[]);passed('Profile-menu sound shortcut is accessible on mobile and no browser runtime errors occurred');
  report.status='passed';report.artifacts=artifacts;
-}catch(error){report.status='failed';report.error=error.message;console.error('Agent sound QA failed:',error.message);if(pages[0])await pages[0].screenshot({path:'/tmp/agent-reply-sounds-live-failure.png',fullPage:true});process.exitCode=1;}
-finally{await fs.writeFile('/tmp/agent-reply-sounds-live-report.json',JSON.stringify(report,null,2));await ctx.close();await browser.close();}
+}catch(error){report.status='failed';report.error=error.message;console.error('Agent sound QA failed:',error.message);if(pages[0])await pages[0].screenshot({path:path.join(artifacts, 'agent-reply-sounds-live-failure.png'),fullPage:true});process.exitCode=1;}
+finally{await fs.writeFile(path.join(artifacts, 'agent-reply-sounds-live-report.json'),JSON.stringify(report,null,2));await ctx.close();await browser.close();}

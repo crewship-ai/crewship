@@ -58,7 +58,7 @@ func TestSeedTeamChatRealRouterContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := cli.NewClient(server.URL, token, "cseedchatabcdefghijklmn")
-	dir := t.TempDir()
+	dir := teamSeedTempDir(t)
 	result, err := seedTeamChat(t.Context(), client, dir)
 	if err != nil {
 		t.Fatal(err)

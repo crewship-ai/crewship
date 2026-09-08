@@ -15,6 +15,25 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// Response DTOs are shared with the OpenAPI JSON-tag contract tests.
+type workspaceConversationListResponse struct {
+	Conversations []groupchat.Conversation `json:"conversations"`
+	NextOffset    *int                     `json:"next_offset"`
+}
+type workspaceConversationMessagesResponse struct {
+	Messages []groupchat.Message `json:"messages"`
+	HasMore  bool                `json:"has_more"`
+}
+type workspaceConversationParticipantsResponse struct {
+	Participants []groupchat.Member `json:"participants"`
+}
+type workspaceConversationAgentsResponse struct {
+	Agents []groupchat.AgentMember `json:"agents"`
+}
+type workspaceConversationAgentJobsResponse struct {
+	Jobs []groupchat.Job `json:"jobs"`
+}
+
 // WorkspaceConversationsHandler exposes agent-independent human conversations.
 // Every store operation rechecks workspace membership and conversation access.
 type WorkspaceConversationsHandler struct {
@@ -107,11 +126,12 @@ func (h *WorkspaceConversationsHandler) List(w http.ResponseWriter, r *http.Requ
 		h.fail(w, err)
 		return
 	}
-	var next any
+	var next *int
 	if len(rows) == limit {
-		next = offset + limit
+		nextOffset := offset + limit
+		next = &nextOffset
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversations": rows, "next_offset": next})
+	writeJSON(w, http.StatusOK, workspaceConversationListResponse{Conversations: rows, NextOffset: next})
 }
 func (h *WorkspaceConversationsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := h.identity(w, r)
@@ -174,7 +194,7 @@ func (h *WorkspaceConversationsHandler) Messages(w http.ResponseWriter, r *http.
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": rows, "has_more": len(rows) == limit})
+	writeJSON(w, http.StatusOK, workspaceConversationMessagesResponse{Messages: rows, HasMore: len(rows) == limit})
 }
 func (h *WorkspaceConversationsHandler) Send(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := h.identity(w, r)
@@ -224,7 +244,7 @@ func (h *WorkspaceConversationsHandler) Members(w http.ResponseWriter, r *http.R
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"participants": rows})
+	writeJSON(w, http.StatusOK, workspaceConversationParticipantsResponse{Participants: rows})
 }
 func (h *WorkspaceConversationsHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := h.identity(w, r)
@@ -267,7 +287,7 @@ func (h *WorkspaceConversationsHandler) Agents(w http.ResponseWriter, r *http.Re
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": rows})
+	writeJSON(w, http.StatusOK, workspaceConversationAgentsResponse{Agents: rows})
 }
 func (h *WorkspaceConversationsHandler) AddAgent(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := h.identity(w, r)
@@ -307,7 +327,7 @@ func (h *WorkspaceConversationsHandler) AgentJobs(w http.ResponseWriter, r *http
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": rows})
+	writeJSON(w, http.StatusOK, workspaceConversationAgentJobsResponse{Jobs: rows})
 }
 
 // Advisory invalidations carry no private text. Durable messages have their

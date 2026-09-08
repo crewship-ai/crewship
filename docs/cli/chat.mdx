@@ -370,3 +370,33 @@ existing private group roster for a channel) are retained. Use the same
 `--client-id` when retrying the same request after a lost response; a different
 payload with that ID is rejected. Joining the agent does not start work: send a
 new message with `--mention-agent AGENT_ID` when ready.
+
+### Room history, read cursors and notification controls
+
+`crewship chat room messages ROOM_ID` returns the latest page. `--limit` defaults
+to 100 and accepts 1–100. Use `--before-sequence N` (positive) for older history
+or `--after-sequence N` (nonnegative) to catch up; the two flags are mutually
+exclusive. `--after-sequence 0` starts at the beginning. JSON includes `has_more`;
+messages within each page are ordered by sequence.
+
+```bash
+crewship chat room messages ROOM_ID --before-sequence 101 --limit 50
+crewship chat room messages ROOM_ID --after-sequence 150
+crewship chat room read ROOM_ID --sequence 175
+crewship chat room mute ROOM_ID --muted=true
+crewship chat room mute ROOM_ID --muted=false
+```
+
+`crewship chat room read` requires `--sequence` (nonnegative): pass the last
+message actually read. The server only advances your own read cursor.
+`crewship chat room mute` defaults `--muted` to true; explicitly pass false to
+restore your room notifications. Neither command changes another user's state.
+
+`crewship chat room activity ROOM_ID` reads the channel's activity settings.
+To change them, the channel creator must explicitly provide both `--issues` and
+`--routines`; omitting only one is an error. Both are false by default. Enabling
+starts with future events, without replaying historical issues or routine runs.
+
+```bash
+crewship chat room activity ROOM_ID --issues=true --routines=false
+```

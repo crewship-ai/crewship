@@ -1,3 +1,4 @@
+import { readPrivateJson, createPrivateArtifacts } from './helpers/private-artifacts.mjs';
 // Opt-in live Dev2 sound test. Uses native audio nodes and normal demo logins.
 // TEAM_CHAT_STATE=/private/accounts.json node e2e/notification-sounds-live.mjs
 import { chromium, expect } from '@playwright/test';
@@ -6,13 +7,12 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 const statePath=process.env.TEAM_CHAT_STATE;
 if(!statePath)throw new Error('TEAM_CHAT_STATE must point to private demo credentials');
-assert.equal((await fs.stat(statePath)).mode&0o077,0);
-const state=JSON.parse(await fs.readFile(statePath,'utf8'));
+const state = await readPrivateJson(statePath);
 const base='https://crewship-dev2.unifylab.cz';
 const report={server:base,workspace_id:state.workspace_id,checks:[],page_errors:[],audio_evidence:'Native OscillatorNode.start calls in running AudioContexts; physical speaker output is not measured.'};
 const browser=await chromium.launch({headless:true});
 const contexts=[];
-const artifacts=path.resolve('docs/prd/reports/assets/notification-sounds-dev2');await fs.mkdir(artifacts,{recursive:true});
+const artifacts = await createPrivateArtifacts('notification-sounds-live');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 async function request(ctx,url,options={}){
  for(let attempt=0;attempt<5;attempt++){
@@ -110,5 +110,5 @@ try{
  await settings(a);await a.setViewportSize({width:390,height:844});assert.ok(await a.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await a.screenshot({path:path.join(artifacts,'mobile.png'),fullPage:true});await closeSettings(a);
  assert.deepEqual(report.page_errors,[]);passed('Desktop/mobile personal settings are accessible with no browser runtime errors');
  report.status='passed';report.artifacts=artifacts;
-}catch(error){report.status='failed';report.error=error.message;console.error('Sound QA failed:',error.message);if(pages[0])await pages[0].screenshot({path:'/tmp/notification-sounds-live-failure.png',fullPage:true});process.exitCode=1;}
-finally{await fs.writeFile('/tmp/notification-sounds-live-report.json',JSON.stringify(report,null,2));for(const ctx of contexts)await ctx.close();await browser.close();}
+}catch(error){report.status='failed';report.error=error.message;console.error('Sound QA failed:',error.message);if(pages[0])await pages[0].screenshot({path:path.join(artifacts, 'notification-sounds-live-failure.png'),fullPage:true});process.exitCode=1;}
+finally{await fs.writeFile(path.join(artifacts, 'notification-sounds-live-report.json'),JSON.stringify(report,null,2));for(const ctx of contexts)await ctx.close();await browser.close();}

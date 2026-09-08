@@ -28,5 +28,7 @@ errors. Notification delivery uses real server WebSocket events and API reads.
 Important non-chat Inbox alerts are covered by the isolated policy/unit tests;
 this live test does not manufacture approvals or escalations in the workspace.
 
-Screenshots: `docs/prd/reports/assets/notification-sounds-dev2/`.
-Report without credentials: `/tmp/notification-sounds-live-report.json`.
+Screenshots: `Artifacts: …` run directory.
+Report without credentials: `notification-sounds-live-report.json` inside the private run directory printed as `Artifacts: …`.
+
+Each run creates a unique mode-0700 artifact directory. Reports and screenshots stay there; inspect and sanitize them before copying selected evidence into tracked documentation. Credential state must be a regular mode-0600 file owned by the current user; symlinks are rejected.

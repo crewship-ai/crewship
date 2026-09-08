@@ -13,6 +13,7 @@ import (
 )
 
 func TestChatAttachCmd_OutputFormats(t *testing.T) {
+	guardCLIState(t)
 	for _, format := range []string{"json", "yaml", "ndjson", "quiet", "table"} {
 		t.Run(format, func(t *testing.T) {
 			stub := covStub(t)
@@ -71,6 +72,7 @@ func TestChatAttachCmd_OutputFormats(t *testing.T) {
 }
 
 func TestChatAttachCmd_InvalidResponseIsNotSuccess(t *testing.T) {
+	guardCLIState(t)
 	stub := covStub(t)
 	covResetFlags(t, chatAttachCmd)
 	flagFormat = "json"

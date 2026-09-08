@@ -9,14 +9,13 @@ server, agent runtime or model is used. Temporary databases are cleaned up.
 Run from the repository root:
 
 ```bash
-CREWSHIP_CHAT_LOAD_ACCEPTANCE=1 \
 CREWSHIP_CHAT_LOAD_REPORT=/tmp/crewship-chat-http-100-active.json \
 go test ./internal/api \
   -run '^TestWorkspaceConversationsHTTP100Active$' \
   -count=1 -v -timeout=5m
 ```
 
-Without `CREWSHIP_CHAT_LOAD_ACCEPTANCE=1`, the test skips. The report path is
+This acceptance test runs in the normal Go suite as well. The report path is
 optional; JSON is always printed in the test log. Its directory must already
 exist. The report contains timings and failure summaries, never session tokens.
 Do not set `TMPDIR` to a RAM filesystem if comparing disk-backed SQLite runs;
