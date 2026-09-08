@@ -525,3 +525,27 @@ describe("CreateAgentDialog", () => {
     })
   })
 })
+
+it('edits only changed fields and preserves an unlisted saved model', async () => {
+  const agent = {
+    id: 'existing', workspace_id: 'ws-1', crew_id: 'c1', name: 'Alice', slug: 'alice',
+    description: null, role_title: null, agent_role: 'AGENT', lead_mode: null,
+    status: 'IDLE', cli_adapter: 'CLAUDE_CODE', llm_provider: 'ANTHROPIC', llm_model: 'private-model-v9',
+    system_prompt: null, timeout_seconds: 1800, tool_profile: 'CODING', memory_enabled: true,
+    avatar_seed: null, avatar_style: null, updated_at: '2026-09-08T00:00:00Z', crew: null,
+  }
+  const spy = vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+    if (init?.method === 'PATCH') return new Response(JSON.stringify({ ...agent, name: 'Alice revised' }))
+    return catalogueResponse(String(url)) ?? new Response('{}')
+  })
+  render(<CreateAgentDialog workspaceId="ws-1" agent={agent} open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+  const name = screen.getByLabelText(/name/i, { selector: 'input' })
+  fireEvent.change(name, { target: { value: 'Alice revised' } }); fireEvent.blur(name)
+  expect(spy.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(spy.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true))
+  const patch = spy.mock.calls.find(([, init]) => init?.method === 'PATCH')!
+  expect(JSON.parse(String(patch[1]?.body))).toEqual({ name: 'Alice revised' })
+  expect(spy.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  vi.restoreAllMocks()
+})

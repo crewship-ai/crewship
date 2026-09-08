@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { Ghost, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -34,12 +35,15 @@ interface AgentData {
 }
 
 interface CrewData {
+  description?: string | null
+  _count?: { agents: number }
   id: string
   slug: string
   name: string
 }
 
 export interface EmptyRosterProps {
+  showCrews?: boolean
   agents: AgentData[]
   crews: CrewData[]
   onAgentSelect: (slug: string) => void
@@ -72,10 +76,12 @@ const GRID = "md:grid md:grid-cols-[1fr_140px_180px_120px_130px] md:items-center
  * carry an EPHEMERAL badge with their TTL / hire reason; once their TTL
  * lapses (expired_at set) the row dims to a ghost and offers Rehire.
  */
-export function EmptyRoster({ agents, crews, onAgentSelect }: EmptyRosterProps) {
+export function EmptyRoster({ agents, crews, onAgentSelect, showCrews = false }: EmptyRosterProps) {
   const crewById = new Map(crews.map((c) => [c.id, c]))
   // Resolve parent_lead_id → lead name for the "Hired by …" tooltip.
   const nameById = new Map(agents.map((a) => [a.id, a.name]))
+
+  if (showCrews) return <div className="px-4 md:px-8 lg:px-12 py-8 space-y-6"><div><h1 className="text-2xl font-semibold">Crews &amp; agents</h1><p className="text-sm text-muted-foreground mt-2">Find a team for your work, or create a new one.</p></div><div className="grid gap-4 xl:grid-cols-2">{crews.map((crew) => <section key={crew.id} className="rounded-2xl border border-border bg-card p-5"><Link className="text-lg font-medium" href={`/crews?crew=${encodeURIComponent(crew.slug)}`}>{crew.name}</Link><p className="mt-2 text-sm text-muted-foreground">{crew.description || 'Add a purpose in Edit so people know when to use this crew.'}</p><ul className="mt-4 flex flex-wrap gap-2">{agents.filter((agent) => agent.crew_id === crew.id).slice(0, 4).map((agent) => <li key={agent.id}><button className="rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted" onClick={() => onAgentSelect(agent.slug)}>{agent.name}</button></li>)}</ul><Link className="text-sm text-primary inline-block mt-4" href={`/crews?crew=${encodeURIComponent(crew.slug)}`}>Open crew{crew._count ? ` · ${crew._count.agents} agents` : ''} →</Link></section>)}</div>{!crews.length && <p className="text-sm text-muted-foreground">No crews yet. Use + Crew to create a team.</p>}{agents.some((agent) => !agent.crew_id) && <section><h2 className="font-medium">Workspace agents</h2><div className="flex flex-wrap gap-2 mt-3">{agents.filter((agent) => !agent.crew_id).map((agent) => <Button key={agent.id} variant="outline" onClick={() => onAgentSelect(agent.slug)}>{agent.name}</Button>)}</div></section>}</div>
 
   return (
     <div className="px-4 md:px-8 lg:px-12 py-8 md:py-12 detail-width">

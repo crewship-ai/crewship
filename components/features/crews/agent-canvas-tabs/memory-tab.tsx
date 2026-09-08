@@ -732,7 +732,8 @@ function PersonaPanel({
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona`, { headers }),
         apiFetch(`/api/v1/agents/${encodeURIComponent(agentId)}/persona/history?limit=20`, { headers }),
       ])
-      if (pr.ok) setAgentPersona(await pr.json())
+      if (!pr.ok) throw new Error(`Persona could not be loaded (${pr.status}).`)
+      setAgentPersona(await pr.json())
       if (hist.ok) {
         const h = (await hist.json()) as { entries?: HistoryEntry[] }
         setHistory({ status: "ready", entries: h.entries || [], projection: RECORDED })
@@ -770,7 +771,9 @@ function PersonaPanel({
           body: JSON.stringify({ content: next }),
         })
         if (!r.ok) {
-          setErr(`save failed: ${r.status} ${await r.text()}`)
+          const message = `Persona could not be saved (${r.status}).`
+          setErr(message)
+          throw new Error(message)
         } else {
           await load()
         }
@@ -802,7 +805,7 @@ function PersonaPanel({
     }
   }, [agentId, load, workspaceId])
 
-  const personaContent = agentPersona?.from_default ? "" : agentPersona?.content ?? ""
+  const personaContent = agentPersona?.content ?? ""
   const personaBytes = agentPersona?.bytes ?? 0
 
   return (

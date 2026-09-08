@@ -60,6 +60,7 @@ export interface ChatRow {
   message_count: number
   status: string
   started_at: string
+  last_activity_at?: string | null
   ended_at: string | null
   created_at: string
 }
@@ -99,6 +100,11 @@ export interface PeerMessageRow {
   from_agent_name?: string
   from_agent_slug?: string
   preview?: string
+  question?: string
+  response?: string | null
+  direction?: string
+  to_agent_name?: string
+  to_agent_slug?: string
   created_at?: string
 }
 

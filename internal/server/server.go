@@ -502,6 +502,12 @@ func (s *Server) mountAPIRouter(
 	orch.SetApprovalGate(newApprovalGateAdapter(deps.DB, s.journalWriter))
 	orch.SetPresenceTracker(newPresenceAdapter(deps.DB, s.journalWriter, logger))
 	orch.SetMemoryMetrics(newMemoryMetricsAdapter(deps.DB))
+	orch.SetPersonalizationAllowed(func(ctx context.Context, workspaceID, userID string) (bool, error) {
+		return memory.PersonalizationAllowed(ctx, deps.DB, workspaceID, userID)
+	})
+	orch.SetUserModelReader(func(ctx context.Context, workspaceID, userID string) (string, error) {
+		return memory.ReadIndexedUserModel(ctx, deps.DB, cfg.Storage.BasePath, workspaceID, userID)
+	})
 	// Episodic embedder resolution. Injection (tests/fakes) wins;
 	// otherwise build an Ollama embedder when Keeper Ollama is
 	// actually configured. Gating on Keeper.Enabled — not just a
@@ -880,7 +886,7 @@ func (s *Server) mountAPIRouter(
 		// runner uses for its own RecordVersion calls — sharing
 		// one blob root means an approve-merge and a cron-merge
 		// of the same content dedupe to the same blob.
-		opts = append(opts, goapi.WithMemoryVersionsBlobRoot(filepath.Join(cfg.Storage.MemoryRoot, "versions")))
+		opts = append(opts, goapi.WithMemoryVersionsBlobRoot(filepath.Join(cfg.Storage.MemoryRoot, "versions")), goapi.WithMemoryInventoryRoot(cfg.Storage.MemoryRoot))
 	}
 	// Hybrid search wiring — reuse the same embedder instance the
 	// episodic recall adapter already uses (single Ollama client

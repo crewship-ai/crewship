@@ -115,6 +115,7 @@ type AgentRunRequest struct {
 	// system jobs), in which case no peer card is injected.
 	RoleTitle      string
 	OpenedByUserID string
+	ChatVisibility string // group conversations never receive a personal opener profile
 
 	// Creator attribution ([4], #810). Captured on missions (v129:
 	// author_agent_id / created_by_user_id) but never threaded into the
@@ -414,16 +415,18 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
-	container      provider.ContainerProvider
-	state          provider.StateProvider
-	convStore      *conversation.Store
-	scrubber       *scrubber.Scrubber
-	logger         *slog.Logger
-	cooldown       *CooldownManager
-	sidecarEnabled bool
-	keeperEnabled  bool
-	ipcBaseURL     string
-	ipcToken       string
+	userModelReader        func(context.Context, string, string) (string, error)
+	personalizationAllowed func(context.Context, string, string) (bool, error)
+	container              provider.ContainerProvider
+	state                  provider.StateProvider
+	convStore              *conversation.Store
+	scrubber               *scrubber.Scrubber
+	logger                 *slog.Logger
+	cooldown               *CooldownManager
+	sidecarEnabled         bool
+	keeperEnabled          bool
+	ipcBaseURL             string
+	ipcToken               string
 	// localModelBaseURL is the OpenAI-compatible local model endpoint
 	// (cfg.LocalModels.BaseURL) used only as a deprecated fallback when no
 	// ENDPOINT_URL credential resolved a URL (#955); see SetLocalModelBaseURL.
@@ -1493,3 +1496,19 @@ func (o *Orchestrator) ContainerProvider() provider.ContainerProvider {
 // container resources tile can scope its WS stream correctly. Pass empty string
 // if called from a context where workspace is unknown (the register callback
 // short-circuits on empty workspace).
+
+// SetUserModelReader supplies authoritative user/workspace memory. A configured
+// reader returning empty deliberately suppresses obsolete container-local copies.
+func (o *Orchestrator) SetUserModelReader(reader func(context.Context, string, string) (string, error)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.userModelReader = reader
+}
+
+// SetPersonalizationAllowed makes consent authoritative at prompt assembly,
+// even if a previous cleanup could not remove an on-disk profile.
+func (o *Orchestrator) SetPersonalizationAllowed(check func(context.Context, string, string) (bool, error)) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.personalizationAllowed = check
+}

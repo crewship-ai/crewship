@@ -9,6 +9,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Changed
+
+- **Crews & Agents now separates Overview, Work, Team and Memory.** Create and Edit share the same agent and crew forms; advanced runtime settings remain available. Overview shows scoped run metrics, recent outcomes and conversations. Memory reads current knowledge independently of version history and exposes the signed-in user's preferences.
+
+### Security
+
+- ⚠️ **Behaviour change:** agent peer-profile endpoints now allow only the signed-in user's own profile, including for workspace administrators; administrator-wide exports retain their explicit administration gate. Personal profiles are excluded from general memory history and group-chat prompts. Personalization opt-out is checked before prompt assembly, and cross-crew user-model reads follow the authoritative workspace index.
+
+
 ### Added
 
 - **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.

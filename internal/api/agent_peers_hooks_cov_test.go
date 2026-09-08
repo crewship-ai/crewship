@@ -129,7 +129,7 @@ func TestCovPH2GetAgentPeer_StorageNotConfigured(t *testing.T) {
 	h := NewPeerCardHandler(db, newTestLogger(), "")
 	rec := httptest.NewRecorder()
 	h.GetAgentPeer(rec, covPH2PeerReq(http.MethodGet, wsID, userID, map[string]string{
-		"agentId": agentID, "userId": "u1",
+		"agentId": agentID, "userId": userID,
 	}))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no storage: code = %d, want 503 (%s)", rec.Code, rec.Body.String())
@@ -140,7 +140,7 @@ func TestCovPH2GetAgentPeer_AgentNotFound(t *testing.T) {
 	h, _, userID, wsID, _ := covPH2PeerHandler(t)
 	rec := httptest.NewRecorder()
 	h.GetAgentPeer(rec, covPH2PeerReq(http.MethodGet, wsID, userID, map[string]string{
-		"agentId": "ghost", "userId": "u1",
+		"agentId": "ghost", "userId": userID,
 	}))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown agent: code = %d, want 404 (%s)", rec.Code, rec.Body.String())
@@ -152,7 +152,7 @@ func TestCovPH2GetAgentPeer_AgentNoCrew(t *testing.T) {
 	solo := seedAgentRow(t, db, "agent-solo", wsID, "", "Solo", "solo", "COORDINATOR")
 	rec := httptest.NewRecorder()
 	h.GetAgentPeer(rec, covPH2PeerReq(http.MethodGet, wsID, userID, map[string]string{
-		"agentId": solo, "userId": "u1",
+		"agentId": solo, "userId": userID,
 	}))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("crewless agent: code = %d, want 409 (%s)", rec.Code, rec.Body.String())
@@ -172,7 +172,7 @@ func TestCovPH2DeleteAgentPeer_StorageNotConfigured(t *testing.T) {
 	h := NewPeerCardHandler(db, newTestLogger(), "")
 	rec := httptest.NewRecorder()
 	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, userID, map[string]string{
-		"agentId": agentID, "userId": "u1",
+		"agentId": agentID, "userId": userID,
 	}))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("no storage: code = %d, want 503 (%s)", rec.Code, rec.Body.String())
@@ -183,7 +183,7 @@ func TestCovPH2DeleteAgentPeer_AgentNotFound(t *testing.T) {
 	h, _, userID, wsID, _ := covPH2PeerHandler(t)
 	rec := httptest.NewRecorder()
 	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, userID, map[string]string{
-		"agentId": "ghost", "userId": "u1",
+		"agentId": "ghost", "userId": userID,
 	}))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown agent: code = %d, want 404 (%s)", rec.Code, rec.Body.String())
@@ -195,7 +195,7 @@ func TestCovPH2DeleteAgentPeer_AgentNoCrew(t *testing.T) {
 	solo := seedAgentRow(t, db, "agent-solo", wsID, "", "Solo", "solo", "COORDINATOR")
 	rec := httptest.NewRecorder()
 	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, userID, map[string]string{
-		"agentId": solo, "userId": "u1",
+		"agentId": solo, "userId": userID,
 	}))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("crewless agent: code = %d, want 409 (%s)", rec.Code, rec.Body.String())
@@ -203,7 +203,7 @@ func TestCovPH2DeleteAgentPeer_AgentNoCrew(t *testing.T) {
 }
 
 func TestCovPH2DeleteAgentPeer_IdempotentMissingCard(t *testing.T) {
-	h, db, userID, wsID, agentID := covPH2PeerHandler(t)
+	h, db, _, wsID, agentID := covPH2PeerHandler(t)
 	// The agent's peers/ dir must exist for the file lock to open, but
 	// the card file itself is absent — DeletePeerCard removes a missing
 	// file cleanly (os.Remove tolerates fs.ErrNotExist), so the handler
@@ -218,7 +218,7 @@ func TestCovPH2DeleteAgentPeer_IdempotentMissingCard(t *testing.T) {
 		t.Fatalf("seed target user: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, userID, map[string]string{
+	h.DeleteAgentPeer(rec, covPH2PeerReq(http.MethodDelete, wsID, "u-noCard", map[string]string{
 		"agentId": agentID, "userId": "u-noCard",
 	}))
 	if rec.Code != http.StatusNoContent {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -48,7 +48,7 @@ import {
   useAgentAccessCatalog,
   type AgentAccessSelection,
 } from "./agent-access"
-import { MODELS_BY_PROVIDER, defaultModelForProvider, isKnownModel } from "./llm-models"
+import { defaultModelForProvider, isKnownModel } from "./llm-models"
 import {
   applyPersonaDefaults,
   initialAgentDraft,
@@ -57,7 +57,13 @@ import {
   resolveFinalPrompt,
   type CrewLite,
 } from "./types"
+import { AskFormsBuilder } from "../ask-forms-builder"
+import { PersonaDraft } from "../persona-draft"
+import { ConfigModel } from "../canvas/config-model"
+import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
+import type { AgentRecord } from "../agent-canvas-tabs/types"
 import type { LLMProvider } from "@/lib/entities"
+import type { AgentDraft } from "./types"
 
 export interface CreateAgentDialogProps {
   workspaceId: string
@@ -66,6 +72,7 @@ export interface CreateAgentDialogProps {
   defaultCrewSlug: string | null
   crews: CrewLite[]
   onCreated: (slug: string) => void
+  agent?: AgentRecord
 }
 
 /** Shared input/select styling. Centralised so the form looks consistent
@@ -109,13 +116,19 @@ export function CreateAgentDialog({
   open,
   onOpenChange,
   defaultCrewSlug,
-  crews,
+  crews: listedCrews,
   onCreated,
+  agent,
 }: CreateAgentDialogProps) {
+  const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
+    ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
   const router = useRouter()
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
+  const [persona, setPersona] = useState<string | null | undefined>(undefined)
+  const [baseline, setBaseline] = useState<AgentDraft | null>(null)
+  const [extra, setExtra] = useState<Record<string, unknown>>({})
   const [submitting, setSubmitting] = useState(false)
   // Ref for the in-flight check inside submit() — using `submitting` state
   // there would close over a stale value and let a fast double-fire through
@@ -144,7 +157,11 @@ export function CreateAgentDialog({
   const wasOpenRef = useRef(false)
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setDraft(initialAgentDraft(defaultCrewSlugRef.current))
+      const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
+      setDraft(next)
+      setBaseline(next)
+      setExtra({})
+      setPersona(undefined)
       setBaselineCrewSlug(defaultCrewSlugRef.current)
       setSubmitting(false)
       setBrowserOpen(false)
@@ -152,7 +169,7 @@ export function CreateAgentDialog({
       setRefusal(null)
     }
     wasOpenRef.current = open
-  }, [open])
+  }, [open, agent, crews])
 
   // Auto-derive slug from name unless user has manually edited it.
   useEffect(() => {
@@ -258,12 +275,15 @@ export function CreateAgentDialog({
         tool_profile: draft.toolProfile,
         memory_enabled: draft.memoryEnabled,
       }
+      const payload: Record<string, unknown> = agent && baseline
+        ? { ...Object.fromEntries(Object.entries(body).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(agentBody(baseline, crews)[key]))), ...extra }
+        : { ...body, ...extra }
       const res = await apiFetch(
-        `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/agents${agent ? `/${agent.id}` : ""}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
-          method: "POST",
+          method: agent ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         },
       )
       if (!res.ok) {
@@ -271,13 +291,17 @@ export function CreateAgentDialog({
         throw new Error(text || `HTTP ${res.status}`)
       }
       const created = await res.json()
+      if (agent && persona !== undefined) {
+        const response = await apiFetch(`/api/v1/agents/${agent.id}/persona?workspace_id=${encodeURIComponent(workspaceId)}`, { method: persona === null ? "DELETE" : "PUT", headers: { "Content-Type": "application/json" }, body: persona === null ? undefined : JSON.stringify({ content: persona }) })
+        if (!response.ok) throw new Error(`Agent settings saved, but persona could not be saved (${response.status}). Your persona draft is retained; retry Save changes.`)
+      }
 
       // Bindings are keyed on an agent that exists, so they are spent here
       // rather than in the body above. Failures are reported, not thrown: the
       // agent is created either way, and an agent quietly missing the tool it
       // was created for is worse than being told where to add it.
       const failed =
-        access.integrationIds.length || access.channelIds.length
+        !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
           : []
 
@@ -286,20 +310,20 @@ export function CreateAgentDialog({
           description: `${failed.join(", ")} — add them from the agent's canvas.`,
         })
       } else {
-        toast.success(`Agent "${created.name}" created`)
+        toast.success(`Agent "${created.name}" ${agent ? "updated" : "created"}`)
       }
       onOpenChange(false)
       onCreated(created.slug)
       router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
     } catch (err) {
-      const message = `Could not create agent: ${err instanceof Error ? err.message : String(err)}`
+      const message = `Could not ${agent ? "save" : "create"} agent: ${err instanceof Error ? err.message : String(err)}`
       toast.error(message)
       setRefusal(message)
     } finally {
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, persona, baseline, extra, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -313,7 +337,7 @@ export function CreateAgentDialog({
         open={open}
         onOpenChange={onOpenChange}
         size="lg"
-        dirty={isDraftDirty(draft, baselineCrewSlug)}
+        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
         discardLabel="this agent"
         onSubmit={() => {
           // ⌘↵ inside the picker closes the picker; it must not also create
@@ -327,11 +351,11 @@ export function CreateAgentDialog({
           concept="crews"
           accent="purple"
           context={crewName}
-          title={pickerOpen ? "Avatar — new agent" : "New agent"}
+          title={pickerOpen ? (agent ? `Avatar — ${agent.name}` : "Avatar — new agent") : agent ? `Edit ${agent.name}` : "New agent"}
           description={
             pickerOpen
               ? "Pick a style and a seed. The same seed always produces the same face."
-              : "Pick a template to start fast, or fill in the basics."
+              : agent ? "Changes are saved together when you choose Save changes." : "Pick a template to start fast, or fill in the basics."
           }
           onBack={pickerOpen ? () => setPickerOpen(false) : undefined}
           onClose={() => onOpenChange(false)}
@@ -608,16 +632,17 @@ export function CreateAgentDialog({
             </CreateSurfaceField>
           </CreateSurfaceSection>
 
+          {agent && draft.crewSlug !== baseline?.crewSlug && <CreateSurfaceNotice tone="warn">Moving this agent changes its inherited access, shared knowledge, and runtime environment.</CreateSurfaceNotice>}
           {/* ─── Persona ─── */}
           <CreateSurfaceSection
-            title="Persona"
+            title="Instructions"
             icon={Brain}
             accent="purple"
             hint="how should this agent behave"
           >
             <textarea
               id="agent-persona"
-              aria-label="Persona system prompt"
+              aria-label="Agent system prompt"
               value={
                 draft.editedPersonaPrompt !== null
                   ? draft.editedPersonaPrompt
@@ -675,18 +700,7 @@ WORK STYLE: …`}
 
           {/* ─── Runtime (model + memory only — most common) ─── */}
           <CreateSurfaceSection title="Runtime" icon={Cpu} accent="teal">
-            <CreateSurfaceField
-              label="Model"
-              htmlFor="agent-model"
-              hint={`from ${draft.llmProvider.toLowerCase()}`}
-            >
-              <ModelInput
-                id="agent-model"
-                provider={draft.llmProvider}
-                value={draft.llmModel}
-                onChange={(model) => setDraft({ ...draft, llmModel: model })}
-              />
-            </CreateSurfaceField>
+            <ConfigModel draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={(model) => setDraft({ ...draft, llmModel: model })} />
 
             {/* "on" / "off" restated the switch beside it and said nothing
                 about what is being switched. The agent canvas already words
@@ -700,7 +714,7 @@ WORK STYLE: …`}
               hint={
                 draft.memoryEnabled
                   ? "Notes it keeps and can search later — AGENT.md, a daily journal, lessons."
-                  : "Without it every session starts from nothing."
+                  : "Saved knowledge is not injected into runs. Conversation history and episodic recall are separate."
               }
               control={
                 <Switch
@@ -720,11 +734,11 @@ WORK STYLE: …`}
               container should not hold the same integrations. The crew's
               Container step decides what is INSTALLED; this decides what this
               agent may CALL and where it may post. */}
-          <AgentAccessSection
+          {!agent && <AgentAccessSection
             catalog={accessCatalog}
             selection={access}
             onChange={setAccess}
-          />
+          />}
 
 
           {/* ─── Advanced ───
@@ -857,6 +871,9 @@ WORK STYLE: …`}
               — no API exposes these, so they cannot be set anywhere.
             </p>
           </CreateSurfaceDisclosure>
+          {!agent && <CreateSurfaceDisclosure label="Chat suggestions and forms"><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async (value) => { setExtra((current) => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={(value) => { setExtra((current) => ({ ...current, ask_forms: value })) }} /></CreateSurfaceDisclosure>}
+          {agent && <CreateSurfaceDisclosure label="Persona"><PersonaDraft workspaceId={workspaceId} agentId={agent.id} value={persona} onChange={setPersona} /></CreateSurfaceDisclosure>}
+          {agent && <CreateSurfaceDisclosure label="Chat and additional settings"><ConfigTab supplementalOnly agent={{ ...agent, ...extra }} crews={crews} patch={async (body) => { setExtra((current) => ({ ...current, ...body })) }} onSelectCrew={() => {}} /></CreateSurfaceDisclosure>}
           </div>
             </>
           )}
@@ -867,7 +884,7 @@ WORK STYLE: …`}
         <CreateSurfaceFooter
           hint={validationHint ? <span className="text-warn">{validationHint}</span> : undefined}
           onCancel={() => onOpenChange(false)}
-          primaryLabel={submitting ? "Creating…" : "Create agent"}
+          primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : "Create agent"}
           primaryIcon={ArrowRight}
           primaryDisabled={!valid}
           busy={submitting}
@@ -877,70 +894,23 @@ WORK STYLE: …`}
   )
 }
 
-/** Model picker that adapts to the current provider:
- *    - dropdown listing the curated models for that provider
- *    - "(custom…)" option flips the input into a free-text field, useful for
- *      Ollama where model names are whatever the user has pulled locally,
- *      and for early-access provider models not yet in our list. */
-function ModelInput({
-  id,
-  provider,
-  value,
-  onChange,
-}: {
-  id: string
-  provider: LLMProvider
-  value: string
-  onChange: (model: string) => void
-}) {
-  const known = MODELS_BY_PROVIDER[provider]
-  const isCustom = !known.includes(value)
-
-  if (isCustom) {
-    return (
-      <div className="flex gap-1.5 items-stretch">
-        <input
-          id={id}
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="model-name-tag"
-          className={cn(INPUT_CLASS, "font-mono text-[12px] flex-1")}
-          spellCheck={false}
-        />
-        <button
-          type="button"
-          onClick={() => onChange(defaultModelForProvider(provider))}
-          title="Switch back to the curated list"
-          className="px-2.5 py-1.5 rounded-md text-[11.5px] border border-white/[0.15] hover:bg-white/[0.03] text-foreground/80 whitespace-nowrap"
-        >
-          ← list
-        </button>
-      </div>
-    )
+function draftFromAgent(agent: AgentRecord, crews: CrewLite[]): AgentDraft {
+  return { ...initialAgentDraft(null), name: agent.name, slug: agent.slug, slugTouched: true,
+    crewSlug: crews.find((crew) => crew.id === agent.crew_id)?.slug ?? agent.crew?.slug ?? "",
+    agentRole: agent.agent_role as AgentDraft["agentRole"], roleTitle: agent.role_title ?? "", description: agent.description ?? "",
+    avatarSeed: agent.avatar_seed ?? "", avatarStyle: agent.avatar_style ?? DEFAULT_AVATAR_STYLE,
+    customPrompt: agent.system_prompt ?? "", llmProvider: (agent.llm_provider ?? "ANTHROPIC") as AgentDraft["llmProvider"],
+    llmModel: agent.llm_model ?? "", cliAdapter: agent.cli_adapter as AgentDraft["cliAdapter"],
+    toolProfile: agent.tool_profile as AgentDraft["toolProfile"], timeoutSeconds: agent.timeout_seconds,
+    memoryEnabled: agent.memory_enabled, leadMode: (agent.lead_mode ?? "active") as AgentDraft["leadMode"],
   }
-  return (
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === "__custom__") {
-          // Empty seed so the user knows it's their turn to type.
-          onChange("")
-          return
-        }
-        onChange(e.target.value)
-      }}
-      className={INPUT_CLASS}
-    >
-      {known.map((m) => (
-        <option key={m} value={m}>
-          {m}
-        </option>
-      ))}
-      <option value="__custom__" className="italic">
-        — custom…
-      </option>
-    </select>
-  )
+}
+function agentBody(draft: AgentDraft, crews: CrewLite[]): Record<string, unknown> {
+  return { name: draft.name.trim(), slug: draft.slug.trim(), agent_role: draft.agentRole,
+    crew_id: crews.find((crew) => crew.slug === draft.crewSlug)?.id ?? null,
+    description: draft.description.trim() || null, role_title: draft.roleTitle.trim() || null,
+    lead_mode: draft.agentRole === "LEAD" ? draft.leadMode : null, cli_adapter: draft.cliAdapter,
+    llm_provider: draft.llmProvider, llm_model: draft.llmModel, system_prompt: resolveFinalPrompt(draft) || null,
+    avatar_seed: draft.avatarSeed.trim() || null, avatar_style: draft.avatarStyle,
+    timeout_seconds: draft.timeoutSeconds, tool_profile: draft.toolProfile, memory_enabled: draft.memoryEnabled }
 }

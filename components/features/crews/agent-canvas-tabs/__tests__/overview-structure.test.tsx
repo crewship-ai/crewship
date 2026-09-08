@@ -68,7 +68,7 @@ function renderTab() {
 describe("agent overview structure", () => {
   it("groups the cards under the question each answers", () => {
     renderTab()
-    for (const band of ["What it holds", "What it can do", "What it has been up to"]) {
+    for (const band of ["What it holds", "Capabilities", "What it has been up to"]) {
       expect(screen.getByRole("heading", { name: band })).toBeInTheDocument()
     }
   })
@@ -82,7 +82,7 @@ describe("agent overview structure", () => {
         .filter((t) => t !== title)
     }
     expect(bandOf("What it holds")).toEqual(["Issues", "Routines", "Triggers", "Credentials"])
-    expect(bandOf("What it can do")).toEqual(["Skills", "Tools", "Channels"])
+    expect(bandOf("Capabilities")).toEqual(["Skills", "Tools", "Channels"])
     expect(bandOf("What it has been up to")).toEqual(["Runs", "Sessions"])
   })
 

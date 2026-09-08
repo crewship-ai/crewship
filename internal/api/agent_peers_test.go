@@ -95,7 +95,7 @@ func TestPeers_ListAndGetAndDelete(t *testing.T) {
 	r.seedCard(t, "u1", "Pavel notes")
 	r.seedCard(t, "u2", "Ivana notes")
 
-	// List → 2 entries.
+	// List exposes only the authenticated subject, not other crew members.
 	rec := httptest.NewRecorder()
 	r.h.ListAgentPeers(rec, r.req(t, http.MethodGet, "", map[string]string{"agentId": r.agentID}))
 	if rec.Code != http.StatusOK {
@@ -103,8 +103,8 @@ func TestPeers_ListAndGetAndDelete(t *testing.T) {
 	}
 	var got map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got["peers"].([]any)) != 2 {
-		t.Errorf("expected 2 peers; got %d", len(got["peers"].([]any)))
+	if len(got["peers"].([]any)) != 1 {
+		t.Errorf("expected only my peer card; got %d", len(got["peers"].([]any)))
 	}
 
 	// Get u1 → content + audit row.
@@ -158,7 +158,7 @@ func TestPeers_GetWithNoCardReturns404(t *testing.T) {
 	r := peerTestSetup(t)
 	rec := httptest.NewRecorder()
 	r.h.GetAgentPeer(rec, r.req(t, http.MethodGet, "", map[string]string{
-		"agentId": r.agentID, "userId": "u_nobody",
+		"agentId": r.agentID, "userId": r.userID,
 	}))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("expected 404; got %d", rec.Code)

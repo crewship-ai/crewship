@@ -139,9 +139,8 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     await waitFor(() => screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
 
     fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
@@ -181,9 +180,8 @@ describe("<CreateCrewDialog> — CreateSurface shell", () => {
     await waitFor(() => screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Start empty/ }))
     fireEvent.click(screen.getByRole("button", { name: /Continue/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
-    await waitFor(() => screen.getByRole("button", { name: /Skip to defaults/ }))
-    fireEvent.click(screen.getByRole("button", { name: /Skip to defaults/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
+    await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
     await waitFor(() => screen.getByRole("button", { name: /Create crew/ }))
 
     fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))

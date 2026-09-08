@@ -21,6 +21,7 @@ func NewAgentInboxHandler(db *sql.DB, logger *slog.Logger) *AgentInboxHandler {
 }
 
 type agentInboxResponse struct {
+	Unavailable         []string         `json:"unavailable,omitempty"`
 	ApprovalsPending    int              `json:"approvals_pending"`
 	AssignmentsOpen     int              `json:"assignments_open"`
 	EscalationsOpen     int              `json:"escalations_open"`
@@ -81,6 +82,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM approvals_queue WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'`,
 		workspaceID, agentID).Scan(&resp.ApprovalsPending); err != nil {
 		h.logger.Warn("inbox: approvals count", "err", err, "agent_id", agentID)
+		resp.Unavailable = append(resp.Unavailable, "approvals")
 	}
 
 	// Assignments open (this agent is the recipient, still running or queued)
@@ -88,6 +90,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM assignments WHERE workspace_id = ? AND assigned_to_id = ? AND status IN ('queued', 'running')`,
 		workspaceID, agentID).Scan(&resp.AssignmentsOpen); err != nil {
 		h.logger.Warn("inbox: assignments count", "err", err, "agent_id", agentID)
+		resp.Unavailable = append(resp.Unavailable, "assignments")
 	}
 
 	// Escalations: this agent raised them, not yet finished with.
@@ -114,6 +117,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		escalationStatusResolved, escalationStatusExpired, escalationStatusCancelled,
 	).Scan(&resp.EscalationsOpen); err != nil {
 		h.logger.Warn("inbox: escalations count", "err", err, "agent_id", agentID)
+		resp.Unavailable = append(resp.Unavailable, "escalations")
 	}
 
 	// Peer messages involving this agent (either direction), 20 most recent
@@ -134,6 +138,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		`, workspaceID, crewID.String, agentID, agentID)
 		if err != nil {
 			h.logger.Warn("inbox: peer messages", "err", err, "agent_id", agentID)
+			resp.Unavailable = append(resp.Unavailable, "peers")
 		} else {
 			defer rows.Close()
 			for rows.Next() {
@@ -147,6 +152,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 					&pm.Question, &response, &pm.Status, &pm.CreatedAt,
 					&fromID, &escalated, &duration); err != nil {
 					h.logger.Warn("inbox: peer messages scan", "err", err, "agent_id", agentID)
+					resp.Unavailable = append(resp.Unavailable, "peers")
 					continue
 				}
 				if fromID == agentID {
@@ -167,6 +173,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := rows.Err(); err != nil {
 				h.logger.Warn("inbox: peer messages iteration", "err", err, "agent_id", agentID)
+				resp.Unavailable = append(resp.Unavailable, "peers")
 			}
 		}
 	}
@@ -185,6 +192,7 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		WHERE workspace_id = ? AND agent_id = ? AND created_at >= ?
 	`, workspaceID, agentID, monthStart).Scan(&costUSD, &callCount, &tokenTotal); err != nil {
 		h.logger.Debug("inbox: cost ledger (may be missing table)", "err", err, "agent_id", agentID)
+		resp.Unavailable = append(resp.Unavailable, "cost")
 	} else {
 		resp.CostUSDThisMonth = costUSD.Float64
 		resp.LLMCallsThisMonth = int(callCount.Int64)

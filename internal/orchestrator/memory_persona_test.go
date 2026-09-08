@@ -208,3 +208,62 @@ func TestBuildPeerCardBlock_RequiresWorkspace(t *testing.T) {
 		t.Errorf("expected empty when WorkspaceID is unset; got %q", got)
 	}
 }
+
+func TestPersonalMemory_GroupDoesNotInjectOpener(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/shared/.memory/users/" + slug + ".md":       "private model",
+		"/crew/agents/alice/.memory/peers/" + slug + ".md": "private peer card",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	called := false
+	o.SetUserModelReader(func(context.Context, string, string) (string, error) {
+		called = true
+		return "private canonical model", nil
+	})
+	req := AgentRunRequest{AgentSlug: "alice", ContainerID: "c1", WorkspaceID: "ws1", OpenedByUserID: "u1", ChatVisibility: "group"}
+	if got := o.buildUserModelBlock(context.Background(), req); got != "" {
+		t.Fatal("group received model")
+	}
+	if got := o.buildPeerCardBlock(context.Background(), req); got != "" {
+		t.Fatal("group received peer card")
+	}
+	if called {
+		t.Fatal("group read personal data")
+	}
+}
+func TestPersonalMemory_IndexedModelOverridesLocalCopy(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{"/crew/shared/.memory/users/" + slug + ".md": "obsolete local copy"})
+	o := New(mc, newMemState(), slog.Default())
+	canonical := "current workspace preference"
+	o.SetUserModelReader(func(_ context.Context, ws, user string) (string, error) {
+		if ws != "ws1" || user != "u1" {
+			t.Fatal("wrong subject")
+		}
+		return canonical, nil
+	})
+	req := AgentRunRequest{AgentSlug: "alice", ContainerID: "another-crew", WorkspaceID: "ws1", OpenedByUserID: "u1"}
+	got := o.buildUserModelBlock(context.Background(), req)
+	if !strings.Contains(got, canonical) || strings.Contains(got, "obsolete") {
+		t.Fatalf("wrong model: %s", got)
+	}
+	canonical = ""
+	if got := o.buildUserModelBlock(context.Background(), req); got != "" {
+		t.Fatal("deleted indexed model fell back to obsolete copy")
+	}
+}
+
+func TestPersonalMemory_OptOutBlocksStaleFiles(t *testing.T) {
+	slug := memory.UserSlug("u1", "ws1")
+	mc := mockContainerForMemory(map[string]string{
+		"/crew/shared/.memory/users/" + slug + ".md":       "stale model",
+		"/crew/agents/alice/.memory/peers/" + slug + ".md": "stale peer",
+	})
+	o := New(mc, newMemState(), slog.Default())
+	o.SetPersonalizationAllowed(func(context.Context, string, string) (bool, error) { return false, nil })
+	req := AgentRunRequest{AgentSlug: "alice", ContainerID: "c1", WorkspaceID: "ws1", OpenedByUserID: "u1"}
+	if o.buildPeerCardBlock(context.Background(), req) != "" || o.buildUserModelBlock(context.Background(), req) != "" {
+		t.Fatal("opt-out injected stale personal memory")
+	}
+}

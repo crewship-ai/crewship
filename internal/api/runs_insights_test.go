@@ -165,3 +165,25 @@ func insightCat(rows []journalCategory, key string) (total, failed int, ok bool)
 	}
 	return 0, 0, false
 }
+
+func TestRunHandler_InsightsScopesBeforeAggregation(t *testing.T) {
+	f := newRunsTestFixture(t)
+	now := time.Now().UTC().Add(-time.Hour)
+	f.emitRunRowFull(t, "scoped-success", f.agent, "COMPLETED", "manual", "", now, time.Minute)
+	otherCrew := seedCrewRow(t, f.h.db, "scope-crew", f.wsID, "Other", "scope-other")
+	otherAgent := seedAgentRow(t, f.h.db, "scope-agent", f.wsID, otherCrew, "Other", "scope-agent", "AGENT")
+	f.emitRunRowFull(t, "other-failure", otherAgent, "FAILED", "manual", "", now, time.Minute)
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/runs/insights?window=7d&agent_id="+f.agent, nil), f.user, f.wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	f.h.Insights(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+	var body runInsightsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Totals.Total != 1 || body.Totals.Succeeded != 1 || body.Totals.Failed != 0 {
+		t.Fatalf("scope leaked: %+v", body.Totals)
+	}
+}

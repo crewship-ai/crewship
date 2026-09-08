@@ -68,13 +68,13 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 	request("CoreAgentCreateRequestV2", object(map[string]any{
 		"name": str(), "slug": str(), "crew_id": nullable(str()), "description": nullable(str()), "role_title": nullable(str()),
 		"agent_role": enum("AGENT", "LEAD"), "lead_mode": nullable(enum("active", "passive")), "cli_adapter": enum("CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"),
-		"llm_provider": nullable(enum("ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA")), "llm_model": nullable(str()), "system_prompt": nullable(str()),
+		"llm_provider": nullable(enum("ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA")), "llm_model": nullable(str()), "system_prompt": nullable(str()), "suggested_prompts": nullable(str()), "ask_forms": nullable(str()),
 		"avatar_seed": nullable(str()), "avatar_style": nullable(str()), "timeout_seconds": integer(), "tool_profile": enum("MINIMAL", "CODING", "FULL"), "memory_enabled": boolean(),
 	}, "name", "slug", "agent_role", "cli_adapter", "timeout_seconds", "tool_profile", "memory_enabled"))
 	request("CoreAgentUpdateRequestV2", object(map[string]any{
 		"name": str(), "slug": str(), "description": nullable(str()), "role_title": nullable(str()), "agent_role": enum("AGENT", "LEAD"), "lead_mode": enum("active", "passive"),
 		"cli_adapter": enum("CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"), "llm_provider": nullable(enum("ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA")), "llm_model": nullable(str()),
-		"system_prompt": nullable(str()), "avatar_seed": nullable(str()), "avatar_style": nullable(str()), "timeout_seconds": integer(), "tool_profile": enum("MINIMAL", "CODING", "FULL"), "memory_enabled": boolean(),
+		"system_prompt": nullable(str()), "suggested_prompts": nullable(str()), "ask_forms": nullable(str()), "avatar_seed": nullable(str()), "avatar_style": nullable(str()), "timeout_seconds": integer(), "tool_profile": enum("MINIMAL", "CODING", "FULL"), "memory_enabled": boolean(),
 		"cli_tools": nullable(str()), "crew_id": nullable(str()), "schedule_cron": nullable(str()), "schedule_prompt": nullable(str()), "schedule_enabled": boolean(), "mcp_config_json": nullable(str()), "webhook_require_timestamp": boolean(),
 	}))
 

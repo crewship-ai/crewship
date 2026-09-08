@@ -90,6 +90,7 @@ func (info ChatInfo) ToAgentRunRequest(o AgentRunOverrides) orchestrator.AgentRu
 		PreferredLanguage:     info.PreferredLanguage,
 		Skills:                info.InstalledSkills,
 		OpenedByUserID:        info.OpenedByUserID,
+		ChatVisibility:        info.Visibility,
 		RoleTitle:             info.RoleTitle,
 		// #810 — HITL gate mode from crew policy (resolver-populated) and
 		// creator attribution from the dispatching caller. Setting these in

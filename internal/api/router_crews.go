@@ -387,6 +387,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// surfaces use so the suggest endpoint stays consistent with
 	// other agent-initiated actions.
 	persona := NewPersonaHandler(r.db, r.logger, r.outputBasePath, r.PolicyResolver())
+	persona.workspaceMemoryRoot = r.memoryInventoryRoot
+	r.mux.Handle("GET /api/v1/agents/{agentId}/memory", authed(wsCtx(http.HandlerFunc(persona.AgentMemoryInventory))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/memory", authed(wsCtx(http.HandlerFunc(persona.CrewMemoryInventory))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersona))))
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/persona", roleCreate, persona.PutAgentPersona)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/persona", roleCreate, persona.DeleteAgentPersona)

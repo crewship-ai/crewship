@@ -128,3 +128,31 @@ func TestIssueList_CarriesAssigneeSlug(t *testing.T) {
 		t.Fatalf("assignee_slug missing or wrong; body=%s", rr.Body.String())
 	}
 }
+
+func TestIssueList_StatusCountsBeforePagination(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := newTestIssueHandler(t)
+	for i := 0; i < 7; i++ {
+		seedIssue(t, h.db, wsID, crewID, leadID, "COUNT-"+strconv.Itoa(i), "BACKLOG")
+	}
+	seedIssue(t, h.db, wsID, crewID, leadID, "COUNT-8", "IN_PROGRESS")
+	rr := httptest.NewRecorder()
+	h.List(rr, issueListRequest(t, userID, wsID, "?counts=1&limit=1&crew_id="+crewID))
+	if rr.Code != 200 {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+	var counts map[string]int
+	if err := json.Unmarshal([]byte(rr.Header().Get("X-Status-Counts")), &counts); err != nil {
+		t.Fatal(err)
+	}
+	if counts["BACKLOG"] != 7 || counts["IN_PROGRESS"] != 1 {
+		t.Fatalf("page counted as whole: %v", counts)
+	}
+	rr = httptest.NewRecorder()
+	h.List(rr, issueListRequest(t, userID, wsID, "?counts=1&limit=1&crew_id=other"))
+	if err := json.Unmarshal([]byte(rr.Header().Get("X-Status-Counts")), &counts); err != nil {
+		t.Fatal(err)
+	}
+	if headerInt(t, rr, "X-Total-Count") != 0 {
+		t.Fatal("crew scope leaked")
+	}
+}
