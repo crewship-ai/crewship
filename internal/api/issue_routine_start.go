@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type issueRoutineDispatchKey struct{}
@@ -65,7 +66,7 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	executionID, runID := generateCUID(), generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	_, err = tx.ExecContext(r.Context(), `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,routine_run_id,created_at,updated_at) SELECT ?,mission_id,revision,brief_revision,'working',?,?,?,? FROM issue_work WHERE mission_id=?`, executionID, leadID, runID, now, now, missionID)
 	if err != nil {
 		internalError(w, r, h.logger, "start routine: execution", err)
@@ -86,7 +87,7 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 	}
 	fail := func(cause error) {
 		ctx := context.Background()
-		stamp := time.Now().UTC().Format(time.RFC3339Nano)
+		stamp := tsformat.Format(time.Now())
 		// Guard the execution so a late error cannot overwrite a human handoff.
 		_, updateErr := h.db.ExecContext(ctx, `UPDATE missions SET status='FAILED',updated_at=? WHERE id=? AND status='IN_PROGRESS' AND EXISTS(SELECT 1 FROM issue_executions WHERE id=? AND stage='working')`, stamp, missionID, executionID)
 		if updateErr != nil {

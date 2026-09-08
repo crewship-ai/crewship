@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/untrusted"
 )
 
@@ -43,7 +44,7 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 	if status != "IN_PROGRESS" || mode == "human" {
 		return true, nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	if brief != currentBrief || work != currentWork || stage == "superseded" {
 		return true, e.settleIssueExecution(ctx, tx, ms, id, "superseded", "TODO", "The assignment or handoff changed. Start a new execution to review the current revision.", now)
 	}
