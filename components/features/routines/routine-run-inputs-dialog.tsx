@@ -86,13 +86,15 @@ export function RoutineRunInputsDialog({
   )
 }
 
-function InputsForm({
+export function InputsForm({
   inputs,
   submitting,
   onCancel,
   onRun,
+  submitLabel = "Run",
 }: {
   inputs: RoutineInputSpec[]
+  submitLabel?: string
   submitting?: boolean
   onCancel: () => void
   onRun: (inputs: Record<string, unknown>) => void
@@ -159,7 +161,7 @@ function InputsForm({
           Cancel
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Running…" : "Run"}
+          {submitting ? (submitLabel === "Run" ? "Running…" : "Scheduling…") : submitLabel}
         </Button>
       </DialogFooter>
     </form>

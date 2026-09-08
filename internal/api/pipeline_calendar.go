@@ -65,16 +65,37 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			truncated = true
 		}
 	}
-	pending, err := pipeline.NewPendingRunStore(h.db).ListPending(r.Context(), ws, 1000)
+	// Filter before limiting: the generic pending list caps at 200 and falls
+	// back to 50 for larger requests, hiding later months in busy workspaces.
+	pending, err := h.db.QueryContext(r.Context(), `SELECT q.id,q.pipeline_slug,COALESCE(p.name,q.pipeline_slug),q.fire_at
+ FROM pending_runs q LEFT JOIN pipelines p ON p.id=q.pipeline_id AND p.workspace_id=q.workspace_id
+ WHERE q.workspace_id=? AND q.status='pending' AND julianday(q.fire_at)>=julianday(?) AND julianday(q.fire_at)<julianday(?)
+ ORDER BY julianday(q.fire_at),q.id LIMIT 1001`, ws, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	if err != nil {
 		replyError(w, 500, "load pending runs")
 		return
 	}
-	for _, p := range pending {
-		if !p.FireAt.Before(start) && p.FireAt.Before(end) {
-			events = append(events, map[string]any{"id": p.ID, "kind": "pending", "at": p.FireAt.Format(time.RFC3339), "slug": p.PipelineSlug, "name": p.PipelineSlug})
+	pendingCount := 0
+	for pending.Next() {
+		var id, slug, name, at string
+		if err := pending.Scan(&id, &slug, &name, &at); err != nil {
+			pending.Close()
+			replyError(w, 500, "read pending runs")
+			return
 		}
+		pendingCount++
+		if pendingCount > 1000 {
+			truncated = true
+			break
+		}
+		events = append(events, map[string]any{"id": id, "kind": "pending", "at": at, "slug": slug, "name": name})
 	}
+	if err := pending.Err(); err != nil {
+		pending.Close()
+		replyError(w, 500, "read pending runs")
+		return
+	}
+	pending.Close()
 	rows, err := h.db.QueryContext(r.Context(), `SELECT r.id,r.pipeline_slug,COALESCE(p.name,r.pipeline_slug),r.started_at,r.status,COALESCE(r.outcome,'') FROM pipeline_runs r LEFT JOIN pipelines p ON p.id=r.pipeline_id WHERE r.workspace_id=? AND julianday(r.started_at)>=julianday(?) AND julianday(r.started_at)<julianday(?) ORDER BY r.started_at LIMIT 1001`, ws, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	if err != nil {
 		replyError(w, 500, "load calendar runs")

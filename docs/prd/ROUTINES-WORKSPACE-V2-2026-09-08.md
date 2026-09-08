@@ -269,3 +269,25 @@ Release fixtures using reserved test-routines-/test-issue- prefixes are hidden
 from the normal explorer/overview/calendar unless Show test recipes is enabled.
 They remain addressable, clearly marked, and unmodified. This prefix convention
 is presentation filtering, not authorization or a new database lifecycle state.
+
+## Full calendar navigation and date-based scheduling
+
+User-approved addition: Day / 3 days / Week / Month / Year, Today, previous/next,
+direct date navigation and routine identities on calendar entries. Monday starts
+a week. Day/3-day/week use hour rows with independently clickable slots; month
+and year dates open Schedule a routine. Year month headings drill into a month.
+All views retain the existing explorer and gray card design. Calendar position
+is linkable with tab=calendar, calendar=<view>, date=YYYY-MM-DD.
+
+The scheduling dialog chooses an active existing recipe, date, local time and
+typed declared inputs. It creates an actual fire_at pending run through the
+existing Run API, refreshes only after a confirmed pending_id, and preserves
+errors without claiming success. Repeating schedules remain in the recipe Plan.
+The displayed timezone is the browser's local timezone; nonexistent DST hours
+and past times are refused. Entries represent starts, not invented durations.
+
+Year queries twelve monthly windows with at most three simultaneous requests,
+respecting the existing 32-day API bound. The pending-run calendar query now
+filters by workspace AND displayed interval before limiting. The generic list's
+implicit fallback to 50 rows previously hid distant dates. Dense responses mark
+truncated explicitly. No migration or separate calendar database is introduced.
