@@ -365,6 +365,38 @@ func TestPaymaster_SubscriptionUsage_EmptyHappyPath(t *testing.T) {
 	if _, ok := body["until"]; !ok {
 		t.Error("response missing 'until'")
 	}
+	for _, key := range []string{"rows", "logins"} {
+		if _, ok := body[key].([]any); !ok {
+			t.Errorf("%s must be an array, got %#v", key, body[key])
+		}
+	}
+}
+
+func TestPaymaster_SubscriptionUsage_LoginLookupFailurePreservesRows(t *testing.T) {
+	h := newPaymasterTestHandler(t)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+	insertLedger(t, h, ledgerRow{id: "subscription", wsID: wsID, provider: "openai", model: "gpt-5.5", ts: time.Now().UTC().Add(-time.Minute)})
+	if _, err := h.db.ExecContext(context.Background(), `UPDATE cost_ledger SET billing_mode = 'flat_rate', subscription_plan = 'ChatGPT Plus' WHERE id = 'subscription'`); err != nil {
+		t.Fatal(err)
+	}
+	// Break only account enrichment in this isolated test database.
+	if _, err := h.db.ExecContext(context.Background(), `ALTER TABLE credentials RENAME TO credentials_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/paymaster/subscriptions", nil), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.SubscriptionUsage(rr, req)
+	var body struct {
+		Rows   []json.RawMessage `json:"rows"`
+		Logins []json.RawMessage `json:"logins"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || len(body.Rows) != 1 || body.Logins == nil || len(body.Logins) != 0 {
+		t.Fatalf("lost usage or invalid login array: %d %s", rr.Code, rr.Body.String())
+	}
 }
 
 // ---- parseWindow ----

@@ -45,7 +45,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	}
 	missionSpend := object(map[string]any{"mission_id": str(), "cost_usd": number(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "first_ts": dateTime(), "last_ts": dateTime()})
 	topPaymaster := object(map[string]any{"scope_kind": str(), "scope_id": str(), "cost_usd": number(), "call_count": integer()})
-	subscription := object(map[string]any{"subscription_plan": str(), "provider": str(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "last_ts": dateTime()})
+	subscription := object(map[string]any{"credential_id": str(), "subscription_plan": str(), "provider": str(), "call_count": integer(), "input_tokens": integer(), "output_tokens": integer(), "last_ts": dateTime()})
 	// Chain graph (GET /api/v1/chains/{anchor}). Flat node/edge lists rather
 	// than a nested tree, because the underlying data is a graph: a run
 	// reached from both its routine and its issue has two parents, and any

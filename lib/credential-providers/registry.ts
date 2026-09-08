@@ -31,6 +31,7 @@
 // nothing matched, not a brand you can choose by name.
 
 import type { ComponentType, SVGProps } from "react"
+import { GrokIcon, GroqIcon, KimiIcon, ZAIIcon, MinimaxIcon } from "./grok-groq-icons"
 // Lucide stands in for brands Simple Icons has no mark for (Microsoft,
 // Amazon, LinkedIn and the rest were pulled upstream over trademark
 // claims). The glyph is generic; the brand's own hex is not, which is
@@ -41,7 +42,7 @@ import {
   Database, FileSignature, FileText, FolderOpen, Gamepad2, GitBranch,
   Image, Landmark, LifeBuoy, LineChart, Mail, Megaphone,
   MonitorSmartphone, NotebookPen, Palette, Phone, Search, Send,
-  Server, ShoppingCart, Sparkles, Table, Video, Waves, Zap,
+  Server, ShoppingCart, Table, Video, Waves,
 } from "lucide-react"
 
 import {
@@ -288,8 +289,11 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "OPENROUTER", label: "OpenRouter", hex: "#94A3B8", Icon: SiOpenrouter as IconComponent, category: "AI", keywords: ["openrouter"], prefixes: ["sk-or-"] },
   // No "grok" keyword: "ngrok" contains it, and AI is walked before
   // DevOps, so every ngrok token would arrive wearing an xAI badge.
-  { key: "XAI", label: "xAI / Grok", hex: "#000000", darkHex: "#FFFFFF", Icon: Sparkles as unknown as IconComponent, category: "AI", keywords: ["xai", "x.ai"] },
-  { key: "GROQ", label: "Groq", hex: "#F55036", Icon: Zap as unknown as IconComponent, category: "AI", keywords: ["groq"], prefixes: ["gsk_"] },
+  { key: "XAI", label: "xAI / Grok", hex: "#000000", darkHex: "#FFFFFF", Icon: GrokIcon, category: "AI", keywords: ["xai", "x.ai"] },
+  { key: "GROQ", label: "Groq", hex: "#F55036", Icon: GroqIcon, category: "AI", keywords: ["groq"], prefixes: ["gsk_"] },
+  { key: "MOONSHOT", label: "Moonshot / Kimi", hex: "#FFFFFF", Icon: KimiIcon, category: "AI", keywords: ["moonshot", "kimi"] },
+  { key: "ZAI", label: "Z.AI", hex: "#FFFFFF", Icon: ZAIIcon, category: "AI", keywords: ["z.ai"] },
+  { key: "MINIMAX", label: "MiniMax", hex: "#FFFFFF", Icon: MinimaxIcon, category: "AI", keywords: ["minimax"] },
   { key: "COHERE", label: "Cohere", hex: "#39594D", darkHex: "#7BAF9B", Icon: Waves as unknown as IconComponent, category: "AI", keywords: ["cohere"] },
   { key: "MIDJOURNEY", label: "Midjourney", hex: "#000000", darkHex: "#FFFFFF", Icon: Image as unknown as IconComponent, category: "AI", keywords: ["midjourney"] },
   { key: "COPILOT", label: "GitHub Copilot", hex: "#000000", darkHex: "#FFFFFF", Icon: SiGithubcopilot as IconComponent, category: "AI", keywords: ["copilot", "githubcopilot"] },

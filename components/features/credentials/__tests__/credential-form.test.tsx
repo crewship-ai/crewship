@@ -256,7 +256,7 @@ describe("brand auto-detection from a pasted value", () => {
     renderForm({ mode: "edit", hideValue: false, initial: { name: "" } })
     // Edit mode appends "(leave empty to keep existing)" to the Value
     // label, so match loosely rather than the exact create-mode string.
-    fireEvent.change(screen.getByLabelText(/^value/i), {
+    fireEvent.change(screen.getByLabelText(/^replace secret value/i), {
       target: { value: "sk-ant-abcdefghijklmnop" },
     })
     expect(nameInput().value).toBe("")
@@ -681,9 +681,9 @@ describe("clicking Test value", () => {
 describe("Advanced toggle button", () => {
   it("opens and closes the advanced section", () => {
     renderForm()
-    fireEvent.click(screen.getByRole("button", { name: /^advanced/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^access & security/i }))
     expect(screen.getByLabelText("Description")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /^advanced/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^access & security/i }))
     expect(screen.queryByLabelText("Description")).not.toBeInTheDocument()
   })
 })

@@ -628,8 +628,10 @@ crun_2d40…        completed  FAILED     live  manual      —                 
 
 `OUTCOME` is the §9.6 routing decision (work package B6, #2349) — `-` when the run
 predates the `outcome` column. It is not the same question `STATUS` answers: a run whose
-process completed cleanly but never reported a recognised outcome shows `FAILED` here
-(`error_message` names it `"no outcome reported"`), and `NEEDS_HUMAN` is the one value
+process completed cleanly but never reported a recognised outcome — while holding an
+`agent_run` step that could have — shows `FAILED` here (`error_message` names it
+`"no outcome reported"`); an agentless routine, which has nobody to report one, shows
+`SUCCEEDED` with no error. `NEEDS_HUMAN` is the one value
 that raises an inbox item (`crewship inbox list --kind run_needs_human`). Full vocabulary:
 [API reference → Issues → Outcome](/api-reference/issues#outcome).
 
@@ -690,7 +692,7 @@ crewship routine active
 
 Backed by `GET /api/v1/workspaces/{ws}/pipelines/runs/active` — the handler note in `internal/api/pipeline_runs.go` flags it as **single-replica scope**: in a multi-replica deployment the response only reflects runs hosted by the replica the request landed on.
 
-**Output columns:** RUN_ID (truncated), SLUG, STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
+**Output columns:** RUN_ID (truncated), SLUG, STATUS (`running`, or `waiting` for a run parked at a waitpoint), STARTED, CANCEL_REQ, CONCURRENCY_KEY. Empty list prints `No active runs.`
 
 Pair with `routine cancel <run_id>` to terminate any of the listed runs.
 

@@ -10,8 +10,17 @@ import (
 )
 
 // codexAdapter wires OpenAI's `codex` CLI (Rust port distributed as the
-// @openai/codex npm package, current as of 0.128.0). Auth is BYO API key via
-// OPENAI_API_KEY.
+// @openai/codex npm package, current as of 0.153.2). Two auth paths (#2428):
+//
+//   - API key: the dummy OPENAI_API_KEY in the env is sent to a custom
+//     model_provider pointing at the sidecar's /openai route, where the real
+//     key is injected (codexDefaultRoute). Codex's own OPENAI_BASE_URL no
+//     longer exists and its built-in `openai` provider cannot be overridden,
+//     so this is the only way the proxy sees the request.
+//   - ChatGPT subscription: $CODEX_HOME/auth.json, rendered from an
+//     AI_CLI_TOKEN credential with provider OPENAI (codex_auth_file.go). No
+//     provider block is emitted — Codex ignores base URLs in that mode and
+//     goes to chatgpt.com through the CONNECT tunnel.
 //
 // Canonical non-interactive form per developers.openai.com/codex/cli/reference
 // is `codex exec --json` — NOT `codex --quiet` (no such flag in the Rust port).
@@ -35,7 +44,13 @@ func (codexAdapter) Name() string { return "CODEX_CLI" }
 func (codexAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
-	cmd := []string{"codex", "exec", "--json"}
+	// --skip-git-repo-check: since the 0.1xx line `codex exec` refuses to
+	// start outside a git repository ("Not inside a trusted directory and
+	// --skip-git-repo-check was not specified", exit 1) — measured on
+	// 0.153.2 during the first live run on crewship-dev (#2428). Agent
+	// workdirs are not repositories unless a task cloned one, and the
+	// sandbox policy below is the safety boundary here, not the repo check.
+	cmd := []string{"codex", "exec", "--json", "--skip-git-repo-check"}
 	model := req.LLMModel
 
 	// Codex supports custom OpenAI Responses providers through its native
@@ -47,7 +62,7 @@ func (codexAdapter) BuildCommand(req AgentRunRequest) []string {
 	// state behind for the next agent sharing this container.
 	if routed, ok := resolveRoutedProvider(req, req.sidecarActive); ok {
 		const providerID = "crewship"
-		baseURL := sidecarProxyOrigin + routed.Spec.PathPrefix
+		baseURL := routed.ProxyBaseURL()
 		cmd = append(cmd,
 			"--config", fmt.Sprintf("model_provider=%q", providerID),
 			"--config", fmt.Sprintf("model_providers.%s.name=%q", providerID, routed.Label),

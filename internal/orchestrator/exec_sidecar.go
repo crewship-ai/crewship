@@ -1299,6 +1299,14 @@ func sortedGranteeIDs(ids []string) []string {
 // where a provider with no descriptor would previously have been forwarded
 // upstream unauthenticated.
 func credTypeToProvider(c Credential) string {
+	// A Codex or Gemini login (#2428) is an OAuth JWT plus a refresh token,
+	// not an API key: injected as a bearer it would be a 401, and loaded here
+	// it would put the refresh token in the sidecar heap for nothing. The
+	// env-var switch below cannot tell — the operator may well have named the
+	// binding OPENAI_API_KEY — so the type+provider check comes first.
+	if credentialOAuthKind(c).fileDelivered() {
+		return ""
+	}
 	// EXCEPT for a provider whose upstream comes from the credential, which the
 	// env-var switch must never claim. AddCredential accepts any syntactically
 	// valid env_var_name for any provider, so an OPENAI_COMPAT credential

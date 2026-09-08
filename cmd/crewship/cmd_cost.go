@@ -54,9 +54,16 @@ Examples:
 			"crews":         crewRows,
 			"subscriptions": subRows,
 		}, func() {
+			// The cost rollups are keyed by id — the ledger groups by
+			// agent_id / crew_id and joins nothing — so "Top spenders" read
+			// `agent/cmtov6c2f010216ea53ca` and "By crew" was a column of
+			// cuids. Resolved for the human sections only; the machine
+			// document above keeps the ids, which is what a script that
+			// cross-references the ledger needs.
+			slugs := fetchWorkspaceSlugs(client)
 			printCostHeader(rng, crewRows)
-			printCostTopSpenders(topRows)
-			printCostByCrew(crewRows)
+			printCostTopSpenders(topRows, slugs)
+			printCostByCrew(crewRows, slugs)
 			printCostSubscriptions(subRows)
 		})
 	},
@@ -70,12 +77,13 @@ type topSpenderRow struct {
 }
 
 type subUsageRow struct {
-	Plan       string  `json:"subscription_plan"`
-	Provider   string  `json:"provider"`
-	CallCount  int64   `json:"call_count"`
-	InTokens   int64   `json:"input_tokens"`
-	OutTokens  int64   `json:"output_tokens"`
-	LastUsedAt *string `json:"last_used_at"`
+	CredentialID string  `json:"credential_id,omitempty"`
+	Plan         string  `json:"subscription_plan"`
+	Provider     string  `json:"provider"`
+	CallCount    int64   `json:"call_count"`
+	InTokens     int64   `json:"input_tokens"`
+	OutTokens    int64   `json:"output_tokens"`
+	LastUsedAt   *string `json:"last_used_at"`
 }
 
 func fetchTopSpenders(c *cli.Client, rng string, limit int) ([]topSpenderRow, error) {
@@ -137,12 +145,28 @@ func fetchSubscriptionUsage(c *cli.Client, rng string) ([]subUsageRow, error) {
 		return nil, err
 	}
 	var body struct {
-		Rows []subUsageRow `json:"rows"`
+		Rows []struct {
+			CredentialID string  `json:"credential_id"`
+			Plan         string  `json:"subscription_plan"`
+			Provider     string  `json:"provider"`
+			CallCount    int64   `json:"call_count"`
+			InTokens     int64   `json:"input_tokens"`
+			OutTokens    int64   `json:"output_tokens"`
+			LastTS       *string `json:"last_ts"`
+		} `json:"rows"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err
 	}
-	return body.Rows, nil
+	rows := make([]subUsageRow, len(body.Rows))
+	for i, row := range body.Rows {
+		rows[i] = subUsageRow{
+			CredentialID: row.CredentialID, Plan: row.Plan, Provider: row.Provider,
+			CallCount: row.CallCount, InTokens: row.InTokens, OutTokens: row.OutTokens,
+			LastUsedAt: row.LastTS,
+		}
+	}
+	return rows, nil
 }
 
 func printCostHeader(rng string, crews []crewSpendRow) {
@@ -161,20 +185,34 @@ func printCostHeader(rng string, crews []crewSpendRow) {
 	fmt.Println(strings.Repeat("─", 64))
 }
 
-func printCostTopSpenders(rows []topSpenderRow) {
+// scopeLabel renders one top-spender scope as "<kind>/<slug>". The kind is
+// kept because the ledger's scope is not always an agent, and a bare slug
+// would stop saying what the row is about.
+func scopeLabel(r topSpenderRow, slugs workspaceSlugs) string {
+	name := r.ScopeID
+	switch r.ScopeKind {
+	case "agent":
+		name = slugs.agent(r.ScopeID)
+	case "crew":
+		name = slugs.crew(r.ScopeID)
+	}
+	return fmt.Sprintf("%s/%s", r.ScopeKind, name)
+}
+
+func printCostTopSpenders(rows []topSpenderRow, slugs workspaceSlugs) {
 	if len(rows) == 0 {
 		return
 	}
 	fmt.Printf("\n%sTop spenders%s\n", cli.Bold, cli.Reset)
 	for i, r := range rows {
-		scope := fmt.Sprintf("%s/%s", r.ScopeKind, r.ScopeID)
+		scope := scopeLabel(r, slugs)
 		fmt.Printf("  %2d. %-44s  %s$%8.4f%s  %d calls\n",
 			i+1, truncateString(scope, 44),
 			cli.Yellow, r.CostUSD, cli.Reset, r.CallCount)
 	}
 }
 
-func printCostByCrew(rows []crewSpendRow) {
+func printCostByCrew(rows []crewSpendRow, slugs workspaceSlugs) {
 	if len(rows) == 0 {
 		return
 	}
@@ -186,8 +224,15 @@ func printCostByCrew(rows []crewSpendRow) {
 
 	fmt.Printf("\n%sBy crew%s\n", cli.Bold, cli.Reset)
 	for _, r := range rows {
+		// An empty crew_id is real: the ledger's GROUP BY coalesces rows
+		// that were never attributed to a crew, and calling that "—" is
+		// truer than printing nothing in the column.
+		crew := slugs.crew(r.CrewID)
+		if crew == "" {
+			crew = "(unattributed)"
+		}
 		fmt.Printf("  %-30s  %s$%8.4f%s  %5d calls  %d tokens\n",
-			truncateString(r.CrewID, 30), cli.Yellow, r.CostUSD, cli.Reset,
+			truncateString(crew, 30), cli.Yellow, r.CostUSD, cli.Reset,
 			r.CallCount, r.InTokens+r.OutTokens)
 	}
 }

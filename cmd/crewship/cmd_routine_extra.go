@@ -180,11 +180,16 @@ Examples:
 // ---- active runs ----
 
 // routineActiveCmd lists workspace-wide in-flight pipeline runs. Calls
-// GET /pipelines/runs/active (single-replica scope per the handler
-// note). Empty list when nothing is running.
+// GET /pipelines/runs/active. Empty list when nothing is running.
+//
+// In-flight includes WAITING — a run parked on an approval waitpoint. It
+// released its concurrency slot and its registry entry when it parked, which
+// is why it used to be invisible here; it is still a run in progress, and it
+// resumes and completes the moment somebody approves. The STATUS column is
+// what tells the two apart.
 var routineActiveCmd = &cobra.Command{
 	Use:   "active",
-	Short: "List in-flight routine runs across the workspace",
+	Short: "List in-flight routine runs across the workspace (running, queued, and waiting on approval)",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -219,14 +224,23 @@ var routineActiveCmd = &cobra.Command{
 				return
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "RUN_ID\tSLUG\tSTARTED\tCANCEL_REQ\tCONCURRENCY_KEY")
+			fmt.Fprintln(w, "RUN_ID\tSLUG\tSTATUS\tSTARTED\tCANCEL_REQ\tCONCURRENCY_KEY")
 			for _, r := range rows {
 				cancelMark := ""
 				if r.CancelRequested {
 					cancelMark = "yes"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					truncIDForCLI(r.RunID, 24), r.PipelineSlug, r.StartedAt, cancelMark, r.ConcurrencyKey)
+				// STATUS exists because "in-flight" is not one state: a run
+				// parked on an approval is in flight and is doing nothing,
+				// and those need different reactions from whoever is reading
+				// this. Older servers send no status; "running" is what this
+				// endpoint used to mean in full.
+				status := r.Status
+				if status == "" {
+					status = "running"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					truncIDForCLI(r.RunID, 24), r.PipelineSlug, status, r.StartedAt, cancelMark, r.ConcurrencyKey)
 			}
 			flush.of(w)
 		}); err != nil {
@@ -238,8 +252,14 @@ var routineActiveCmd = &cobra.Command{
 
 // activeRunRow is one in-flight routine run.
 type activeRunRow struct {
-	RunID           string `json:"run_id" yaml:"run_id"`
-	PipelineSlug    string `json:"pipeline_slug" yaml:"pipeline_slug"`
+	RunID        string `json:"run_id" yaml:"run_id"`
+	PipelineSlug string `json:"pipeline_slug" yaml:"pipeline_slug"`
+	// Status distinguishes a run that is executing from one parked on an
+	// approval waitpoint. Both are in flight — the parked one resumes and
+	// completes the moment somebody approves — but only one of them is
+	// making progress, and a list that could not tell them apart was
+	// answering a question nobody asked.
+	Status          string `json:"status" yaml:"status"`
 	ConcurrencyKey  string `json:"concurrency_key" yaml:"concurrency_key"`
 	StartedAt       string `json:"started_at" yaml:"started_at"`
 	CancelRequested bool   `json:"cancel_requested" yaml:"cancel_requested"`

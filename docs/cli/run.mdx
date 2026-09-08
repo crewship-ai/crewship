@@ -197,7 +197,19 @@ scripting; the default is a human-readable table.
 | `tool_result` | stderr, `[result] …` | `--verbose` only |
 | `status` | stderr, `[status] …` | unless `--quiet` |
 | `error` | stderr, `[error] …`; exit non-zero | always |
+| `agent_busy` | stderr, `[busy] …`; exit non-zero | always |
 | `done` | stderr, `[done]`; commit `--save` tempfile | unless `--quiet` |
+
+An agent runs one message at a time. A send that arrives while the agent
+already has a live run is bounced with `agent_busy` and no `done` follows it —
+that frame ends the exchange. `run` reports it and exits non-zero rather than
+waiting, so retry once the live run finishes.
+
+Chat sends bounce; assignment dispatches do not. A dispatch that loses the same
+per-agent lock — an `/assign` or an `@mention` of a busy agent — is queued
+behind the live run with `queued_reason: agent_busy` and drained by the
+completion pump instead. Prefer that route when you want work to wait its turn
+rather than be rejected.
 
 A dropped WebSocket connection mid-run exits non-zero so wrapping scripts (`crewship run x "y" || alert`) catch it.
 
@@ -206,6 +218,7 @@ A dropped WebSocket connection mid-run exits non-zero so wrapping scripts (`crew
 - **`prompt is required (provide as argument, --prompt flag, or use --interactive)`** — every path requires content unless you're starting a REPL.
 - **`ws read: ...`** — the WebSocket dropped before `done`. Most often a server restart.
 - **`agent error: <message>`** — the model or a tool returned a hard error event. The exit code is non-zero and the message is sanitised before display.
+- **`agent busy: <message>`** — the agent already had a live run, so this message was rejected and never reached it. Nothing ran and nothing was persisted; send it again once the agent is free.
 - **`save commit: ...`** — `--save` tempfile couldn't be atomically renamed (disk full, permission denied). Reported separately from a stream error so neither one masks the other.
 
 ## See also

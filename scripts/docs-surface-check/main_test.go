@@ -16,7 +16,7 @@ import (
 // navigation declared a page Mintlify had not published yet — which is the
 // state of every PR that adds documentation.
 func TestServedCheckIsSkippedWithoutURL(t *testing.T) {
-	served, err := checkServed("", 279)
+	served, err := checkServed("", make([]string, 279))
 	if err != nil {
 		t.Fatalf("checkServed(\"\", …) = %v; an unset URL must skip the deployed comparison, not fail", err)
 	}
@@ -32,7 +32,7 @@ func TestServedCheckMakesNoRequestWithoutURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := checkServed("", 1); err != nil {
+	if _, err := checkServed("", make([]string, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if reached {
@@ -98,11 +98,11 @@ func TestServedCheckReportsDeployedDrift(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := checkServed(srv.URL, 2); err != nil {
+	if _, err := checkServed(srv.URL, make([]string, 2)); err != nil {
 		t.Fatalf("checkServed with a caught-up index = %v, want nil", err)
 	}
 
-	served, err := checkServed(srv.URL, 5)
+	served, err := checkServed(srv.URL, make([]string, 5))
 	if err == nil {
 		t.Fatal("checkServed with a lagging index = nil, want an error")
 	}
@@ -759,5 +759,34 @@ func TestJSXHostileCodeSpansHandlesANestedFence(t *testing.T) {
 	}
 	if len(offenders) != 0 {
 		t.Fatalf("jsxHostileCodeSpans() = %+v, want none — the whole outer fence is sample content", offenders)
+	}
+}
+
+// Counting the drift is not enough to act on it. The scheduled run reported
+// "llms.txt lists 306 pages, docs.json declares 307" for days: true, and
+// useless — nobody could tell WHICH page the deployed index was missing
+// without diffing the two sets by hand. (It was manifest/README, a basename
+// Mintlify never publishes, so the count never caught up on its own.) The
+// error has to name the pages, or the next one sits red just as long.
+func TestServedCheckNamesTheMissingPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/llms.txt") {
+			_, _ = w.Write([]byte("# Docs\n\n- [One](https://example.test/one.md)\n- [Two](https://example.test/guides/two.md)\n"))
+			return
+		}
+		_, _ = w.Write([]byte("full index body"))
+	}))
+	defer srv.Close()
+
+	_, err := checkServed(srv.URL, []string{"one", "guides/two", "manifest/README"})
+	if err == nil {
+		t.Fatal("checkServed with a lagging index = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "manifest/README") {
+		t.Errorf("error does not name the missing page, so it is not actionable: %v", err)
+	}
+	// The pages the deployed index DOES carry must not be listed as missing.
+	if strings.Contains(err.Error(), "guides/two") {
+		t.Errorf("error names a page that is actually served: %v", err)
 	}
 }

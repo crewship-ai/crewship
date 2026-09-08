@@ -181,8 +181,8 @@ func TestResolveModelList_Catalog(t *testing.T) {
 		wantModel string // an id that must be present
 		wantRated bool
 	}{
-		{"catalog-only provider on auto", "deepseek", modelSourceAuto, "deepseek-chat", true},
-		{"catalog-only provider, source unset", "deepseek", "", "deepseek-chat", true},
+		{"catalog-only provider on auto", "deepseek", modelSourceAuto, "deepseek-v4-flash", true},
+		{"catalog-only provider, source unset", "deepseek", "", "deepseek-v4-flash", true},
 		{"gateway", "xai", modelSourceAuto, "grok-4.6", true},
 		{"live provider forced offline", "anthropic", modelSourceCatalog, "claude-opus-4-5", true},
 	}
@@ -731,19 +731,19 @@ func TestAcceptance_ModelList_CatalogProviderOffline(t *testing.T) {
 	}
 	var chat *modelInfoRow
 	for i := range res.Models {
-		if res.Models[i].ID == "deepseek-chat" {
+		if res.Models[i].ID == "deepseek-v4-flash" {
 			chat = &res.Models[i]
 		}
 	}
 	if chat == nil {
-		t.Fatalf("deepseek-chat missing from %+v", res.Models)
+		t.Fatalf("deepseek-v4-flash missing from %+v", res.Models)
 	}
 	if chat.Catalog == nil || chat.Catalog.ContextTokens == 0 ||
 		chat.Catalog.InputPerMTok == nil || chat.Catalog.OutputPerMTok == nil {
-		t.Fatalf("deepseek-chat carries no catalog facts: %+v", chat.Catalog)
+		t.Fatalf("deepseek-v4-flash carries no catalog facts: %+v", chat.Catalog)
 	}
 	if !chat.Catalog.ToolCall {
-		t.Errorf("deepseek-chat tool_call = false; the snapshot says otherwise")
+		t.Errorf("deepseek-v4-flash tool_call = false; the snapshot says otherwise")
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
 var runCmd = &cobra.Command{
@@ -342,6 +343,20 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 
 	// Failure cases — emit a clear stderr message so exec callers can diagnose,
 	// and return an error so the process exits non-zero.
+	//
+	// The bounce is checked first: it is the one outcome where the agent
+	// never ran at all, so the generic "no text"/"no done" diagnostics below
+	// would name the wrong cause. Non-zero exit like the rest, so
+	// `crewship run x "y" || alert` notices, and worded as a wait rather
+	// than a failure because the remedy is to retry once the agent frees up.
+	if res.Busy {
+		notice := res.BusyNotice
+		if notice == "" {
+			notice = "the agent is busy with another run"
+		}
+		fmt.Fprintf(os.Stderr, "%s[busy]%s %s\n", cli.Yellow, cli.Reset, notice)
+		return fmt.Errorf("agent busy: %s", notice)
+	}
 	if streamErr != "" {
 		fmt.Fprintf(os.Stderr, "%s[error]%s %s\n", cli.Red, cli.Reset, streamErr)
 		return fmt.Errorf("agent error: %s", streamErr)
@@ -536,6 +551,32 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(event.Content))
 			}
+		case wsproto.AgentBusyEventType:
+			// The send bounced off the per-agent run lock (#2269): the agent
+			// already has a live run, this message was NOT persisted, and the
+			// server deliberately sends no terminal `done` after this frame —
+			// emitting one would travel the shared session channel and
+			// finalize the WINNING sender's live turn mid-generation
+			// (internal/ws/client.go). So this frame IS the end of the
+			// exchange, and a client that does not return here waits for a
+			// `done` that is never coming: before this case existed,
+			// `crewship run` against a busy agent hung silently until the
+			// caller's own timeout killed it.
+			//
+			// Non-zero exit, like every other unstarted-run path, so
+			// `crewship run x "y" || alert` notices. No maybeNotifyRunComplete:
+			// nothing ran, so there is no completion to report — the notice
+			// below is the whole outcome.
+			flush()
+			// Same as the error case: leave save uncommitted so the caller's
+			// deferred Close discards the tempfile rather than truncating a
+			// previous artefact over a run that never produced output.
+			notice := sanitizeTerminal(event.Content)
+			if notice == "" {
+				notice = "the agent is busy with another run"
+			}
+			fmt.Fprintf(os.Stderr, "%s[busy]%s %s\n", cli.Yellow, cli.Reset, notice)
+			return joinErrs(fmt.Errorf("agent busy: %s", notice))
 		case "error":
 			flush()
 			// Don't commit save — defer Close in the caller discards the
@@ -559,6 +600,17 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			}
 			maybeNotifyRunComplete(startedAt, "", "COMPLETED")
 			return saveErr
+		default:
+			// An event type this client does not know. Silence here is how
+			// the agent_busy hang survived: the server sent a frame, the
+			// switch ignored it, and the loop went back to waiting for a
+			// `done` that the server had already decided not to send. Under
+			// -v, say what arrived so the next unhandled frame is one grep
+			// away instead of an unexplained stall.
+			if flagVerbose {
+				fmt.Fprintf(os.Stderr, "%s[unhandled event]%s type=%q content=%s\n",
+					cli.Gray, cli.Reset, event.Type, truncate(sanitizeTerminal(event.Content), 120))
+			}
 		}
 	}
 }

@@ -229,6 +229,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.credMonitor != nil {
 		go s.credMonitor.Run(ctx)
 	}
+	if s.loginRefresher != nil {
+		go s.loginRefresher.Run(ctx)
+	}
 
 	// Episodic indexer sweeper (W2, release-1.0 hardening): embeds
 	// high-value journal entries into journal_embeddings so HybridRecall

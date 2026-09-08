@@ -76,6 +76,17 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"agent_credentials":    IntentInclude,
 	"credential_audit":     IntentInclude,
 	"credential_rotations": IntentInclude,
+	// OAuth polling sessions and refresh leases belong to this process.
+	// Credential fields already preserve the sealed refresh material; the
+	// monitor reconstructs its schedule after restore. Never restore a lease
+	// or resume a device approval started on a different instance.
+	"provider_login_refresh":      IntentExcludeRuntime,
+	"provider_device_logins":      IntentExcludeRuntime,
+	"provider_login_pools":        IntentInclude,
+	"provider_login_pool_members": IntentInclude,
+	// Observations survive process restarts but are instance-local; a restored
+	// deployment must not inherit an old runtime's authentication verdict.
+	"provider_login_availability": IntentExcludeRuntime,
 	// Composio managed-integration provider config (encrypted API key per
 	// workspace). Workspace-scoped; round-trips with the encrypted value.
 	"composio_settings": IntentInclude,

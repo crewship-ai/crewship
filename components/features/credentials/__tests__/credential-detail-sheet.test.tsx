@@ -101,6 +101,22 @@ beforeEach(() => {
 })
 
 describe("write affordances gated by role", () => {
+  it("provider accounts never offer generic secret rotation or reveal", () => {
+    renderSheet({
+      type: "AI_CLI_TOKEN", provider: "OPENAI",
+      login: {
+        mode: "subscription", provider: "OPENAI", plan: "plus", plan_label: "ChatGPT Plus",
+        owner_user_id: "u1", owner_email: "fixture@example.test", expires_at: null,
+        refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
+        quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 },
+      },
+    })
+    expect(screen.queryByRole("button", { name: /rotate/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument()
+    expect(screen.getByText("Connection health")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
+    expect(screen.getByText("Properties & protection").closest("details")).not.toHaveAttribute("open")
+  })
   it("OWNER sees rotate and delete", () => {
     h.role = "OWNER"
     renderSheet()
@@ -399,11 +415,38 @@ describe("used by", () => {
     expect(screen.getAllByText("2").length).toBeGreaterThan(0)
   })
 
-  it("shows the empty state when no agent uses the credential", () => {
+  it("shows an honest empty state after checking visible agents", async () => {
     h.role = "OWNER"
     renderSheet({ agent_names: [] })
     openTab(/used by/i)
-    expect(screen.getByText(/no agent holds this credential yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/No matching grants were reported/i)).toBeInTheDocument()
+  })
+  it("does not interpret a failed access lookup as no access", async () => {
+    h.apiFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({}) })
+    renderSheet()
+    expect(await screen.findByText(/Access could not be fully loaded/)).toBeInTheDocument()
+    expect(screen.queryByText(/No matching grants were reported/)).not.toBeInTheDocument()
+  })
+  it("checks candidates reached by a workspace delivery binding", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () =>
+      url.includes("/bindings?") ? { bindings: [{ id: "b", scope: "WORKSPACE", slot: "SERVICE_KEY" }] }
+      : url.includes("/agents?") ? [{ id: "a1", name: "Worker", crew_id: "unrelated" }]
+      : url.includes("/agents/a1/credentials?") ? [{ credential_id: "cred_1", env_var_name: "SERVICE_KEY", grant_source: "binding" }]
+      : [],
+    }))
+    renderSheet()
+    expect(await screen.findByText("Worker")).toBeInTheDocument()
+    expect(screen.getByTestId("credential-access-summary")).toHaveTextContent("Checked 1 of 1")
+    expect(screen.getByText("delivery binding")).toBeInTheDocument()
+  })
+  it("reports capped assignment checks instead of presenting a complete list", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () =>
+      url.includes("/bindings?") ? { bindings: [{ id: "b", scope: "WORKSPACE", slot: "SERVICE_KEY" }] }
+      : url.includes("/agents?") ? Array.from({ length: 15 }, (_, i) => ({ id: `a${i}`, name: `Agent ${i}` })) : [],
+    }))
+    renderSheet()
+    await waitFor(() => expect(screen.getByTestId("credential-access-summary")).toHaveTextContent("Checked 12 of 15"))
+    expect(screen.queryByText(/No matching grants were reported/)).not.toBeInTheDocument()
   })
 
   it("shows the MCP-usage note only when mcp_used is true", () => {
@@ -662,7 +705,7 @@ describe("changing the value", () => {
     h.role = "OWNER"
     renderSheet()
     expect(
-      screen.getByRole("button", { name: /rotate and show the new value/i }),
+      screen.getByRole("button", { name: /replace with grace period/i }),
     ).toBeInTheDocument()
   })
 })
@@ -912,7 +955,8 @@ describe("readiness", () => {
         readinessKnown
       />,
     )
-    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Tools available").length).toBeGreaterThan(0)
+    expect(screen.getByTestId("connection-verification")).toHaveTextContent("Connection not verified")
   })
 
   // The important one.
@@ -930,7 +974,7 @@ describe("readiness", () => {
       />,
     )
     expect(screen.queryByText("Ready")).not.toBeInTheDocument()
-    expect(screen.getAllByText("Readiness unknown").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Tools not checked").length).toBeGreaterThan(0)
     expect(screen.getByText(/no crew has reported its tool inventory yet/i)).toBeInTheDocument()
   })
 })

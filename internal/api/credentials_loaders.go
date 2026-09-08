@@ -4,15 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
+	"strings"
 )
 
 // credentialVisibilityFilter builds the SQL fragment + arguments that
 // constrain which credentials the caller may see, based on their
 // workspace role.
 //
-// MANAGER+ (canRole "update") sees every credential in the workspace —
-// they own the credential lifecycle and need full visibility for
-// rotations, revokes, and audit reviews.
+// OWNER/ADMIN see every credential. Provider accounts (including legacy
+// provider API keys and CLI tokens) are hidden from all other roles.
+// MANAGER sees all ordinary secrets for lifecycle management.
 //
 // MEMBER and VIEWER are scoped: they see WORKSPACE-scoped credentials
 // (which are intentionally workspace-wide, e.g. shared CI tokens) plus
@@ -23,8 +25,13 @@ import (
 // Returns ("", nil) for full-access roles so callers can append the
 // fragment unconditionally.
 func credentialVisibilityFilter(role string, user *AuthUser) (string, []any) {
-	if canRole(role, "update") {
+	if canRole(role, "manage") {
 		return "", nil
+	}
+	loginSQL, args := loginRowsSQL()
+	filter := " AND NOT COALESCE(" + strings.TrimPrefix(loginSQL, " AND ") + ", 0)"
+	if canRole(role, "update") {
+		return filter, args
 	}
 	// Defensive: an empty user shouldn't reach here (auth middleware
 	// guarantees one), but if it does, scope-only filter blanks the
@@ -33,14 +40,39 @@ func credentialVisibilityFilter(role string, user *AuthUser) (string, []any) {
 	if user != nil {
 		userID = user.ID
 	}
-	return ` AND (
+	return filter + ` AND (
 		c.scope = 'WORKSPACE'
 		OR EXISTS (
 			SELECT 1 FROM credential_crews cc
 			JOIN crew_members cm ON cm.crew_id = cc.crew_id
 			WHERE cc.credential_id = c.id AND cm.user_id = ?
 		)
-	)`, []any{userID}
+	)`, append(args, userID)
+}
+
+// visibleCredentialNames is for public management responses only. Delivery
+// must resolve precedence first, then redact rows using this set; filtering
+// delivery inputs could resurrect a shadowed, lower-priority credential.
+func visibleCredentialNames(r *http.Request, db *sql.DB, workspaceID string) (map[string]string, error) {
+	filter, args := credentialVisibilityFilter(RoleFromContext(r.Context()), UserFromContext(r.Context()))
+	rows, err := db.QueryContext(r.Context(), `SELECT c.id, COALESCE(c.name, '') FROM credentials c
+		WHERE c.workspace_id = ? AND c.deleted_at IS NULL`+filter, append([]any{workspaceID}, args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("query visible credential names: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("scan visible credential name: %w", err)
+		}
+		out[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate visible credential names: %w", err)
+	}
+	return out, nil
 }
 
 // Batch / junction-table loaders for CredentialHandler. Lifted out of

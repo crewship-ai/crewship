@@ -66,7 +66,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -169,7 +168,7 @@ type plainCredentialField struct {
 // any part is considered, so a part can never take a name a credential holds,
 // regardless of ordering. Parts are then considered in delivery order (priority,
 // then source rank — the order the consumers already use) and claim as they go.
-func attachDeliveredCredentialFields(ctx context.Context, db *sql.DB, delivered []deliveredCredential) error {
+func attachDeliveredCredentialFields(ctx context.Context, db sqlQuerier, delivered []deliveredCredential) error {
 	if len(delivered) == 0 {
 		return nil
 	}

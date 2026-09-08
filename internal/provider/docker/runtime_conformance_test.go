@@ -94,6 +94,13 @@ type probe struct {
 	// why is printed on failure — the consequence of the invariant not
 	// holding, so a red run explains itself without a git archaeology trip.
 	why string
+	// control names this probe's entry in the known-gap registry
+	// (runtime_gaps.go), when it has one. It is how a difference this repo
+	// has already measured, written down and cannot fix — podman below 5
+	// dropping a bare numeric GID — reports as expected instead of reddening
+	// the nightly job with news from months ago. Empty means "nobody tracks
+	// this control", and the probe is judged on the measurement alone.
+	control string
 }
 
 func TestRuntimeConformance(t *testing.T) {
@@ -702,7 +709,7 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 	gotGroups := strings.Split(f["GROUPS"], ",")
 	add(probe{
 		name: "supplementary groups from GroupAdd are present", want: strings.Join(wantGroups, ","), got: f["GROUPS"],
-		honoured: containsAll(gotGroups, wantGroups), loadBearing: true,
+		honoured: containsAll(gotGroups, wantGroups), loadBearing: true, control: "GroupAdd",
 		why: "the sidecar-owned .memory subtrees are group-readable only; without gid 1002 the agent cannot read its own memory",
 	})
 
@@ -869,16 +876,47 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 func report(t *testing.T, p *Provider, probes []probe) {
 	t.Helper()
 	var failed []probe
+	var stale []probe
+	gaps := KnownRuntimeGaps(p.detected)
 	t.Logf("── runtime conformance: %s %s ──", p.detected.Runtime, p.detected.Version)
 	for _, pr := range probes {
+		verdict, gap := ClassifyConformance(pr.control, pr.honoured, gaps)
 		mark := "ok  "
-		if !pr.honoured {
+		switch verdict {
+		case ConformanceRegression:
 			mark = "MISS"
+		case ConformanceKnownGap:
+			mark = "KNWN"
+		case ConformanceStaleGap:
+			mark = "STAL"
 		}
 		t.Logf("  [%s] %-48s want=%-24s got=%s", mark, pr.name, pr.want, pr.got)
-		if !pr.honoured && pr.loadBearing {
-			failed = append(failed, pr)
+		switch verdict {
+		case ConformanceKnownGap:
+			// Printed in full so the matrix still states the difference — the
+			// deliverable of this harness is what a runtime does differently,
+			// and a documented gap is a finding, not a silence.
+			t.Logf("         known gap on %s %s: %s", p.detected.Runtime, p.detected.Version, gap.Detail)
+		case ConformanceStaleGap:
+			stale = append(stale, pr)
+		case ConformanceRegression:
+			if pr.loadBearing {
+				failed = append(failed, pr)
+			}
 		}
+	}
+	// A registry entry the runtime has outgrown fails REGARDLESS of
+	// loadBearing: KnownRuntimeGaps feeds doctor, /system/runtime and the
+	// startup WARN, so leaving it in place tells operators their agents
+	// cannot read crew memory on a runtime where they can.
+	if len(stale) > 0 {
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s %s honours %d control(s) that KnownRuntimeGaps still records as dropped — remove the stale entry from runtime_gaps.go:\n",
+			p.detected.Runtime, p.detected.Version, len(stale))
+		for _, pr := range stale {
+			fmt.Fprintf(&b, "  · %s (control %s)\n      got: %s\n", pr.name, pr.control, pr.got)
+		}
+		t.Fatal(b.String())
 	}
 	if len(failed) == 0 {
 		return

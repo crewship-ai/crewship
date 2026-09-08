@@ -185,6 +185,10 @@ describe("useTopSpenders", () => {
 })
 
 describe("useSubscriptionUsage", () => {
+  it("does not load provider accounts when disabled by RBAC", () => {
+    renderHook(() => useSubscriptionUsage("7d", 0, false))
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
   it("hits the subscriptions endpoint with range", async () => {
     const fetchMock = global.fetch as ReturnType<typeof vi.fn>
     fetchMock.mockResolvedValueOnce(okJSON({ rows: [] }))

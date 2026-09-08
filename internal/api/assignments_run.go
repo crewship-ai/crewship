@@ -1239,7 +1239,14 @@ func (h *AssignmentHandler) finishAssignment(
 	// and a crashed execution both win over whatever the model said) and
 	// defaults an unreported outcome on an otherwise-clean completion to
 	// FAILED — "an absent outcome is a bug, not a silent success" (§9.6).
-	outcome, defaultedReason := orchestrator.DeriveOutcome(status, orchestrator.ReportedOutcome(result))
+	//
+	// An assignment IS an agent run — there is always somebody who was
+	// asked to hand an outcome back — so it passes true for
+	// hasOutcomeCapableStep and keeps the strict default. (The routine
+	// side, internal/pipeline, decides that per run: an agentless routine
+	// has nobody to report, so nothing to flag.)
+	const assignmentHasOutcomeCapableStep = true
+	outcome, defaultedReason := orchestrator.DeriveOutcome(status, orchestrator.ReportedOutcome(result), assignmentHasOutcomeCapableStep)
 	// effectiveErrMsg tracks whatever ends up in errVal (the DB write
 	// below) as a plain string, so every OTHER sink that reports an error
 	// reason for this run — the terminal run.* journal entry, a few lines

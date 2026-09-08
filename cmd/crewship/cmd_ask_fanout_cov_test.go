@@ -21,6 +21,7 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	wsproto "github.com/crewship-ai/crewship/internal/ws"
 )
 
 // covFanoutServer serves:
@@ -87,6 +88,15 @@ func covFanoutServer(t *testing.T) *httptest.Server {
 				send("text", "partial-before-error")
 				send("error", "agent exploded")
 				return
+			case "agent-busy":
+				// What internal/ws/client.go actually sends when the
+				// per-agent run lock is held: a sender-only agent_busy
+				// event and deliberately NO terminal done. The conn is
+				// left open, exactly as in production — so a client that
+				// does not recognise the frame blocks here forever.
+				send(wsproto.AgentBusyEventType,
+					"The agent is busy with another run right now. Please wait for it to finish.")
+				continue
 			case "agent-drop":
 				send("text", "text-before-drop")
 				return // close without done → read error path
@@ -362,5 +372,43 @@ func TestFanoutOne_WSDialFails(t *testing.T) {
 	_, err := fanoutOne(t.Context(), client, deadURL, "ws-tok", "agent-a", "ping", 0)
 	if err == nil || !strings.Contains(err.Error(), "ws:") {
 		t.Errorf("expected ws dial error; got %v", err)
+	}
+}
+
+// TestFanoutOne_AgentBusy pins the fan-out half of the same #2269 gap
+// cmd_run.go had: `crewship ask` across N agents is the likeliest way to
+// hit a busy agent (any one of the N may already have a live run), and
+// fanoutOne's switch knew only text/error/done. The stub leaves the
+// connection OPEN after the busy frame, as the real server does, so this
+// test HANGS rather than fails if the case is missing — hence the explicit
+// deadline: an unbounded wait is the bug, and the test has to be able to
+// say so instead of stalling the whole package.
+func TestFanoutOne_AgentBusy(t *testing.T) {
+	srv := covFanoutServer(t)
+	covSetupCli8(t, srv.URL)
+	client := newAPIClient()
+
+	type result struct {
+		text string
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		text, err := fanoutOne(t.Context(), client, srv.URL, "ws-tok", "agent-busy", "ping", 0)
+		done <- result{text, err}
+	}()
+
+	select {
+	case got := <-done:
+		if got.err == nil {
+			t.Fatal("fanoutOne returned nil error for a bounced send")
+		}
+		if !strings.Contains(got.err.Error(), "busy") {
+			t.Errorf("error %q does not say the agent was busy", got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("fanoutOne blocked on an agent_busy frame: the server sends no " +
+			"terminal done after a busy bounce, so waiting for one hangs until " +
+			"the caller gives up (observed live on dev3: 200 s, empty output, exit 124)")
 	}
 }

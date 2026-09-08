@@ -97,11 +97,12 @@ func (m *memState) Close() error { return nil }
 
 // mock container provider
 type mockContainer struct {
-	execResults   []*provider.ExecResult
-	execErr       error
-	execCallIdx   int
-	execFn        func(cfg provider.ExecConfig) (*provider.ExecResult, error) // callback-based mock
-	inspectResult struct {
+	preflightSucceeds bool // model a successfully delivered merged setup script
+	execResults       []*provider.ExecResult
+	execErr           error
+	execCallIdx       int
+	execFn            func(cfg provider.ExecConfig) (*provider.ExecResult, error) // callback-based mock
+	inspectResult     struct {
 		running  bool
 		exitCode int
 	}
@@ -117,6 +118,9 @@ func (m *mockContainer) ContainerStatus(_ context.Context, _ string) (*provider.
 	return &provider.ContainerStatus{State: "running"}, nil
 }
 func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if m.preflightSucceeds && len(cfg.Cmd) == 1 && cfg.Cmd[0] == "sh" && cfg.Stdin != nil {
+		return &provider.ExecResult{ExecID: "preflight", Reader: io.NopCloser(strings.NewReader(preflightDoneMarker + "\n"))}, nil
+	}
 	// Callback-based mock takes priority
 	if m.execFn != nil {
 		return m.execFn(cfg)
@@ -539,6 +543,7 @@ func TestRunAgentScrubsCredentials(t *testing.T) {
 	// Detect agent CLI exec by tmux-session signature; see TestRunAgentSuccess
 	// for the rationale (canonical-memory writes shifted indexing).
 	mc := &mockContainer{
+		preflightSucceeds: true,
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			joined := strings.Join(cfg.Cmd, " ")
 			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {
@@ -599,6 +604,7 @@ func TestRunAgentWithSidecar(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
+		preflightSucceeds: true,
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			joined := strings.Join(cfg.Cmd, " ")
 			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, "agent-test-agent") {

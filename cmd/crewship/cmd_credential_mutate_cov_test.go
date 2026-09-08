@@ -240,14 +240,14 @@ func TestCredUpdateCmd_MetadataFetchFailsStillUpdates(t *testing.T) {
 	}
 }
 
-func TestCredUpdateCmd_StdinEmptyMeansNoFields(t *testing.T) {
+func TestCredUpdateCmd_StdinEmptyRejected(t *testing.T) {
 	covStub(t)
 	covResetFlags(t, credUpdateCmd)
 	covWithStdin(t, "") // EOF — scanner.Scan() returns false
 	covSetFlags(t, credUpdateCmd, map[string]string{"value-stdin": "true"})
 	err := credUpdateCmd.RunE(credUpdateCmd, []string{covCredIDCli3})
-	if err == nil || !strings.Contains(err.Error(), "no fields to update") {
-		t.Fatalf("expected no-fields error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stdin value cannot be empty") {
+		t.Fatalf("expected empty-stdin error, got %v", err)
 	}
 }
 

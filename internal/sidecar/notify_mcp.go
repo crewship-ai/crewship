@@ -127,7 +127,9 @@ func (s *Server) handleNotifyMCP(w http.ResponseWriter, r *http.Request) {
 	case "tools/call":
 		s.respondNotifyMCPToolsCall(w, r, req)
 	case "notifications/initialized", "notifications/cancelled":
-		w.WriteHeader(http.StatusOK)
+		// 202 + empty body — see the note in memory_mcp.go: an empty 200 has
+		// no Content-Type and strict MCP clients drop the server over it.
+		w.WriteHeader(http.StatusAccepted)
 	default:
 		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 			JSONRPC: "2.0", ID: req.ID,

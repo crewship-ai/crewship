@@ -185,3 +185,44 @@ func TestCollectInboxItemsPerSuccessfulRunMetrics_NoSuccessfulRunsIsAbsentNotZer
 		t.Errorf("items_on_successful_runs must be a real, explicit 0; output:\n%s", out)
 	}
 }
+
+// TestCollectInboxItemsPerSuccessfulRunMetrics_MatchesStepKeyedItems pins
+// the numerator's key shapes. A routine's notify step keys its inbox item
+// by "<run_id>:<step_id>", not by the bare run id, so a numerator that
+// joins r.id = i.source_id is blind to exactly the §12 case the metric
+// exists for: a SUCCEEDED routine posting an inbox message. Both shapes
+// must count — and the prefix split must be exact, so an item belonging to
+// a DIFFERENT run whose id merely starts with a successful run's id is
+// never miscounted.
+func TestCollectInboxItemsPerSuccessfulRunMetrics_MatchesStepKeyedItems(t *testing.T) {
+	s := b16Fixture(t)
+	succeeded, failed := "SUCCEEDED", "FAILED"
+
+	// One successful routine run, and a FAILED one whose id starts with
+	// the successful one's id — the prefix trap.
+	seedPipelineRun(t, s, "run_ok", "schedule", "2026-01-01T00:00:00Z", "", &succeeded)
+	seedPipelineRun(t, s, "run_ok_extra", "schedule", "2026-01-01T00:00:01Z", "", &failed)
+
+	// Both violation shapes on the SUCCEEDED run: the bare run id (the
+	// failed_run producer's key) and the step-scoped key notify uses.
+	seedInboxItem(t, s, "ibx_bare", "failed_run", "run_ok")
+	seedInboxItem(t, s, "ibx_step", "message", "run_ok:post")
+	// Items on the FAILED run — allowed, and never counted against the
+	// successful run just because its id is a prefix of theirs.
+	seedInboxItem(t, s, "ibx_other_bare", "failed_run", "run_ok_extra")
+	seedInboxItem(t, s, "ibx_other_step", "message", "run_ok_extra:post")
+
+	var b strings.Builder
+	s.collectInboxItemsPerSuccessfulRunMetrics(context.Background(), &b, "h")
+	out := b.String()
+
+	if !strings.Contains(out, `crewshipd_successful_runs_total{hostname="h"} 1`) {
+		t.Errorf("expected 1 successful run; output:\n%s", out)
+	}
+	if !strings.Contains(out, `crewshipd_inbox_items_on_successful_runs{hostname="h"} 2`) {
+		t.Errorf("expected 2 items on the successful run (bare + step-keyed), and neither of run_ok_extra's; output:\n%s", out)
+	}
+	if !strings.Contains(out, `crewshipd_inbox_items_per_successful_run{hostname="h"} 2`) {
+		t.Errorf("expected ratio 2/1 = 2; output:\n%s", out)
+	}
+}

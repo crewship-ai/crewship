@@ -6,6 +6,9 @@ package main
 // domain-specific parser.
 type DomainSchema struct {
 	Request map[string]any
+	// RequestRequired opts an operation into a mandatory body without changing
+	// the legacy optional-body contract of other operations.
+	RequestRequired bool
 	// RequestMedia lists the media types accepted by the request body. When
 	// omitted, the generator uses application/json for backwards-compatible
 	// JSON endpoints.

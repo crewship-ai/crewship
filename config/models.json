@@ -29,6 +29,7 @@
       "label": "OpenAI",
       "default": "gpt-5.5",
       "models": [
+        { "id": "gpt-6-astra", "label": "GPT-6 Astra", "category": "frontier" },
         { "id": "gpt-5.5", "label": "GPT-5.5", "category": "frontier", "role": "default" },
         { "id": "gpt-5.4", "label": "GPT-5.4", "category": "frontier" },
         { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "category": "fast", "role": "cheap" },
@@ -94,8 +95,8 @@
     "CODEX_CLI": {
       "provider": "openai",
       "default": "gpt-5.5",
-      "$comment": "Codex CLI accepts only the GPT-5.x family — not the o-series, which is valid for the general API but rejected by the CLI. Source: developers.openai.com/codex/models",
-      "models": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"]
+      "$comment": "Conservative Codex default; Astra remains opt-in because availability depends on account and rollout. Older models may require API-key sign-in. Source: learn.chatgpt.com/docs/models (2026-09-07)",
+      "models": ["gpt-6-astra", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"]
     },
     "GEMINI_CLI": {
       "provider": "google",

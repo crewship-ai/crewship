@@ -235,6 +235,8 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		"internal/api/local_model_endpoint.go":     "reads ENDPOINT_URL rows, which are already the split shape",
 		"internal/api/models.go":                   "lists models with a provider key",
 		"internal/api/oauth_creds.go":              "OAuth token storage",
+		"internal/api/provider_login_view.go":      "derives plan and expiry metadata; never sends credentials upstream",
+		"internal/api/provider_login_refresh.go":   "refreshes subscription parts only through registered OAuth refreshers; derivative delivery is adapter-gated",
 		"internal/api/oauth_flow.go":               "OAuth exchange",
 		"internal/api/oauth_token.go":              "OAuth refresh",
 		"internal/api/skills_generate.go":          "first-party LLM call",

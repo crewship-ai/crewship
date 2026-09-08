@@ -52,7 +52,7 @@ describe("container", () => {
 
   it("names itself, so the modal is not an unlabelled box", () => {
     renderDialog()
-    expect(screen.getByRole("dialog", { name: /add a credential/i })).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: /add secret/i })).toBeInTheDocument()
   })
 
   it("renders nothing while closed", () => {
@@ -126,7 +126,7 @@ describe("on a phone", () => {
     expect(dialog.className).toContain("overflow-hidden")
     expect(body.className).toContain("overflow-y-auto")
     // The title and the step bar sit above the scrollport, the actions below.
-    expect(body.contains(screen.getByRole("heading", { name: /add a credential/i }))).toBe(false)
+    expect(body.contains(screen.getByRole("heading", { name: /add secret/i }))).toBe(false)
     expect(body.contains(screen.getByTestId("wizard-footer"))).toBe(false)
   })
 })

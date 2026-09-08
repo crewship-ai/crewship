@@ -4,10 +4,11 @@ import { Sparkles } from "lucide-react"
 import { formatRelativeTime } from "@/lib/time"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { SubscriptionUsageRow } from "@/lib/types/paymaster"
+import type { SubscriptionLogin, SubscriptionUsageRow } from "@/lib/types/paymaster"
 
 interface SubscriptionsPanelProps {
   rows: SubscriptionUsageRow[]
+  logins?: SubscriptionLogin[]
   loading: boolean
   /**
    * Surface fetch / parse failures explicitly rather than silently
@@ -35,6 +36,7 @@ interface SubscriptionsPanelProps {
  */
 export function SubscriptionsPanel({
   rows,
+  logins,
   loading,
   error,
   notConfigured,
@@ -44,6 +46,19 @@ export function SubscriptionsPanel({
   // doesn't clear an already-rendered list.
   const showError = !!error && !loading
   const showNotConfigured = !!notConfigured && !loading
+  const loginNames = new Map((logins ?? []).map((login) => [login.credential_id, login.name]))
+  const loginOwners = new Map((logins ?? []).map((login) => [login.credential_id, login.login?.owner_email]))
+  const observed = new Set(rows.map((row) => row.credential_id))
+  const displayRows = [...rows]
+  for (const account of logins ?? []) {
+    if (account.login?.mode !== "subscription" || observed.has(account.credential_id)) continue
+    displayRows.push({
+      credential_id: account.credential_id,
+      subscription_plan: account.login.plan_label ?? "Unknown plan",
+      provider: account.login.provider,
+      call_count: 0, input_tokens: 0, output_tokens: 0, last_ts: "",
+    })
+  }
 
   return (
     <Card className="py-3">
@@ -68,11 +83,11 @@ export function SubscriptionsPanel({
             backend yet. Upgrade crewshipd to surface flat-rate credential
             usage here.
           </div>
-        ) : loading && rows.length === 0 ? (
+        ) : loading && displayRows.length === 0 ? (
           <div className="h-[120px] flex items-center justify-center text-[11px] text-muted-foreground">
             Loading…
           </div>
-        ) : rows.length === 0 ? (
+        ) : displayRows.length === 0 ? (
           <div className="rounded-md border border-dashed border-border/60 bg-muted/20 px-3 py-3 text-[11px] text-muted-foreground">
             No subscription credentials in use during this window. When agents
             run on Claude Code Max, Cursor Pro, Codex via ChatGPT, or other
@@ -81,9 +96,9 @@ export function SubscriptionsPanel({
           </div>
         ) : (
           <ul className="divide-y divide-border/40">
-            {rows.map((r) => (
+            {displayRows.map((r) => (
               <li
-                key={`${r.subscription_plan}::${r.provider}`}
+                key={`${r.credential_id ?? "unknown"}::${r.subscription_plan}::${r.provider}`}
                 className="py-2 flex items-center gap-3"
               >
                 <Badge
@@ -95,6 +110,14 @@ export function SubscriptionsPanel({
                 <span className="text-[11px] font-mono text-muted-foreground/80">
                   {r.provider}
                 </span>
+                <span className="text-[11px] text-muted-foreground" title={r.credential_id}>
+                  {r.credential_id ? (loginNames.get(r.credential_id) ?? `Login ${r.credential_id.slice(-8)}`) : "Login unknown"}
+                </span>
+                {r.credential_id && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {loginOwners.get(r.credential_id) ?? "Owner unknown"}
+                  </span>
+                )}
                 <span className="ml-auto text-[11px] text-foreground/80 tabular-nums">
                   {new Intl.NumberFormat().format(r.call_count)} calls
                 </span>

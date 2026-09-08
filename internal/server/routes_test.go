@@ -192,6 +192,14 @@ func TestSessionMessagesWithStore(t *testing.T) {
 	cfg.Auth.JWTSecret = "test-secret-for-server-routes-test-32"
 	logger := logging.New("error", "json", nil)
 	s := New(cfg, logger, &Deps{DB: openTestDB(t)})
+	// New() spawns the catalog/runtime refreshers, which write into
+	// <BasePath>/catalog-cache on their own schedule. Without this the test
+	// returns, t.TempDir() starts removing the directory underneath them, and
+	// cleanup fails with "directory not empty" — on the linux-arm64 runner of
+	// PR #2452, in code that PR does not touch. Registered after t.TempDir()
+	// so LIFO runs it first. Same reason as newTestServer's, and the same
+	// one-liner every other boot test in this package already carries.
+	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 
 	store := conversation.NewStore(dir, logger)

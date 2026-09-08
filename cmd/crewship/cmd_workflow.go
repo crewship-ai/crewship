@@ -212,8 +212,9 @@ See docs/manifest/workflow_template.md for the full schema.`,
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Workflow template created: %s (%s)", created.Name, created.ID))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(created, func() {
+			cli.PrintSuccess(fmt.Sprintf("Workflow template created: %s (%s)", created.Name, created.ID))
+		})
 	},
 }
 

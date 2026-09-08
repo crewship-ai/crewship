@@ -309,6 +309,10 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range workflowRequestComponents {
 		schemas[name] = schema
 	}
+	_, providerLoginComponents := providerLoginSchemaCatalog()
+	for name, schema := range providerLoginComponents {
+		schemas[name] = schema
+	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
 		"sessionCookie":       map[string]any{"type": "apiKey", "in": "cookie", "name": "next-auth.session-token"},
@@ -494,6 +498,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 		if schema.Request != nil {
 			merged.Request = schema.Request
 		}
+		merged.RequestRequired = merged.RequestRequired || schema.RequestRequired
 		if schema.RequestMedia != nil {
 			merged.RequestMedia = schema.RequestMedia
 		}
@@ -537,6 +542,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range routineTrustSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	providerLoginRoutes, _ := providerLoginSchemaCatalog()
+	for key, schema := range providerLoginRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	coreResourceRequestsV2, _ := coreResourceRequestSchemaCatalogV2()
 	for key, schema := range coreResourceRequestsV2 {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -569,6 +578,7 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	existing.RequestRequired = existing.RequestRequired || incoming.RequestRequired
 	if incoming.Request != nil {
 		existing.Request = incoming.Request
 	}
@@ -590,14 +600,19 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 func requestBodyForRoute(rt route) map[string]any {
 	request := requestSchema(rt)
 	media := []string{"application/json"}
-	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.RequestMedia != nil {
+	schema := routeSchemaCatalog()[rt.method+" "+rt.path]
+	if schema.RequestMedia != nil {
 		media = schema.RequestMedia
 	}
 	content := make(map[string]any, len(media))
 	for _, mediaType := range media {
 		content[mediaType] = map[string]any{"schema": request}
 	}
-	return map[string]any{"content": content}
+	body := map[string]any{"content": content}
+	if schema.RequestRequired {
+		body["required"] = true
+	}
+	return body
 }
 
 func remainingAuthIntegrationsSchemaCatalogRoutes() map[string]DomainSchema {

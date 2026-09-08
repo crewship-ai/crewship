@@ -145,8 +145,8 @@ func TestPaymasterSubscriptionsRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
 	stub.OnGet("/api/v1/paymaster/subscriptions", clitest.JSONResponse(200, map[string]any{
 		"rows": []map[string]any{{
-			"plan": "max-20x", "provider": "ANTHROPIC", "call_count": 12,
-			"input_tokens": 900, "output_tokens": 100, "last_used_at": "2026-06-11T22:00:00Z",
+			"subscription_plan": "max-20x", "provider": "ANTHROPIC", "call_count": 12,
+			"input_tokens": 900, "output_tokens": 100, "last_ts": "2026-06-11T22:00:00Z",
 		}},
 	}))
 

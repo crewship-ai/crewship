@@ -159,6 +159,7 @@ type Scope struct {
 // an OAuth subscription token. Leaving them zero produces a metered row
 // with confidence=estimate — the historical default before migration v62.
 type Call struct {
+	CredentialID        string // exact payer; empty means attribution unknown
 	Scope               Scope
 	Provider            string
 	Model               string

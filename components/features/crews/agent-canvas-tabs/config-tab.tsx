@@ -19,6 +19,7 @@ import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigRow, ConfigSelect, ConfigSwitch, ConfigText,
 } from "../canvas/config-field"
 import { ConfigModel } from "../canvas/config-model"
+import { PaysWithRow } from "./pays-with-row"
 import type { AgentRecord } from "./types"
 
 // =============================================================================
@@ -390,6 +391,16 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             value={agent.cli_adapter}
             options={ADAPTERS.map((a) => ({ value: a.value, label: a.label }))}
             onSave={(v) => patch({ cli_adapter: v })}
+          />
+          {/* The seat the adapter pays with, asked where the adapter is chosen
+              (PRD provider-logins §6.3): an adapter and a seat that disagree
+              are caught here, not as a 401 inside a run. */}
+          <PaysWithRow
+            workspaceId={agent.workspace_id}
+            agentId={agent.id}
+            agentName={agent.name}
+            cliAdapter={agent.cli_adapter}
+            paysWith={agent.pays_with ?? null}
           />
           <ConfigPresets
             label="Longest run" hint="When it expires the run ends as a timeout."

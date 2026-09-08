@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, AlertTriangle, CheckCircle2, XCircle } from "lucide-react"
+import { Eye, EyeOff, AlertTriangle } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -30,9 +30,6 @@ export function RotationDialog({
   const [customHours, setCustomHours] = React.useState(12)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [testing, setTesting] = React.useState(false)
-  const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
-  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   React.useEffect(() => {
     if (!open) {
@@ -41,43 +38,11 @@ export function RotationDialog({
       setCustomHours(12)
       setSubmitting(false)
       setError(null)
-      setTesting(false)
-      setTestResult(null)
     }
   }, [open])
 
-  // Auto-test debounced (same pattern as CredentialForm's paste auto-test).
-  React.useEffect(() => {
-    if (!value.trim()) return
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      setTesting(true)
-      setTestResult(null)
-      try {
-        // We don't know the type/provider here without re-fetching the
-        // credential — fall back to the per-credential test endpoint.
-        const res = await apiFetch(`/api/v1/credentials/${credentialId}/test?workspace_id=${workspaceId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value: value.trim() }),
-        })
-        if (!res.ok) {
-          setTestResult({ valid: false, error: "Test request failed" })
-          setTesting(false)
-          return
-        }
-        const data = await res.json()
-        setTestResult({ valid: data.valid, error: data.error })
-      } catch {
-        setTestResult({ valid: false, error: "Network error" })
-      } finally {
-        setTesting(false)
-      }
-    }, 800)
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [value, credentialId, workspaceId])
+  // /{id}/test probes the STORED value and ignores a replacement in the body.
+  // Do not label a new value "Valid" based on the old credential's result.
 
   const graceSeconds = grace === "immediate" ? 0 : grace === "24h" ? 86400 : Math.max(0, customHours * 3600)
 
@@ -111,8 +76,8 @@ export function RotationDialog({
         <DialogHeader>
           <DialogTitle>Rotate <span className="font-mono">{credentialName}</span></DialogTitle>
           <DialogDescription>
-            New value takes effect immediately. The old value stays usable during the grace
-            window so in-flight agent runs don&apos;t break.
+            Paste a replacement issued by your service. The grace period is managed in Crewship;
+            it does not keep a revoked key valid at the external service.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,26 +103,7 @@ export function RotationDialog({
                 {showValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <div className="min-h-[16px] text-xs">
-              {testing && (
-                <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                  <Spinner className="h-3 w-3" />
-                  Testing...
-                </span>
-              )}
-              {!testing && testResult?.valid && (
-                <span className="inline-flex items-center gap-1.5 text-success">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Valid
-                </span>
-              )}
-              {!testing && testResult && !testResult.valid && (
-                <span className="inline-flex items-center gap-1.5 text-warn">
-                  <XCircle className="h-3 w-3" />
-                  {testResult.error || "Could not validate (will rotate anyway)"}
-                </span>
-              )}
-            </div>
+            <p className="text-xs text-muted-foreground">The replacement has not been tested. Existing secret values are never shown here.</p>
           </div>
 
           <div className="space-y-1.5">

@@ -169,7 +169,7 @@ var workspaceCreateCmd = &cobra.Command{
 			return err
 		}
 
-		f := newFormatter()
+		f := resolvedFormatter(cmd)
 		if !f.RoutesToHuman() {
 			return f.Machine(created)
 		}
@@ -651,7 +651,7 @@ var workspaceInviteCmd = &cobra.Command{
 			return cmd.Help()
 		}
 		role, _ := cmd.Flags().GetString("role")
-		return sendWorkspaceInvitation(args[0], role)
+		return sendWorkspaceInvitation(cmd, args[0], role)
 	},
 }
 
@@ -659,7 +659,12 @@ var workspaceInviteCmd = &cobra.Command{
 // `workspace invite <email>` shortcut and `workspace invite create
 // <email>`. Keeping it a plain function avoids relying on Cobra flag
 // inheritance across delegated RunE calls.
-func sendWorkspaceInvitation(email, role string) error {
+// sendWorkspaceInvitation is shared by `workspace invite <email>` and
+// `workspace invite create <email>`. It takes the cobra command so both
+// spellings resolve the SAME --format flag: a helper that reached for the
+// global would honour the flag on one command and not the other, which is
+// the drift the format contract exists to stop.
+func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -693,12 +698,13 @@ func sendWorkspaceInvitation(email, role string) error {
 		return err
 	}
 
-	// Deliberately not "Invitation sent": no mail is sent. CreateInvitation
-	// holds no mailer, so this writes a row and nothing reaches the invitee.
-	// `workspace member invite` is the command that actually gets someone in.
-	cli.PrintSuccess(fmt.Sprintf("Invitation recorded for %s (%s role).", inv.Email, inv.Role))
-	cli.PrintWarning("No email was sent — no mailer is wired. Use `crewship workspace member invite` to create the account and get a setup link.")
-	return nil
+	return resolvedFormatter(cmd).AutoHuman(inv, func() {
+		// Deliberately not "Invitation sent": no mail is sent. CreateInvitation
+		// holds no mailer, so this writes a row and nothing reaches the invitee.
+		// `workspace member invite` is the command that actually gets someone in.
+		cli.PrintSuccess(fmt.Sprintf("Invitation recorded for %s (%s role).", inv.Email, inv.Role))
+		cli.PrintWarning("No email was sent — no mailer is wired. Use `crewship workspace member invite` to create the account and get a setup link.")
+	})
 }
 
 var workspaceInviteListCmd = &cobra.Command{
@@ -750,7 +756,7 @@ var workspaceInviteCreateCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		role, _ := cmd.Flags().GetString("role")
-		return sendWorkspaceInvitation(args[0], role)
+		return sendWorkspaceInvitation(cmd, args[0], role)
 	},
 }
 

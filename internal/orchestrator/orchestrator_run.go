@@ -572,8 +572,17 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// "exit 0" as "it worked". Tool-level failures are deliberately excluded —
 	// see inband_failure.go for the run-vs-tool boundary.
 	var inBand inBandFailure
+	usageModel := req.LLMModel
 	tappedHandler := EventHandler(func(event AgentEvent) {
 		inBand.observe(event)
+		if event.Type == "system" {
+			if meta, ok := event.Metadata.(map[string]any); ok {
+				if model, ok := meta["model"].(string); ok && model != "" {
+					usageModel = model
+				}
+			}
+		}
+		o.recordSubscriptionUsage(execCtx, req, runState.ID, usageModel, event)
 		// A line that decoded partially kept whatever matched and dropped the
 		// rest; the parser records which field it could not read. Say so once
 		// per run: the dropped field is data the CLI sent us and nothing else
@@ -1422,6 +1431,16 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		}
 		o.logger.Warn("failed to write credential files", "error", credWriteErr, "agent_id", req.AgentID)
 	}
+	// A file-delivered login (Codex's $CODEX_HOME/auth.json, Gemini's
+	// ~/.gemini/oauth_creds.json — auth_delivery.go, #2428) lives under the
+	// agent's HOME, not /secrets. Same fail-loud posture as the file-mounted
+	// credentials above: without the file the CLI does not fail closed, it
+	// falls through to the dummy key. A no-op for adapters with no file form.
+	if err := syncLoginFile(ctx, batch, req.ContainerID, req, o.logger); err != nil {
+		o.logger.Error("failed to deliver login file", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
+	}
 	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
@@ -1483,6 +1502,22 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		return nil, "", fmt.Errorf("prepare /secrets/%s for file-mounted credentials: %w — "+
 			"if this is a permission error on /secrets, the Docker daemon likely predates Docker Engine 26 "+
 			"(required for tmpfs uid/gid mount options); upgrade the daemon", req.AgentSlug, flushErr)
+	}
+	// Every file-login step (#2428) is queued on the batch like the others, so
+	// its failure surfaces here, not at the call. Both arms matter: a write
+	// that did not land starts Codex on the dummy key, and a REMOVAL that did
+	// not land leaves a previous login in the persistent HOME paying for a run
+	// nobody assigned it to.
+	delivery := getAdapter(req.CLIAdapter).AuthDelivery()
+	if delivery.FileDelivered() &&
+		(batch.stepFailed("file:"+delivery.File) || batch.stepFailed("rm:"+delivery.File)) {
+		// A read probe may already have flushed this step. The final Flush
+		// can then succeed (or have no work), but prior failure still counts.
+		if flushErr == nil {
+			flushErr = fmt.Errorf("login file step failed in an earlier preflight batch: %s", delivery.File)
+		}
+		o.failRun(ctx, req, runID, "error")
+		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, flushErr)
 	}
 	if hasMCP && batch.stepFailed(preflightStepMCPConfig) {
 		o.failRun(ctx, req, runID, "error")

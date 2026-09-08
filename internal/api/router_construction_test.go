@@ -30,6 +30,32 @@ func TestNewRouter_RequiresNonNilDB(t *testing.T) {
 	}
 }
 
+func TestProviderLoginRefresherIsRouterScoped(t *testing.T) {
+	for _, name := range []string{"first database", "second database"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			db := setupTestDB(t)
+			r, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", newTestLogger())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(r.Shutdown)
+			if r.loginRefresher == nil || r.loginRefresher.db != db {
+				t.Fatal("router must own the refresher for its database")
+			}
+			for name, hook := range map[string]runStartRefresher{
+				"agent boot": r.internalHandler.loginRefresher,
+				"assignment": r.assignmentHandler.loginRefresher,
+				"peer query": r.queryHandler.loginRefresher,
+			} {
+				if hook != r.loginRefresher {
+					t.Errorf("%s does not use its router's refresher", name)
+				}
+			}
+		})
+	}
+}
+
 func TestNewRouter_RejectsBadJWTSecret(t *testing.T) {
 	// auth.NewJWTValidator enforces a minimum secret length; an empty
 	// secret must propagate as a clean construction error rather than

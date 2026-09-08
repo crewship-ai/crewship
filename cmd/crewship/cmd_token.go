@@ -37,6 +37,32 @@ func emitToken(cmd *cobra.Command, name, id, token string) error {
 	out := cmd.OutOrStdout()
 	errOut := cmd.ErrOrStderr()
 
+	// `-f json` is an explicit request for the machine rendering, and it is
+	// answered before the file/quiet branches so the flag means the same
+	// thing here as everywhere else in the tree.
+	//
+	// The bearer IS in that document, which is the one place this command
+	// deviates from its own rule of keeping the secret off stdout. The rule
+	// exists so a routine `crewship token create > log` does not persist a
+	// credential by accident — but --quiet already prints the bare token to
+	// stdout on request, so an explicitly-asked-for machine format doing the
+	// same is consistent rather than a new hole. The advisory stays on
+	// stderr, where it does not corrupt the document.
+	//
+	// --output-file and --quiet are explicit requests too, and they are the
+	// ones a CI job relies on: with `format: json` persisted in the CLI
+	// config, an unflagged `token create --output-file /run/tok` must still
+	// write the file and keep the bearer off stdout. So the machine branch
+	// applies only when neither of those was asked for.
+	if f := resolvedFormatter(cmd); outFile == "" && !quiet && !f.RoutesToHuman() {
+		fmt.Fprintf(errOut, "%sToken is sensitive — it won't be shown again. Avoid shell history / CI logs.%s\n", cli.Yellow, cli.Reset)
+		return f.Machine(struct {
+			ID    string `json:"id" yaml:"id"`
+			Name  string `json:"name" yaml:"name"`
+			Token string `json:"token" yaml:"token"`
+		}{ID: id, Name: name, Token: token})
+	}
+
 	if outFile != "" {
 		// Durable, atomic, and 0600 — all three matter here because the
 		// bytes are a credential (#1999).

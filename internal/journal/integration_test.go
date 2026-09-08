@@ -75,6 +75,7 @@ CREATE TABLE journal_chain_checkpoints (
 );
 
 CREATE TABLE cost_ledger (
+	credential_id TEXT,
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     crew_id TEXT,
