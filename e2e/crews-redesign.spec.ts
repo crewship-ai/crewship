@@ -13,7 +13,7 @@ test.describe("/crews — selection-driven canvas", () => {
   test("empty selection renders the roster", async ({ page }) => {
     await page.goto("/crews")
     // No agent or crew selected → roster headline visible.
-    await expect(page.getByRole("heading", { name: "Your fleet" })).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByRole("heading", { name: "Crews & agents" })).toBeVisible({ timeout: TIMEOUT })
   })
 
   test("sub-bar exposes filters + create CTAs", async ({ page }) => {

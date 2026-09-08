@@ -149,7 +149,7 @@ func currentKnowledge(base, dir, scope, prefix string) ([]memoryDocument, string
 }
 
 func (h *PersonaHandler) AgentMemoryInventory(w http.ResponseWriter, r *http.Request) {
-	paths, _, slug, _, _, err := h.resolveAgentPaths(r, r.PathValue("agentId"))
+	paths, crewID, slug, _, _, err := h.resolveAgentPaths(r, r.PathValue("agentId"))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "agent memory not found")
@@ -158,7 +158,7 @@ func (h *PersonaHandler) AgentMemoryInventory(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
-	h.writeMemoryInventory(w, paths.AgentDir, paths.CrewDir, slug, r)
+	h.writeMemoryInventory(w, paths.AgentDir, paths.CrewDir, slug, crewID, r)
 }
 func (h *PersonaHandler) CrewMemoryInventory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("crewId")
@@ -171,9 +171,9 @@ func (h *PersonaHandler) CrewMemoryInventory(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
-	h.writeMemoryInventory(w, "", h.crewSharedMemoryDir(id), "", r)
+	h.writeMemoryInventory(w, "", h.crewSharedMemoryDir(id), "", id, r)
 }
-func (h *PersonaHandler) writeMemoryInventory(w http.ResponseWriter, agentDir, crewDir, slug string, r *http.Request) {
+func (h *PersonaHandler) writeMemoryInventory(w http.ResponseWriter, agentDir, crewDir, slug, crewID string, r *http.Request) {
 	if h.outputBasePath == "" {
 		replyError(w, http.StatusServiceUnavailable, "memory storage unavailable")
 		return
@@ -186,13 +186,9 @@ func (h *PersonaHandler) writeMemoryInventory(w http.ResponseWriter, agentDir, c
 		states["agent"] = state
 	}
 	if crewDir != "" {
-		var crewSlug string
-		crewID := r.PathValue("crewId")
-		if crewID == "" {
-			_ = h.db.QueryRowContext(r.Context(), "SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ?", r.PathValue("agentId"), WorkspaceIDFromContext(r.Context())).Scan(&crewID)
-		}
-		_ = h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ? AND workspace_id = ?", crewID, WorkspaceIDFromContext(r.Context())).Scan(&crewSlug)
-		rows, state := currentKnowledge(h.outputBasePath, crewDir, "crew", "crew:"+crewSlug+"/")
+		// Shared history is keyed by immutable crew ID in the audit watcher
+		// and consolidator; the display slug is not its storage identity.
+		rows, state := currentKnowledge(h.outputBasePath, crewDir, "crew", "crew:"+crewID+"/")
 		docs = append(docs, rows...)
 		states["crew"] = state
 	}

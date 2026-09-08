@@ -20,6 +20,8 @@ The Memory API exposes the read surfaces over an agent's episodic and markdown m
 
 | Method | Endpoint | Purpose |
 |---|---|---|
+| GET | `/api/v1/agents/{agentId}/memory` | Current agent and shared knowledge |
+| GET | `/api/v1/crews/{crewId}/memory` | Current crew and workspace knowledge |
 | GET | [`/api/v1/memory/health`](#get-health-snapshot) | Memory health snapshot (five metrics + composite) |
 | POST | [`/api/v1/memory/search/hybrid`](#hybrid-search) | Fused FTS5 + episodic memory recall |
 | GET | [`/api/v1/memory/versions`](#get-apiv1memoryversions) | Audit chain for one canonical memory path |
@@ -31,6 +33,74 @@ Export and import require `OWNER` or `ADMIN` (the route's `manage` role). The
 workspace is selected by the authenticated session's workspace context;
 `workspace_id` is not part of either operation's request payload. Both require
 `crew_id`; an empty `agent_slug` addresses crew-shared memory.
+
+## Current knowledge inventory
+
+### `GET /api/v1/agents/{agentId}/memory`
+
+Reads the agent's current knowledge and its crew's shared knowledge. It does
+not start or provision a container. Requires an authenticated workspace member;
+`agentId` must belong to the workspace resolved from the session and
+`workspace_id` query parameter or `X-Workspace-ID` header. No request body.
+
+Both routes also include workspace knowledge when its storage root is configured.
+Personal `users/` and `peers/` files are excluded: read your preferences through
+the `/api/v1/users/me/user-model` and `/api/v1/users/me/peer-cards` endpoints.
+Persona is edited through the agent or crew persona API.
+
+| Response field | Type | Meaning |
+|---|---|---|
+| `source` | string | `current_files`; these are current files, not historical snapshots. |
+| `scopes` | object | Each included scope (`agent`, `crew`, `workspace`) is `available`, `empty`, or `unavailable`. |
+| `documents` | array | Current knowledge documents from readable scopes. |
+| `documents[].id` | string | Scope plus relative note name; selection identity within this inventory. |
+| `documents[].name`, `scope` | string | Relative note name and owning scope. |
+| `documents[].state` | string | `available` or `unavailable`; an unreadable file is not empty content. |
+| `documents[].content` | string, optional | Current content; omitted for unreadable or empty notes. |
+| `documents[].bytes` | integer or null | Readable content length, otherwise unknown. |
+| `documents[].revision` | string, optional | SHA-256 of the current readable content. |
+| `documents[].updated_at` | string, optional | Current file modification time in UTC. |
+| `documents[].history_path` | string, optional | Separate version-history key; crew paths use immutable crew IDs. |
+| `peer_generation` | string | `unavailable` while automatic agent-specific profiles are not generated. |
+
+Response status codes for both routes:
+
+| Status | Meaning |
+|---|---|
+| `200` | Inventory returned, possibly with individual unavailable scopes/documents. |
+| `401` | Authentication or workspace context is missing. |
+| `403` | Workspace access is refused by authorization middleware. |
+| `404` | The selected agent/crew does not exist in this workspace. |
+| `503` | Entity lookup or required memory storage is unavailable. |
+
+Reads are bounded to 64 KiB per document and 512 KiB per scope. Directory
+inventories above the supported bound are unavailable rather than partial
+counts. Symlinks are excluded. Responses use `Cache-Control: private, no-store`.
+History may be unavailable even when current content is readable.
+
+### `GET /api/v1/crews/{crewId}/memory`
+
+Reads the crew's shared knowledge. Requires an authenticated workspace member;
+`crewId` must belong to that workspace. The workspace selection and response
+contract are the same as the agent inventory. No request body.
+
+Response: `200` JSON with `source`, `scopes`, `documents` and
+`peer_generation`, using the inventory fields documented above. There is no
+agent scope on this route. Example for a new crew:
+
+```json
+{"source":"current_files","scopes":{"crew":"empty","workspace":"unavailable"},"documents":[],"peer_generation":"unavailable"}
+```
+
+| Status | Meaning |
+|---|---|
+| `200` | Current inventory returned, including per-scope availability. |
+| `401` | Authentication or workspace context is missing. |
+| `403` | Workspace access refused. |
+| `404` | Crew does not exist in the current workspace. |
+| `503` | Entity lookup or required storage is unavailable. |
+
+General member version-history routes reject personal `users/` and `peers/` paths with `403`; use the self-service privacy APIs. Explicit administrator compliance routes retain their separate authorization.
 
 ## Memory portability
 

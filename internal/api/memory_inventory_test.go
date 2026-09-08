@@ -134,3 +134,35 @@ func TestPeersRejectOtherSubjects(t *testing.T) {
 		t.Fatal("rejected deletion changed storage")
 	}
 }
+
+func TestMemoryInventoryCrewHistoryUsesID(t *testing.T) {
+	rig := peerTestSetup(t)
+	h := NewPersonaHandler(rig.db, rig.h.logger, rig.output, nil)
+	dir := filepath.Join(rig.output, "crews", rig.crewID, "shared", ".memory")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "CREW.md"), []byte("shared"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, viaAgent := range []bool{true, false} {
+		rec := httptest.NewRecorder()
+		if viaAgent {
+			h.AgentMemoryInventory(rec, rig.req(t, "GET", "", map[string]string{"agentId": rig.agentID}))
+		} else {
+			h.CrewMemoryInventory(rec, rig.req(t, "GET", "", map[string]string{"crewId": rig.crewID}))
+		}
+		if rec.Code != 200 {
+			t.Fatalf("status %d", rec.Code)
+		}
+		var body struct {
+			Documents []memoryDocument `json:"documents"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body.Documents) != 1 || body.Documents[0].HistoryPath != "crew:"+rig.crewID+"/CREW.md" {
+			t.Fatalf("wrong history key: %+v", body)
+		}
+	}
+}

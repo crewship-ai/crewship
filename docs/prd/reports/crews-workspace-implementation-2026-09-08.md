@@ -56,7 +56,7 @@ retains the draft for retry. Billing access is explicitly managed independently.
 
 ## Verification
 
-- Crews and related orchestration UI: 74 files / 844 tests passed.
+- Crews and related orchestration UI: 74 files / 844 tests passed; the Work paging hook adds 14 passing tests.
 - Focused API contracts: inventory, workspace/subject isolation, custom-model
   preservation, scoped aggregates/status counts, OpenAPI and personal-memory
   consent/group behavior covered by regression tests.
@@ -66,4 +66,16 @@ retains the draft for retry. Billing access is explicitly managed independently.
   cancel, desktop and 390px mobile. No uncaught JavaScript errors or document
   horizontal overflow. Mobile dialog measured 390px wide at x=0; its footer is
   visible. This check created no live crews, agents, decisions or model calls.
-- Full Go suite, vet and final deployment verification are recorded below when complete.
+- Full `go test ./... -count=1 -timeout=30m`: all application packages passed,
+  including API, database and orchestrator. The sole failing documentation
+  inventory assertion caught the old operation count; the reference was updated
+  from 620/599 to 622/601 total/named responses and both documentation packages
+  passed on rerun. The crew-history ID correction passed its focused API tests.
+- `go vet ./...`, migration lint and agents invariants passed. ESLint: no errors
+  (32 existing warnings). Production static export passed again after the final
+  UI adjustments.
+- Dev2 service reloaded; `/api/health` returns `{"status":"ok"}`, `/crews`
+  returns HTTP 200 and the current-memory API enforces authentication (401
+  without a session). No Dev1/Dev3 deployment or data changes were performed.
+- CI's browser contract expected the retired fleet heading and fourth wizard
+  step. Its assertions now follow the new heading and three-step flow.
