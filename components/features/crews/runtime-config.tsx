@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   AlertCircle, Boxes, Check, Copy, FileJson, HardDrive, Info as InfoIcon,
-  Package, Pencil, Search, Wrench, X,
+  Package, Pencil, Search, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -1404,7 +1404,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
          *  "anything else". */}
         <div hidden={focusedSection === "versions"}><CreateSurfaceSection
           title="Preinstalled tooling"
-          icon={Wrench}
+          icon={Package}
           accent="amber"
           hint="things the container comes with — whatever version ships"
         >

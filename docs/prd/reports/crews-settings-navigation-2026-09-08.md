@@ -39,3 +39,5 @@ API `crews_create.go` / `crews_update.go` přijímá pouze free a restricted. `s
 - Logy `/tmp/crews-editor-final-tests.log`, `/tmp/crews-editor-submit-tests.log`, `/tmp/crews-editor-browser.log`, `/tmp/crews-editor-network-tests.log`, `/tmp/crews-editor-api.log`.
 
 Závěrečná kontrola zachytává také `console.error`, nejen `pageerror`: odhalila opakované aktualizace RuntimeConfig při změně sousedních síťových polí. Stabilní callback ve StepContainer odstranil cyklus. Po opravě prošlo dalších 25 testů StepContainer a celý živý scénář včetně zadání hostu, přepnutí free → restricted se zachováním draftu a Cancel; konzole i API chyby jsou prázdné (`/tmp/crews-editor-console-verified.log`).
+
+Doplnění ikon: identita agenta používá Bot, instrukce FileText, oprávnění ShieldCheck a provider account CreditCard stejně jako jeho existující výběr účtu. Preinstalled tooling používá Package stejně jako menu Tools. Paměť zůstává Brain; značky providerů a runnerů používají stávající loga. Jde pouze o ikony bez změny rozložení, textů nebo ukládání. Cílená kontrola: 18 souborů / 275 testů prošlo, lint bez chyb (32 původních warnings).

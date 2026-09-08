@@ -8,8 +8,10 @@ import {
   Brain,
   ChevronDown,
   Cpu,
-  Image as ImageIcon,
-  KeyRound,
+  Bot,
+  CreditCard,
+  FileText,
+  ShieldCheck,
   MessageSquare,
   Layers,
   Sparkles,
@@ -344,10 +346,10 @@ export function CreateAgentDialog({
         />
 
         <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen} sections={[
-          { id: "identity", label: "Identity", icon: ImageIcon },
+          { id: "identity", label: "Identity", icon: Bot },
           { id: "model", label: "Model and execution", icon: Cpu },
-          { id: "instructions", label: "Instructions and persona", icon: Brain },
-          { id: "access", label: "Permissions", icon: KeyRound },
+          { id: "instructions", label: "Instructions and persona", icon: FileText },
+          { id: "access", label: "Permissions", icon: ShieldCheck },
           { id: "chat", label: "Chat", icon: MessageSquare },
         ]}>
         <CreateSurfaceBody className="min-w-0 space-y-5">
@@ -482,7 +484,7 @@ export function CreateAgentDialog({
           </CreateSurfaceSection>
 
           {/* ─── Identity ─── */}
-          <CreateSurfaceSection title="Identity" icon={ImageIcon} accent="purple">
+          <CreateSurfaceSection title="Identity" icon={Bot} accent="purple">
             {/* `items-end` keeps the 56px tile bottom-aligned with the input
                 next to it, the way the old grid did. */}
             <div className="flex items-start gap-3">
@@ -628,7 +630,7 @@ export function CreateAgentDialog({
           {/* ─── Persona ─── */}
           <CreateSurfaceSection
             title="Instructions"
-            icon={Brain}
+            icon={FileText}
             accent="purple"
             hint="how should this agent behave"
           >
@@ -735,7 +737,7 @@ WORK STYLE: …`}
               <p className="text-xs text-muted-foreground">Enforcement depends on the selected runner. This setting does not change the crew's network access.</p>
             </CreateSurfaceSection>
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
-            {agent && <CreateSurfaceSection title="Provider account" icon={KeyRound}><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} />}</CreateSurfaceSection>}
+            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} />}</CreateSurfaceSection>}
             {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Work → Skills and access.</p>}
           </EditorPanel>
           <EditorPanel active={section === "chat"}>
