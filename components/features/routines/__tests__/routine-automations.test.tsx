@@ -293,8 +293,9 @@ describe("routine access and starting points", () => {
     expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
   })
   it("links credential requirements to accounts without inventing an assigned credential", () => {
-    renderCard(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "cli_token", scope: "github" }, { type: "cli_token", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
+    renderCard(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "CLI_TOKEN", scope: "github" }, { type: "AI_CLI_TOKEN", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
     expect(screen.getAllByRole("link", { name: /github|gitlab/i }).filter(link => link.getAttribute("href") === "/credentials")).toHaveLength(2)
+    expect(screen.getByRole("link", { name: /AI CLI token/ })).toBeInTheDocument()
     expect(screen.getByText(/Accounts are resolved when the run starts/)).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute("href", "/crews?agent=morgan")
     const host = screen.getByText("api.github.com")
