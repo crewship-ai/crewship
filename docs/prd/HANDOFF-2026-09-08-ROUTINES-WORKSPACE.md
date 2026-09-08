@@ -525,3 +525,95 @@ Full backend verification for this refinement completed successfully: all 135
 Go test packages passed on dedicated disk TMPDIR (API 758.175s, database
 813.160s), with no rerun needed. Full go vet passed. Logs:
 /tmp/routines-credentials-go.log and /tmp/routines-credentials-vet.log.
+
+## Client workspace: first implementation of the revised proposal
+
+Application `05da032d6` is deployed on dev1 only (base change `44e7daad3`,
+Markdown fix `61ad1c1b2`, queued-state precedence fix `05fbdfcf9`, exact JSON
+value preservation `05da032d6`).
+The existing RoutinesExplorer, identity icon/color picker, agent avatars,
+DetailCard/Pill palette, shared authoring dialog and full calendar remain.
+No runtime, schema, credentials permission or Issues execution contract changed.
+
+The saved recipe now opens with declared questions/results and a compact,
+expandable work list. Conditions and dependencies are shown without claiming
+that list order is a serial execution order. Large recipes initially show five
+steps with an explicit expansion. Workflow Map opens the original definition
+canvas on demand. Trigger, access and agent-reach controls remain available.
+
+Navigation distinguishes Overview (recipe), Run (the selected execution),
+History, Versions and Schedule while preserving existing query values. A run
+leads with its recorded outcome and explanation, then its readable result and
+available files. Workflow retains the original TraceCanvas against the immutable
+saved DSL, per-step output and execution-attempt history. Activity and Inputs
+remain directly accessible. Existing Activity, Inbox and Issue links retain
+the same run/decision identities; no duplicate timeline or history store exists.
+
+Business outcomes PARTIAL, NO_CHANGE and WORK_CREATED are no longer flattened
+into Completed by the shared presentation helper. Generic waiting is no longer
+called a human decision. A loaded approval or the recorded current step's wait
+kind explains human/event/datetime waiting; unknown reasons remain explicit.
+The legacy exact error `no outcome reported` is explained without turning a
+failed outcome green. This compatibility mapping is not a new structured backend
+reason-code contract, and the UI does not invent successful validation checks.
+
+Run again still offers current/executed version and saved input defaults and
+creates a separate execution; its form now explains replay semantics. Stop has
+an explicit effect explanation before calling the existing cancel endpoint.
+It does not promise rollback. Icon and recipe editing preserve their existing
+permissions and save paths.
+
+Recorded text uses Streamdown in static mode with its default GFM/sanitization
+plugins; structured JSON preserves the original recorded text and numeric identifiers. Browser inspection caught that
+reusing the Issues MarkdownContent wrapper replaced the default remark plugins
+and lost table parsing. The fix is local to Routines; Issues was not modified.
+HANDOFF summaries remain readable with the full protocol behind a disclosure.
+
+Verification so far: 246 tests in 36 Routines/presentation suites passed, followed
+by the final six focused client/result tests including real Markdown tables,
+executable HTML stripping and JSON preservation. TypeScript passed, full lint
+has zero errors and the same 32 existing warnings; changed-file lint passed.
+Both real production exports and dev1 service builds passed. Peer tracked WIP
+was temporarily stashed during each service build and restored byte-for-byte.
+
+Actual dev1 browser verification covers feed-change-report's readable definition,
+original definition map and editor, existing failed run with retained report,
+historical graph and attempts, Activity, saved inputs, rerun form and 390px mobile.
+No real routine was started, approved or stopped during this UI verification.
+Evidence: `/tmp/routines-client-final-live.log`, screenshots
+`/tmp/routines-client-live-{definition,map,edit,result,run-map,mobile}.png`.
+Additional browser state fixtures are intercepted responses, not real executions.
+
+Remaining proposal scope is explicit: no new readiness/connection-repair API,
+transactional publication of recipe + schedules, durable collaborative draft/CAS,
+complete visual step library/data-mapping editor or resume/idempotency engine was
+implemented by this increment. Existing capabilities remain available. Runtime
+performance improvements or client comprehension gains have not been measured.
+
+Final browser state fixtures passed seven cases: queued, event wait, date wait,
+partial result, no change, follow-up work created and interruption, plus cancelling
+a Stop dialog without a request and confirming exactly one intercepted stop.
+No real writes occurred. The first fixture caught queued state being described
+as its configured event wait; queued now takes priority over a stale/current-step
+hint, with an added regression assertion. Eleven focused presentation tests passed.
+Evidence: `/tmp/routines-client-live-states.log` and
+`/tmp/routines-client-queue-tests.log`. Final production build passed again.
+Go vet passed. Full Go tests initially passed 133 packages; API and database hit
+the default 10-minute timeout with no assertion failure reported. Their complete
+packages were restarted with `-timeout=30m` on a dedicated disk TMPDIR.
+
+Final backend verification completed: all 135 Go test packages are covered by
+133 successful packages in `/tmp/routines-client-go.log` and the complete API
+(621.683s) / database (730.908s) reruns in `/tmp/routines-client-slow-go.log`.
+Both reruns passed; `go vet ./...` passed in `/tmp/routines-client-vet.log`.
+No additional runtime code was changed during this verification.
+
+The last result fix preserves JSON bytes rather than parse/stringify formatting,
+which would round large numeric identifiers. Six focused client/result tests
+passed, including `9007199254740993`, and the final live browser fixture verified
+that exact identifier. Final state fixture evidence:
+`/tmp/routines-client-live-states-final.log`. Final production export:
+`/tmp/routines-client-json-build.log`. Every deployment restored peer tracked WIP
+byte-for-byte and removed only its own temporary stash. The PR remains unmerged;
+CodeRabbit was rate-limited without a substantive review. Existing CI timestamp
+lint concerns documented above have not been repaired by this UI-only increment.
