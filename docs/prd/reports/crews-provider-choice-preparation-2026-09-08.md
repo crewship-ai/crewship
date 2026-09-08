@@ -23,3 +23,5 @@ The Dev2 agent `test` was created with Anthropic / Claude Code without an explic
 - The initial systemd reload reported a signal failure; automatic recovery completed, and API/UI plus both runner checks subsequently succeeded.
 
 Logs: `/tmp/crews-provider-ui-final.log`, `/tmp/crews-provider-regression.log`, `/tmp/crews-provider-build.log`, `/tmp/crews-provider-browser.log`, `/tmp/crews-provider-go-all.log`, `/tmp/crews-provider-race.log`.
+
+Full Go verification finished: API 615.983 s, database 666.554 s, orchestrator 20.230 s; every package except `web` passed in the full invocation. The `web` compile raced with the production export replacing hashed assets (`embed ... no such file or directory`). After the export settled, `go test ./web -count=1` passed (0.003 s). Thus the full command itself exited 1, with the sole failed package subsequently verified successfully; this is not reported as a single green full-suite invocation. The latest provisioning snapshot refinement additionally passed the targeted race run. Log: `/tmp/crews-provider-web-retry.log`.
