@@ -338,6 +338,12 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Keep the dispatched body and every journal emission on the persisted issue.
+	body.MissionID = missionID
+	if missionID != "" {
+		r = r.WithContext(journal.WithMission(r.Context(), missionID))
+	}
+
 	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
 			WorkspaceID:     body.WorkspaceID,
@@ -378,10 +384,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(taskPreviewForSummary) > 120 {
 		taskPreviewForSummary = taskPreviewForSummary[:120] + "…"
 	}
-	// MissionID intentionally NOT set — body.ChatID is a chat session
-	// id, which only sometimes corresponds to a row in `missions`
-	// (group_id linkage). Setting it would FK-fail under tests + any
-	// non-mission assignment. chat_id lives in payload + refs instead.
+	// The validated issue identity is carried by the journal context. Ordinary
+	// chat assignments keep only their chat reference.
 	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -395,6 +399,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"assignment_id": assignmentID,
 			"chat_id":       body.ChatID,
 			"target_slug":   body.TargetSlug,
+			"actor_name":    target.Name,
 			"target_id":     target.ID,
 			"task":          body.Task,
 		},
@@ -938,6 +943,27 @@ func (h *AssignmentHandler) runAssignment(
 	})
 	acc = bufAcc
 	handler := func(event orchestrator.AgentEvent) {
+		if body.MissionID != "" && h.hub != nil {
+			metadata := map[string]any{"agent_id": target.ID, "agent_name": target.Name, "run_id": runID, "assignment_id": assignmentID}
+			if original, ok := event.Metadata.(map[string]any); ok {
+				for key, value := range original {
+					metadata[key] = value
+				}
+			}
+			typ := event.Type
+			if typ == "error" {
+				typ = "assignment_error"
+			}
+			if typ == "done" {
+				typ = "assignment_done"
+			}
+			metadata["agent_id"] = target.ID
+			metadata["agent_name"] = target.Name
+			metadata["run_id"] = runID
+			metadata["assignment_id"] = assignmentID
+			h.hub.EmitSessionEvent(body.ChatID, ws.ChatEvent{Type: typ, Content: event.Content, Metadata: metadata})
+		}
+
 		if event.Type == "text" && event.Content != "" {
 			outputParts = append(outputParts, event.Content)
 		}
@@ -1084,7 +1110,7 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 	// is always true for sub-agent runs.
 	req.ChatID = body.ChatID
 	req.ContainerID = containerID
-	req.UserMessage = body.Task
+	req.UserMessage = body.Task + orchestrator.AssignmentOutcomeInstructions
 	req.AgentRole = agentRole
 	req.SkipSidecar = skipSidecar
 	req.SkipConvHistory = true
@@ -1445,6 +1471,10 @@ func (h *AssignmentHandler) finishAssignment(
 		}); err != nil {
 			h.logger.Error("emit terminal assignment entry", "error", err, "assignment_id", assignmentID)
 		}
+	}
+
+	if status == "COMPLETED" {
+		h.publishIssueDeliverables(ctx, assignmentID, result)
 	}
 
 	// Drain the queue: now that this assignment's slot is free,

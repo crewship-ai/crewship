@@ -334,7 +334,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"inbox_item_reads": IntentInclude,
 	"issue_counters":   IntentInclude,
 	// Current human holds must survive restore, or agents could resume without consent.
-	"issue_work": IntentInclude,
+	"issue_work":       IntentInclude,
+	"issue_executions": IntentInclude,
 	// issue_agent_sessions (PRD-ISSUES-AND-ROUTINES-2026 §9.2, work package
 	// B1, #2332) is the durable cursor an agent holds on one issue —
 	// last_consumed_seq, state, agent_version. IntentInclude, the same

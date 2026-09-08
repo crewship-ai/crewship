@@ -141,6 +141,9 @@ export interface Mission {
   // render them as two separate things, and never fall back to putting an
   // agent in owner's place.
   work_mode?: "agent" | "human"
+  brief_revision?: number
+  client_review_required?: boolean
+  execution?: {id: string; stage: string; attempt: number; reviewer: string; note: string; routine_run_id?: string; workers: {assignment_id: string; name: string; status: string; outcome: string; run_id?: string; review: boolean}[]}
   work_revision?: number
   worker_user_id?: string | null
   worker_name?: string | null

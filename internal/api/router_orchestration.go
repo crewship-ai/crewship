@@ -87,6 +87,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		issueStarter = missionEngineForPublic
 	}
 	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
+	issues.routines = r.PipelinesHandler
 	issues.SetJournal(r.Journal())
 	issues.SetStoragePath(r.storagePath)
 	issues.SetContainer(r.keeperContainer)
@@ -99,6 +100,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Delete)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/work", roleCreate, issues.Work)
+	r.authedMut("PUT", "/api/v1/crews/{crewId}/issues/{identifier}/review-policy", roleCreate, issues.ReviewPolicy)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", roleCreate, issues.Start)
 	// openapi: query hard:boolean
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", roleCreate, issues.Stop)
@@ -823,6 +825,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Stash on the Router so the server boot path can start the
 	// stuck-QUEUED sweeper on this same instance (Assignments()).
 	r.assignmentHandler = assign
+	assign.attachments = attachments
 	// #1768 item 3: an @mention in an issue comment wakes the mentioned agent.
 	// Wired here rather than at NewIssueHandler because the dispatch has to be
 	// the SAME AssignmentHandler /assign uses — that is what makes a mention

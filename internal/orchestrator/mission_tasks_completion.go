@@ -453,6 +453,9 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 // missions table (never mission_tasks rows), which is what makes sharing
 // that snapshot with the subsequent deadlock check safe.
 func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms *missionState, tasks []TaskInfo) error {
+	if handled, err := e.checkIssueExecution(ctx, ms); handled {
+		return err
+	}
 	if len(tasks) == 0 {
 		// No mission_tasks — check if lead planning completed and all assignments are done.
 		// This handles the case where lead used /assign (creates assignments, not mission_tasks).
@@ -487,7 +490,7 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		// still goes to REVIEW — work happened and is worth reviewing.
 		var failed int
 		if err := e.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND status = 'FAILED'`, ms.ID).Scan(&failed); err != nil {
+			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND (status IN ('FAILED','TIMEOUT','CANCELLED') OR (outcome IS NOT NULL AND outcome NOT IN ('SUCCEEDED','NO_CHANGE','WORK_CREATED')))`, ms.ID).Scan(&failed); err != nil {
 			// This count decides FAILED vs REVIEW; a swallowed error would
 			// leave failed=0 and silently send an all-failed mission to review.
 			return fmt.Errorf("count failed assignments for mission %s: %w", ms.ID, err)

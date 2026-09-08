@@ -48,8 +48,9 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 			"target_identifier": str(), "relation_type": enum("blocks", "blocked_by", "relates_to", "duplicate_of"),
 		}, "target_identifier", "relation_type"),
 		"FinalCoreIssueReviewRequest": object(map[string]any{
-			"action": enum("approve", "request_changes"), "comment": str(), "reassign_to": nullableString(),
+			"action": enum("approve", "request_changes"), "comment": str(), "reassign_to": nullableString(), "revision": integer(), "brief_revision": integer(),
 		}, "action"),
+		"IssueReviewPolicyRequest":   object(map[string]any{"revision": integer(), "client_review_required": boolean()}, "revision", "client_review_required"),
 		"FinalCorePortRevokeRequest": object(map[string]any{"reason": str()}),
 		"FinalCoreInboxBulkRequest": object(map[string]any{
 			"ids": array(str()), "state": enum("unread", "read", "resolved"), "resolved_action": str(),
@@ -80,6 +81,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/comments", "FinalCoreIssueCommentRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/relations", "FinalCoreIssueRelationRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", "FinalCoreIssueReviewRequest")
+	add("PUT", "/api/v1/crews/{crewId}/issues/{identifier}/review-policy", "IssueReviewPolicyRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/members", "FinalCoreCrewMemberRequest")

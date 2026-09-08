@@ -156,6 +156,7 @@ var BackupTables = []string{
 	"projects",
 	"missions",
 	"issue_work",
+	"issue_executions",
 	"crew_templates",
 	"credentials",
 	// Depth 2: workspace via crews

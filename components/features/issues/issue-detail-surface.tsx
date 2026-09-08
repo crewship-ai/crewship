@@ -608,31 +608,19 @@ export function IssueDetailSurface({
   const runRoutine = React.useCallback(async () => {
     if (!issue?.routine_slug) return
     try {
-      const res = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(issue.routine_slug)}/run`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inputs: {},
-            triggered_via: "issue",
-            // The identifier, so /activity's Runs view can join the run back
-            // to the issue that started it.
-            triggered_by_id: issue.identifier ?? issue.id,
-          }),
-        },
-      )
+      if (!base) return
+      const res = await apiFetch(`${base}/start?${qs}`, { method: "POST" })
       if (!res.ok) {
         const b = await res.json().catch(() => null)
         toast.error(b?.detail ?? "Failed to start routine")
         return
       }
-      toast.success(`Routine ${issue.routine_slug} started — see /activity`)
+      toast.success(`Routine ${issue.routine_slug} started — progress and Lead review appear here`)
       await refresh()
     } catch {
       toast.error("Failed to start routine")
     }
-  }, [issue?.routine_slug, issue?.identifier, issue?.id, workspaceId, refresh])
+  }, [issue?.routine_slug, base, qs, refresh])
 
   const runWorkflow = React.useCallback(
     async (action: WorkflowAction, comment?: string) => {
@@ -653,6 +641,8 @@ export function IssueDetailSurface({
           body: review
             ? JSON.stringify({
                 action: action === "approve" ? "approve" : "request_changes",
+                revision: issue?.work_revision,
+                brief_revision: issue?.brief_revision,
                 ...(comment ? { comment } : {}),
               })
             : undefined,

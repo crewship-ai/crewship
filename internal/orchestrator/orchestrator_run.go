@@ -940,6 +940,11 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 		}
 	}
 
+	if req.MissionID != "" {
+		promptBuf.WriteString("\n\n[ISSUE EXECUTION]\nThis issue uses durable orchestration. After delegating, end this turn with WORK_CREATED; do not poll /results or wait in a background process. The engine tracks workers and schedules a separate Lead review when they finish. This replaces the general polling advice above.\n[END ISSUE EXECUTION]\n")
+		promptBuf.WriteString(AssignmentOutcomeInstructions)
+	}
+
 	// Episodic recall: ask the memory layer for past high-value events
 	// similar to the current user prompt. Regular agents see only their
 	// own history; LEAD sees crew-shared entries too (the scope rule is

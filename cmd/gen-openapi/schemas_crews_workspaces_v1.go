@@ -31,7 +31,7 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	addList := func(path, name string, item map[string]any) { add(path, name, array(item)) }
 
 	member := object(map[string]any{"user_id": str(), "user_name": str(), "email": str(), "role": str(), "capabilities": array(str()), "created_at": str()})
-	issue := object(map[string]any{"id": str(), "identifier": str(), "title": str(), "status": str(), "priority": str(), "description": str(), "created_at": str(), "updated_at": str()})
+	issue := object(map[string]any{"id": str(), "identifier": str(), "title": str(), "status": str(), "priority": str(), "description": str(), "created_at": str(), "updated_at": str(), "brief_revision": integer(), "client_review_required": boolean(), "execution": anyObject()})
 	pipeline := object(map[string]any{"id": str(), "workspace_id": str(), "name": str(), "slug": str(), "description": str(), "version": integer(), "enabled": boolean(), "created_at": str(), "updated_at": str()})
 
 	add("/api/v1/crews/{crewId}/capabilities", "CrewCapabilitiesResponseV1", object(map[string]any{"crew_id": str(), "crew_slug": str(), "container": anyObject(), "integrations": array(anyObject()), "agents": array(object(map[string]any{"slug": str(), "name": str()})), "runtimes": anyObject(), "schema": anyObject()}))

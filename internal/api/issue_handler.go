@@ -44,6 +44,7 @@ type IssueHandler struct {
 	// never calls SetContainer) makes a hard stop report "unsupported"
 	// rather than panic; Tier 1 cooperative stop never reads this field.
 	container provider.ContainerProvider
+	routines  *PipelineHandler
 }
 
 // NewIssueHandler creates a new IssueHandler.
@@ -297,29 +298,32 @@ type issueResponse struct {
 	// old clients during the migration window. Nil when nobody occupies
 	// that slot. A UI must render these as two separate things and must
 	// never fall back to putting an agent in Owner's place.
-	WorkMode       string                 `json:"work_mode"`
-	WorkRevision   int                    `json:"work_revision"`
-	WorkerUserID   *string                `json:"worker_user_id,omitempty"`
-	WorkerName     *string                `json:"worker_name,omitempty"`
-	WorkNote       string                 `json:"work_note"`
-	WorkStopping   bool                   `json:"work_stopping"`
-	Owner          *issueOwnerResponse    `json:"owner,omitempty"`
-	Delegate       *issueDelegateResponse `json:"delegate,omitempty"`
-	DueDate        *string                `json:"due_date"`
-	SortOrder      float64                `json:"sort_order"`
-	MissionType    string                 `json:"mission_type"`
-	LeadAgentID    string                 `json:"lead_agent_id"`
-	CreatedAt      string                 `json:"created_at"`
-	UpdatedAt      string                 `json:"updated_at"`
-	CompletedAt    *string                `json:"completed_at"`
-	Labels         []labelResponse        `json:"labels"`
-	ProjectID      *string                `json:"project_id"`
-	ProjectName    *string                `json:"project_name,omitempty"`
-	Estimate       *int                   `json:"estimate"`
-	ParentIssueID  *string                `json:"parent_issue_id"`
-	MilestoneID    *string                `json:"milestone_id"`
-	SubIssuesCount int                    `json:"sub_issues_count"`
-	CommentCount   int                    `json:"comment_count"`
+	Execution            *issueExecutionResponse `json:"execution,omitempty"`
+	BriefRevision        int                     `json:"brief_revision,omitempty"`
+	ClientReviewRequired bool                    `json:"client_review_required"`
+	WorkMode             string                  `json:"work_mode"`
+	WorkRevision         int                     `json:"work_revision"`
+	WorkerUserID         *string                 `json:"worker_user_id,omitempty"`
+	WorkerName           *string                 `json:"worker_name,omitempty"`
+	WorkNote             string                  `json:"work_note"`
+	WorkStopping         bool                    `json:"work_stopping"`
+	Owner                *issueOwnerResponse     `json:"owner,omitempty"`
+	Delegate             *issueDelegateResponse  `json:"delegate,omitempty"`
+	DueDate              *string                 `json:"due_date"`
+	SortOrder            float64                 `json:"sort_order"`
+	MissionType          string                  `json:"mission_type"`
+	LeadAgentID          string                  `json:"lead_agent_id"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at"`
+	CompletedAt          *string                 `json:"completed_at"`
+	Labels               []labelResponse         `json:"labels"`
+	ProjectID            *string                 `json:"project_id"`
+	ProjectName          *string                 `json:"project_name,omitempty"`
+	Estimate             *int                    `json:"estimate"`
+	ParentIssueID        *string                 `json:"parent_issue_id"`
+	MilestoneID          *string                 `json:"milestone_id"`
+	SubIssuesCount       int                     `json:"sub_issues_count"`
+	CommentCount         int                     `json:"comment_count"`
 	// Routine binding — when set, /run-routine on this issue invokes
 	// the bound pipeline. RoutineSlug is denormalized in the response
 	// so the UI doesn't have to round-trip the pipelines list to

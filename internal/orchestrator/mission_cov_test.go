@@ -32,6 +32,7 @@ func covMissionDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { db.Close() })
 
 	schema := `
+		CREATE TABLE issue_executions (id TEXT PRIMARY KEY, mission_id TEXT, created_at TEXT, stage TEXT, routine_run_id TEXT);
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT, slug TEXT);
 		CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT, escalation_config TEXT);
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,

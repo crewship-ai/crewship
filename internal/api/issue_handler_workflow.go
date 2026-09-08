@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/missionactivity"
 )
 
 // Named so Start's 400 body is grep-able and a test can assert exactly
@@ -33,9 +34,11 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 
 	var req struct {
-		Action     string  `json:"action"` // "approve" or "request_changes"
-		Comment    string  `json:"comment"`
-		ReassignTo *string `json:"reassign_to"` // agent slug for request_changes
+		Revision      *int    `json:"revision"`
+		BriefRevision *int    `json:"brief_revision"`
+		Action        string  `json:"action"` // "approve" or "request_changes"
+		Comment       string  `json:"comment"`
+		ReassignTo    *string `json:"reassign_to"` // agent slug for request_changes
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -46,110 +49,106 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get issue
-	var missionID, status string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &status)
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Issue not found")
-			return
-		}
-		internalError(w, r, h.logger, "review: load issue", err)
+		internalError(w, r, h.logger, "review: begin", err)
 		return
 	}
-
+	defer tx.Rollback()
+	// Acquire the write lock before reading the version being approved.
+	if _, err = tx.ExecContext(ctx, `UPDATE missions SET updated_at=updated_at WHERE identifier=? AND crew_id=? AND workspace_id=?`, ident, crewID, wsID); err != nil {
+		internalError(w, r, h.logger, "review: lock", err)
+		return
+	}
+	var missionID, status, mode string
+	var revision, brief int
+	var submitted sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT m.id,m.status,w.mode,w.revision,w.brief_revision,w.submitted_brief_revision FROM missions m JOIN issue_work w ON w.mission_id=m.id WHERE m.identifier=? AND m.crew_id=? AND m.workspace_id=?`, ident, crewID, wsID).Scan(&missionID, &status, &mode, &revision, &brief, &submitted)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeProblem(w, r, 404, "Issue not found")
+		return
+	}
+	if err != nil {
+		internalError(w, r, h.logger, "review: load", err)
+		return
+	}
 	if status != "REVIEW" && status != "IN_PROGRESS" {
-		writeProblem(w, r, http.StatusBadRequest, "Issue must be in REVIEW or IN_PROGRESS to review (current: "+status+")")
+		writeProblem(w, r, 400, "Issue must be in REVIEW or IN_PROGRESS to review (current: "+status+")")
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	// Captured before either branch mutates the row, so the broadcast below
-	// can report the transition's origin — the SELECT above only proved
-	// REVIEW-or-IN_PROGRESS, and by the time of the broadcast the row itself
-	// already reads the new status.
-	fromStatus := status
-	var toStatus string
-
+	if (req.Revision != nil && *req.Revision != revision) || (req.BriefRevision != nil && *req.BriefRevision != brief) {
+		writeProblem(w, r, 409, "The issue changed. Refresh before reviewing.")
+		return
+	}
+	var active bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assignments WHERE `+assignmentMatch+`) OR EXISTS(SELECT 1 FROM issue_executions WHERE mission_id=? AND stage IN ('working','reviewing'))`, missionID, missionID, missionID, missionID).Scan(&active); err != nil {
+		internalError(w, r, h.logger, "review: active work", err)
+		return
+	}
+	if active {
+		writeProblem(w, r, 409, "Work or Lead review is still running. Stop it or wait for the result before reviewing.")
+		return
+	}
 	if req.Action == "approve" {
-		// REVIEW → DONE
-		_, err = h.db.ExecContext(r.Context(),
-			`UPDATE missions SET status = 'DONE', completed_at = ?, updated_at = ? WHERE id = ?`,
-			now, now, missionID)
-		if err != nil {
-			internalError(w, r, h.logger, "review: approve", err)
+		if mode == "human" && submitted.Valid && int(submitted.Int64) != brief {
+			writeProblem(w, r, 409, "The brief changed after submission. Submit an updated result before approving.")
 			return
 		}
+		var executionBrief int
+		err = tx.QueryRowContext(ctx, `SELECT brief_revision FROM issue_executions WHERE mission_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, missionID).Scan(&executionBrief)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			internalError(w, r, h.logger, "review: execution", err)
+			return
+		}
+		if mode != "human" && err == nil && executionBrief != brief {
+			writeProblem(w, r, 409, "The result belongs to an older brief. Run the updated work before approving.")
+			return
+		}
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	fromStatus, toStatus := status, "TODO"
+	commentBody, activity := "Changes requested", "review_changes_requested"
+	if req.Action == "approve" {
 		toStatus = "DONE"
-
-		// Add comment
-		commentBody := "Approved"
-		if req.Comment != "" {
-			commentBody = "Approved: " + req.Comment
-		}
-		h.addIssueComment(r.Context(), missionID, "user", user.ID, commentBody)
-
-		// Activity
-		h.logActivity(r.Context(), missionID, "user", user.ID, "review_approved", commentBody)
-
-		// F4.5 mission outcomes → crew memory.
-		emitMissionOutcomeLessonAsync(r.Context(), h.db, h.storagePath, missionID, "DONE", h.logger)
-
-	} else {
-		// request_changes → TODO
-		ub := newUpdate()
-		ub.Set("status", "TODO")
-
-		if req.ReassignTo != nil && *req.ReassignTo != "" {
-			// Resolve agent slug to ID, scoped to this workspace.
-			//
-			// agents.slug is only UNIQUE(workspace_id, slug) (v01 schema), not
-			// globally unique, so a lookup without "AND workspace_id = ?" was a
-			// TWO-part bug, found by assignee_write_invariant_test.go (the 7th
-			// unguarded assignee_id write — #1532/#1541 covers the other 6):
-			//   - correctness: with LIMIT 1 and no workspace filter, two
-			//     workspaces that happen to both have an agent slugged "alex"
-			//     race on which one a plain, non-adversarial reassign hits —
-			//     nondeterministic cross-tenant assignment with no attacker
-			//     involved at all.
-			//   - security: an attacker only needs to guess a live agent slug
-			//     ("alex", "qa", "reviewer" — far cheaper than guessing a CUID)
-			//     in ANY workspace to reassign a REVIEW issue to it.
-			// Filtering by workspace_id fixes both in the same line: the
-			// UNIQUE(workspace_id, slug) constraint then makes the match
-			// unique, and it can no longer resolve outside wsID.
-			var agentID string
-			err := h.db.QueryRowContext(r.Context(),
-				`SELECT id FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL LIMIT 1`,
-				*req.ReassignTo, wsID).Scan(&agentID)
-			if err == nil {
-				ub.Set("assignee_type", "agent")
-				ub.Set("assignee_id", agentID)
-				// Delegation (A10, I5): reassigning to an agent sets the
-				// typed delegate column, never owner_user_id.
-				ub.Set("delegate_agent_id", agentID)
-			}
-		}
-
-		query, args := ub.Build("missions", "id = ?", missionID)
-		_, err = h.db.ExecContext(r.Context(), query, args...)
-		if err != nil {
-			internalError(w, r, h.logger, "review: request_changes", err)
+		commentBody = "Approved"
+		activity = "review_approved"
+	}
+	if req.Comment != "" {
+		commentBody += ": " + req.Comment
+	}
+	if req.ReassignTo != nil && *req.ReassignTo != "" && req.Action == "request_changes" {
+		var agentID string
+		if err = tx.QueryRowContext(ctx, `SELECT id FROM agents WHERE slug=? AND workspace_id=? AND deleted_at IS NULL AND status!='PENDING_REVIEW'`, *req.ReassignTo, wsID).Scan(&agentID); err != nil {
+			writeProblem(w, r, 400, "Review target is not an available agent in this workspace")
 			return
 		}
-		toStatus = "TODO"
-
-		// Add comment
-		commentBody := "Changes requested"
-		if req.Comment != "" {
-			commentBody = "Changes requested: " + req.Comment
+		_, err = tx.ExecContext(ctx, `UPDATE missions SET assignee_type='agent',assignee_id=?,delegate_agent_id=? WHERE id=?`, agentID, agentID, missionID)
+		if err != nil {
+			internalError(w, r, h.logger, "review: target", err)
+			return
 		}
-		h.addIssueComment(r.Context(), missionID, "user", user.ID, commentBody)
-
-		// Activity
-		h.logActivity(r.Context(), missionID, "user", user.ID, "review_changes_requested", commentBody)
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE missions SET status=?,completed_at=CASE WHEN ?='DONE' THEN ? ELSE NULL END,updated_at=? WHERE id=?`, toStatus, toStatus, now, now, missionID)
+	if err == nil && req.Action == "request_changes" {
+		_, err = tx.ExecContext(ctx, `UPDATE issue_executions SET stage='changes_requested',review_note=?,updated_at=? WHERE mission_id=? AND stage IN ('accepted','needs_human')`, commentBody, now, missionID)
+	}
+	if err == nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO mission_comments(id,mission_id,author_type,author_id,body,created_at,updated_at) VALUES(?,?,'user',?,?,?,?)`, generateCUID(), missionID, user.ID, commentBody, now, now)
+	}
+	if err == nil {
+		_, err = missionactivity.EmitTx(ctx, tx, missionactivity.Entry{ID: generateCUID(), MissionID: missionID, ActorType: "user", ActorID: user.ID, Action: activity, Details: commentBody})
+	}
+	if err != nil {
+		internalError(w, r, h.logger, "review: persist", err)
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "review: commit", err)
+		return
+	}
+	if toStatus == "DONE" {
+		emitMissionOutcomeLessonAsync(ctx, h.db, h.storagePath, missionID, "DONE", h.logger)
 	}
 
 	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
@@ -276,6 +275,16 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var routineID string
+	if err = tx.QueryRowContext(r.Context(), `SELECT COALESCE(routine_id,'') FROM missions WHERE id=?`, missionID).Scan(&routineID); err != nil {
+		internalError(w, r, h.logger, "start: routine", err)
+		return
+	}
+	if routineID != "" {
+		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID)
+		return
+	}
+
 	// 3. Validate delegate (F62): pre-A10 this checked only that
 	// assignee_id EXISTED, which passed for a user-owner with no agent
 	// delegate at all, or for an assignee_id whose row had since been
@@ -327,6 +336,16 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Each start owns a durable review round; historical runs cannot satisfy it.
+	executionID := generateCUID()
+	executionNow := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.ExecContext(r.Context(), `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+ SELECT ?,mission_id,revision,brief_revision,'working',?,?,? FROM issue_work WHERE mission_id=?`, executionID, leadAgentID, executionNow, executionNow, missionID)
+	if err != nil {
+		internalError(w, r, h.logger, "start: execution", err)
+		return
+	}
+
 	// 4. Reset existing tasks to PENDING or create new one
 	var taskCount int
 	_ = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
@@ -363,6 +382,25 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	// Returning a previously completed issue creates an actual corrective step.
+	var pendingTasks int
+	if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id=? AND status NOT IN ('COMPLETED','SKIPPED')`, missionID).Scan(&pendingTasks); err != nil {
+		internalError(w, r, h.logger, "start: pending tasks", err)
+		return
+	}
+	if taskCount > 0 && pendingTasks == 0 {
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO mission_tasks(id,mission_id,assigned_agent_id,title,description,status,task_order,depends_on,created_at,updated_at)
+ SELECT ?,id,delegate_agent_id,title,COALESCE(description,'') || char(10) || COALESCE((SELECT body FROM mission_comments WHERE mission_id=missions.id ORDER BY created_at DESC,id DESC LIMIT 1),''),'PENDING',COALESCE((SELECT MAX(task_order)+1 FROM mission_tasks WHERE mission_id=missions.id),1),'[]',?,? FROM missions WHERE id=?`, generateCUID(), executionNow, executionNow, missionID)
+		if err != nil {
+			internalError(w, r, h.logger, "start: corrective task", err)
+			return
+		}
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET issue_execution_id=? WHERE mission_id=? AND status NOT IN ('COMPLETED','SKIPPED')`, executionID, missionID); err != nil {
+		internalError(w, r, h.logger, "start: task execution", err)
+		return
 	}
 
 	// 5. Update status → IN_PROGRESS (atomic CAS)

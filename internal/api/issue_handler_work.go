@@ -186,7 +186,7 @@ func (h *IssueHandler) workAs(w http.ResponseWriter, r *http.Request, actorType,
 		return
 	}
 	if req.Action == "submit" {
-		_, err = tx.ExecContext(ctx, `UPDATE issue_work SET revision=revision+1,note=?,updated_at=? WHERE mission_id=?`, req.Note, now, id)
+		_, err = tx.ExecContext(ctx, `UPDATE issue_work SET revision=revision+1,submitted_brief_revision=brief_revision,note=?,updated_at=? WHERE mission_id=?`, req.Note, now, id)
 	} else if nextMode != "human" {
 		_, err = tx.ExecContext(ctx, `UPDATE issue_work SET mode=?,worker_user_id=?,revision=revision+1,note=?,updated_at=? WHERE mission_id=?`, nextMode, worker, req.Note, now, id)
 	}

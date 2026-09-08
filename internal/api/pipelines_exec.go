@@ -208,7 +208,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 
 	exec := h.newExecutor()
-	res, err := exec.Run(r.Context(), pipeline.RunInput{
+	input := pipeline.RunInput{
 		PipelineID:        p.ID,
 		WorkspaceID:       workspaceID,
 		InvokingCrewID:    invokingCrew,
@@ -223,7 +223,51 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		Tags:              body.Tags,
 		MetadataJSON:      marshalMetadata(body.Metadata),
 		IdempotencyKeyTTL: time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
-	})
+	}
+	if dispatch, ok := r.Context().Value(issueRoutineDispatchKey{}).(issueRoutineDispatch); ok {
+		input.RunIDOverride = dispatch.RunID
+		finish := beginBackgroundWork()
+		go func() {
+			defer finish()
+			parent := h.lifecycleCtx
+			if parent == nil {
+				parent = context.Background()
+			}
+			runCtx, cancel := context.WithCancel(parent)
+			defer cancel()
+			done := make(chan struct{})
+			defer close(done)
+			if !dispatch.Active(runCtx) {
+				return
+			}
+			monitorFinish := beginBackgroundWork()
+			go func() {
+				defer monitorFinish()
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-done:
+						return
+					case <-runCtx.Done():
+						return
+					case <-ticker.C:
+						if !dispatch.Active(runCtx) {
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+			_, runErr := exec.Run(runCtx, input)
+			if runErr != nil {
+				dispatch.Failed(runErr)
+			}
+		}()
+		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": dispatch.RunID, "status": "IN_PROGRESS"})
+		return
+	}
+	res, err := exec.Run(r.Context(), input)
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal
 		// error. Map before the catch-all.

@@ -44,6 +44,14 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
     } catch (err) { setError(err instanceof Error ? err.message : "Could not transfer work") }
     finally { setBusy(false) }
   }
+  async function setReviewPolicy(required: boolean) {
+    setBusy(true); setError(null)
+    try {
+      const res = await apiFetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier ?? issue.id)}/review-policy?workspace_id=${encodeURIComponent(issue.workspace_id)}`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({revision: issue.work_revision, client_review_required: required})})
+      if (!res.ok) { const body = await res.json().catch(() => null); throw new Error(body?.detail || "Could not update acceptance") }
+      await onChanged()
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not update acceptance") } finally { setBusy(false) }
+  }
   async function retryStop() {
     if (busy) return
     setBusy(true); setError(null)
@@ -68,6 +76,17 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
         <Button size="sm" variant="outline" disabled={busy || issue.work_stopping} onClick={() => { setForm("handoff"); setError(null) }}><ArrowRightLeft className="mr-1 h-3.5 w-3.5" />Hand off</Button>
         {human && <Button size="sm" disabled={busy || issue.work_stopping} onClick={() => { setForm("submit"); setError(null) }}>Submit result</Button>}
       </div>}
+    </div>
+    {issue.execution && <div className="mt-4 space-y-2 border-t border-border pt-3 text-xs" aria-label="Execution progress">
+      <p className="font-medium">{({working: "Work in progress", reviewing: "Lead review", accepted: issue.status === "DONE" ? "Completed" : "Ready for your acceptance", changes_requested: "Changes requested", needs_human: "Your decision is needed", failed: "Execution failed", superseded: "Previous work superseded"} as Record<string, string>)[issue.execution.stage] ?? issue.execution.stage} · Attempt {issue.execution.attempt + 1}</p>
+      <p className="text-muted-foreground">Reviewer: {issue.execution.reviewer}</p>
+      {issue.execution.routine_run_id && <p className="text-muted-foreground">Routine execution is linked to this review.</p>}
+      {issue.execution.workers.length > 0 && <ul className="space-y-1">{issue.execution.workers.map((worker) => <li key={worker.assignment_id} className="flex flex-wrap justify-between gap-2"><span>{worker.name}{worker.review ? " · Reviewer" : " · Worker"}</span><span className="text-muted-foreground">{worker.outcome ? worker.outcome.toLowerCase().replaceAll("_", " ") : worker.status === "RUNNING" ? "Executing" : worker.status.toLowerCase()}</span></li>)}</ul>}
+      {issue.execution.note && <p className="whitespace-pre-wrap break-words">{issue.execution.note}</p>}
+    </div>}
+    <div className="mt-3 text-xs text-muted-foreground">
+      <label className="flex items-center gap-2"><input type="checkbox" checked={issue.client_review_required ?? true} disabled={!editable || busy || !["TODO", "BACKLOG"].includes(issue.status)} onChange={(event) => void setReviewPolicy(event.target.checked)} />Require client acceptance after Lead review</label>
+      <p className="mt-1">{(issue.client_review_required ?? true) ? "Lead verifies the result, then a person approves completion." : "Lead can mark verified work Done. Uncertainty still comes back to a person."}</p>
     </div>
     {issue.work_note && <details className="mt-3 text-xs"><summary className="cursor-pointer text-muted-foreground">Latest handoff or result</summary><p className="mt-2 whitespace-pre-wrap break-words">{issue.work_note}</p></details>}
     {form && <form className="mt-4 space-y-3 border-t border-border pt-3" onSubmit={(event) => {

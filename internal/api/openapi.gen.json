@@ -3680,11 +3680,21 @@
       },
       "CrewIssueResponseV1": {
         "properties": {
+          "brief_revision": {
+            "type": "integer"
+          },
+          "client_review_required": {
+            "type": "boolean"
+          },
           "created_at": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "execution": {
+            "additionalProperties": true,
+            "type": "object"
           },
           "id": {
             "type": "string"
@@ -3736,11 +3746,21 @@
       "CrewIssueSubtasksResponseV1": {
         "items": {
           "properties": {
+            "brief_revision": {
+              "type": "integer"
+            },
+            "client_review_required": {
+              "type": "boolean"
+            },
             "created_at": {
               "type": "string"
             },
             "description": {
               "type": "string"
+            },
+            "execution": {
+              "additionalProperties": true,
+              "type": "object"
             },
             "id": {
               "type": "string"
@@ -5563,12 +5583,18 @@
             ],
             "type": "string"
           },
+          "brief_revision": {
+            "type": "integer"
+          },
           "comment": {
             "type": "string"
           },
           "reassign_to": {
             "nullable": true,
             "type": "string"
+          },
+          "revision": {
+            "type": "integer"
           }
         },
         "required": [
@@ -7584,6 +7610,21 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "IssueReviewPolicyRequest": {
+        "properties": {
+          "client_review_required": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "client_review_required"
         ],
         "type": "object"
       },
@@ -49492,8 +49533,66 @@
               }
             },
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
           },
-          "404": {
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/review-policy": {
+      "put": {
+        "operationId": "put_api_v1_crews_crewId_issues_identifier_review-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueReviewPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
@@ -49521,7 +49620,37 @@
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -102229,6 +102358,16 @@
               }
             },
             "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "400": {
             "content": {
