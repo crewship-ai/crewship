@@ -69,6 +69,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     } catch (e) { setActionError(e instanceof Error ? e.message : String(e)) }
     finally { setStarting(false) }
   }
+  const resultSummary = run.output?.includes("---HANDOFF---") ? /^summary:\s*(.+)$/m.exec(run.output.slice(run.output.lastIndexOf("---HANDOFF---")))?.[1]?.trim() : undefined
   const outputs = Object.entries(run.step_outputs ?? {})
   const step = dsl?.steps?.find(s => s.id === selectedStep)
   const needsAttention = run.outcome === "FAILED" || run.outcome === "NEEDS_HUMAN" || ["failed", "interrupted"].includes(run.status)
@@ -87,7 +88,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     {run.error_message && <p role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm">{run.failed_at_step && `${run.failed_at_step}: `}{run.error_message}</p>}
     {approval.waitpoint && <RoutineApprovalBanner waitpoint={approval.waitpoint} deciding={approval.deciding} onDecide={approval.decide} />}
     {approval.error && <p role="alert" className="text-sm text-destructive">Could not load or update the decision. <button onClick={approval.refresh}>Retry</button></p>}
-    {run.output && <section className="rounded-xl border p-4"><h2 className="mb-2 text-sm font-medium">Result</h2><pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-sm">{run.output}</pre></section>}
+    {run.output && <section className="rounded-xl border p-4"><h2 className="mb-2 text-sm font-medium">Result</h2>{resultSummary ? <><p className="whitespace-pre-wrap break-words text-sm">{resultSummary}</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">Full recorded response</summary><pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words">{run.output}</pre></details></> : <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-words text-sm">{run.output}</pre>}</section>}
     <nav aria-label="Run detail" className="flex gap-2 border-b pb-2">{["progress", "outputs", "activity", "inputs"].map(t => <Button key={t} size="sm" variant={tab === t ? "secondary" : "ghost"} onClick={() => setTab(t)} aria-pressed={tab === t}>{t[0].toUpperCase() + t.slice(1)}</Button>)}</nav>
     {tab === "progress" && <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
       {dsl ? <div className="h-[560px] min-h-[360px] overflow-hidden rounded-xl border"><TraceCanvas run={run} dsl={dsl} workspaceId={workspaceId} selectedStepId={selectedStep} onStepSelect={setSelectedStep} waitpointTokensByStepId={tokens} heatmapBuckets={EMPTY} stepMetrics={EMPTY} initialFocus="all" centerOnSelect /></div> : <p className="rounded-xl border p-6 text-sm text-muted-foreground">The historical recipe is unavailable. Recorded outputs and activity remain accessible.</p>}

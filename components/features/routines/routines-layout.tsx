@@ -259,7 +259,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
            routine. Appears once a routine is selected, pairing the
            definition above with its run console below. ---- */}
-      {routineCtx && (
+      {routineCtx && !selectedRun && (
         <BottomPanel
           workspaceId={workspaceId}
           context={routineCtx}
