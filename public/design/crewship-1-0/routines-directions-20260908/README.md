@@ -27,3 +27,10 @@ production implementation must always come from recorded backend evidence.
 
 Verification evidence on the dev1 host:
 `/tmp/routines-directions-test.log`, `/tmp/routines-layout-continuity.log`.
+
+Updated recommendation: `client-workspace.html` adds an outcome-first client
+workspace, state-specific emphasis, compact direct editing, preflight repair,
+version impact, recovery explanations and an explicitly subjective priority
+matrix (`#priorities`). This supersedes the initial recommendation of A.
+The sample recipe, checks, connection availability and all runtime evidence
+are illustrative. See analysis section 16 for scope and production contracts.

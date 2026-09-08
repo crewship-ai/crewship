@@ -4,6 +4,8 @@
 
 [Otevřít přehled pěti směrů a tři interaktivní wireframy](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/index.html).
 
+> **Aktualizace doporučení:** nová klientská interpretace a priority jsou v oddílu 16. Původní varianty A/B/C zůstávají srovnávacími exploracemi, nikoli doporučeným finálním řešením.
+
 ## 1. Co tento audit skutečně pokrývá
 
 Prošel jsem na dev1 `feed-change-report` (název GitHub incident brief), jeho
@@ -244,7 +246,7 @@ Případné nové sloupce navrhovat podle skutečně chybějících dat, ne podl
 
 ## 12. Doporučené pořadí implementace
 
-1. **P0 — společný detail a běh.** Jedna kostra, stejné uzly a pozice, společný
+1. **P0 — společný detail a běh.** Jedna kostra, stejné identity uzlů a kontext, společný
    inspektor, čitelný výsledek, vysvětlení technického stavu a outcome.
 2. **P0 — dokončit ruční tvorbu.** Add step, úplná editace klíčových typů,
    datové vazby, bezpečné odstranění a Save version bez vynuceného průvodce.
@@ -259,7 +261,7 @@ Případné nové sloupce navrhovat podle skutečně chybějících dat, ne podl
 6. **Později — volitelné prostředí autora.** AI spoluautor, pokročilá mapa,
    srovnání a nástroje pro rozsáhlé recepty až na společném modelu.
 
-Nejdřív rozhodnout o kostře A/B/C. Neimplementovat všechny varianty jako další
+Nejdřív ověřit klientský směr z oddílu 16. Neimplementovat všechny varianty jako další
 povinné přepínače. Dashboard a plný kalendář ponechat; opravit jejich vazby
 na zvolený detail bez plošné další změny vzhledu.
 
@@ -267,7 +269,7 @@ na zvolený detail bez plošné další změny vzhledu.
 
 - Klient bez znalosti DSL vysvětlí vstup, dvě hlavní akce a výsledek referenční
   rutiny bez rozklikávání technických panelů.
-- Start nezmění místo ani pojmenování kroků; odlišení receptu a provedení je
+- Start zachová identitu a pojmenování práce; odlišení receptu a provedení je
   viditelné i při otevření přímého historického odkazu.
 - Nový jednoduchý recept lze vytvořit, napojit a upravit bez Code.
 - Nepodporovaná editace staršího/custom kroku je výslovná; nic se tiše nemaže.
@@ -319,3 +321,93 @@ položek knihovny; tu určuje popsaný backendový kontrakt.
 Aktuální soubory se zpřístupňují v existující dev1 cestě
 `/design/crewship-1-0/`. Nebylo potřeba měnit proxy, restartovat instanci,
 nasadit nový backend ani upravovat aplikaci. Žádná živá rutina nebyla spuštěna.
+
+
+## 16. Revidované doporučení: klientská práce a prokazatelný výsledek
+
+Nový [klikací klientský návrh](https://crewship-dev1.unifylab.cz/design/crewship-1-0/routines-directions-20260908/client-workspace.html)
+rozvíjí předchozí kritiku. Nejde o čtvrtý volitelný režim aplikace, ale návrh
+jednoho výchozího detailu. A/B/C zůstávají archivem srovnání, nikoli třemi
+produktovými povrchy. Předchozí preference A byla předčasná.
+
+**Hlavní investice:** jeden pravdivý záznam práce, srozumitelný od přípravy
+po výsledek. Před spuštěním dominuje co vznikne, vstupy a účinky. Za běhu
+aktuální práce. Při čekání příčina a konkrétní akce. Po dokončení výsledek
+s kontrolami. Stejný sidebar, identita, vizuální jazyk a navigace; stejná
+pozice grafu není cílem. Mapa zůstává pro detail a Activity.
+
+Návrh rozlišuje klientskou úroveň (účel, smysluplné části práce, výsledek)
+a autorskou úroveň (skutečné kroky, vazby, agent, limity, kód). Editace používá
+kompaktní modal podobný Credentials: přímé sekce, návrat k rozepsané práci,
+jedno zhodnocení dopadu publikace. Nevyžaduje průchod všemi sekcemi.
+Text o účincích a podmínkách musí vycházet ze skutečného receptu. Autorské
+shrnutí není důkaz, že backend danou podmínku vynucuje.
+
+### Priority funkcí
+
+Čísla jsou **návrhové skóre důležitosti 0–100 v procentech**, zaokrouhlené
+na 5 bodů. Nejde o měření, procento zrychlení, pravděpodobnost ani podíl z celku;
+sloupce se nesčítají. Klient = správné pochopení a rozhodnutí. Provoz =
+spolehlivost, menší plýtvání, kontrola nákladů a oprav. 100 znamená základní
+podmínku v dané dimenzi, kolem 50 užitečné zlepšení. Nejde o přesný žebříček
+ROI; ten potřebuje náklady implementace a skutečné měření.
+
+| Funkce | Klient | Provoz | Fáze |
+| --- | ---: | ---: | --- |
+| Pravdivý výsledek a kontroly | 100 % | 90 % | P0 |
+| Jeden záznam běhu pro Activity a návaznosti | 95 % | 100 % | P0 |
+| Co Start způsobí a co potřebuje | 100 % | 90 % | P0 |
+| Čekání a konkrétní další akce | 100 % | 85 % | P0 |
+| Oprava, opakování a zastavení | 90 % | 100 % | P0 |
+| Historická verze a bezpečné úpravy | 90 % | 95 % | P0 |
+| Čitelné části práce a skutečná mapa | 95 % | 65 % | P1 |
+| Přímá editace a typované vazby | 85 % | 85 % | P1 |
+| Limity, timeouty, souběh a volba modelu | 65 % | 100 % | P0 |
+| Kalendář s ikonami a opakováním | 85 % | 70 % | P1 |
+| Animace a vizuální doladění | 55 % | 15 % | P2 |
+
+P0 = základ release důvěry, P1 = navazující použitelnost, P2 = doladění.
+Dostupná existující funkcionalita se tím nemaže ani neodkládá; hodnotíme
+potřebné doplnění a sjednocení. První implementační celek: sdílený run kontrakt,
+stav a výsledek, Activity, čekání a jeho řešení, předstartovní připravenost.
+Potom úplnější autorství nad stejným kontraktem.
+
+Backend: sdílet existující journal, runs, step executions, artefakty, verze a
+waitpointy. Doplnit strukturované důvody problémů, skutečné preflight výsledky,
+pravidla opakování účinků, limity a souběh. Draft a revize mají řešit obnovu
+práce a konflikt publikace; nezavádět novou paralelní historii. Slabší model
+není automaticky ekvivalent silnějšího: hodnotit cenu za přijatý výsledek na
+stejné sadě úloh. Samotné UI výkon agentů nezrychluje.
+
+Měření: klient bez pomoci vysvětlí Start a jeho účinky, najde výsledek a vyřeší
+čekání. Zaznamenat správnost, čas a chybné akce. Provoz: duplicitní účinky,
+zbytečně zahájené běhy, čas do odstranění blokace a cena za přijatý výsledek.
+Srovnat stejnou sadu úloh před a po změně; neslibovat předem procento úspory.
+
+### Rozsah nové HTML ukázky
+
+Vše běží pouze v paměti prohlížeče, bez API a modelu. Produktové texty jsou
+anglicky, hodnocení česky. Ukázka má vlastní tříkrokový recept s review;
+není přepisem skutečné dvoukrokové feed-change-report. Obsah reportu je fiktivní.
+Obsahuje přepnutí přípravy, chybějícího připojení, fronty, běhu, lidského/event/date
+čekání, neověřeného výsledku, chyby, success/no-change/partial/work-created a Stop.
+Přímé odkazy: `#edit`, `#run`, `#priorities`.
+
+Editace simuluje jméno, ikonu, účel, instrukci, lidskou kontrolu a opakování;
+publikace zachová historický snapshot. Nenahrazuje úplný knihovní editor kroků,
+picker agentů, typované formuláře ani plný kalendář. Tyto existující schopnosti
+se mají zachovat. Workflow Map je zde schematická ukázka umístění; produkce
+má využít stávající renderer. Prototyp simuluje společnou publikaci receptu a
+plánu: produkce to musí umět transakčně, nebo jasně nabídnout oddělené uložení.
+Recovery nabízí nový běh, nepředstírá podporu resume. AI connection je lokální
+simulace, nikoli provedená credential kontrola. Approval nemůže opravit chybějící
+completion. Odkazy na Activity, Inbox a Issue jsou kontextové náhledy.
+
+Ověření nové ukázky: v Playwright prošlo zachování rozepsaných polí mezi sekcemi,
+publikace v4 se zachovaným historickým v3, dvanáct provozních stavů, lokální
+oprava připojení, Start/Stop, schválení i odmítnutí, jedenáct položek hodnocení,
+mobil 390 px bez horizontálního přetékání, odkaz z hubu, ZIP a offline `file://`
+editace. Bez JavaScriptových chyb. Skript `/tmp/routines-client-test.cjs`;
+snímky `/tmp/routines-client-{overview,edit,result,priorities,mobile}.png`.
+Jde o ověření návrhu HTML, nikoli backendu nebo uživatelského porozumění.
+V tomto kroku se nemění aplikace ani Go kód a nebyla spuštěna živá rutina.
