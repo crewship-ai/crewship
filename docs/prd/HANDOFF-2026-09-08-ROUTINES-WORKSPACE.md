@@ -241,3 +241,37 @@ close button; the regression test covers that path.
 These results verify the listed paths, not every future integration or model.
 PR #2460 remains unmerged and requires actual current-head review; CodeRabbit
 has reported rate limiting rather than a completed review.
+
+## Full calendar follow-up (2026-09-08)
+
+Day, 3 days, Monday-based week, month and year views now share Today,
+previous/next, date navigation, event-kind filters and routine icons. The URL
+retains tab/calendar/date. Clicking a date or hour, or Add routine, selects an
+active recipe and its typed inputs and creates a durable one-time start through
+fire_at. Recurrence editing remains in Plan. Browser-local timezone is explicit;
+past/nonexistent local hours are refused. Starts are not drawn as invented
+activity durations. Year fetches twelve bounded months with concurrency three.
+
+The existing calendar called ListPending with 1000; that helper rejects limits
+above 200 and silently defaults to 50. Later dates could disappear. The calendar
+now queries pending starts within its workspace/date interval before limiting,
+and reports >1000 entries as truncated. No migration is needed.
+
+Validation: full Go suite passed 135 packages, then full API passed again after
+the pending-window fix (110.320s). Full go vet passed again. Full frontend:
+646 files / 8,014 tests passed; final calendar regressions: 3 files / 8 tests.
+TypeScript and production builds passed; ESLint 0 errors / 32 existing warnings.
+The Prague timezone check rejected 2026-03-29 02:30 and retained the repeated hour
+in October's 745-hour month. Tests cover leap years, year-crossing weeks,
+interval partitioning, typed inputs, refusal/error persistence, month coverage,
+workspace scoping and truncation after a dense pending queue.
+
+Public dev1 browser verification (`/tmp/routines-calendar-live.log`): all five
+views, routine icons, date-click scheduling, persistence after reload, planned
+start cancellation and mobile width without page errors. Tomorrow's 09:30 start
+`pnd_cmtsqe2wa00087f9828d3` persisted and was cancelled. The next start
+`pnd_cmtsqe5p40009832722df`, scheduled through the UI for 13:56 UTC, produced
+completed `run_cmtsqfyeg00010aac0ae7`. Both use the existing manual, agentless
+fixture `test-routines-calendar-20260908`; no future test schedule was left.
+Screenshots: `/tmp/routines-calendar-*.png`. Concurrent main-clone verification
+WIP was stashed only for deployment and reapplied; it is not shipped here.
