@@ -42,6 +42,7 @@ export async function waitpointDecide(
 // workspace-wide; callers filter by pipeline_run_id when they want
 // "waitpoints for this run".
 export interface PendingWaitpoint {
+  inbox_item_id?: string
   token: string
   pipeline_run_id: string
   step_id: string

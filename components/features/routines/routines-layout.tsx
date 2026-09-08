@@ -21,6 +21,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { isRoutineTestFixture } from "@/lib/routine-filters"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { RoutineFilters } from "./routines-filter-sidebar"
@@ -61,6 +62,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
+  const visiblePipelines = useMemo(() => filters.showTestRoutines ? pipelines : pipelines.filter(p => !isRoutineTestFixture(p.slug)), [pipelines, filters.showTestRoutines])
   // The selected routine lives in the URL: /routines?slug=<slug>.
   //
   // It used to be read from the URL once and then kept in component state,
@@ -94,7 +96,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         return
       }
       if (e.key === "Escape" && !isInputContext) {
-        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral) {
+        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral || filters.showTestRoutines) {
           e.preventDefault()
           setSearch("")
           setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
@@ -108,7 +110,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
+  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral, filters.showTestRoutines])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -145,7 +147,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // Live sub-bar description — derived from the loaded pipelines list.
   // `pipelines.length` = routines in the workspace; `totalRuns` sums each
   // routine's invocation_count (Pipeline.invocation_count from use-pipelines).
-  const totalRuns = pipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
+  const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -159,7 +161,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         title="Routines"
         description={
           <>
-            {pipelines.length} {pipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
+            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
             {totalRuns === 1 ? "run" : "runs"}
           </>
         }
@@ -219,7 +221,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                toggle lives inside the toolbar (next to search), not as a
                floating button. */
             <RoutinesExplorer
-              routines={pipelines}
+              routines={visiblePipelines}
               search={search}
               onSearchChange={setSearch}
               selectedSlug={selectedSlug}
@@ -235,7 +237,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
             {selectedRun ? (
-              <div key={selectedRun} className="absolute inset-0 overflow-auto"><ButtonBack onClick={() => setSelectedRun(null)} /><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
+              <div key={selectedRun} className="absolute inset-0 overflow-auto"><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
             ) : selectedSlug ? (
               <motion.div
                 key={`detail-${selectedSlug}`}
@@ -290,7 +292,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
               >
                 <RoutinesWorkspace
                   workspaceId={workspaceId}
-                  routines={pipelines}
+                  routines={visiblePipelines}
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
@@ -438,5 +440,3 @@ export function ImportRoutineDialog({
     </CreateSurface>
   )
 }
-
-function ButtonBack({ onClick }: { onClick: () => void }) { return <button className="m-4 text-xs text-muted-foreground hover:text-foreground" onClick={onClick}>← Back to routine</button> }

@@ -36,6 +36,7 @@ export const SLASH_ROUTINE_ID_PREFIX = "routine.run:"
 
 /** One declared input, as it appears in a routine's definition JSON. */
 export interface RoutineInputSpec {
+  label?: string
   name: string
   /** JSON data type: string | integer | number | boolean | array | object. */
   type?: string
@@ -136,6 +137,7 @@ export function slashFieldsFromRoutineInputs(
     .filter((i) => typeof i?.name === "string" && i.name !== "")
     .map((i) => ({
       name: i.name,
+      ...(i.label ? { label: i.label } : {}),
       type: widgetForInputType(i.type),
       required: Boolean(i.required),
       default: formatInputDefault(i.default),

@@ -159,6 +159,7 @@
       "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
+        "label": { "type": "string", "description": "Human-readable field name; name stays the stable input key." },
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
@@ -182,6 +183,8 @@
       "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
+        "label": { "type": "string" },
+        "value_labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Author-defined descriptions of primitive result values." },
         "name": { "type": "string" },
         "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "array", "object"] },
         "description": { "type": "string" }

@@ -103,10 +103,10 @@ export function RoutinesOverview({
 }: Props) {
   const { runs: recordedRuns } = usePipelineRuns(workspaceId, "all")
   // A finished engine run may still have a failed or human-review result.
-  const runs = React.useMemo(() => recordedRuns.map(run => ({
+  const runs = React.useMemo(() => recordedRuns.filter(run => routines.some(r => r.slug === run.pipeline_slug)).map(run => ({
     ...run,
     status: run.outcome === "FAILED" ? "failed" : run.outcome === "NEEDS_HUMAN" ? "needs_human" : run.status,
-  })), [recordedRuns])
+  })), [recordedRuns, routines])
   const { schedules } = usePipelineSchedules(workspaceId)
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
   const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)

@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api-fetch"
 // journal event). Use this hook for the list-runs view; use
 // usePipelineRuns when you need per-step events for the waterfall.
 export interface PipelineRunRecord {
+  pipeline_version?: number
   id: string
   outcome?: string
   pipeline_id: string

@@ -175,3 +175,29 @@ and two Linux process tests exceeding the skip budget. The follow-up removes
 only the unused helpers and makes the process tests Linux build-time tests,
 requiring util-linux setsid instead of runtime skips. This preserves runtime
 behavior and retains the real child-process cancellation/exit assertions.
+
+## Unified recipe/run UX follow-up
+
+The approved refinement adds a shared identity header and navigation across
+recipe and run detail, gray calendar cards, separate version archives with
+read-only graphs/diffs and explicit unsaved restoration drafts. Historical
+manual starts accept pinned_version, retain HEAD, and preflight the selected
+recipe. The input review dialog offers current/executed versions and preserves
+matching historical inputs. Optional input labels also reach Chat forms; output
+value_labels come only from the executed author's schema.
+
+Catalog and detail summaries now resolve their latest durable pipeline_runs
+record, including business outcome. Pending approval responses include the
+existing Inbox item ID, scoped by workspace/token. Activity deep links use the
+canonical pipeline/run parameters, and Activity still uses the same run surface.
+No Issues dispatch, review or client acceptance behavior is changed. No new
+migration is required for this follow-up; existing version, run and inbox rows
+remain authoritative. Test fixture prefixes are hidden through a reversible
+explorer filter and marked when directly opened.
+
+Drafts are local unsaved editor buffers, not durable collaborative drafts.
+Historical re-execution pins the recipe, not executable/container revisions or
+external source data. The existing current governance and runtime override
+contracts still apply. Native unsaved-change protection covers editor closing,
+its recipe tabs, anchor navigation and browser unload; it is not a shared
+cross-page draft store.

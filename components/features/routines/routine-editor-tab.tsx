@@ -29,6 +29,8 @@ import type { RoutineDetail } from "./routines-detail-panel"
 // user asked for.
 
 interface Props {
+  onDirtyChange?: (dirty: boolean) => void
+  initialDraft?: Record<string, unknown>
   routine: RoutineDetail
   workspaceId: string
   onSaved: () => void
@@ -44,7 +46,7 @@ interface Props {
   onStepAtCaret?: (stepId: string | null) => void
 }
 
-export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret }: Props) {
+export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret, initialDraft, onDirtyChange }: Props) {
   // Beside the graph the editor is a 48%-wide column, which is right
   // for reading a step and wrong for reading a routine. Expanded, it
   // takes the window and blurs everything behind it.
@@ -112,6 +114,21 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   const [text, setText] = useState(() => renderInitial("yaml"))
   const [liveText, setLiveText] = useState(() => renderInitial("yaml"))
   const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  dirtyRef.current = dirty
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
+  useEffect(() => {
+    if (!dirty) return
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
+    const onNavigate = (event: MouseEvent) => {
+      const link = (event.target as Element)?.closest?.("a[href]")
+      if (link && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
+    }
+    window.addEventListener("beforeunload", beforeUnload)
+    document.addEventListener("click", onNavigate, true)
+    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", onNavigate, true) }
+  }, [dirty])
+
   const [saving, setSaving] = useState(false)
   const saveRef = useRef<(() => void) | null>(null)
   // bufferRef mirrors the editor's latest doc. FileEditor only hands
@@ -132,6 +149,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
   // the key bump the visible editor keeps the old buffer while
   // bufferRef already points at the new definition.
   useEffect(() => {
+    if (dirtyRef.current) return
     const seeded = renderInitial(formatRef.current)
     setText(seeded)
     setLiveText(seeded)
@@ -142,6 +160,16 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret 
     // is exactly when the editor should be re-seeded. `format` is read
     // through the ref on purpose.
   }, [renderInitial, routine.slug])
+
+  // A historical restore seeds an unsaved editor buffer, never repoints HEAD.
+  const draftApplied = useRef<Record<string, unknown> | undefined>(undefined)
+  useEffect(() => {
+    if (!initialDraft || draftApplied.current === initialDraft) return
+    draftApplied.current = initialDraft
+    const next = formatRef.current === "yaml" ? toYaml(initialDraft) : JSON.stringify(initialDraft, null, 2)
+    setText(next); setLiveText(next); bufferRef.current = next
+    setDirty(true); setEditorKey(k => k + 1)
+  }, [initialDraft])
 
   const validation = useMemo(() => parseRoutineBuffer(liveText, format), [liveText, format])
 

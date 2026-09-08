@@ -24,7 +24,7 @@ export function RoutinesWorkspace(props: { workspaceId: string; routines: Pipeli
     </nav>
     <div className="min-h-0 flex-1 overflow-auto">
       {tab === "overview" && <RoutinesOverview {...props} />}
-      {tab === "calendar" && <div className="p-4 md:p-6"><RoutineCalendar workspaceId={props.workspaceId} /></div>}
+      {tab === "calendar" && <div className="p-4 md:p-6"><RoutineCalendar workspaceId={props.workspaceId} routines={props.routines} /></div>}
       {tab === "recent runs" && <RecentRoutineRuns workspaceId={props.workspaceId} routines={props.routines} />}
     </div>
   </div>
@@ -32,12 +32,13 @@ export function RoutinesWorkspace(props: { workspaceId: string; routines: Pipeli
 
 function RecentRoutineRuns({ workspaceId, routines }: { workspaceId: string; routines: Pipeline[] }) {
   const { runs, loading, error } = usePipelineRuns(workspaceId, "all", 200)
+  const visibleRuns = runs.filter(run => routines.some(r => r.slug === run.pipeline_slug))
   return <section className="p-4 md:p-6">
     <h1 className="text-lg font-medium">Recent runs</h1>
-    <p className="mb-4 text-xs text-muted-foreground">Latest {runs.length} loaded runs</p>
+    <p className="mb-4 text-xs text-muted-foreground">Latest {visibleRuns.length} loaded runs</p>
     {error && <p role="alert">Run history could not be loaded.</p>}
     <div className="overflow-hidden rounded-3xl border border-white/[0.06] bg-card">
-      {runs.map(run => {
+      {visibleRuns.map(run => {
         const routine = routines.find(r => r.slug === run.pipeline_slug)
         return <Link key={run.id} href={routineRunHref(run.pipeline_slug, run.id)} className="flex flex-wrap items-center gap-3 border-b border-white/[0.04] px-4 py-3 text-xs last:border-0 hover:bg-muted/30">
           <CrewIcon icon={resolveRoutineIcon(routine ?? { slug: run.pipeline_slug })} color={resolveRoutineColor(routine ?? { slug: run.pipeline_slug })} size="sm" />
@@ -46,12 +47,12 @@ function RecentRoutineRuns({ workspaceId, routines }: { workspaceId: string; rou
           <span>{routineRunLabel(run)}</span>
         </Link>
       })}
-      {!runs.length && <p className="p-6 text-sm text-muted-foreground">{loading ? "Loading runs…" : error ? "History unavailable." : "No runs yet."}</p>}
+      {!visibleRuns.length && <p className="p-6 text-sm text-muted-foreground">{loading ? "Loading runs…" : error ? "History unavailable." : "No runs yet."}</p>}
     </div>
   </section>
 }
 interface CalendarEvent { id: string; kind: "planned" | "pending" | "run"; at: string; slug: string; name: string; status?: string; outcome?: string }
-function RoutineCalendar({ workspaceId }: { workspaceId: string }) {
+function RoutineCalendar({ workspaceId, routines }: { workspaceId: string; routines: Pipeline[] }) {
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [error, setError] = useState(false)
@@ -74,5 +75,5 @@ function RoutineCalendar({ workspaceId }: { workspaceId: string }) {
     return () => controller.abort()
   }, [workspaceId, month])
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-  return <section className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>Previous</Button><Button size="sm" variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>Next</Button></div></div><p className="text-xs text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone} · Future entries are planned starts. Past entries show actual runs.</p>{loading && <p role="status">Loading calendar…</p>}{error && <p role="alert">Calendar could not be loaded.</p>}{truncated && <p className="text-sm text-muted-foreground">High frequency schedules or a large history: only a limited set of occurrences is shown.</p>}<div className="grid grid-cols-1 gap-2 sm:grid-cols-7">{Array.from({ length: (month.getDay() + 6) % 7 }, (_, i) => <div key={`blank-${i}`} className="hidden sm:block" />)}{Array.from({ length: days }, (_, i) => i + 1).map(day => { const list = events.filter(e => new Date(e.at).getDate() === day).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)); return <div key={day} className="min-w-0 rounded-lg border p-2 sm:min-h-28"><p className="mb-2 text-xs text-muted-foreground">{day} · {new Date(month.getFullYear(), month.getMonth(), day).toLocaleDateString(undefined, { weekday: "short" })}</p><div className="max-h-40 overflow-y-auto">{list.map(e => <Link key={e.id} href={e.kind === "run" ? routineRunHref(e.slug, e.id) : `/routines?slug=${encodeURIComponent(e.slug)}`} className="mb-1 block rounded bg-muted/60 p-1.5 text-[11px]"><span className="block truncate">{new Date(e.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })} · {e.name}</span><span className="text-muted-foreground">{e.kind === "run" ? routineRunLabel(e) : e.kind === "pending" ? "Scheduled once" : "Planned"}</span></Link>)}</div></div> })}</div></section>
+  return <section className="space-y-4 rounded-3xl border border-white/[0.06] bg-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-medium">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>Previous</Button><Button size="sm" variant="outline" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>Next</Button></div></div><p className="text-xs text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone} · Future entries are planned starts. Past entries show actual runs.</p>{loading && <p role="status">Loading calendar…</p>}{error && <p role="alert">Calendar could not be loaded.</p>}{truncated && <p className="text-sm text-muted-foreground">High frequency schedules or a large history: only a limited set of occurrences is shown.</p>}<div className="grid grid-cols-1 gap-2 sm:grid-cols-7">{Array.from({ length: (month.getDay() + 6) % 7 }, (_, i) => <div key={`blank-${i}`} className="hidden sm:block" />)}{Array.from({ length: days }, (_, i) => i + 1).map(day => { const list = events.filter(e => new Date(e.at).getDate() === day && routines.some(r => r.slug === e.slug)).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)); return <div key={day} className="min-w-0 rounded-xl border border-border/60 bg-muted/30 p-2 sm:min-h-28"><p className="mb-2 text-xs text-muted-foreground">{day} · {new Date(month.getFullYear(), month.getMonth(), day).toLocaleDateString(undefined, { weekday: "short" })}</p><div className="max-h-40 overflow-y-auto">{list.map(e => <Link key={e.id} href={e.kind === "run" ? routineRunHref(e.slug, e.id) : `/routines?slug=${encodeURIComponent(e.slug)}`} className="mb-1 block rounded bg-muted/60 p-1.5 text-[11px]"><span className="block truncate">{new Date(e.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })} · {e.name}</span><span className="text-muted-foreground">{e.kind === "run" ? routineRunLabel(e) : e.kind === "pending" ? "Scheduled once" : "Planned"}</span></Link>)}</div></div> })}</div></section>
 }

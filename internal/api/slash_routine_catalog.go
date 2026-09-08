@@ -167,6 +167,7 @@ func slashFormSchemaForInputs(inputs []pipeline.InputSpec) []slashFormField {
 		}
 		out = append(out, slashFormField{
 			Name:      in.Name,
+			Label:     in.Label,
 			Type:      slashWidgetForInputType(in.Type),
 			Required:  in.Required,
 			Default:   formatInputDefault(in.Default),

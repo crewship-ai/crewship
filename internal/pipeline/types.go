@@ -224,6 +224,7 @@ type ExecutionTier struct {
 // (e.g. Max=0.5 would round to 0). Validation rejects fractional
 // bounds when the input Type is "integer".
 type InputSpec struct {
+	Label       string   `json:"label,omitempty"`
 	Name        string   `json:"name"`
 	Type        string   `json:"type"` // string | integer | number | boolean | array | object
 	Required    bool     `json:"required,omitempty"`
@@ -237,9 +238,11 @@ type InputSpec struct {
 // are read from the final step's output by name; we do not enforce
 // strict typing in MVP, the spec is documentary + UI-rendering.
 type OutputSpec struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
+	Label       string            `json:"label,omitempty"`
+	ValueLabels map[string]string `json:"value_labels,omitempty"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Description string            `json:"description,omitempty"`
 }
 
 // CredReq declares a credential the pipeline needs at runtime. Type-

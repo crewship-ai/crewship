@@ -87,3 +87,8 @@ export function matchesRoutineFilters(
       return routine.lastStatus?.toLowerCase() === filters.status
   }
 }
+
+/** Reserved prefixes used by release verification fixtures, not client examples. */
+export function isRoutineTestFixture(slug: string): boolean {
+  return slug.startsWith("test-routines-") || slug.startsWith("test-issue-")
+}

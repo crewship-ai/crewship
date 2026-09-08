@@ -62,11 +62,9 @@ import { runProvenance } from "@/lib/run-provenance"
 import { AutomationList } from "@/components/features/automations/automation-list"
 import { integrationLabel } from "@/lib/integration-labels"
 import { credentialTypeLabel } from "@/lib/credential-labels"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { CrewIconPopover } from "@/components/crew-icon-popover"
-import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
-import { apiFetch } from "@/lib/api-fetch"
-import { toast } from "sonner"
+import { RoutineIdentityHeader } from "./routine-identity-header"
+import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
+import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineStepDefinition } from "./routine-step-definition"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
@@ -147,9 +145,13 @@ export function RoutineCardDetail({
   statusPills,
   editRequest = 0,
 }: Props) {
-  const [view, setView] = React.useState("definition")
+  const [selectedView, setView] = useUrlSelection("view")
+  const view = ROUTINE_VIEWS.find(v => v === selectedView) ?? "definition"
   const reduceMotion = useReducedMotion()
   const [editing, setEditing] = React.useState(false)
+  const [editorDirty, setEditorDirty] = React.useState(false)
+  const mayDiscard = () => !editorDirty || window.confirm("Discard unsaved recipe changes?")
+  const [draft, setDraft] = React.useState<{ definition: Record<string, unknown>; version: number } | null>(null)
   React.useEffect(() => {
     if (editRequest > 0) setEditing(true)
   }, [editRequest])
@@ -176,42 +178,6 @@ export function RoutineCardDetail({
   // drop the capability, so Manage mounts the real thing rather than a
   // reimplementation of it.
   const [manageRuns, setManageRuns] = React.useState(false)
-
-  // Stored if chosen, derived from the slug if not — resolved in one
-  // place so the header and the explorer row can never disagree.
-  const [icon, setIcon] = React.useState(() => resolveRoutineIcon(routine))
-  const [color, setColor] = React.useState(() => resolveRoutineColor(routine))
-  React.useEffect(() => {
-    setIcon(resolveRoutineIcon(routine))
-    setColor(resolveRoutineColor(routine))
-  }, [routine])
-
-  const saveAppearance = React.useCallback(
-    async (next: { icon?: string; color?: string }) => {
-      const prev = { icon, color }
-      if (next.icon !== undefined) setIcon(next.icon)
-      if (next.color !== undefined) setColor(next.color)
-      try {
-        const res = await apiFetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(routine.slug)}/appearance`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(next),
-          },
-        )
-        if (!res.ok) throw new Error(String(res.status))
-        onChanged()
-      } catch {
-        // Put it back. A picker that silently keeps a colour the server
-        // rejected is the same lie as a save button that saves nothing.
-        setIcon(prev.icon)
-        setColor(prev.color)
-        toast.error("Could not save the icon")
-      }
-    },
-    [icon, color, routine.slug, workspaceId, onChanged],
-  )
 
   const { records } = usePipelineRunRecords(workspaceId, routine.slug)
   const { schedules } = usePipelineSchedules(workspaceId)
@@ -255,10 +221,6 @@ export function RoutineCardDetail({
     return Array.isArray(raw) ? (raw as { type?: string }[]) : []
   }, [routine.definition])
 
-  // The agent the routine runs through, for the avatar. Manifest first —
-  // it is derived from the step graph — falling back to nothing rather
-  // than guessing from the author, who may not be an agent at all.
-  const ownerAgent = routine.manifest?.agents?.[0] ?? null
   const lastRun = records[0] ?? null
 
   return (
@@ -266,84 +228,18 @@ export function RoutineCardDetail({
       {/* Identity, as a card that scrolls with the page rather than a
           fixed header band. The name is the first thing on the page —
           it used to sit under a row of status chrome. */}
-      <Appear order={0}>
-        <DetailCard>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-3">
-                {/* A real picker now: PATCH /appearance writes two
-                    columns and leaves the definition alone, so choosing
-                    an icon does not mint a routine version. Optimistic,
-                    because a colour that lags a round-trip feels
-                    broken — and it reverts loudly if the write fails. */}
-                <CrewIconPopover
-                  icon={icon}
-                  color={color}
-                  size="lg"
-                  onIconChange={(next) => saveAppearance({ icon: next })}
-                  onColorChange={(next) => saveAppearance({ color: next })}
-                />
-                <div className="min-w-0">
-                  <h1 className="truncate text-lg font-semibold tracking-tight">
-                    {routine.name || routine.slug}
-                  </h1>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-
-                    {routine.head_version != null && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span className="font-mono">v{routine.head_version}</span>
-                      </>
-                    )}
-                    {ownerAgent && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <Link
-                          href="/crews"
-                          className="inline-flex items-center gap-1.5 rounded-full border border-border/60 py-0.5 pl-0.5 pr-2 transition-colors hover:border-border hover:text-foreground"
-                        >
-                          <AgentAvatar seed={ownerAgent} className="h-4 w-4" alt="" />
-                          <span className="font-medium">{ownerAgent}</span>
-                        </Link>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-              {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
-            </div>
-
-            {routine.description && (
-              <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">
-                {routine.description}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              {statusPills}
-              <Pill tone="default">{mine.length > 0 ? "scheduled" : "manual"}</Pill>
-              {/* The pill above answers "does a clock start this". It has no
-                  word for "an event starts this", and without one a routine a
-                  rule fires reads as manual at a glance. */}
-              {myAutomations.length > 0 && (
-                <span data-testid="routine-automations-pill">
-                  <Pill tone="default">
-                    <Zap className="h-3 w-3" />
-                    {myAutomations.length} automation{myAutomations.length === 1 ? "" : "s"}
-                  </Pill>
-                </span>
-              )}
-              <Pill tone="default">
-                {steps.length} {steps.length === 1 ? "step" : "steps"}
-              </Pill>
-              {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
-            </div>
-          </div>
-        </DetailCard>
-      </Appear>
-
-      <nav aria-label="Routine detail" className="flex gap-2 border-b pb-2">{["definition", "history", "settings"].map(v => <button key={v} className={cn("rounded-md px-3 py-2 text-sm capitalize", view === v ? "bg-muted font-medium" : "text-muted-foreground")} onClick={() => setView(v)} aria-pressed={view === v}>{v}</button>)}</nav>
-      {view === "settings" && <div className="space-y-4"><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} concurrencyKey={concurrencyKey} maxConcurrent={maxConcurrent} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><RoutineVersionsTab workspaceId={workspaceId} slug={routine.slug} onRolledBack={onChanged} /><details className="rounded-xl border p-4"><summary>Technical metadata</summary><Metadata routine={routine} steps={steps.length} /></details></div>}
+      <RoutineIdentityHeader routine={routine} workspaceId={workspaceId} onChanged={onChanged} actions={actions}>
+        {statusPills}
+        <Pill tone="default">{mine.some(s => s.enabled) ? "scheduled" : "manual / event"}</Pill>
+        {myAutomations.length > 0 && <span data-testid="routine-automations-pill"><Pill tone="default"><Zap className="h-3 w-3" />{myAutomations.length} automation{myAutomations.length === 1 ? "" : "s"}</Pill></span>}
+        <Pill tone="default">{steps.length} {steps.length === 1 ? "step" : "steps"}</Pill>
+        {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
+      </RoutineIdentityHeader>
+      <RoutineNavigation slug={routine.slug} view={view} onChange={next => { if (next === view || mayDiscard()) { setEditorDirty(false); setView(next) } }} />
+      {view === "versions" && <RoutineVersionsTab workspaceId={workspaceId} slug={routine.slug} onRolledBack={onChanged} onPrepareDraft={(definition, version) => { setDraft({ definition, version }); setEditing(true); setView("definition") }} />}
+      {view === "plan" && <div className="space-y-4"><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} concurrencyKey={concurrencyKey} maxConcurrent={maxConcurrent} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div>}
+      {view === "settings" && <div className="space-y-4"><DetailCard title="Connected workspace"><div className="flex flex-wrap gap-4 text-xs"><Link className="text-primary" href="/credentials">Credentials ↗</Link><Link className="text-primary" href="/integrations">Integrations ↗</Link><Link className="text-primary" href={`/activity?pipeline=${encodeURIComponent(routine.slug)}`}>Activity ↗</Link></div><p className="mt-3 text-xs text-muted-foreground">The access checks are applied when a run starts. Editing these connections does not rewrite historical runs.</p></DetailCard><AccessCard routine={routine} crewshipActions={crewshipActions} /><RoutineReachCard workspaceId={workspaceId} agentSlugs={routine.manifest?.agents ?? []} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><DetailCard title="Technical metadata"><Metadata routine={routine} steps={steps.length} /></DetailCard></div>}
+      {view === "definition" && draft && <DetailCard><p className="text-sm">Unsaved draft from version {draft.version}. Review the editor and save to create a new version. The graph still shows the currently saved recipe.</p><button className="mt-2 text-xs text-primary" onClick={() => { setDraft(null); setEditing(false) }}>Discard draft</button></DetailCard>}
       {view === "definition" &&
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
         <Appear order={2} className="xl:col-span-2 2xl:col-span-3">
@@ -381,7 +277,7 @@ export function RoutineCardDetail({
                     graph, not a title-bar away from it. */}
                 <button
                   type="button"
-                  onClick={() => setEditing((v) => !v)}
+                  onClick={() => { if (!editing || mayDiscard()) { setEditorDirty(false); setEditing(v => !v) } }}
                   className={cn(
                     "absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors",
                     editing
@@ -414,7 +310,9 @@ export function RoutineCardDetail({
                     <RoutineEditorTab
                       routine={routine}
                       workspaceId={workspaceId}
-                      onSaved={onChanged}
+                      initialDraft={draft?.definition}
+                      onDirtyChange={setEditorDirty}
+                      onSaved={() => { setDraft(null); onChanged() }}
                       onStepAtCaret={handleCaret}
                     />
                   </motion.aside>
@@ -427,8 +325,8 @@ export function RoutineCardDetail({
         <div className="flex flex-col gap-4">
           <Appear order={3}>
             <LastRunCard
-              status={lastRun?.outcome === "FAILED" ? "failed" : lastRun?.outcome === "NEEDS_HUMAN" ? "needs attention" : routine.last_invocation_status}
-              at={routine.last_invoked_at}
+              status={lastRun?.outcome === "FAILED" ? "failed" : lastRun?.outcome === "NEEDS_HUMAN" ? "needs attention" : lastRun?.status ?? routine.last_invocation_status}
+              at={lastRun?.started_at ?? routine.last_invoked_at}
               runId={lastRun?.id}
               durationMs={lastRun?.duration_ms}
               slug={routine.slug}
@@ -463,6 +361,7 @@ export function RoutineCardDetail({
                         key={t}
                         type="button"
                         onClick={() => {
+                          if (t === "versions") { if (mayDiscard()) { setEditorDirty(false); setView("versions") }; return }
                           setSideTab(t)
                           setManageTriggers(false)
                           setManageVersions(false)
@@ -541,8 +440,7 @@ export function RoutineCardDetail({
                   />
                 ) : (
                   <p className="text-[12px] text-muted-foreground">
-                    Head is v{routine.head_version ?? 1}. Press Manage for the full history and
-                    rollback.
+                    Current recipe is v{routine.head_version ?? 1}. Open Versions to compare recipes or prepare a draft.
                   </p>
                 )
               ) : triggerKind === "automations" ? (
@@ -989,6 +887,7 @@ function RunsList({
                     <div className="truncate font-mono text-[11px] text-foreground/85">{new Date(r.started_at).toLocaleString()} · {routineRunLabel(r)}</div>
                     <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                       <span>{prov.label}</span>
+                      {r.pipeline_version != null && <span>· v{r.pipeline_version}</span>}
                       {prov.source && (
                         <span className="truncate normal-case text-muted-foreground-soft">
                           {prov.source}

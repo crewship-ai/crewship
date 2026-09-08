@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api-fetch"
  */
 
 export interface SlashFormField {
+  label?: string
   name: string
   /** The widget to draw: text, textarea, cron, timezone, secret, slug,
    *  priority, number, boolean, … It says what the user sees, not what

@@ -342,6 +342,9 @@ func (h *PipelineHandler) DrainVerdicts(timeout time.Duration) bool {
 // flatten + camelCase the persistent struct here so the on-disk
 // schema can evolve without breaking the API.
 type pipelineResponse struct {
+	HeadVersion          *int    `json:"head_version,omitempty"`
+	LastRecordedRunID    string  `json:"last_recorded_run_id,omitempty"`
+	LastRunOutcome       string  `json:"last_run_outcome,omitempty"`
 	ID                   string  `json:"id"`
 	Slug                 string  `json:"slug"`
 	Name                 string  `json:"name"`

@@ -235,3 +235,37 @@ min-width:0 na grid položkách a opakovaný průchod při 390 px prošel.
 Kalendář a detail běhu také bez přetečení stránky. Samostatně ověřeno filtrování
 a prázdný výsledek hledání. Screenshoty jsou v /tmp/routines-v2-*.png.
 Nejsou provedeny nové aplikační změny, DB migrace ani nový kompletní release gate.
+
+## Approved unified navigation refinement (2026-09-08)
+
+Preserve the original explorer, icon/color controls, spacing, dark gray cards
+and existing graph renderer. The recipe and a selected run share one identity
+header and Definition / History / Versions / Plan / Settings navigation.
+Overview, calendar and recent runs share the same card palette. A run is a
+historical execution of this recipe, not a differently branded application.
+
+History is executions; Versions is immutable recipe changes. Archives show a
+graph and comparison with the current version. Use as draft opens an explicitly
+unsaved editor buffer; saving follows the existing save/reclassification gate
+and creates a version. This is not a persisted draft collaboration feature.
+Run again reviews inputs and selects either the current or executed recipe.
+Historical starts preserve HEAD and validate credentials/integrations/resources
+against the selected definition; runtime step overrides remain governed by the
+executor and captured in the effective execution snapshot.
+
+The explorer/detail latest state uses pipeline_runs. A technically completed
+agent run with FAILED outcome must not be presented as successful. A boolean
+false output is data, not an execution error; only author-declared output
+value_labels assign business meaning. Optional input labels retain stable input
+names and types and are shared with the Chat form contract.
+
+Activity links carry the same routine slug and run ID. Routines and Activity
+render the same run component and journal timeline. A pending approval links to
+its existing workspace-scoped Inbox item; no duplicate decision model is added.
+Settings links credentials, integrations and routine Activity; bound Issue runs
+retain their Issue link and existing acceptance/review ownership.
+
+Release fixtures using reserved test-routines-/test-issue- prefixes are hidden
+from the normal explorer/overview/calendar unless Show test recipes is enabled.
+They remain addressable, clearly marked, and unmodified. This prefix convention
+is presentation filtering, not authorization or a new database lifecycle state.
