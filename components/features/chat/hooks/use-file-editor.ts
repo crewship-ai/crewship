@@ -34,7 +34,7 @@ interface FileRef {
 }
 
 /** The one place a file URL is built, for both actions and both trees. */
-function fileRoute(
+export function fileRoute(
   scope: EditorScope,
   agentId: string,
   action: "download" | "save",
@@ -73,7 +73,12 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
   const [editorFile, setEditorFile] = useState<FileRef | null>(null)
   const [editorContent, setEditorContent] = useState<string | null>(null)
   const [editorLoading, setEditorLoading] = useState(false)
-  const [editorDirty, setEditorDirty] = useState(false)
+  const [editorDirty, updateEditorDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  const setEditorDirty = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty
+    updateEditorDirty(dirty)
+  }, [])
   const [editorExpanded, setEditorExpanded] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   const editorAbortRef = useRef<AbortController | null>(null)
@@ -86,10 +91,11 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
     setEditorContent(null)
     setEditorDirty(false)
     setEditorExpanded(false)
-  }, [agentId, workspaceId])
+  }, [agentId, workspaceId, setEditorDirty])
 
   const openFileEditor = useCallback((node: { path: string; name: string }, scope: EditorScope) => {
     if (!workspaceId) return
+    if (dirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
     editorAbortRef.current?.abort()
     const ac = new AbortController()
     editorAbortRef.current = ac
@@ -104,16 +110,17 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
       .then((text) => { if (!ac.signal.aborted) setEditorContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setEditorContent(null); toast.error("Failed to load file") } })
       .finally(() => { if (!ac.signal.aborted) setEditorLoading(false) })
-  }, [agentId, workspaceId])
+  }, [agentId, workspaceId, setEditorDirty])
 
   const closeEditor = useCallback(() => {
+    if (dirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
     editorAbortRef.current?.abort()
     setEditorFile(null)
     setEditorContent(null)
     setEditorLoading(false)
     setEditorDirty(false)
     setEditorExpanded(false)
-  }, [])
+  }, [setEditorDirty])
 
   const handleEditorSave = useCallback((content: string) => {
     if (!workspaceId || !editorFile) return
@@ -131,7 +138,7 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
       })
       .catch(() => toast.error("Save failed"))
       .finally(() => setEditorSaving(false))
-  }, [agentId, workspaceId, editorFile])
+  }, [agentId, workspaceId, editorFile, setEditorDirty])
 
   return {
     editorFile,

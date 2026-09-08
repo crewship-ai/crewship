@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { initialFocusedMember, initialSettingsTab, MOVED_SECTIONS } from "../settings-layout"
 
 describe("initialSettingsTab", () => {
+  it("opens personal sound settings directly", () => { expect(initialSettingsTab("?tab=sounds")).toBe("sounds") })
   it("returns the tab from a valid ?tab= param (deep-link lands on the right section)", () => {
     expect(initialSettingsTab("?tab=audit")).toBe("audit")
     expect(initialSettingsTab("?tab=members")).toBe("members")

@@ -24,6 +24,7 @@ import path from "node:path"
 // as a silent no-op.
 // =============================================================================
 
+const newConversation = vi.fn()
 const push = vi.fn()
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
@@ -90,6 +91,7 @@ function renderPalette(props: Record<string, unknown> = {}) {
   return render(
     <SlashPalette
       open
+      onNewConversation={newConversation}
       agentSlug="riley"
       workspaceId="ws-1"
       onCommand={props.onCommand as never}
@@ -104,6 +106,7 @@ function renderPalette(props: Record<string, unknown> = {}) {
  *  is pinned by chat-panel-slash-actions.test.tsx, which walks the same
  *  PANEL_HANDLED_COMMAND_IDS list. */
 const CLIENT_EFFECT: Record<string, (onCommand: ReturnType<typeof vi.fn>) => void> = {
+  "new-session": () => { expect(newConversation).toHaveBeenCalledTimes(1); expect(push).not.toHaveBeenCalled() },
   clear: (onCommand) => expect(onCommand).toHaveBeenCalledWith("clear"),
   regenerate: (onCommand) => expect(onCommand).toHaveBeenCalledWith("regenerate"),
   search: (onCommand) => expect(onCommand).toHaveBeenCalledWith("search"),
@@ -113,6 +116,7 @@ const CLIENT_EFFECT: Record<string, (onCommand: ReturnType<typeof vi.fn>) => voi
 }
 
 beforeEach(() => {
+  newConversation.mockClear()
   push.mockClear()
   toggleDrawer.mockClear()
   serverCatalog.list = []
@@ -341,4 +345,14 @@ describe("slash palette — the delegated rows are named for the host", () => {
       expect(CLIENT_COMMAND_IDS).toContain(id)
     }
   })
+})
+
+it("disables new-session with an explanation if its host cannot create a draft", () => {
+  renderPalette({ onNewConversation: undefined })
+  const row = screen.getByTestId("slash-item-new-session")
+  expect(row).toHaveAttribute("aria-disabled", "true")
+  expect(within(row).getByText("Open a chat to start a new conversation")).toBeInTheDocument()
+  fireEvent.click(row)
+  expect(newConversation).not.toHaveBeenCalled()
+  expect(push).not.toHaveBeenCalled()
 })

@@ -5,6 +5,8 @@ import Link from "next/link"
 import { motion } from "motion/react"
 import { Activity, ArrowUpRight, MailOpen, Plus, Users } from "lucide-react"
 
+import { UnifiedChatSidebar } from "./unified-chat-sidebar"
+import { UnifiedChatFacets, UnifiedConversationSection, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import {
   SidebarCollapseButton,
@@ -284,7 +286,7 @@ export function groupRowsByRoutine(
 
 /* ------------------------------------------------------------------ props */
 
-interface Props {
+export interface Props {
   agents: ChatTreeAgent[] | null
   threadsByAgent: Record<string, ChatTreeThread[]>
   /** Which kind of thing the list is showing. Owned by the page — it drives
@@ -314,6 +316,7 @@ interface Props {
   threadErrors?: Record<string, string>
   threadsLoaded: boolean
   activeThreadId?: string | null
+  draftConversation?: { agent: ChatTreeAgent; id: string } | null
   onSelectThread: (agent: ChatTreeAgent, thread: ChatTreeThread) => void
   onStartConversation: (agent: ChatTreeAgent) => void
   /** Re-read the roster. Omitted when the caller has no way to re-ask. */
@@ -326,6 +329,7 @@ interface Props {
   /** Overrides the collapse button's accessible name. The control does the
    *  same thing at both sizes — put this column away — but "Collapse sidebar"
    *  is the wrong description of dismissing a drawer. */
+  onUnifiedSelect?: () => void
   collapseLabel?: string
   className?: string
   /** Injected by tests so bucketing is not at the mercy of the wall clock. */
@@ -344,15 +348,19 @@ export function ConversationsSidebar({
   threadErrors,
   threadsLoaded,
   activeThreadId,
+  draftConversation,
   onSelectThread,
   onStartConversation,
   onRetryRoster,
   onRetryThreads,
   onToggleCollapse,
   collapseLabel,
+  onUnifiedSelect,
   className,
   now,
 }: Props) {
+  const unified = useUnifiedConversations()
+  const showAgents = !unified || unified.facet === "all" || unified.facet === "agents"
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<ConversationFilters>(NO_FILTERS)
   const [filterOpen, setFilterOpen] = useState(false)
@@ -365,6 +373,12 @@ export function ConversationsSidebar({
   // leaves the list reading as empty for a reason the badge alone does not
   // explain — and the reader did not ask for that narrowing here.
   useEffect(() => setFilters(NO_FILTERS), [scope])
+  useEffect(() => {
+    if (!draftConversation?.id) return
+    setFilters(NO_FILTERS)
+    setQuery("")
+    setPicking(false)
+  }, [draftConversation?.id])
 
   // `agents ?? []` inline would mint a new array on every render and defeat
   // every memo below it — the list would rebuild and re-sort on each keystroke
@@ -472,12 +486,15 @@ export function ConversationsSidebar({
     .filter((a) => folds[a.id] > 0)
     .map((a) => ({ agent: a, more: folds[a.id] }))
 
+  if (unified) return <UnifiedChatSidebar props={{ agents, threadsByAgent, scope, onScopeChange, kindCounts, totalsByAgent, onShowAll, loadError, threadErrors, threadsLoaded, activeThreadId, draftConversation, onSelectThread, onStartConversation, onRetryRoster, onRetryThreads, onToggleCollapse, collapseLabel, onUnifiedSelect, className, now }} rows={rows} query={query} setQuery={setQuery} />
+
   return (
     // Width, border and background belong to the WRAPPER, the way
     // /routines and /issues do it: the collapsed rail is the same element at
     // `w-9`, so a width baked in here would fight it. The column itself is
     // just a full-height flex stack.
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
+      {unified && <UnifiedChatFacets />}
       {/* ── Search + Filter ── */}
       <SidebarToolbar>
         <div data-chat-search className="min-w-0 flex-1">
@@ -498,8 +515,8 @@ export function ConversationsSidebar({
             }}
           />
         </div>
-        <SidebarFilterPopover
-          label="Filter conversations"
+        {showAgents && <SidebarFilterPopover
+          label={unified ? "Filter agent sessions" : "Filter conversations"}
           activeCount={nFilters}
           onClear={() => setFilters(NO_FILTERS)}
           open={filterOpen}
@@ -586,7 +603,7 @@ export function ConversationsSidebar({
               </p>
             </SidebarFacet>
           )}
-        </SidebarFilterPopover>
+        </SidebarFilterPopover>}
         {onToggleCollapse && (
           <SidebarCollapseButton
             collapsed={false}
@@ -601,9 +618,9 @@ export function ConversationsSidebar({
         )}
       </SidebarToolbar>
 
-      {/* ── Show ── (single-select bucket, wired to the fetch) */}
-      <SidebarSection
-        label="Show"
+      {/* ── Show ── (agent execution buckets) */}
+      {showAgents && <SidebarSection
+        label={unified ? "Agent sessions" : "Show"}
         count={CHAT_SCOPES.length}
         collapsible
         collapsed={!showOpen}
@@ -663,41 +680,29 @@ export function ConversationsSidebar({
             </SidebarRow>
           )
         })}
-      </SidebarSection>
+      </SidebarSection>}
 
       {/* ── The list ── */}
       <div className="flex min-h-0 flex-1 flex-col">
-        <SidebarSection
-          label={picking ? "Start a conversation with" : "Conversations"}
-          count={picking ? pickable.length : visible.length}
-          actions={
-            <button
-              type="button"
-              onClick={() => {
-                setPicking((v) => !v)
-                setQuery("")
-              }}
-              disabled={roster.length === 0 || !!loadError}
-              aria-expanded={picking}
-              aria-label={picking ? "Cancel" : "New conversation"}
-              title={picking ? "Cancel" : "New conversation"}
-              className={cn(
-                "inline-flex h-5 w-5 items-center justify-center rounded transition-colors",
-                "text-muted-foreground/70 hover:bg-white/[0.06] hover:text-foreground",
-                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50",
-                "disabled:pointer-events-none disabled:opacity-40",
-                picking && "bg-primary/15 text-primary",
-              )}
-            >
-              <Plus
-                className={cn("h-3.5 w-3.5 transition-transform", picking && "rotate-45")}
-                aria-hidden="true"
-              />
-            </button>
-          }
-        />
+        <div className="px-2 py-2">
+          {unified && !picking ? <UnifiedNewChatMenu onAgent={() => { setPicking(true); setQuery("") }} /> : <button
+            type="button"
+            onClick={() => { setPicking((v) => !v); setQuery("") }}
+            disabled={roster.length === 0 || !!loadError}
+            aria-expanded={picking}
+            className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-foreground transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Plus className={cn("h-4 w-4", picking && "rotate-45")} aria-hidden="true" />
+            {picking ? "Cancel" : "New conversation"}
+          </button>}
+        </div>
+        {(picking || !unified) && <SidebarSection
+          label={picking ? "Start a conversation with" : unified ? "Agent conversations" : "Conversations"}
+          count={picking ? pickable.length : visible.length + (draftConversation ? 1 : 0)}
+        />}
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-1">
+          {!picking && unified && <UnifiedConversationSection query={query} onSelect={onUnifiedSelect} />}
           {picking ? (
             <>
               {pickable.length === 0 && (
@@ -731,8 +736,17 @@ export function ConversationsSidebar({
                 </SidebarRow>
               ))}
             </>
-          ) : (
+          ) : showAgents ? (
             <>
+              {unified && <SidebarSection label="Agent conversations" count={visible.length + (draftConversation ? 1 : 0)} />}
+              {draftConversation && (
+                <div className="px-1 pb-2" role="status">
+                  <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm" aria-current="page">
+                    <p className="font-medium">New conversation</p>
+                    <p className="text-xs text-muted-foreground">{draftConversation.agent.name} · Draft</p>
+                  </div>
+                </div>
+              )}
               {loadError && (
                 <ScopeFailure
                   label="Conversations could not be loaded"
@@ -765,7 +779,7 @@ export function ConversationsSidebar({
                   server actually answered, and it names the SCOPE — "No
                   conversations yet" under the Routines bucket was a sentence
                   about a list nobody was looking at. */}
-              {!loadError && threadsLoaded && visible.length === 0 && (
+              {!loadError && !draftConversation && threadsLoaded && visible.length === 0 && (
                 <div className="flex flex-col items-start gap-1 px-3 py-2">
                   <p className="text-[11px] text-muted-foreground">
                     {query.trim() || nFilters > 0
@@ -943,7 +957,7 @@ export function ConversationsSidebar({
                 </SidebarSection>
               )}
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -23,6 +23,8 @@ DELETE /api/v1/cache/images/{tag} roleManage
 DELETE /api/v1/chats/{chatId}/messages/{messageId}/reactions/{emoji} roleSelf
 DELETE /api/v1/chats/{chatId}/participants/{userId} roleSelf
 DELETE /api/v1/checkpoints/{id} roleCreate
+DELETE /api/v1/conversations/{conversationId}/agents/{agentId} roleSelf
+DELETE /api/v1/conversations/{conversationId}/participants/{userId} roleSelf
 DELETE /api/v1/credential-rotations/{rotationId} roleInline
 DELETE /api/v1/credentials/bindings/{bindingId} roleManage
 DELETE /api/v1/credentials/{credentialId} roleManage
@@ -170,7 +172,15 @@ POST /api/v1/connectors/{connectorId}/verify roleCreate
 POST /api/v1/consolidate/proposed/{id}/approve roleManage
 POST /api/v1/consolidate/proposed/{id}/reject roleManage
 POST /api/v1/consolidate/run roleManage
+POST /api/v1/conversations roleSelf
+POST /api/v1/conversations/direct roleSelf
 POST /api/v1/conversations/search roleSelf
+POST /api/v1/conversations/{conversationId}/agents roleSelf
+POST /api/v1/conversations/{conversationId}/continue roleSelf
+POST /api/v1/conversations/{conversationId}/messages roleSelf
+POST /api/v1/conversations/{conversationId}/mute roleSelf
+POST /api/v1/conversations/{conversationId}/participants roleSelf
+POST /api/v1/conversations/{conversationId}/read roleSelf
 POST /api/v1/credentials roleInline
 POST /api/v1/credentials/bindings roleManage
 POST /api/v1/credentials/test roleSelf
@@ -311,6 +321,7 @@ PUT /api/v1/agents/{agentId}/avatar roleInline
 PUT /api/v1/agents/{agentId}/chats/{chatId}/read roleSelf
 PUT /api/v1/agents/{agentId}/files/save roleCreate
 PUT /api/v1/agents/{agentId}/persona roleCreate
+PUT /api/v1/conversations/{conversationId}/activity roleSelf
 PUT /api/v1/credentials/reveal-policy roleInline
 PUT /api/v1/credentials/{credentialId} roleCreate
 PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate

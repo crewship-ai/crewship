@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { Bot, AtSign } from "lucide-react"
+import { Bot, AtSign, User } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
@@ -13,6 +13,7 @@ export interface CrewMember {
   name: string
   role_title?: string
   description?: string
+  kind?: "agent" | "human"
 }
 
 interface MentionAutocompleteProps {
@@ -36,10 +37,10 @@ function detectMention(text: string, caret: number): MentionTrigger | null {
   return { start: i, query: text.slice(i + 1, caret).toLowerCase() }
 }
 
-export function MentionAutocomplete({ text: _text, textareaRef, members, onPick }: MentionAutocompleteProps) {
+export function MentionAutocomplete({ text, textareaRef, members, onPick }: MentionAutocompleteProps) {
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null)
   const [highlighted, setHighlighted] = useState(0)
-  const popoverRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
 
   useEffect(() => {
     const ta = textareaRef.current
@@ -49,15 +50,32 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
       setTrigger(t)
       setHighlighted(0)
     }
+    // Input already handles typing. Only caret movement needs keyup; running
+    // it for picker navigation resets ArrowDown and reopens after Escape.
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) handler()
+    }
     ta.addEventListener("input", handler)
     ta.addEventListener("click", handler)
-    ta.addEventListener("keyup", handler)
+    ta.addEventListener("keyup", onKeyUp)
     return () => {
       ta.removeEventListener("input", handler)
       ta.removeEventListener("click", handler)
-      ta.removeEventListener("keyup", handler)
+      ta.removeEventListener("keyup", onKeyUp)
     }
   }, [textareaRef])
+
+  // Controlled updates (send clears, prefill, restored drafts) do not emit
+  // native input events. Reconcile an existing picker, never reopen one that
+  // Escape or a successful selection already dismissed.
+  useEffect(() => {
+    setTrigger((current) => {
+      if (!current) return null
+      const next = detectMention(text, textareaRef.current?.selectionStart ?? text.length)
+      if (!next || next.start !== current.start) return null
+      return next.query === current.query ? current : next
+    })
+  }, [text, textareaRef])
 
   const matches = useMemo(() => {
     if (!trigger) return [] as CrewMember[]
@@ -70,12 +88,32 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
       .slice(0, 6)
   }, [trigger, members])
 
+  const selected = Math.min(highlighted, Math.max(0, matches.length - 1))
+  useEffect(() => {
+    const ta = textareaRef.current
+    if (!ta || !trigger || !matches.length) return
+    ta.setAttribute("aria-autocomplete", "list")
+    ta.setAttribute("aria-controls", listId)
+    ta.setAttribute("aria-activedescendant", `${listId}-${selected}`)
+    return () => {
+      ta.removeAttribute("aria-autocomplete")
+      ta.removeAttribute("aria-controls")
+      ta.removeAttribute("aria-activedescendant")
+    }
+  }, [textareaRef, trigger, matches.length, listId, selected])
+
   useEffect(() => {
     if (!trigger) return
     const ta = textareaRef.current
     if (!ta) return
     const onKey = (e: KeyboardEvent) => {
-      if (!matches.length) return
+      if (!matches.length || e.isComposing) return
+      if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
+        e.preventDefault()
+        // The composer also handles Enter. Picking a mention must never send
+        // the unfinished message through its React key handler.
+        e.stopPropagation()
+      }
       if (e.key === "ArrowDown") {
         e.preventDefault()
         setHighlighted((h) => (h + 1) % matches.length)
@@ -84,7 +122,7 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
         setHighlighted((h) => (h - 1 + matches.length) % matches.length)
       } else if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault()
-        onPick(matches[highlighted], trigger.start)
+        onPick(matches[selected], trigger.start)
         setTrigger(null)
       } else if (e.key === "Escape") {
         setTrigger(null)
@@ -92,14 +130,13 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
     }
     ta.addEventListener("keydown", onKey)
     return () => ta.removeEventListener("keydown", onKey)
-  }, [trigger, matches, highlighted, onPick, textareaRef])
+  }, [trigger, matches, selected, onPick, textareaRef])
 
   if (!trigger || !matches.length) return null
 
   return (
     <AnimatePresence>
       <motion.div
-        ref={popoverRef}
         initial={{ opacity: 0, y: 4, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 4, scale: 0.97 }}
@@ -108,13 +145,18 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
       >
         <div className="flex items-center gap-1.5 px-3 py-1.5 border-b text-xs text-muted-foreground">
           <AtSign className="h-3 w-3" />
-          <span>Mention an agent</span>
+          <span>{members.some((m) => m.kind === "human") ? "Mention a participant" : "Mention an agent"}</span>
         </div>
-        <ul className="max-h-64 overflow-y-auto py-1">
+        <ul id={listId} role="listbox" aria-label="Mention suggestions" className="max-h-64 overflow-y-auto py-1">
           {matches.map((m, i) => (
-            <li key={m.id}>
+            <li key={m.id} role="presentation">
               <button
+                id={`${listId}-${i}`}
                 type="button"
+                role="option"
+                aria-selected={i === selected}
+                tabIndex={-1}
+                onMouseDown={(event) => event.preventDefault()}
                 onMouseEnter={() => setHighlighted(i)}
                 onClick={() => {
                   onPick(m, trigger.start)
@@ -122,10 +164,10 @@ export function MentionAutocomplete({ text: _text, textareaRef, members, onPick 
                 }}
                 className={cn(
                   "flex w-full items-start gap-2 px-3 py-1.5 text-left text-sm",
-                  i === highlighted && "bg-accent",
+                  i === selected && "bg-accent",
                 )}
               >
-                <Bot className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                {m.kind === "human" ? <User className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" /> : <Bot className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />}
                 <div className="flex flex-col min-w-0">
                   <span className="font-medium truncate">
                     @{m.slug} <span className="text-muted-foreground font-normal">· {m.name}</span>

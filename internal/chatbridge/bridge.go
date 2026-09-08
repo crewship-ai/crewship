@@ -1276,7 +1276,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// persistence. Return the durable id at the done boundary so reactions and
 	// feedback target the same message that history returns after a reload.
 	// The active OTel trace id also rides on this event for feedback correlation.
-	doneMeta := map[string]any{"message_id": assistantMessageID}
+	doneMeta := map[string]any{"message_id": assistantMessageID, "replied_at": repliedAt.UTC().Format("2006-01-02T15:04:05.000Z")}
 	for key, value := range assistantMetadata {
 		doneMeta[key] = value
 	}

@@ -654,6 +654,11 @@ the wire.
 
 ## 7. Forward compatibility: group threads with agents
 
+**2026-09-06 follow-on:** the owner advanced this deferred scope in
+[`workspace-conversations.md`](workspace-conversations.md). That specification
+adds agent-independent human groups and workspace channels; the original
+no-new-model constraints below describe the earlier release, not the follow-on.
+
 Wanted, deferred, and **not to be foreclosed**. The groundwork exists:
 `chats.visibility` and `chat_participants` (v118), author attribution already
 resolved (`chat-panel.tsx:245-274` → `turn-renderer.tsx:47`), `@mention`

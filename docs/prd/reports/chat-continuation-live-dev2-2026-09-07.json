@@ -1,0 +1,15 @@
+{
+  "workspace_id": "cmtplws8h000276fa560f",
+  "source_id": "cmtr5ax9s0ca9d35dab28491db95d8022",
+  "checks": [
+    "Private direct continues into one retry-safe group; original private access is unchanged",
+    "Three independently authenticated people exchange messages; source DM history stays unchanged",
+    "Explicit workspace channel atomically includes the agent without private history or an automatic run",
+    "A colleague mentions the invited agent; its real reply matches the stored issue status and link"
+  ],
+  "group_id": "cmtr9szsl184a363e579ab737bd7d0918",
+  "channel_id": "cmtr9t06j68c1c6280a38c4b6b43a7cd9",
+  "agent_job_id": "cmtr9t0eg18d61d5af5c2df41715ee584",
+  "reply_id": "cmtr9t5p6909f734bcb7dc29affcd3cb8",
+  "status": "passed"
+}

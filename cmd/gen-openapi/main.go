@@ -293,10 +293,11 @@ func buildDocument(routes []route) map[string]any {
 	_, finalCoreRequestComponents := finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog()
 	_, finalAuthComponents := finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog()
 	_, onboardingProposalComponents := onboardingProposalSchemaCatalog()
+	_, workspaceConversationComponents := workspaceConversationSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -567,6 +568,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	onboardingProposalRoutes, _ := onboardingProposalSchemaCatalog()
 	for key, schema := range onboardingProposalRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	workspaceConversationRoutes, _ := workspaceConversationSchemaCatalog()
+	for key, schema := range workspaceConversationRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result

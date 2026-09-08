@@ -71,7 +71,9 @@ func TestNotify_CreatorGetsInboxItemWhenNotWatching(t *testing.T) {
 	hub := &fakeHub{subscribed: map[string]bool{}}
 	n := New(db, hub, quietLogger())
 
-	n.NotifyAssistantReply(context.Background(), baseNotification())
+	rn := baseNotification()
+	rn.RepliedAt = mustTime(t, "2026-07-02T10:00:00.123Z")
+	n.NotifyAssistantReply(context.Background(), rn)
 
 	var target, title, body, state, payload string
 	err := db.QueryRow(`SELECT target_user_id, title, body_md, state, payload_json
@@ -91,6 +93,9 @@ func TestNotify_CreatorGetsInboxItemWhenNotWatching(t *testing.T) {
 	}
 	if !strings.Contains(payload, `"chat_url":"/chat/atlas?session=c1"`) {
 		t.Errorf("payload %q missing deep link", payload)
+	}
+	if !strings.Contains(payload, `"replied_at":"2026-07-02T10:00:00.123Z"`) {
+		t.Errorf("payload %q must carry exact reply persist timestamp", payload)
 	}
 	if len(hub.broadcasts) != 1 || hub.broadcasts[0] != "ws1" {
 		t.Errorf("broadcasts = %v, want one inbox.updated on ws1", hub.broadcasts)

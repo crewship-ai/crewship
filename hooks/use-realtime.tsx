@@ -10,11 +10,13 @@ import {
   useRef,
 } from "react"
 import { useWebSocket, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { apiFetch } from "@/lib/api-fetch"
 
 /** All supported real-time event types broadcast over the workspace WebSocket channel. */
 export type RealtimeEventType =
+  | "conversation.updated"
   | "run.started"
   | "run.completed"
   | "run.failed"
@@ -240,6 +242,7 @@ interface RealtimeContextValue {
 // nothing in the app should read this directly; subscribe via
 // useRealtimeEvent instead.
 export const VALID_REALTIME_TYPES: Set<string> = new Set([
+  "conversation.updated",
   "run.started", "run.completed", "run.failed",
   "agent.status", "agent.created", "agent.updated", "agent.deleted",
   // PR-D F5 ephemeral lifecycle. Without these in the allowlist the
@@ -352,6 +355,8 @@ function getWsUrl(): string {
  */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const { workspaceId } = useWorkspace()
+  const { data: session } = useSessionSafe()
+  const userId = session?.user.id
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
   const activeChannelsRef = useRef<Set<string>>(new Set())
   const statusRef = useRef<string>("disconnected")
@@ -453,6 +458,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       send({ type: "unsubscribe", channel: `workspace:${workspaceId}` })
     }
   }, [status, workspaceId, send])
+
+  // Private conversation invalidations are authorized per user, never sent on
+  // the workspace channel. Reconnect and account changes renew this subscription.
+  useEffect(() => {
+    if (status !== "connected" || !userId) return
+    const channel = `user:${userId}`
+    send({ type: "subscribe", channel })
+    return () => { send({ type: "unsubscribe", channel }) }
+  }, [status, userId, send])
 
   const subscribeChannel = useCallback(
     (channel: string): (() => void) => {

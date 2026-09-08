@@ -1,0 +1,56 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "workspace_id": "cmtplws8h000276fa560f",
+  "channel_id": "cmtrb4eokd7a22899a6d2a267fec03874",
+  "checks": [
+    "thomas: real ADMIN, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "paul: real MANAGER, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "peter: real MEMBER, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "anna: real MANAGER, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "sofia: real MEMBER, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "emma: real VIEWER, own PNG avatar, idempotent Chat send, role gates and private-DM denial",
+    "Six distinct bundled PNG avatars and seven seeded channel messages",
+    "Emma VIEWER sees six loaded portraits, roster and responsive Chat without browser errors"
+  ],
+  "actors": [
+    {
+      "key": "thomas",
+      "role": "ADMIN",
+      "user_id": "6c71b390-4fe0-4e2d-ad63-e082affb3107",
+      "avatar_sha256": "aad851146537164d734286090002cf0992ad483b741416b1a2ea1093e1830483"
+    },
+    {
+      "key": "paul",
+      "role": "MANAGER",
+      "user_id": "792f011c-143e-4779-a260-37e5c66f6e68",
+      "avatar_sha256": "adfaee37ff269f52bc2eb3385c60a977ad3509bb5f8515f4e3aa3073dac3863b"
+    },
+    {
+      "key": "peter",
+      "role": "MEMBER",
+      "user_id": "2aa8ada5-8042-440c-921d-1cb88655772f",
+      "avatar_sha256": "78f609ad0f6185a1f0f2f24a3fa7fd0fbc67f6c81633dfdf741ad264cb5860cf"
+    },
+    {
+      "key": "anna",
+      "role": "MANAGER",
+      "user_id": "65b4cdfd-d63f-4fcc-a7e4-a933a74b7c0e",
+      "avatar_sha256": "8c13ff2c898504e945f828ca8914400a682de4c6937b87799ba677c99693219c"
+    },
+    {
+      "key": "sofia",
+      "role": "MEMBER",
+      "user_id": "2ac37303-28cb-4f20-b6c6-8682d39ebd8e",
+      "avatar_sha256": "a74a23ec28cd1f3fe19d9851102e1a8521d7571bb62e8f88bbe5addd773db225"
+    },
+    {
+      "key": "emma",
+      "role": "VIEWER",
+      "user_id": "b4c27e82-6218-4470-9a38-9a2fdddeba02",
+      "avatar_sha256": "39bc7c083d0f295afba1036b3d95df463dc2bfeec86a47ad8617df358128f90a"
+    }
+  ],
+  "page_errors": [],
+  "status": "passed",
+  "artifacts": "assets/chat-seed-team-dev2"
+}
