@@ -54,6 +54,19 @@ describe("shared routine editor", () => {
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     expect(h.calls.filter(c => c.url.endsWith("/save"))).toHaveLength(1)
   })
+  it("starts a fresh recipe after successful creation instead of overwriting the previous recipe", async () => {
+    const creation = { ...props, routine: undefined }
+    const view = render(<RoutineCreateDialog {...creation} />)
+    fireEvent.click(screen.getByText("Write it yourself", { exact: true }))
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "First recipe" } })
+    fireEvent.click(screen.getByRole("button", { name: "Validate & Save" }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
+    view.rerender(<RoutineCreateDialog {...creation} open={false} />)
+    view.rerender(<RoutineCreateDialog {...creation} open />)
+    fireEvent.click(screen.getByText("Write it yourself", { exact: true }))
+    expect(screen.getByLabelText("Name")).toHaveValue("")
+    expect(screen.getByLabelText("Routine identifier")).toHaveValue("my-routine")
+  })
   it("opens a historical version as an unsaved draft", () => {
     render(<RoutineCreateDialog {...props} initialDraft={{ ...routine.definition, steps: [] }} />)
     fireEvent.click(screen.getByRole("button", { name: "Steps", exact: true }))

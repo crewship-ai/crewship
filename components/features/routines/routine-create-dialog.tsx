@@ -272,6 +272,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   // otherwise preserved across a close/reopen within the same session.)
   useEffect(() => {
     if (!open) return
+    const previouslySaved = savedRecipe.current !== null
     savedRecipe.current = null
     if (routine) {
       const text = toYaml(initialDraft ?? routine.definition)
@@ -280,7 +281,17 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
       setIcon(resolveRoutineIcon(routine)); setColor(resolveRoutineColor(routine))
       setDslText(text); setLiveText(text); bufferRef.current = text; pristineText.current = toYaml(routine.definition)
       setEditorKey(k => k + 1); setTestResult(null); setSaveToken(null); setSaveError(null)
-    } else setMode("entry")
+    } else {
+      setMode("entry")
+      if (previouslySaved) {
+        const text = toYaml(STARTER_TEMPLATES[0].json)
+        setName(""); setDescription(""); setAuthorCrewId(""); setIcon("workflow"); setColor("violet")
+        setDslFormat("yaml"); setDslText(text); setLiveText(text); bufferRef.current = text; pristineText.current = text
+        setEditorKey(k => k + 1); setSection("Overview"); setForkSource(null)
+        setTrigger(t => ({ ...t, kind: "manual", at: "" })); setScheduledValues({})
+        setGoal(""); setSourcesAndOutput(""); setTestResult(null); setSaveToken(null); setSaveError(null)
+      }
+    }
   // Seed once when opening; background refresh must not replace an unsaved draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
