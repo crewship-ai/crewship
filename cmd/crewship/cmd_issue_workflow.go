@@ -271,7 +271,7 @@ var issueReviewCmd = &cobra.Command{
 			return fmt.Errorf("--action must be 'approve' or 'request_changes'")
 		}
 
-		body := map[string]interface{}{"action": action}
+		body := map[string]interface{}{"action": action, "revision": iss.WorkRevision, "brief_revision": iss.BriefRevision}
 		if comment, _ := cmd.Flags().GetString("comment"); comment != "" {
 			body["comment"] = comment
 		}

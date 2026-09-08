@@ -50,6 +50,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 		"FinalCoreIssueReviewRequest": object(map[string]any{
 			"action": enum("approve", "request_changes"), "comment": str(), "reassign_to": nullableString(), "revision": integer(), "brief_revision": integer(),
 		}, "action"),
+		"IssueReviewPolicyResponse":  object(map[string]any{"revision": integer(), "client_review_required": boolean()}, "revision", "client_review_required"),
 		"IssueReviewPolicyRequest":   object(map[string]any{"revision": integer(), "client_review_required": boolean()}, "revision", "client_review_required"),
 		"FinalCorePortRevokeRequest": object(map[string]any{"reason": str()}),
 		"FinalCoreInboxBulkRequest": object(map[string]any{
@@ -82,6 +83,10 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/relations", "FinalCoreIssueRelationRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", "FinalCoreIssueReviewRequest")
 	add("PUT", "/api/v1/crews/{crewId}/issues/{identifier}/review-policy", "IssueReviewPolicyRequest")
+	policyRoute := "PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy"
+	policySchema := routes[policyRoute]
+	policySchema.Response = map[string]any{"$ref": "#/components/schemas/IssueReviewPolicyResponse"}
+	routes[policyRoute] = policySchema
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", "FinalCoreEmptyRequest")
 	add("POST", "/api/v1/crews/{crewId}/members", "FinalCoreCrewMemberRequest")

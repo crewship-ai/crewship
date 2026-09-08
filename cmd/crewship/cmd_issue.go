@@ -19,25 +19,28 @@ import (
 // rather than "crew_id"). Without the yaml tag, --format yaml and --format
 // json return the same data under different key casing (#1211).
 type issueItem struct {
-	WorkMode     string  `json:"work_mode" yaml:"work_mode"`
-	WorkRevision int     `json:"work_revision" yaml:"work_revision"`
-	WorkerUserID *string `json:"worker_user_id,omitempty" yaml:"worker_user_id,omitempty"`
-	WorkerName   *string `json:"worker_name,omitempty" yaml:"worker_name,omitempty"`
-	WorkNote     string  `json:"work_note" yaml:"work_note"`
-	WorkStopping bool    `json:"work_stopping" yaml:"work_stopping"`
-	ID           string  `json:"id" yaml:"id"`
-	CrewID       string  `json:"crew_id" yaml:"crew_id"`
-	CrewName     string  `json:"crew_name" yaml:"crew_name"`
-	CrewSlug     string  `json:"crew_slug" yaml:"crew_slug"`
-	Number       *int    `json:"number" yaml:"number"`
-	Identifier   *string `json:"identifier" yaml:"identifier"`
-	Title        string  `json:"title" yaml:"title"`
-	Description  *string `json:"description" yaml:"description"`
-	Status       string  `json:"status" yaml:"status"`
-	Priority     string  `json:"priority" yaml:"priority"`
-	AssigneeType *string `json:"assignee_type" yaml:"assignee_type"`
-	AssigneeID   *string `json:"assignee_id" yaml:"assignee_id"`
-	AssigneeName *string `json:"assignee_name" yaml:"assignee_name"`
+	WorkMode             string         `json:"work_mode" yaml:"work_mode"`
+	BriefRevision        int            `json:"brief_revision" yaml:"brief_revision"`
+	ClientReviewRequired bool           `json:"client_review_required" yaml:"client_review_required"`
+	Execution            map[string]any `json:"execution,omitempty" yaml:"execution,omitempty"`
+	WorkRevision         int            `json:"work_revision" yaml:"work_revision"`
+	WorkerUserID         *string        `json:"worker_user_id,omitempty" yaml:"worker_user_id,omitempty"`
+	WorkerName           *string        `json:"worker_name,omitempty" yaml:"worker_name,omitempty"`
+	WorkNote             string         `json:"work_note" yaml:"work_note"`
+	WorkStopping         bool           `json:"work_stopping" yaml:"work_stopping"`
+	ID                   string         `json:"id" yaml:"id"`
+	CrewID               string         `json:"crew_id" yaml:"crew_id"`
+	CrewName             string         `json:"crew_name" yaml:"crew_name"`
+	CrewSlug             string         `json:"crew_slug" yaml:"crew_slug"`
+	Number               *int           `json:"number" yaml:"number"`
+	Identifier           *string        `json:"identifier" yaml:"identifier"`
+	Title                string         `json:"title" yaml:"title"`
+	Description          *string        `json:"description" yaml:"description"`
+	Status               string         `json:"status" yaml:"status"`
+	Priority             string         `json:"priority" yaml:"priority"`
+	AssigneeType         *string        `json:"assignee_type" yaml:"assignee_type"`
+	AssigneeID           *string        `json:"assignee_id" yaml:"assignee_id"`
+	AssigneeName         *string        `json:"assignee_name" yaml:"assignee_name"`
 	// Owner and Delegate (#2297, A10 — invariant I5: delegating to an agent
 	// never changes the human owner) are the typed projection of the
 	// server's missions.owner_user_id / delegate_agent_id, independent of

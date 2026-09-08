@@ -32,6 +32,9 @@ func TestIssueWorkRestorePreservesHumanHoldAndDoesNotOverwriteExistingWork(t *te
 	if _, err := source.ExecContext(ctx, `UPDATE issue_work SET mode='human',worker_user_id='u_admin',revision=7,note='Verified report; waiting for client',brief_revision=2 WHERE mission_id='held-issue'`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := source.ExecContext(ctx, `INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,review_note,created_at,updated_at) VALUES('saved-review','held-issue',7,2,'accepted','a_alice','Verified result','2026-09-08','2026-09-08'); UPDATE assignments SET issue_execution_id='saved-review' WHERE id='old-result'`); err != nil {
+		t.Fatal(err)
+	}
 	dump, err := DumpWorkspace(ctx, source, ws)
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,10 @@ func TestIssueWorkRestorePreservesHumanHoldAndDoesNotOverwriteExistingWork(t *te
 	}
 	if err := RestoreDump(ctx, target, dump); err != nil {
 		t.Fatal(err)
+	}
+	var reviewNote, executionID string
+	if err := target.QueryRowContext(ctx, `SELECT x.review_note,a.issue_execution_id FROM assignments a JOIN issue_executions x ON x.id=a.issue_execution_id WHERE a.id='old-result'`).Scan(&reviewNote, &executionID); err != nil || reviewNote != "Verified result" || executionID != "saved-review" {
+		t.Fatalf("review lost on restore: %q %q %v", reviewNote, executionID, err)
 	}
 	var oldBrief int
 	var stopped string
