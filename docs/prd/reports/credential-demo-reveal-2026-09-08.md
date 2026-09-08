@@ -84,3 +84,19 @@ enabled after operator confirmation. No real stored password was revealed.
   (0 lint errors, 32 existing warnings). Agents/migration invariants passed.
 - Deployment and live browser acceptance will be recorded in the PR after
   rollout. This report does not claim complete PRD acceptance.
+
+## Deployment acceptance and scanner follow-up
+
+- Deployed application commit `c56b541c` to dev3 via
+  `sudo systemctl reload crewship-ws@3`. Health returned `ok`; Go and Next.js
+  are running. The root's unrelated operator WIP was preserved.
+- A real browser login as the demo OWNER revealed only the inert JSON fixture
+  and observed automatic hiding after 30 seconds. CLI audit confirms REVEAL by
+  Demo User at `2026-09-08T13:23:21Z`. No real passwords were inspected.
+- PR #2462 CodeQL reported a stat-before-read race in the test-only static
+  server. Replaced that sequence with direct reads and checked every fallback
+  path stays inside the export root. All eight final browser/helper tests pass,
+  including traversal denial, root serving and a missing-file response.
+- The follow-up changes only test infrastructure and this report, not deployed
+  application behavior. CodeQL re-analysis and PR review are still required;
+  the PR has not been merged.

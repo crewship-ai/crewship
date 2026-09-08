@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test"
 
+test("Static export helper serves root and denies traversal", async ({ request }) => {
+  expect((await request.get("/")).status()).toBe(200)
+  expect((await request.get("/%2e%2e%2fpackage.json")).status()).toBe(403)
+  expect((await request.get("/missing-fixture-2461")).status()).toBe(404)
+})
+
 for (const scenario of [
   { role: "OWNER", capability: true, enabled: true, sealed: false, allowed: true },
   { role: "ADMIN", capability: true, enabled: true, sealed: false, allowed: true },
