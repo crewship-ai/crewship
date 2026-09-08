@@ -350,3 +350,58 @@ describe("MemoryTab — the tiers this panel cannot show", () => {
     expect(other).toHaveTextContent(/learned-/i)
   })
 })
+
+// A persona load started for one agent must never land in the panel after the
+// operator has switched to another — one agent's persona under another's name
+// is a disclosure nobody watching the screen would catch.
+//
+// Today the protection is the key on <PersonaPanel>: keying it by
+// workspace/agent/crew unmounts the old instance, so the in-flight load has
+// nothing left to write to. That is a one-line contract with no local comment
+// saying what it protects, and deleting it makes this test fail with agent A's
+// persona rendered under agent B — verified by removing it. A review of an
+// earlier head read the panel as long-lived and asked for a request-generation
+// guard inside load(); the key makes that unnecessary, and this test pins the
+// behaviour rather than the mechanism.
+describe("MemoryTab — PERSONA across an agent switch", () => {
+  it("drops a persona response that arrives after the operator moved on", async () => {
+    let releaseAlice: () => void = () => {}
+    const alicePending = new Promise<void>(resolve => {
+      releaseAlice = resolve
+    })
+    let crewCalls = 0
+    const body = (payload: unknown) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(payload),
+      json: async () => payload,
+    })
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes("/crews/crew_x/persona")) {
+        crewCalls += 1
+        if (crewCalls === 1) {
+          await alicePending
+          return body({ content: "ALICE CREW PERSONA", bytes: 18, from_default: false })
+        }
+        return body({ content: "BOB CREW PERSONA", bytes: 16, from_default: false })
+      }
+      if (url.includes("/persona/history")) return body({ entries: [] })
+      if (url.includes("/persona")) return body({ content: "persona", bytes: 7, from_default: false })
+      return body({ entries: [], peers: [] })
+    }) as unknown as typeof fetch
+
+    const { rerender } = render(
+      <MemoryTab agentId="agent_a" agentSlug="alice" crewId="crew_x" workspaceId="ws_test" />,
+    )
+    fireEvent.click(screen.getByTestId("memory-subtab-persona"))
+    // Agent A's crew persona is still in flight when the canvas switches.
+    rerender(<MemoryTab agentId="agent_b" agentSlug="bob" crewId="crew_x" workspaceId="ws_test" />)
+    await screen.findByText("BOB CREW PERSONA")
+
+    releaseAlice()
+    await waitFor(() => expect(crewCalls).toBe(2))
+    expect(screen.queryByText("ALICE CREW PERSONA")).not.toBeInTheDocument()
+    expect(screen.getByText("BOB CREW PERSONA")).toBeInTheDocument()
+  })
+})

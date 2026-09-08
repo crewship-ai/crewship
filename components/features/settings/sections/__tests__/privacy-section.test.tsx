@@ -52,7 +52,9 @@ describe('PrivacySection', () => {
     mockPrivacy()
     render(<PrivacySection workspaceId="ws1" />)
     await screen.findByText('Prefers concise answers.')
-    expect(screen.getByText('researcher')).toBeVisible()
+    // PrivacySection is now a thin wrapper over PersonalMemory, which
+    // attributes each note with an @-prefixed agent handle.
+    expect(screen.getByText('@researcher')).toBeVisible()
     expect(screen.getByText(/Automatic agent-specific profile generation is not available/)).toBeVisible()
   })
   it('does not offer deletion when no peer notes exist', async () => {

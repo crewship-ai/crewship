@@ -44011,6 +44011,14 @@
         "operationId": "get_api_v1_crews",
         "parameters": [
           {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
