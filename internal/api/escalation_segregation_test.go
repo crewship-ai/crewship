@@ -209,9 +209,8 @@ func TestResolveEscalation_SegregationOfDuties_NonCredentialUnaffected(t *testin
 }
 
 // TestResolveEscalation_SegregationOfDuties_NoRecordedOwner — a legacy agent
-// with no created_by_user_id (pre-v99 row, NULL owner) can't have the rule
-// enforced against it; resolution proceeds even with the toggle on, since
-// there is no initiator identity to compare against.
+// with no created_by_user_id must fail closed under the strict rule: there
+// is no initiator identity against which to verify approver independence.
 func TestResolveEscalation_SegregationOfDuties_NoRecordedOwner(t *testing.T) {
 	ensureEncryptionKey(t)
 	db := setupTestDB(t)
@@ -234,8 +233,8 @@ func TestResolveEscalation_SegregationOfDuties_NoRecordedOwner(t *testing.T) {
 	rr := covEscResolve(h, ownerID, wsID, "sod-esc3", map[string]string{
 		"action": "approve",
 	})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (no recorded owner -> rule can't be enforced); body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (unknown initiator must fail closed); body=%s", rr.Code, rr.Body.String())
 	}
 }
 

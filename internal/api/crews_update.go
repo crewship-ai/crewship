@@ -164,7 +164,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Older manifest clients regenerate passwords when the read snapshot
 		// is redacted. Do not let that silently replace a running service's
 		// authentication. Runtime-reference migration must precede such edits.
-		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousServices.String {
+		previousPlain, openErr := serviceconfig.Open(previousServices.String)
+		if openErr != nil {
+			replyInternalError(w, h.logger, "open service configuration for update", openErr)
+			return
+		}
+		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousPlain {
 			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
 			return
 		}
@@ -352,7 +357,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.ServicesJSON == "" {
 			ub.Set("services_json", nil)
 		} else {
-			ub.Set("services_json", *req.ServicesJSON)
+			sealed, sealErr := serviceconfig.Seal(*req.ServicesJSON)
+			if sealErr != nil {
+				replyInternalError(w, h.logger, "protect service configuration", sealErr)
+				return
+			}
+			ub.Set("services_json", sealed)
 		}
 		// Services do NOT participate in the cached image hash —
 		// they're separate containers built from upstream images,
