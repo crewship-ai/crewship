@@ -47,7 +47,9 @@ interface DrawerApi {
 
 interface SlashPaletteProps {
   onCommand?: (id: string, args?: string) => void
-  /** Current chat agent slug (used for /new-session deeplinks). */
+  /** The page owns session selection and draft creation. */
+  onNewConversation?: () => void
+  /** Current chat agent slug. */
   agentSlug?: string
   /** Active workspace — required for the server-driven actions group.
    *  Omit on surfaces that don't have a workspace context yet (e.g.
@@ -94,17 +96,7 @@ export type SlashActionClassification =
  *  Hidden entries stay listed on purpose: the reason is the record of why the
  *  row went away, and the contract test asserts they are not rendered. */
 export const CLIENT_ACTION_CONTRACT: Record<string, SlashActionClassification> = {
-  // Creating a session is the chat PAGE's job: it mints the id, selects it and
-  // writes the URL. `router.push("/chat/<slug>")` does none of that — the page
-  // holds the active session in local state and does not re-read the URL on a
-  // client navigation, so the old code changed the address bar and nothing
-  // else. Worse now than when this was written: `/chat/<slug>` with no
-  // `?session=` opens that agent's FRESHEST conversation, so the push would
-  // land the reader back in the thread they were trying to leave.
-  "new-session": {
-    state: "disabled",
-    reason: "Use New conversation in the conversations column",
-  },
+  "new-session": { state: "enabled" },
   clear: { state: "enabled" },
   regenerate: { state: "enabled" },
   // Nothing in the client or the API creates an alternate reply from a turn:
@@ -224,6 +216,7 @@ interface SlashRunCtx {
   drawer: DrawerApi
   agentSlug?: string
   onCommand?: (id: string, args?: string) => void
+  onNewConversation?: () => void
   close: () => void
 }
 
@@ -235,11 +228,9 @@ const COMMANDS: SlashCommand[] = [
     icon: MessageSquarePlus,
     group: "chat",
     handledBy: "palette",
-    // Disabled by the contract above — kept so the row can explain itself
-    // rather than vanishing from a palette people have learned.
-    run: ({ router, agentSlug, close }) => {
-      if (agentSlug) router.push(`/chat/${agentSlug}`)
+    run: ({ onNewConversation, close }) => {
       close()
+      onNewConversation?.()
     },
   },
   {
@@ -347,6 +338,7 @@ function reasonFor(
 
 export function SlashPalette({
   onCommand,
+  onNewConversation,
   agentSlug,
   workspaceId,
   onAction,
@@ -434,6 +426,7 @@ export function SlashPalette({
   const ctx: SlashRunCtx = {
     router,
     drawer: { toggle: toggleDrawer },
+    onNewConversation,
     agentSlug,
     onCommand,
     close: () => setOpen(false),
@@ -520,7 +513,12 @@ export function SlashPalette({
             <CommandGroup heading={GROUP_LABELS[group as SlashCommand["group"]]}>
               {list.map((cmd) => {
                 const Icon = cmd.icon
-                const reason = reasonFor(classifyClient(cmd.id), disabledCommands?.[cmd.id])
+                const runtimeReason = disabledCommands?.[cmd.id] ?? (
+                  cmd.id === "new-session" && !onNewConversation
+                    ? "Open a chat to start a new conversation"
+                    : undefined
+                )
+                const reason = reasonFor(classifyClient(cmd.id), runtimeReason)
                 return (
                   <CommandItem
                     key={cmd.id}

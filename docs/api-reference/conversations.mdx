@@ -476,3 +476,32 @@ See [Internal IPC API — Crew messaging and files](/api-reference/internal#crew
 - [Crews API](/api-reference/crews).
 - [Crew Journal](/guides/crew-journal) — `peer.escalation`, `peer.conversation`.
 - [User Preferences](/api-reference/preferences) — UI/composer settings.
+
+## Continue a private conversation in a new room
+
+`POST /api/v1/conversations/{conversationId}/continue` creates a separate room
+with fresh history. It never changes the source's privacy or copies its messages.
+Either current participant of a DM can start a new private group; a member of a
+private group or DM can explicitly start a workspace-visible channel with an
+agent.
+
+```json
+{"kind":"group","title":"Planning","member_ids":["additional-user-id"],"client_id":"stable-request-id"}
+```
+
+`kind=group` requires a DM source and at least one additional workspace human;
+both original participants are included. It rejects `agent_id`. For a new
+workspace-visible channel, use `kind=channel` and a required `agent_id`; optional
+`member_ids` adds humans to the existing roster. Creating and joining the agent
+commit atomically; joining does not run the agent. Send a new structured mention
+to request an answer. Private history remains accessible only in the source.
+
+`title` is 1–120 characters, `member_ids` accepts at most 498 entries, and
+`client_id` is a required opaque retry ID of at most 128 UTF-8 bytes. Reuse that ID
+for the same request after a lost response: the server returns the existing new
+room (`200`); first creation returns `201`. Reusing it with different content
+returns `409`. The retry identity is scoped to the source and requesting human.
+Unauthorized source access or foreign-workspace invitees return `404`.
+
+Group creation starts empty. Channel creation contains only the new agent join
+notice, not prior private messages. Existing direct-pair reuse is unchanged.

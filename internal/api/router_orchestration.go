@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/consolidate"
+	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/moby/moby/client"
@@ -47,6 +48,31 @@ type orchestrationHandlers struct {
 func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
+
+	// Human conversations share workspace authentication and enforce their own
+	// participant ACL in every store operation, independently of agent sessions.
+	wch := NewWorkspaceConversationsHandler(groupchat.New(r.db), r.logger)
+	wch.hub = r.hub
+	// openapi: query offset:integer limit:integer
+	r.mux.Handle("GET /api/v1/conversations", authed(wsCtx(http.HandlerFunc(wch.List))))
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}", authed(wsCtx(http.HandlerFunc(wch.Get))))
+	// openapi: query after_sequence:integer before_sequence:integer limit:integer
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}/messages", authed(wsCtx(http.HandlerFunc(wch.Messages))))
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}/participants", authed(wsCtx(http.HandlerFunc(wch.Members))))
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}/agents", authed(wsCtx(http.HandlerFunc(wch.Agents))))
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}/agent-jobs", authed(wsCtx(http.HandlerFunc(wch.AgentJobs))))
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/agents", roleSelf, wch.AddAgent)
+	r.authedMut("DELETE", "/api/v1/conversations/{conversationId}/agents/{agentId}", roleSelf, wch.RemoveAgent)
+	r.authedMut("POST", "/api/v1/conversations", roleSelf, wch.Create)
+	r.authedMut("POST", "/api/v1/conversations/direct", roleSelf, wch.Direct)
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/continue", roleSelf, wch.Continue)
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/messages", roleSelf, wch.Send)
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/read", roleSelf, wch.Read)
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/mute", roleSelf, wch.Mute)
+	r.mux.Handle("GET /api/v1/conversations/{conversationId}/activity", authed(wsCtx(http.HandlerFunc(wch.Activity))))
+	r.authedMut("PUT", "/api/v1/conversations/{conversationId}/activity", roleSelf, wch.SetActivity)
+	r.authedMut("POST", "/api/v1/conversations/{conversationId}/participants", roleSelf, wch.AddMember)
+	r.authedMut("DELETE", "/api/v1/conversations/{conversationId}/participants/{userId}", roleSelf, wch.RemoveMember)
 
 	// Missions
 	var missionEngineForPublic *orchestrator.MissionEngine

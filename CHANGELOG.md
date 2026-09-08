@@ -11,6 +11,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.
+
+- **Personal notification sounds** — five original short tones, separate Chat/Inbox choices, previews, volume and Do not disturb in Settings → Account → Notification sounds, with a desktop/mobile toolbar shortcut. Authorized fresh human messages and important unread Inbox items can alert after audio is enabled; focused reading, muted rooms, duplicate tabs and history reloads remain quiet.
+
+- **Team demo seed** — Thomas, Paul, Peter, Anna, Sofia and Emma have real workspace roles, distinct bundled portraits and independently authored Chat messages. `seed team-chat` adds only this demo to an existing workspace; `seed --with-team-chat` and `./dev.sh seed` include it in a full demo. Private random credentials and stable room/message references support reruns without resetting users or replacing custom avatars.
+
+- **Chat continuations** — Add people opens a fresh private group from a direct message; Invite agent explicitly opens a workspace channel with the selected agent. Original private history stays private. Atomic creation and durable retry IDs prevent duplicate rooms after uncertain responses, including backup/fork restoration.
+
+- **Team Chat identity and activity** — profile portraits and agent avatars, room icons, day dividers, compact author groups and Markdown bring shared rooms closer to agent chat. Channel creators can subscribe to linked issue/routine journal updates; trusted Crewship cards never invoke agents. Explicit agent mentions receive a bounded, workspace-scoped work snapshot for status questions. Repeatable demo-account and live CLI scenarios cover real colleague messages, routine results and agent replies.
+
+- **Chat room CLI** — `crewship chat room` manages human direct messages, private groups and mixed workspace channels, including members, agent mentions/jobs, message pagination, safe retries, mute and read cursors. Existing agent-session commands remain available under Chat.
+
+- **Unified Chat** — agent sessions, direct messages and shared rooms use one Chat sidebar and New chat menu. Human room links open under `/chat`, with old links redirected compatibly.
+
+- **Human direct messages** — open a colleague conversation from the workspace people picker and reuse the same private history on subsequent opens. Direct conversations keep their two original participants; ordinary groups and channels remain separate.
+
+- **People and workspace channels in Chat** — create participant-only human groups or workspace-readable channels without an agent, manage participants, and keep ordered history with safe send retries. Unread conversation activity reaches the existing inbox through a durable outbox, with personal mute and read cursors. Channel agents join visibly and respond only to explicitly selected mentions through the existing assignment queue; private groups remain human-only because agent execution records are workspace-visible.
+
 - **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
 
 - **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)
@@ -20,7 +38,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Agent reply audio** — direct agent answers now play the selected Chat cue on successful completion, including while focused, and deduplicate against their Inbox projection. Saved audio opt-in reactivates on the next real interaction after reload. Sound settings are linked from the profile menu on desktop/mobile.
+
+- **Create-only member provisioning** — automation can reject existing accounts before changing membership or account-setup tokens. The team seed and CLI create-only flag verify server support first.
+
+- **Chat sidebar hierarchy** — one New chat entry, People/Agents/Team spaces sections and expandable per-agent sessions replace overlapping facet grids. Per-agent New session stays explicit, selection highlights are exclusive, and section/history expansion persists per user and workspace.
+
+- **CLI automation output** — workspace creation, member provisioning and chat attachment upload now honor JSON/YAML/NDJSON output instead of mixing human-readable success text into scripts. Invalid attachment responses return an error.
+
 - **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
+- **Starting another conversation with the same agent was hard to find and disabled in Commands.** Chat now has a visible New conversation button and a working New session command, selects a clearly labelled draft, and returns to Direct when starting from Issues or Routines. Unsent message drafts are restored for their author, and mention keyboard navigation no longer resets the selection or reopens after Escape.
+- **Chat Files and Team could show empty or misleading panels.** Mobile Files now loads with error/retry states, Team replaces the empty More panel without a duplicate tab strip, and file Preview opens the editor or offers a download. File edits survive desktop drawer closing and panel tab switches; explicit discard actions ask before losing changes. Team shows crew members separately from agent collaboration, filters history before pagination, and refreshes on relevant realtime events. Agent links open the selected agent, and reconnect notices no longer cover header controls.
 
 - **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
 

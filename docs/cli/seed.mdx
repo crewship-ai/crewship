@@ -33,6 +33,8 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--wait-provision` | `false` | Block until all crews finish provisioning. Default is fire-and-forget — seed returns while provisioning runs in the background. |
 | `--test-backup` | `false` | After seeding, run a backup/restore round-trip self-test on one crew. Implies `--wait-provision`. |
 | `--with-memory` | `false` | Pre-seed agent memory tiers (`AGENT.md` / `CREW.md` / `PERSONA.md` / `pins.md` / `daily/{date}.md` / `learned.md`) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests. |
+| `--with-team-chat` | `false` | Add six fictional colleagues with actual workspace roles, bundled portraits, a shared Chat channel and separately authored DMs. Requires OWNER and current create-only provisioning support; signup is not required. |
+| `--state-dir <path>` | User configuration directory | Private owned-account state outside Git, separated by server/workspace. Passwords are random and never printed. |
 | `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Requires the server to have been started with `CREWSHIP_ALLOW_SIGNUP=true` — seed checks before it starts and **fails** rather than placing nobody. |
 
 ## Examples
@@ -241,3 +243,51 @@ form against `internal/askforms` before it can ship, so an invalid one is a red
 - [`crewship setup`](/cli/setup) — interactive template picker for a single-crew workspace.
 - [`crewship crew`](/cli/crew) — `crewship crew provision status <slug>` for checking background builds.
 - [`crewship apply`](/cli/apply) — declarative manifest as a longer-term alternative to seed.
+
+
+## crewship seed team-chat
+
+Add the same Chat demonstration to an existing workspace without running the
+full crew/routine seed or changing its owner:
+
+```bash
+crewship seed team-chat
+crewship seed team-chat --state-dir /private/crewship-team-demo
+crewship seed --with-team-chat
+```
+
+Thomas (ADMIN), Paul and Anna (MANAGER), Peter and Sofia (MEMBER), and Emma
+(VIEWER) are explicitly fictional demo accounts. Their email addresses include a
+stable workspace suffix, so independent demo workspaces do not reuse global
+accounts. Each user signs in normally, gets a bundled PNG portrait if their
+avatar is missing, and authors their own example DM and channel message. The
+shared channel is **Team lounge · demo**. No agent is invoked and no issue is
+created. Workspace roles are real: VIEWER has restricted work-management powers,
+but the current Chat policy allows viewer participation.
+
+The server must advertise `create_only` provisioning in its OpenAPI schema.
+Account setup uses owner provisioning and its setup token, without signup or
+email delivery. Existing accounts without locally owned state are rejected;
+changed roles or passwords are never overwritten. Owner profile and permissions
+remain unchanged. A rerun preserves personalized demo names/avatars and uses
+stable message IDs, avoiding duplicate messages or DMs.
+
+The private state directory is isolated by server and workspace, with mode 0700
+and an atomically written 0600 JSON file. It contains generated passwords; keep
+it outside Git. JSON output includes only account IDs, roles, room IDs and the
+protected file path. Concurrent seeds fail on an exclusive state lock. After an
+interrupted process, inspect the reported lock before removing it. A lost initial
+provision or channel-creation response fails closed rather than claiming an
+unrelated account/room. Successfully configured accounts are recovered only by
+normal login; missing workspace membership can then be restored without a
+password reset.
+
+`./dev.sh seed` includes this Chat pack by default. The direct `crewship seed`
+command keeps the flag opt-in; legacy `--with-users` remains the separate four-
+account RBAC fixture.
+
+Fresh account setup and login respect the server's auth rate limit. On `429`,
+only these auth requests retry, using the server's `Retry-After` (up to one minute
+per wait, at most three attempts). A normal six-person seed can therefore pause
+for about a minute. Cancellation stops the wait. Other writes are not silently
+replayed.

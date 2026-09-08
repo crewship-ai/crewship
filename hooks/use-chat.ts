@@ -196,6 +196,8 @@ interface UseChatOptions {
    *  overflowed): the chat surface should reload history rather than render a
    *  partial stream. Optional — tests and simple callers omit it. */
   onStreamReset?: () => void
+  /** A new, successfully persisted assistant answer observed on this connection. */
+  onReplyCompleted?: (reply: { sessionId: string; repliedAt: string }) => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -310,7 +312,11 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted }: UseChatOptions) {
+  const completedReplyRef = useRef(onReplyCompleted)
+  completedReplyRef.current = onReplyCompleted
+  const replySoundSinceRef = useRef(Date.now())
+  const replyHasTextRef = useRef(false)
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
   // Mirror of isStreaming for the (deps: []) event handlers — lets
@@ -378,10 +384,13 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   // loadHistory() once the new session's messages arrive, which performs
   // an atomic replace (including the empty-array case for fresh sessions).
   useEffect(() => {
+    replySoundSinceRef.current = Date.now()
+    replyHasTextRef.current = false
     setIsStreaming(false)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
+    replyHasTextRef.current = false
     // Drop any text buffered for the previous session and cancel its
     // pending frame so it can't commit into the new session's turns.
     pendingTextRef.current = ""
@@ -906,6 +915,16 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     // chat where the agent wasn't @mentioned) — never synthesize an error
     // for it.
     const noReply = metadata?.no_reply === true
+    const repliedAt = typeof metadata?.replied_at === "string" ? metadata.replied_at : ""
+    const stamp = Date.parse(repliedAt)
+    const now = Date.now()
+    if (!noReply && !cancelledRef.current && replyHasTextRef.current
+      && typeof metadata?.message_id === "string" && metadata.message_id.trim()
+      && Number.isFinite(stamp) && stamp > replySoundSinceRef.current && stamp <= now + 5000 && now - stamp < 60000) {
+      completedReplyRef.current?.({ sessionId: sessionIdRef.current, repliedAt })
+    }
+    replyHasTextRef.current = false
+
     // Whether OUR run was pending when this done arrived. Captured before
     // the setTurns updater (which React may invoke more than once).
     const localRunPending = isStreamingRef.current
@@ -1009,6 +1028,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   )
 
   const handleErrorEvent = useCallback((content: string) => {
+    replyHasTextRef.current = false
     setTurns((prev) => {
       const last = prev[prev.length - 1]
       const errorPart: TurnPart = {
@@ -1053,6 +1073,8 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   // followed on the wire.
   const applyChatEvent = useCallback(
     (eventType: StreamEventType | undefined, content: string, metadata?: Record<string, unknown>) => {
+      if (eventType === "text" && content.trim()) replyHasTextRef.current = true
+      if (eventType === "error" || eventType === "agent_busy") replyHasTextRef.current = false
       if (eventType === "text") {
         pendingTextRef.current += content
         scheduleTextFlush()
@@ -1173,6 +1195,8 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // and reload history so we don't render a partial/garbled stream.
       if (msg.type === "resume_reset") {
         if (channelSessionId && channelSessionId !== sessionId) return
+        replySoundSinceRef.current = Date.now()
+        replyHasTextRef.current = false
         lastSeqRef.current = 0
         pendingRef.current.clear()
         adoptNextSeqRef.current = true
@@ -1270,6 +1294,8 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
   // reset reassembly and reload history — that picks up the persisted reply
   // (clearing a stale spinner) or lets resume replay a still-active run fresh.
   const handleConnect = useCallback(() => {
+    replySoundSinceRef.current = Date.now()
+    replyHasTextRef.current = false
     if (hasConnectedRef.current) {
       lastSeqRef.current = 0
       pendingRef.current.clear()
@@ -1360,6 +1386,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
       cancelledRef.current = false
+    replyHasTextRef.current = false
 
       send({
         type: "send_message",
@@ -1447,6 +1474,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
+    replyHasTextRef.current = false
 
     send({
       type: "send_message",
@@ -1497,6 +1525,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       textBufferRef.current = ""
       thinkingBufferRef.current = ""
       cancelledRef.current = false
+    replyHasTextRef.current = false
 
       send({
         type: "send_message",

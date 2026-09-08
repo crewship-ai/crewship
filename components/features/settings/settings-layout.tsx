@@ -14,6 +14,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
 import { SettingsNav, isSettingsSectionVisible } from "./settings-nav"
+import { NotificationSoundSettings } from "@/components/layout/notification-sound-settings"
 import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
@@ -42,6 +43,7 @@ interface Member {
 // Section titles for the content area header
 const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
+  sounds: { title: "Notification sounds", description: "Personal Chat and Inbox audio" },
   privacy: { title: "Privacy", description: "Agent memory about you (peer cards, opt-out, deletion)" },
   general: { title: "General", description: "Workspace identity, usage and settings" },
   connections: { title: "Crew links", description: "Cross-crew communication links" },
@@ -228,6 +230,8 @@ export function SettingsLayout() {
   function renderContent() {
     // Before the skeleton: a moved section has nothing to load.
     if (moved) return <SectionMoved href={moved.href} label={moved.label} />
+
+    if (activeTab === "sounds" && !wsLoading) return <NotificationSoundSettings />
 
     if (isLoading) {
       return (

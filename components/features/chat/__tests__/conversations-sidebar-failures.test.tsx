@@ -333,3 +333,17 @@ describe("<ConversationsSidebar> — starting a conversation asks who with", () 
     expect(screen.getByText("Riley")).toBeInTheDocument()
   })
 })
+
+describe("<ConversationsSidebar> — a fresh draft stays visible", () => {
+  it("clears search when the page starts a new draft and labels it without inventing history", () => {
+    const props = { agents: [riley, morgan], threadsByAgent: { "a-morgan": [morganThread] }, threadsLoaded: true, scope: "direct" as const, onScopeChange: vi.fn(), onSelectThread: vi.fn(), onStartConversation: vi.fn() }
+    const view = render(<ConversationsSidebar {...props} />)
+    fireEvent.change(screen.getByRole("textbox", { name: "Search conversations" }), { target: { value: "no match" } })
+    expect(screen.queryByText("Morgan's thread")).not.toBeInTheDocument()
+    view.rerender(<ConversationsSidebar {...props} activeThreadId="new-draft" draftConversation={{ agent: morgan, id: "new-draft" }} />)
+    expect(screen.getByRole("textbox", { name: "Search conversations" })).toHaveValue("")
+    expect(screen.getByText("Morgan · Draft")).toBeInTheDocument()
+    expect(screen.getByText("Morgan's thread")).toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveTextContent("New conversation")
+  })
+})

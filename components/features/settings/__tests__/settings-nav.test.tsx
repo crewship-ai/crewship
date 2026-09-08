@@ -13,7 +13,7 @@ import { SettingsNav, isSettingsSectionVisible } from "../settings-nav"
 
 // Privacy is deliberately absent — it is `enabled: false` until peer-card
 // extraction stops being a no-op. See the dedicated test below.
-const ACCOUNT_ITEMS = ["Profile"]
+const ACCOUNT_ITEMS = ["Profile", "Notification sounds"]
 const WORKSPACE_ITEMS = [
   "General",
   "Crew links",

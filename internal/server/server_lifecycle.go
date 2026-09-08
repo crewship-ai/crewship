@@ -119,6 +119,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 
 	go s.wsHub.Run(ctx)
+	s.startConversationNotifications(ctx)
 	go s.orchestrator.Start(ctx)
 
 	// Stuck-QUEUED assignment sweeper: crash-recovery net for the
@@ -130,6 +131,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// boots have no queue to sweep.
 	if s.apiRouter != nil {
 		if assign := s.apiRouter.Assignments(); assign != nil {
+			s.bgWg.Add(1)
+			go func() { defer s.bgWg.Done(); assign.RunConversationJobs(ctx) }()
 			// Boot-time recovery for RUNNING assignments orphaned by a
 			// previous crash/restart. Dispatch goroutines are process-
 			// local, so a RUNNING row stamped before s.startedAt cannot

@@ -352,3 +352,21 @@ Adding the first participant flips the chat to group visibility, after which the
 - [`crewship ask`](/cli/ask) — one-shot prompt (also creates a chat, tagged `origin=CLI`).
 - [`crewship session`](/cli/session) — browser session management, unrelated noun.
 - [Conversations API](/api-reference/conversations) — the underlying endpoints.
+
+### Continue into a new room
+
+Keep the original private discussion and start a separate room with fresh
+history. A private group continuation requires a DM and at least one additional
+human. Inviting an agent from a private discussion requires explicitly choosing
+a new workspace-visible channel; old private history is never copied.
+
+```bash
+crewship chat room continue DM_ID --kind group --title "Planning" --member USER_ID --client-id planning-request-1
+crewship chat room continue PRIVATE_ROOM_ID --kind channel --title "Team and agent" --agent AGENT_ID --client-id channel-request-1
+```
+
+Repeat `--member` to add workspace humans. Both original DM participants (or the
+existing private group roster for a channel) are retained. Use the same
+`--client-id` when retrying the same request after a lost response; a different
+payload with that ID is rejected. Joining the agent does not start work: send a
+new message with `--mention-agent AGENT_ID` when ready.
