@@ -3,9 +3,9 @@
 import Link from "next/link"
 import { cn } from "@/lib/utils"
 
-export const ROUTINE_VIEWS = ["definition", "history", "versions", "plan", "settings"] as const
+export const ROUTINE_VIEWS = ["definition", "history", "versions", "plan"] as const
 export type RoutineView = typeof ROUTINE_VIEWS[number]
-const labels: Record<RoutineView, string> = { definition: "Definition", history: "History", versions: "Versions", plan: "Plan", settings: "Settings" }
+const labels: Record<RoutineView, string> = { definition: "Definition", history: "History", versions: "Versions", plan: "Plan" }
 export const routineViewHref = (slug: string, view: RoutineView) => `/routines?${new URLSearchParams({ slug, ...(view === "definition" ? {} : { view }) })}`
 const tabClass = (active: boolean) => cn("rounded-full px-3 py-1.5 text-xs transition-colors", active ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")
 export function RoutineNavigation({ slug, view, onChange }: { slug: string; view: string; onChange?: (view: RoutineView) => void }) {

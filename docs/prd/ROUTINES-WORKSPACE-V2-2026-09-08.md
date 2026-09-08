@@ -348,3 +348,26 @@ inputs retain their existing runtime contract. Strings entered as answers remain
 data; {{ inputs.name }} is how authors reference variables in recipe steps, not
 an invitation to recursively evaluate user answers. No credential values are
 introduced as a new form field type.
+
+## Shared creation and editing builder (2026-09-08 follow-up)
+
+Keep the original explorer and visual language. Recipe and historical run headers
+expose Edit; it opens the same builder as New routine, prefilled from the current
+recipe. Definition / History / Versions / Plan remain reading/navigation views;
+Settings is removed. Old settings links open the editor. Access, budget and
+technical metadata are expandable in Overview. Historical restoration seeds an
+unsaved builder draft and saving records a new recipe version.
+
+The builder offers the existing icon/color picker and a crew-scoped agent picker
+with real avatars for each top-level agent_run step. This edits agent_slug in the
+recipe, not a cosmetic owner. Different steps may use different agents; nested
+steps and review agents remain configurable in Code. Existing acting-agent
+identity is preserved when the crew is unchanged. Icons are saved through the
+existing appearance API; a failed appearance write reports the partial save and
+retries only appearance, without duplicating recipe save/scheduled creation.
+
+Editing keeps the slug and omits trigger creation from save. Schedule opens the
+existing schedule/webhook managers; changes there, and budget changes, apply
+immediately and say so. They are independent of the unsaved recipe buffer.
+Creation continues to use atomic recipe+trigger save. Static validation is still
+required and never executes work. No database migration or Issues contract change.

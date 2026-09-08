@@ -2,35 +2,11 @@
 
 import { Button } from "@/components/ui/button"
 
-// The routine detail, as one scrolling surface of cards.
-//
-// Replaces the five-tab shell (Overview / Preview / Runs / Schedules /
-// Advanced). The design was argued on a throwaway /routines-new preview
-// route against the real renderer before landing here; that route is gone
-// now that this is the shipping layout. What follows is it wired to real
-// data.
-//
-// What went, and why:
-//
-//   Preview      the graph is on the page now. A tab holding a picture
-//                of the thing you are already looking at exists to hide
-//                the picture.
-//   Advanced     three levels of nesting over four unrelated things.
-//                The machinery is not gone — Editor opens beside the
-//                graph, Schedules/Webhooks live inside Triggers, and
-//                Versions has its own view. Nothing that worked was
-//                deleted; it stopped being filed under a word that told
-//                the reader nothing.
-//   Wait points  belong to a RUN, not to a definition. Activity is
-//                where the run is.
-//
-// Ordered by what an operator asks, in order: what is it → when does it
-// run → is it healthy → what does it do → what can it reach → what did
-// it do last.
+// Read the saved recipe here; author and edit it in the shared routine builder.
 
 import * as React from "react"
 import Link from "next/link"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { motion, useReducedMotion } from "motion/react"
 import {
   ArrowUpRight,
   Bot,
@@ -38,7 +14,6 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
-  Code2,
   Globe,
   KeyRound,
   PenSquare,
@@ -68,7 +43,9 @@ import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineStepDefinition } from "./routine-step-definition"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineBudgetCard } from "./routine-budget-card"
-import { RoutineEditorTab } from "./routine-editor-tab"
+import { RoutineCreateDialog } from "./routine-create-dialog"
+import { useAbilities } from "@/hooks/use-abilities"
+import { roleAtLeast } from "@/lib/routine-governance"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { RoutineVersionsTab } from "./routine-versions-tab"
@@ -147,22 +124,20 @@ export function RoutineCardDetail({
   const view = ROUTINE_VIEWS.find(v => v === selectedView) ?? "definition"
   const reduceMotion = useReducedMotion()
   const [editing, setEditing] = React.useState(false)
-  const [editorDirty, setEditorDirty] = React.useState(false)
-  const mayDiscard = () => !editorDirty || window.confirm("Discard unsaved recipe changes?")
+  const { role } = useAbilities()
+  const canEdit = roleAtLeast(role, "MANAGER")
   const [draft, setDraft] = React.useState<{ definition: Record<string, unknown>; version: number } | null>(null)
   React.useEffect(() => {
-    if (editRequest > 0) setEditing(true)
-  }, [editRequest])
+    if (editRequest > 0 && canEdit) setEditing(true)
+  }, [editRequest, canEdit])
+  React.useEffect(() => {
+    if ((selectedView === "edit" || selectedView === "settings") && canEdit) { setEditing(true); setView("definition") }
+  }, [selectedView, canEdit, setView])
   const [selected, setSelected] = React.useState<string | null>(null)
   // Separate from `selected`: selection is a persistent choice, focus a
   // one-shot "bring this into view". Merged, a re-render could yank the
   // viewport back after the reader had panned away from it.
   const [focus, setFocus] = React.useState<string | null>(null)
-  const handleCaret = React.useCallback((stepId: string | null) => {
-    if (!stepId) return
-    setSelected(stepId)
-    setFocus(stepId)
-  }, [])
   const handleSelect = React.useCallback((id: string | null) => {
     setSelected(id)
     setFocus(null)
@@ -224,17 +199,18 @@ export function RoutineCardDetail({
       {/* Identity, as a card that scrolls with the page rather than a
           fixed header band. The name is the first thing on the page —
           it used to sit under a row of status chrome. */}
-      <RoutineIdentityHeader routine={routine} workspaceId={workspaceId} onChanged={onChanged} actions={actions}>
+      <RoutineIdentityHeader routine={routine} workspaceId={workspaceId} onChanged={onChanged} onEdit={() => setEditing(true)} actions={actions}>
         {statusPills}
         <Pill tone="default">{mine.some(s => s.enabled) ? "scheduled" : "manual / event"}</Pill>
         {myAutomations.length > 0 && <span data-testid="routine-automations-pill"><Pill tone="default"><Zap className="h-3 w-3" />{myAutomations.length} automation{myAutomations.length === 1 ? "" : "s"}</Pill></span>}
         <Pill tone="default">{steps.length} {steps.length === 1 ? "step" : "steps"}</Pill>
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
       </RoutineIdentityHeader>
-      <RoutineNavigation slug={routine.slug} view={view} onChange={next => { if (next === view || mayDiscard()) { setEditorDirty(false); setView(next) } }} />
+      <RoutineNavigation slug={routine.slug} view={view} onChange={setView} />
       {view === "versions" && <RoutineVersionsTab workspaceId={workspaceId} slug={routine.slug} onRolledBack={onChanged} onPrepareDraft={(definition, version) => { setDraft({ definition, version }); setEditing(true); setView("definition") }} />}
       {view === "plan" && <div className="space-y-4"><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} concurrencyKey={concurrencyKey} maxConcurrent={maxConcurrent} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div>}
-      {view === "settings" && <div className="space-y-4"><DetailCard title="Connected workspace"><div className="flex flex-wrap gap-4 text-xs"><Link className="text-primary" href="/credentials">Credentials ↗</Link><Link className="text-primary" href="/integrations">Integrations ↗</Link><Link className="text-primary" href={`/activity?pipeline=${encodeURIComponent(routine.slug)}`}>Activity ↗</Link></div><p className="mt-3 text-xs text-muted-foreground">The access checks are applied when a run starts. Editing these connections does not rewrite historical runs.</p></DetailCard><AccessCard routine={routine} crewshipActions={crewshipActions} /><RoutineReachCard workspaceId={workspaceId} agentSlugs={routine.manifest?.agents ?? []} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><DetailCard title="Technical metadata"><Metadata routine={routine} steps={steps.length} /></DetailCard></div>}
+      {editing && <RoutineCreateDialog workspaceId={workspaceId} routine={routine} initialDraft={draft?.definition} open={editing} onClose={() => { setEditing(false); setDraft(null) }} onCreated={() => { setDraft(null); onChanged() }} advancedDetails={<><DetailCard title="Connected workspace"><div className="flex flex-wrap gap-4 text-xs"><Link className="text-primary" href="/credentials">Credentials ↗</Link><Link className="text-primary" href="/integrations">Integrations ↗</Link><Link className="text-primary" href={`/activity?pipeline=${encodeURIComponent(routine.slug)}`}>Activity ↗</Link></div><p className="mt-3 text-xs text-muted-foreground">The access checks are applied when a run starts. Editing these connections does not rewrite historical runs.</p></DetailCard><AccessCard routine={routine} crewshipActions={crewshipActions} /><RoutineReachCard workspaceId={workspaceId} agentSlugs={routine.manifest?.agents ?? []} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><DetailCard title="Technical metadata"><Metadata routine={routine} steps={steps.length} /></DetailCard></>} />}
+
       {view === "definition" && draft && <DetailCard><p className="text-sm">Unsaved draft from version {draft.version}. Review the editor and save to create a new version. The graph still shows the currently saved recipe.</p><button className="mt-2 text-xs text-primary" onClick={() => { setDraft(null); setEditing(false) }}>Discard draft</button></DetailCard>}
       {view === "definition" &&
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
@@ -244,16 +220,6 @@ export function RoutineCardDetail({
             subtitle={`${steps.length} ${steps.length === 1 ? "step" : "steps"}`}
             bare
           >
-            {/* The editor is a sibling, not an overlay: as a sibling it
-                takes real width and the graph slides left into what is
-                still visible, instead of hiding underneath it.
-                
-                Both panes are FLOORED so the graph can never be squeezed
-                away — a 380px canvas is the smallest one a step node is
-                still readable in, and the editor is capped at 560px
-                because past that it takes width the graph needs without
-                showing more code. Stacked, the same floors apply to
-                height. Whatever the window does, both halves survive. */}
             <div className="flex h-[56vh] min-h-[380px] flex-col md:flex-row">
               <motion.div
                 layout={reduceMotion ? false : "position"}
@@ -271,49 +237,10 @@ export function RoutineCardDetail({
                 {/* On the canvas, not in the card header: the button that
                     opens an editor for this graph belongs next to the
                     graph, not a title-bar away from it. */}
-                <button
-                  type="button"
-                  onClick={() => { if (!editing || mayDiscard()) { setEditorDirty(false); setEditing(v => !v) } }}
-                  className={cn(
-                    "absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium backdrop-blur transition-colors",
-                    editing
-                      ? "border-primary/40 bg-primary/15 text-primary"
-                      : "border-border/60 bg-card/85 text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Code2 className="h-3.5 w-3.5" />
-                  {editing ? "Close code" : "Edit code"}
-                </button>
+                {canEdit && <button type="button" onClick={() => setEditing(true)} className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/85 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"><PenSquare className="h-3.5 w-3.5" />Edit recipe</button>}
               </motion.div>
-              {/* The editor arrives from the side it will occupy, and
-                  the graph pane's `layout` animates it out of the way in
-                  the same beat — so the two read as one movement rather
-                  than a pane popping into existence. Opacity and offset
-                  only: animating the width itself fights the responsive
-                  floors above, which are the thing keeping the graph
-                  readable. */}
               {selected && !editing && <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0"><button onClick={() => setSelected(null)} className="mb-3 text-xs text-muted-foreground">Close step detail</button><RoutineStepDefinition step={(routine.definition.steps as Record<string, unknown>[] | undefined)?.find(s => s.id === selected)} /></aside>}
-              <AnimatePresence initial={false}>
-                {editing && (
-                  <motion.aside
-                    key="editor"
-                    initial={reduceMotion ? false : { opacity: 0, x: 28 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={reduceMotion ? { opacity: 0 } : { opacity: 0, x: 28 }}
-                    transition={PANE_EASE}
-                    className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t border-border/60 md:h-auto md:max-h-none md:w-[48%] md:max-w-[560px] md:border-l md:border-t-0"
-                  >
-                    <RoutineEditorTab
-                      routine={routine}
-                      workspaceId={workspaceId}
-                      initialDraft={draft?.definition}
-                      onDirtyChange={setEditorDirty}
-                      onSaved={() => { setDraft(null); onChanged() }}
-                      onStepAtCaret={handleCaret}
-                    />
-                  </motion.aside>
-                )}
-              </AnimatePresence>
+
             </div>
           </DetailCard>
         </Appear>

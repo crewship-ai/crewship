@@ -1,3 +1,5 @@
+vi.mock("../routine-schedules-tab", () => ({ RoutineSchedulesTab: () => <div /> }))
+vi.mock("../routine-webhooks-tab", () => ({ RoutineWebhooksTab: () => <div /> }))
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 

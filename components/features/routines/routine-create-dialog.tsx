@@ -1,5 +1,11 @@
 "use client"
 
+import type { ReactNode } from "react"
+import type { RoutineDetail } from "./routines-detail-panel"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
+import { RoutineSchedulesTab } from "./routine-schedules-tab"
+import { RoutineWebhooksTab } from "./routine-webhooks-tab"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -55,6 +61,9 @@ type EditorPane = "code" | "graph"
 // token; it does not execute work. Code stays mounted while sections change.
 
 interface Props {
+  routine?: RoutineDetail
+  initialDraft?: Record<string, unknown>
+  advancedDetails?: ReactNode
   workspaceId: string
   open: boolean
   onClose: () => void
@@ -186,11 +195,14 @@ interface RoutineListItem {
   last_invocation_status?: string
 }
 
-export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: Props) {
+export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, routine, initialDraft, advancedDetails }: Props) {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
+  const [icon, setIcon] = useState(routine ? resolveRoutineIcon(routine) : "workflow")
+  const [color, setColor] = useState(routine ? resolveRoutineColor(routine) : "purple")
+  const savedRecipe = useRef<string | null>(null)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [authorCrewId, setAuthorCrewId] = useState("")
@@ -259,7 +271,18 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // Reset to the entry screen each time the dialog opens. (Field state is
   // otherwise preserved across a close/reopen within the same session.)
   useEffect(() => {
-    if (open) setMode("entry")
+    if (!open) return
+    savedRecipe.current = null
+    if (routine) {
+      const text = toYaml(initialDraft ?? routine.definition)
+      setMode("advanced"); setSection("Overview"); setDslFormat("yaml")
+      setName(routine.name); setDescription(routine.description ?? ""); setAuthorCrewId(routine.author_crew_id ?? "")
+      setIcon(resolveRoutineIcon(routine)); setColor(resolveRoutineColor(routine))
+      setDslText(text); setLiveText(text); bufferRef.current = text; pristineText.current = toYaml(routine.definition)
+      setEditorKey(k => k + 1); setTestResult(null); setSaveToken(null); setSaveError(null)
+    } else setMode("entry")
+  // Seed once when opening; background refresh must not replace an unsaved draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   // Lazy-load crews + agents on first open. Side effects live in useEffect
@@ -336,6 +359,19 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // routine editor uses, so a document written here and a document
   // edited there are held to one standard.
   const dslExtensions = useMemo(() => routineDslExtensions(dslFormat), [dslFormat])
+
+  useEffect(() => {
+    if (!open) return
+    const changed = liveText !== pristineText.current || name !== (routine?.name ?? "") || description !== (routine?.description ?? "") || authorCrewId !== (routine?.author_crew_id ?? "") || icon !== (routine ? resolveRoutineIcon(routine) : "workflow") || color !== (routine ? resolveRoutineColor(routine) : "purple") || goal.trim() !== "" || trigger.kind !== "manual" || sourcesAndOutput.trim() !== "" || Object.keys(scheduledValues).length > 0
+    if (!changed) return
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
+    const onNavigate = (event: MouseEvent) => {
+      const link = (event.target as Element)?.closest?.("a[href]")
+      if (link && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
+    }
+    window.addEventListener("beforeunload", beforeUnload); document.addEventListener("click", onNavigate, true)
+    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", onNavigate, true) }
+  }, [open, liveText, name, description, authorCrewId, icon, color, routine, goal, trigger.kind, sourcesAndOutput, scheduledValues])
 
   if (!open) return null
 
@@ -488,6 +524,10 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       toast.error("Fix the definition before continuing")
       return
     }
+    if (routine && parsed.name !== routine.slug) {
+      setSaveError("The routine identifier cannot change while editing. Fork the routine to create a separate recipe.")
+      return
+    }
     if (!parsed["name"]) {
       toast.error("DSL must include a 'name' (used as slug)")
       return
@@ -502,6 +542,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         definition: parsed,
         skip_test_gate: false,
       }
+      if (!routine) {
       const values = Object.fromEntries(scheduledFields.map(f => [f.name, scheduledValues[f.name] ?? f.default ?? ""]))
       if (trigger.kind === "schedule" || trigger.kind === "once") {
         const missing = scheduledFields.find(f => isMissingRequired(f, values[f.name]))
@@ -514,6 +555,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         if (!trigger.at || !(Date.parse(trigger.at) > Date.now())) throw new Error("Choose a future date and time")
         body.trigger = { kind: "once", fire_at: new Date(trigger.at).toISOString(), inputs: scheduledInputs }
       }
+      }
+      if (routine) body.author_agent_id = routine.author_crew_id === authorCrewId ? routine.author_agent_id : ""
       // The server clears the save test-gate ONLY via the HMAC save_token
       // (minted by /test_run) or the OWNER/ADMIN skip — it no longer trusts a
       // body "it passed" claim. Prefer an explicitly-threaded token (the
@@ -525,6 +568,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       // skip_test_gate is already on the body; nothing else to add.
       if (authorCrewId) body.author_crew_id = authorCrewId
 
+      if (!savedRecipe.current) {
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -535,8 +579,12 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         throw new Error(`${res.status}: ${t || res.statusText}`)
       }
       const saved = (await res.json()) as { slug: string }
-      toast.success(`Routine "${saved.slug}" saved`)
-      onCreated(saved.slug)
+      savedRecipe.current = saved.slug
+      }
+      const appearance = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(savedRecipe.current!)}/appearance`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ icon, color }) })
+      if (!appearance.ok) throw new Error("The recipe was saved, but its icon could not be saved. Retry to finish saving its appearance.")
+      toast.success(`Routine "${savedRecipe.current}" saved`)
+      onCreated(savedRecipe.current!)
       onClose()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -576,7 +624,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     try {
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${item.slug}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const detail = (await res.json()) as { definition?: Record<string, unknown>; name?: string; description?: string }
+      const detail = (await res.json()) as { definition?: Record<string, unknown>; name?: string; description?: string; author_crew_id?: string; icon?: string; color?: string }
       const def = detail.definition ?? {}
       // Rename the fork so it doesn't collide with the source slug on save.
       const forkName = `${item.slug}-copy`
@@ -588,6 +636,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       replaceBuffer(dslFormat === "yaml" ? toYaml(nextDef) : JSON.stringify(nextDef, null, 2), {
         baseline: false,
       })
+      setAuthorCrewId(detail.author_crew_id ?? "")
+      setIcon(resolveRoutineIcon({ ...detail, slug: item.slug })); setColor(resolveRoutineColor({ ...detail, slug: item.slug }))
       setForkSource(item.name || item.slug)
       setSection("Overview")
       setName("")
@@ -616,7 +666,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "Start from an existing routine"
         : mode === "advanced"
-          ? "Build your routine"
+          ? (routine ? "Edit your routine" : "Build your routine")
           : "New routine"
   const headerSub =
     mode === "describe"
@@ -652,8 +702,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     sourcesAndOutput.trim() !== "" ||
     trigger.kind !== "manual" ||
     goal.trim() !== "" ||
-    name.trim() !== "" ||
-    description.trim() !== "" ||
+    name !== (routine?.name ?? "") ||
+    description !== (routine?.description ?? "") ||
+    authorCrewId !== (routine?.author_crew_id ?? "") ||
+    icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
+    color !== (routine ? resolveRoutineColor(routine) : "purple") ||
     liveText !== pristineText.current
 
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
@@ -686,7 +739,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
         context="Routines"
         title={headerTitle}
         description={headerSub}
-        onBack={mode === "entry" ? undefined : () => setMode("entry")}
+        onBack={routine || mode === "entry" ? undefined : () => setMode("entry")}
         onClose={onClose}
       />
 
@@ -943,13 +996,13 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
           {/* The body is the shell's scrollport everywhere else; here it is a
               two-pane frame, because a code editor that scrolls the dialog
               instead of itself is not a code editor. */}
-          <CreateSurfaceBody className="flex overflow-y-hidden p-0 sm:p-0">
+          <CreateSurfaceBody inert={savedRecipe.current !== null} className={cn("flex overflow-y-hidden p-0 sm:p-0", savedRecipe.current && "opacity-60")}>
             {/* The kit's Section and Field, not a column of bespoke
                 `text-[10px] uppercase` labels over `h-7` inputs. Two of those
                 were 28px tall, which is not a tap target on a phone — and
                 every other surface says its field labels the same way. */}
             <aside className="flex w-48 shrink-0 flex-col gap-2 overflow-y-auto border-r border-hairline bg-card p-3 max-sm:w-32 max-sm:p-2">
-              <p className="px-2 py-2 text-xs text-muted-foreground">Recipe · Unsaved</p>
+              <p className="px-2 py-2 text-xs text-muted-foreground">{routine ? `Editing · v${routine.head_version ?? 1}` : "Recipe · Unsaved"}</p>
               <nav aria-label="Recipe sections" className="space-y-1">
                 {["Overview", "Steps", "Schedule", "Validate", "Code"].map(item => <button key={item} type="button" aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)} className={cn("w-full rounded-xl px-3 py-2.5 text-left text-sm hover:bg-muted", section === item ? "bg-primary/10 text-primary" : "text-muted-foreground")}>{item}</button>)}
               </nav>
@@ -961,6 +1014,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               <div hidden={section !== "Overview"} className="space-y-6">
                 {forkSource && <p className="rounded-xl border p-3 text-sm">Based on {forkSource}. Saving creates a separate routine.</p>}
               <CreateSurfaceSection title="Routine details" concept="routines">
+                <div className="flex items-center gap-4"><CrewIconPopover modal icon={icon} color={color} size="lg" ariaLabel="Choose routine icon and color" onIconChange={setIcon} onColorChange={setColor} /><div><p className="text-sm font-medium">Icon and color</p><p className="mt-1 text-xs text-muted-foreground">Your routine’s identity in the sidebar, calendar and history.</p></div></div>
                 <CreateSurfaceField
                   label="Name"
                   htmlFor="routine-name"
@@ -1001,12 +1055,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     clearLabel="— choose at runtime —"
                   />
                 </CreateSurfaceField>
-                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint="Unique name used in links and code. Edit it in Code."><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField>
+                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint={routine ? "Permanent identifier. Editing saves a new version of this routine." : "Unique name used in links and code. Edit it in Code."}><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField>
               </CreateSurfaceSection>
 
+                {definitionRows(parsedDSL?.steps).some(s => s.type === "agent_run") && <section className="space-y-4 rounded-2xl border border-hairline p-5"><h3 className="font-medium">Agents doing the work</h3><p className="text-sm text-muted-foreground">Choose who handles each agent step. Scripts and other steps run as defined in the recipe.</p>{definitionRows(parsedDSL?.steps).map((step, index) => step.type === "agent_run" ? <div key={index} className="space-y-2"><label id={`agent-step-label-${index}`} className="text-sm">{String(step.name || step.id)}</label><Select value={String(step.agent_slug || "")} onValueChange={agent_slug => { if (!parsedDSL) return; const steps = definitionRows(parsedDSL.steps).map((s, i) => i === index ? { ...s, agent_slug } : s); replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, steps }) : JSON.stringify({ ...parsedDSL, steps }, null, 2), { baseline: false }) }} disabled={!authorCrewId}><SelectTrigger aria-labelledby={`agent-step-label-${index}`} className="h-11 w-full rounded-xl bg-muted/30"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{!agents.some(a => a.crew_id === authorCrewId && a.slug === step.agent_slug) && step.agent_slug ? <SelectItem value={String(step.agent_slug)} disabled>{String(step.agent_slug)} · choose an agent from this crew</SelectItem> : null}{agents.filter(a => a.crew_id === authorCrewId).map(a => <SelectItem key={a.id} value={a.slug}><span className="inline-flex items-center gap-2"><AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style || describeCrew?.avatar_style} avatarUrl={a.avatar_url} className="h-6 w-6" alt="" /><span>{a.name}</span><span className="text-xs text-muted-foreground">{a.role_title || a.agent_role.toLowerCase()}</span></span></SelectItem>)}</SelectContent></Select></div> : null)}{!authorCrewId && <p className="text-xs text-muted-foreground">Choose a crew above to see its agents.</p>}<p className="text-xs text-muted-foreground">Nested workflows and review agents can be configured in Code.</p></section>}
                 {parsedDSL && (parsedDSL.inputs == null || (Array.isArray(parsedDSL.inputs) && parsedDSL.inputs.every(i => i != null && typeof i === "object" && typeof i.name === "string"))) ? <RoutineInputFormBuilder inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]} onChange={inputs => replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, inputs }) : JSON.stringify({ ...parsedDSL, inputs }, null, 2), { baseline: false })} /> : <p className="text-sm text-destructive">Fix the input declarations in Code to edit the start form.</p>}
                 <section aria-label="What you receive" className="space-y-3 rounded-2xl border border-hairline p-5"><h3 className="font-medium">What you receive</h3>{definitionRows(parsedDSL?.outputs).map((output, i) => <div key={i}><p className="text-sm">{String(output.label || output.name || "Result")}</p><p className="text-sm text-muted-foreground">{String(output.description || "No description supplied by the author.")}</p></div>)}{!definitionRows(parsedDSL?.outputs).length && <p className="text-sm text-muted-foreground">No outputs declared yet.</p>}<button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit expected results in Code →</button></section>
-                <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Choose a starter template</summary><div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {advancedDetails && <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Access, budget and technical details</summary><div className="mt-4 space-y-4"><p className="text-xs text-muted-foreground">Budget and connection changes apply immediately.</p>{advancedDetails}</div></details>}
+                {!routine && <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Choose a starter template</summary><div className="mt-4 grid gap-3 sm:grid-cols-3">
 
                 {STARTER_TEMPLATES.map((t) => (
                   <CreateSurfaceTile
@@ -1016,10 +1072,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     description={t.description}
                   />
                 ))}
-                </div></details>
+                </div></details>}
               </div>
               {section === "Steps" && <div className="space-y-4">{definitionRows(parsedDSL?.steps).map((step, i) => <div key={i} className="rounded-2xl border border-hairline p-4"><h3 className="font-medium">{i + 1}. {String(step.name || step.id || "Step")}</h3><p className="mt-1 text-xs text-muted-foreground">{String(step.type || "Unspecified").replaceAll("_", " ")}{step.agent_slug ? ` · ${step.agent_slug}` : ""}</p>{(step.description || step.prompt) ? <p className="mt-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">{String(step.description || step.prompt)}</p> : null}{(step.script || step.code) ? <details className="mt-3"><summary className="cursor-pointer text-sm text-primary">View script configuration</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/30 p-3 text-xs">{JSON.stringify(step.script || step.code, null, 2)}</pre></details> : null}</div>)}<div className="relative h-[380px] overflow-hidden rounded-2xl border border-hairline">{parsedDSL ? <RoutineDefinitionCanvas definition={parsedDSL} slug={slug} name={name || slug} /> : <p className="p-5 text-sm text-muted-foreground">Fix the definition in Code to display its steps.</p>}</div><button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit steps in Code →</button></div>}
-              {section === "Schedule" && <div className="space-y-5">              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
+              {section === "Schedule" && routine && <div className="space-y-5"><p className="text-sm text-muted-foreground">These are the routine’s existing starts. Schedule changes apply immediately, independently of saving the recipe.</p><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div>}
+              {section === "Schedule" && !routine && <div className="space-y-5">              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
               {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
 <p className="text-sm text-muted-foreground">Saving activates the selected schedule. Leave “When I start it” selected to save without an automatic start.</p></div>}
               {section === "Validate" && <div className="space-y-4"><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Definition check</h3><p className="mt-2 text-sm text-muted-foreground">Checks the recipe and its configuration. A successful check does not mean a real run has succeeded.</p><button type="button" disabled={busy !== "none"} onClick={handleTestRun} className="mt-4 rounded-full border px-4 py-2 text-sm">{busy === "testing" ? "Validating…" : "Check definition"}</button></div><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Real execution</h3><p className="mt-2 text-sm text-muted-foreground">After saving, use Run to review inputs and start real work. Follow its steps and outputs in History and Activity.</p></div>{parseError && <button type="button" className="text-sm text-destructive" onClick={() => setSection("Code")}>{parseError} · Open Code →</button>}</div>}
