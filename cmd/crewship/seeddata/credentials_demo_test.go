@@ -20,15 +20,35 @@ func TestDemoCredentialsV2_FileAndKeyPairShapes(t *testing.T) {
 		if dc.Def.Provider == "NONE" || dc.Def.Provider == "" {
 			t.Errorf("%s: missing brand", dc.Def.Name)
 		}
+		// Match by key, never by position. Slice order is not part of the
+		// fixture contract, and asserting dc.Fields[0] lets a shape lose its
+		// second field — the key pair's region — without a test noticing.
+		byKey := make(map[string]DemoField, len(dc.Fields))
+		for _, f := range dc.Fields {
+			byKey[f.Key] = f
+		}
+		requireVisible := func(keys ...string) {
+			for _, k := range keys {
+				f, ok := byKey[k]
+				if !ok {
+					t.Errorf("%s: missing field %q", dc.Def.Name, k)
+					continue
+				}
+				if f.Secret {
+					t.Errorf("%s: field %q must be non-secret", dc.Def.Name, k)
+				}
+				if strings.TrimSpace(f.Value) == "" {
+					t.Errorf("%s: field %q carries no value", dc.Def.Name, k)
+				}
+			}
+		}
 		if dc.Def.Name == "demo-v2-json-file" {
 			if !json.Valid([]byte(dc.Def.Value)) {
 				t.Error("file demo is not JSON")
 			}
-			if len(dc.Fields) == 0 || dc.Fields[0].Key != "filename" || dc.Fields[0].Secret {
-				t.Error("file name must be present and non-secret")
-			}
-		} else if len(dc.Fields) == 0 || dc.Fields[0].Key != "access_key_id" || dc.Fields[0].Secret {
-			t.Error("key pair must carry a non-secret ID")
+			requireVisible("filename")
+		} else {
+			requireVisible("access_key_id", "region")
 		}
 	}
 	if len(seen) != 2 {

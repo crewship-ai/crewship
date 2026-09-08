@@ -60,9 +60,10 @@ enabled after operator confirmation. No real stored password was revealed.
   caches from this session's worktrees were removed; no source or live data.
 - ESLint: zero errors, 32 repository warnings. Explicit lint of browser/config
   files reports them ignored by the existing ESLint configuration, not checked.
-- Six browser scenarios passed using API fixtures and dummy values, not live
-  authorization. They cover an allowed owner and member/viewer, missing
-  capability, disabled-policy and SEALED refusals.
+- Seven browser scenarios passed using API fixtures and dummy values, not live
+  authorization. They cover an allowed owner and an allowed admin — the default
+  this change introduces — plus member/viewer, missing capability,
+  disabled-policy and SEALED refusals.
 - Removing the dialog context key made the stale-response regression test fail;
   restoring it returned all 16 reveal-dialog tests to green.
 - Full `go test -p=2 ./... -count=1 -timeout 40m` failed in `internal/api`:
