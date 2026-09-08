@@ -37,6 +37,7 @@ describe("client run explanations", () => {
   })
   it("does not mistake every wait for a human decision", () => {
     expect(routineRunPresentation({ status: "waiting" }).label).toBe("Waiting")
+    expect(routineRunExplanation({ status: "queued" }, "event").title).toBe("Waiting to start")
     expect(routineRunExplanation({ status: "waiting" }, "event").title).toBe("Waiting for an event")
     expect(routineRunExplanation({ status: "running" }, "datetime").title).toBe("Waiting until a scheduled time")
     expect(routineRunExplanation({ status: "waiting" }, "approval").title).toBe("A review is needed")

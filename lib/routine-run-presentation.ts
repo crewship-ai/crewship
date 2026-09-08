@@ -39,7 +39,7 @@ export function routineRunExplanation(run: { status?: string; outcome?: string; 
   }
   if (["cancelled", "canceled"].includes(status) || run.outcome === "CANCELLED") return { title: "Run stopped", detail: "Pending work was cancelled. Recorded results remain available. Stopping does not undo actions that already happened." }
   if (["failed", "error", "interrupted"].includes(status) || run.outcome === "FAILED") return { title: status === "interrupted" ? "Run interrupted" : "This run could not finish", detail: "Review the recorded error and any retained results before starting another run. A new run repeats work; it does not resume this attempt." }
-  if (["waiting", "paused"].includes(status) || (["running", "queued"].includes(status) && !!waitKind)) {
+  if (["waiting", "paused"].includes(status) || (status === "running" && !!waitKind)) {
     if (waitKind === "approval") return { title: "A review is needed", detail: "Read the request and recorded result before deciding. This is the same decision shown in Inbox." }
     if (waitKind === "event") return { title: "Waiting for an event", detail: "The recipe is parked until its configured event arrives. This is not a request for human approval." }
     if (waitKind === "datetime") return { title: "Waiting until a scheduled time", detail: "The recipe is parked at a date waitpoint. See the saved step for its configured time." }
