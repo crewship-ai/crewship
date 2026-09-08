@@ -61,3 +61,11 @@ Ověřeno: 713 frontendových testů Crews + issues hook a 2 nové testy Work; l
 ## Compact run statistics
 
 Run outcomes now shares a two-column row with How runs start, using the existing scoped insights `by_trigger` counts. Both cards stack on mobile. The source breakdown shows at most five rows, combining overflow as Other without losing counts; unavailable source data gets an explicit empty state. Outcome counts exclude cancellations while trigger counts include them, labelled separately. Two focused tests, ESLint, production build and a real Dev2 browser check passed (populated ma-ena agent; desktop and mobile, no console/API errors). No backend or aggregation changes.
+
+## Memory note browser
+
+Replaced the wrapping filename chips with a searchable two-column note browser shared by agents and crews. Pinned notes, knowledge and daily journals have separate labelled groups; journals sort newest first. Human-readable labels lead, with exact filenames retained as secondary metadata. Search covers titles, paths and current note content, with a distinct no-results state and clear action. Changing scope resets the search so an agent query cannot hide the crew's notes. The detail uses the existing sanitized Markdown renderer for headings, lists, tables and links; download and version history remain available. On narrow screens the bounded note list sits above the detail. Crew scope cards now fill their two-column row.
+
+Validation: 35 Crews frontend test files / 305 tests passed, including Markdown headings, chronological ordering, content search, empty results and scope reset. ESLint has no errors (32 pre-existing warnings), production export and Go vet passed. Backend regression and live deployment checks recorded below after completion. No memory data or retrieval changes in this UI patch.
+
+Live Dev2 browser verification passed after reload: crew Markdown headings, content search, no-results + clear, pinned notes, workspace switching, mobile without horizontal overflow and agent archive search. No browser console errors or failed API reads. Screenshots: `/tmp/memory-notes-desktop.png`, `/tmp/memory-notes-mobile.png`. Go web, scripts and tools tests passed; internal/cmd suite is still running in `/tmp/memory-ui-go-tests.log`.
