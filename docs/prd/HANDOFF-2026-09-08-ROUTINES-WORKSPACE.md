@@ -275,3 +275,32 @@ completed `run_cmtsqfyeg00010aac0ae7`. Both use the existing manual, agentless
 fixture `test-routines-calendar-20260908`; no future test schedule was left.
 Screenshots: `/tmp/routines-calendar-*.png`. Concurrent main-clone verification
 WIP was stashed only for deployment and reapplied; it is not shipped here.
+
+## English dates and calendar starts in Plan (2026-09-08)
+
+Application commit `73e72884a` is deployed on dev1. Routines now formats visible
+weekday/month/date labels with en-GB independently of the browser language;
+timezone handling is unchanged. Native date-input controls remain browser-owned.
+Plan groups One-time starts (including Calendar entries) and Repeating schedules
+under Schedules. Pending one-time rows lead; the old misleading global "No
+schedules yet" state is gone. Advanced overlap configuration is collapsed below
+scheduling. The existing left explorer, icons and gray card design remain.
+
+Frontend verification: 31 files / 247 Routines and overview tests passed,
+including the regression with a pending calendar start and no recurring schedule.
+TypeScript, full go vet, production export and actual dev1 build passed. ESLint:
+0 errors / 32 existing warnings; changed-file lint is clean.
+
+Read-only public browser verification used cs-CZ with Europe/Prague. Week and
+month views showed English labels. Incident timeline's real user-created start
+`pnd_cmtsr2st70024c9c50523` appears within Schedules as Wed, 9 Sept 2026, 10:00.
+Its stored `2026-09-09T08:00:00Z` value was identical before and after; no run,
+cancellation or schedule write was performed. No browser page errors occurred.
+Evidence: `/tmp/routines-plan-live.log`, `/tmp/routines-plan-english-week.png`,
+`/tmp/routines-plan-english-schedules.png`. Concurrent Go verification WIP in the
+main clone was preserved through a path-scoped stash for deployment and restored
+afterwards; it is not part of this build.
+
+The full Go suite also passed all 135 packages (database 385.768s), using
+TMPDIR=/dev/shm, -p 3 and -timeout=40m; log `/tmp/routines-plan-go.log`.
+PR #2460 remains unmerged: CodeRabbit is rate-limited, not a completed review.
