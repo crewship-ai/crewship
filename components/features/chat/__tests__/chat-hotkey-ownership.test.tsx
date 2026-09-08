@@ -35,7 +35,7 @@ vi.mock("@/hooks/use-auth", () => ({
     session: { user: { name: "Demo User", email: "demo@crewship.ai" } },
     signOut: vi.fn().mockResolvedValue(undefined),
   }),
-  useSession: () => ({ data: { user: { id: "user-1" } } }),
+  useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))

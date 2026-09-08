@@ -1,0 +1,14 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "checks": [
+    "Emma VIEWER opens Notification sounds under Settings Account; inline region and canonical toolbar shortcut",
+    "Inline controls enable without playback and explicitly preview native Glass audio",
+    "Profile and sound navigation preserve account/workspace preferences without extra playback",
+    "Settings deep link and browser reload restore choices but require renewed audio activation",
+    "Mobile Settings navigation reaches the same inline controls without overflow or runtime errors"
+  ],
+  "page_errors": [],
+  "audio_evidence": "Native oscillator starts in running AudioContext; physical speakers not measured.",
+  "status": "passed",
+  "artifacts": "assets/sounds-settings-dev2"
+}

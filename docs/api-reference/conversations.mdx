@@ -476,3 +476,215 @@ See [Internal IPC API — Crew messaging and files](/api-reference/internal#crew
 - [Crews API](/api-reference/crews).
 - [Crew Journal](/guides/crew-journal) — `peer.escalation`, `peer.conversation`.
 - [User Preferences](/api-reference/preferences) — UI/composer settings.
+
+## Continue a private conversation in a new room
+
+`POST /api/v1/conversations/{conversationId}/continue` creates a separate room
+with fresh history. It never changes the source's privacy or copies its messages.
+Either current participant of a DM can start a new private group; a member of a
+private group or DM can explicitly start a workspace-visible channel with an
+agent.
+
+```json
+{"kind":"group","title":"Planning","member_ids":["additional-user-id"],"client_id":"stable-request-id"}
+```
+
+`kind=group` requires a DM source and at least one additional workspace human;
+both original participants are included. It rejects `agent_id`. For a new
+workspace-visible channel, use `kind=channel` and a required `agent_id`; optional
+`member_ids` adds humans to the existing roster. Creating and joining the agent
+commit atomically; joining does not run the agent. Send a new structured mention
+to request an answer. Private history remains accessible only in the source.
+
+`title` is 1–120 characters, `member_ids` accepts at most 498 entries, and
+`client_id` is a required opaque retry ID of at most 128 UTF-8 bytes. Reuse that ID
+for the same request after a lost response: the server returns the existing new
+room (`200`); first creation returns `201`. Reusing it with different content
+returns `409`. The retry identity is scoped to the source and requesting human.
+Unauthorized source access or foreign-workspace invitees return `404`.
+
+Group creation starts empty. Channel creation contains only the new agent join
+notice, not prior private messages. Existing direct-pair reuse is unchanged.
+
+## Workspace rooms
+
+These rooms back Chat's human DMs, private groups and workspace channels. Their
+IDs and message sequences are separate from legacy agent `chats` sessions above.
+A DM is a `group` with `is_direct=true` and a fixed pair of humans. A channel is
+visible to current workspace members; removing someone from its explicit roster
+does not revoke workspace visibility.
+
+### Workspace room authentication and error contract
+
+**Auth:** every room request requires an authenticated user and workspace context
+(for example `?workspace_id=WORKSPACE_ID`). Private groups and DMs additionally
+require conversation membership. The server checks access on each request;
+authentication alone never grants access to a private room.
+
+**Request:** path IDs identify resources within that workspace. JSON bodies reject
+unknown fields and trailing JSON. Do not send author identity or trusted message
+`source_kind`: the server assigns those fields.
+
+**Errors:** JSON `{"error":"…"}` with `400` for invalid fields or unsupported room
+operations, `401` for missing authentication, `404` for absent or inaccessible
+rooms/targets, `409` for a conflicting retry ID, and `500` for an internal failure.
+Creator-only operations also conceal denied access as `404`, rather than exposing
+another participant's authority. The successful response for each operation is
+listed below.
+
+### List workspace rooms
+
+`GET /api/v1/conversations`
+
+**Query parameters:** `limit` defaults to 100 (1–100); `offset` defaults to 0 and
+must be nonnegative. **Response:** `200` with
+`{"conversations":[],"next_offset":null}`. A full page provides a numeric next
+offset; follow it until `null`. Only accessible rooms are included.
+
+### Create a workspace room
+
+`POST /api/v1/conversations`
+
+**Request body:** `{"kind":"group","title":"Planning","member_ids":["USER_ID"]}`.
+`kind` is `group` or `channel`; title is required (1–120 characters). Members must
+belong to this workspace; the creator is included automatically. **Response:**
+`201` with the conversation object. Creating a channel exposes its history to the
+workspace; it does not invoke an agent.
+
+### Open or reuse a human DM
+
+`POST /api/v1/conversations/direct`
+
+**Request body:** `{"user_id":"OTHER_WORKSPACE_USER_ID"}`. The target must be a
+different current workspace member. **Response:** `201` for a new fixed-pair DM,
+or `200` with the existing conversation for the same pair. Repeating this request
+does not create a second DM or change its participants.
+
+### Read room metadata
+
+`GET /api/v1/conversations/{conversationId}`
+
+**Path parameters:** `conversationId`. **Response:** `200` with a conversation
+object: `id`, `workspace_id`, `kind`, `title`, `created_by`, timestamps,
+`last_sequence`, the caller's `last_read_sequence`, `unread_count`, `muted`,
+`access_scope` and `is_direct`. A DM additionally exposes optional peer identity
+fields `direct_user_id`, `direct_user_name` and `direct_avatar_url`.
+
+### Read room messages
+
+`GET /api/v1/conversations/{conversationId}/messages`
+
+**Path parameters:** `conversationId`. **Query parameters:** `limit` defaults to
+100 (1–100). Omit cursors for the latest page; use positive `before_sequence` for
+older history, or nonnegative `after_sequence` for catch-up (`0` starts from the
+beginning). The two cursors are mutually exclusive. **Response:** `200` with
+`{"messages":[],"has_more":false}`; each page is in ascending sequence order.
+`has_more` means the page filled the limit, so another request may be empty.
+Messages include server ID, room ID, sequence, author identity, content, timestamp,
+retry ID, structured mentions and kind. Optional `source_kind=activity` marks a
+trusted system activity message; a missing author alone does not imply that.
+
+### Send a room message
+
+`POST /api/v1/conversations/{conversationId}/messages`
+
+**Request body:** `{"content":"Please review","client_id":"send-unique-1","mentioned_agent_ids":["AGENT_ID"]}`.
+Content must contain text and fit within 32768 UTF-8 bytes; a nonblank `client_id`
+is required (at most 128 bytes). Agents must already be joined to the channel.
+Plain `@name` text does not invoke an agent. **Response:** `201` with the persisted
+message; an identical retry returns `200` with the same message. Reusing the
+retry ID with different content/mentions returns `409`. Mention jobs are durable;
+message acceptance does not mean an agent has already completed its answer.
+
+### Mark a room read
+
+`POST /api/v1/conversations/{conversationId}/read`
+
+**Request body:** `{"last_read_sequence":42}` with a nonnegative sequence actually
+read by the caller. **Response:** `204 No Content`. The read cursor is per user
+and monotonic; this does not mark other participants' messages as read.
+
+### Mute a room
+
+`POST /api/v1/conversations/{conversationId}/mute`
+
+**Request body:** `{"muted":true}`; send `false` to unmute. **Response:** `204 No
+Content`. This changes the caller's notification preference, not membership or
+other users' preferences.
+
+### List room participants
+
+`GET /api/v1/conversations/{conversationId}/participants`
+
+**Path parameters:** `conversationId`. **Response:** `200` with
+`{"participants":[]}`; entries contain `user_id`, `name`, optional `avatar_url`
+and `joined_at`, with an informational `role`. For channels this is the explicit roster, not a restriction on
+which workspace members can read the room.
+
+### Add a room participant
+
+`POST /api/v1/conversations/{conversationId}/participants`
+
+**Auth:** room creator only. **Request body:** `{"user_id":"WORKSPACE_USER_ID"}`.
+**Response:** `204 No Content`, also when already joined. This grants existing
+room history. A fixed-pair DM rejects roster edits (`400`); use the continuation
+endpoint to create a separate group without exposing the private DM history.
+
+### Remove a room participant
+
+`DELETE /api/v1/conversations/{conversationId}/participants/{userId}`
+
+**Auth:** room creator only. **Path parameters:** `conversationId`, `userId`.
+**Response:** `204 No Content`. Supported for private groups, excluding the
+creator; fixed-pair DMs and workspace channels reject removal (`400`).
+
+### List joined room agents
+
+`GET /api/v1/conversations/{conversationId}/agents`
+
+**Path parameters:** `conversationId`. **Response:** `200` with `{"agents":[]}`.
+Entries include `agent_id`, `name`, `slug`, `joined_at`, and optional avatar URL,
+style and seed. Deleted or foreign-workspace agents are excluded.
+
+### Join an agent to a channel
+
+`POST /api/v1/conversations/{conversationId}/agents`
+
+**Auth:** room creator only. **Request body:** `{"agent_id":"WORKSPACE_AGENT_ID"}`.
+**Response:** `204 No Content`. Only workspace channels support agents; private
+rooms return `400`. Joining records a visible history-access notice but does not
+start work. A later structured mention can supply the channel history to the agent.
+
+### Remove an agent from a channel
+
+`DELETE /api/v1/conversations/{conversationId}/agents/{agentId}`
+
+**Auth:** room creator only. **Path parameters:** `conversationId`, `agentId`.
+**Response:** `204 No Content`. Only channels support this operation; removal
+records an agent-left notice. Queued mention work revalidates access before execution.
+
+### Inspect room agent jobs
+
+`GET /api/v1/conversations/{conversationId}/agent-jobs`
+
+**Path parameters:** `conversationId`. **Response:** `200` with `{"jobs":[]}`.
+Job entries expose `id`, `message_id`, `agent_id`, `state`, `assignment_id` and
+`error`, allowing clients to distinguish accepted work from an
+answer already delivered to the transcript.
+
+### Read channel activity settings
+
+`GET /api/v1/conversations/{conversationId}/activity`
+
+**Path parameters:** `conversationId`, which must name a channel. **Response:**
+`200` with `{"issues":false,"routines":false}` by default. Private rooms return
+`400`; any current workspace member with channel access can read settings.
+
+### Set channel activity settings
+
+`PUT /api/v1/conversations/{conversationId}/activity`
+
+**Auth:** channel creator only. **Request body:** `{"issues":true,"routines":false}`;
+both booleans are required. **Response:** `200` with the saved settings. Enabling
+publishes future issue/routine lifecycle events into the channel, with no historical
+backfill and no agent jobs generated by those system messages.

@@ -1,0 +1,13 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "chat_id": "cmtsftvcj0002380b7512",
+  "checks": [
+    "Saved enabled preference survives a real reload without automatic playback",
+    "One real Ma\u0159ena reply plays after ordinary composer interaction, without Activate or Preview after reload",
+    "Mobile profile menu shows actual Viewer role/workspace and opens inline sound settings without overflow"
+  ],
+  "page_errors": [],
+  "audio_evidence": "Native oscillator started in a running AudioContext after an ordinary composer gesture; no post-reload Activate/Preview.",
+  "status": "passed",
+  "artifacts": "assets/agent-reply-sounds-dev2"
+}

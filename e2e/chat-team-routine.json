@@ -1,0 +1,15 @@
+{
+  "dsl_version": "1.0",
+  "name": "chat-team-demo-check",
+  "description": "Synthetic manual check for the team Chat activity feed. No models, network or file writes.",
+  "steps": [
+    {
+      "id": "result",
+      "type": "transform",
+      "transform": {
+        "input": "CREWSHIP_TEAM_ROUTINE_OK",
+        "expression": "."
+      }
+    }
+  ]
+}

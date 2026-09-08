@@ -42,9 +42,10 @@ import (
 const accountSetupTTL = 7 * 24 * time.Hour
 
 type provisionRequest struct {
-	Email    string `json:"email"`
-	Role     string `json:"role"`
-	FullName string `json:"full_name"`
+	CreateOnly bool   `json:"create_only"` // Refuse existing accounts before membership/token mutations.
+	Email      string `json:"email"`
+	Role       string `json:"role"`
+	FullName   string `json:"full_name"`
 }
 
 type provisionResponse struct {
@@ -151,6 +152,11 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		createdUser = true
 	case err != nil:
 		replyInternalError(w, h.logger, "provision: lookup user", err)
+		return
+	}
+
+	if req.CreateOnly && !createdUser {
+		replyError(w, http.StatusConflict, "cannot provision a new account for this address")
 		return
 	}
 

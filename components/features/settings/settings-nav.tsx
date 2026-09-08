@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import {
-  User, Building, Users,
+  User, Building, Users, Volume2,
   Link2, Activity, Shield, KeyRound, Webhook,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -53,6 +53,7 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
+      { key: "sounds", label: "Notification sounds", icon: Volume2 },
       // Hidden until peer-card extraction actually exists. The routine runs
       // daily and the endpoints are real, but the extractor wired in
       // production is consolidate.NoopExtractor (cmd/crewship/cmd_start.go)

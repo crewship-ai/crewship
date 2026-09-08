@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { FolderOpen, Menu, MessageSquare, SlidersHorizontal } from "lucide-react"
+import { FolderOpen, Menu, MessageSquare, Users } from "lucide-react"
 
+import { UnifiedConversationPanel, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import {
   useChatCompactLayout,
@@ -95,7 +96,7 @@ type MobilePanel = "chat" | "files" | "more"
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "files", label: "Files", icon: FolderOpen },
-  { id: "more", label: "More", icon: SlidersHorizontal },
+  { id: "more", label: "Team", icon: Users },
 ]
 
 /**
@@ -124,6 +125,16 @@ const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquar
  */
 export function ChatClient() {
   const searchParams = useSearchParams()
+  const unified = useUnifiedConversations()
+  const humanConversationId = unified ? unified.selectedId : searchParams.get("conversation")
+  const hasUnifiedChat = !!unified
+  const clearRoom = unified?.clearRoom
+  const [urlRevision, setUrlRevision] = useState(0)
+  useEffect(() => {
+    const read = () => setUrlRevision((value) => value + 1)
+    window.addEventListener("popstate", read)
+    return () => window.removeEventListener("popstate", read)
+  }, [])
   const pathAgentSlug = useAgentSlugFromUrl()
   // `ensureSlug` is the slug from the PATH, not the selection. It is the agent
   // a deep link named, and it must survive `AGENT_FANOUT_CAP`: without it the
@@ -183,9 +194,12 @@ export function ChatClient() {
   const { workspaceId } = useWorkspace()
   const isMobile = useChatCompactLayout()
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>("chat")
+  useEffect(() => { setMobilePanel("chat") }, [humanConversationId])
   const [drawerOpen, setDrawerOpen] = useState(false)
+  useEffect(() => { setDrawerOpen(false) }, [unified?.selectionVersion])
   const [agentSlug, setAgentSlug] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [draftConversation, setDraftConversation] = useState<{ agent: ChatTreeAgent; id: string } | null>(null)
 
   /**
    * When this page last marked each thread read — epoch ms, not a boolean.
@@ -247,8 +261,11 @@ export function ChatClient() {
     // The path segment is authoritative when there is one: `/chat/riley` is a
     // stronger statement about which agent you want than a leftover `?agent=`
     // in the same URL could be.
-    const a = pathAgentSlug ?? searchParams.get("agent")
-    const s = searchParams.get("session")
+    if (humanConversationId) return
+    const currentParams = hasUnifiedChat ? new URLSearchParams(window.location.search) : searchParams
+    const actualSlug = hasUnifiedChat ? window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)?.[1] : null
+    const a = actualSlug ? decodeURIComponent(actualSlug) : pathAgentSlug ?? currentParams.get("agent")
+    const s = currentParams.get("session")
     // A URL that names a DIFFERENT agent and no session drops the old
     // selection. Without this the auto-open effect below sees a `sessionId`
     // that is still set, returns early, and the page renders the previous
@@ -263,7 +280,7 @@ export function ChatClient() {
     }
     if (s) setSessionId(s)
     else if (namedAnotherAgent) setSessionId(null)
-  }, [searchParams, pathAgentSlug])
+  }, [searchParams, pathAgentSlug, humanConversationId, urlRevision, hasUnifiedChat])
 
   /**
    * The one-shot `?prompt=` handoff.
@@ -315,9 +332,9 @@ export function ChatClient() {
   // only has the URL, and the URL carries the slug; this page has the roster.
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   useEffect(() => {
-    setBreadcrumbs(chatBreadcrumbs(agent ? { name: agent.name, slug: agent.slug, crew: agent.crew ?? null } : null))
+    setBreadcrumbs(chatBreadcrumbs(!humanConversationId && agent ? { name: agent.name, slug: agent.slug, crew: agent.crew ?? null } : null))
     return () => setBreadcrumbs([])
-  }, [agent, setBreadcrumbs])
+  }, [agent, setBreadcrumbs, humanConversationId])
 
   /**
    * The fetched lists with this page's read overrides applied.
@@ -354,13 +371,18 @@ export function ChatClient() {
    *
    * Writes the `/chat/<slug>?session=` shape — the one every deep link in the
    * product already uses — so a URL copied out of the bar is a URL that can be
-   * pasted back in. `replaceState`, not push: a conversation switch is not a
-   * page the reader should have to press Back through.
+   * pasted back in. Explicit choices in unified Chat add browser history;
+   * automatic arrival replaces it so loading a page adds no extra Back step.
    */
-  const writeUrl = useCallback((slug: string, session: string) => {
-    const url = `/chat/${encodeURIComponent(slug)}?session=${encodeURIComponent(session)}`
-    window.history.replaceState(null, "", url)
-  }, [])
+  const writeUrl = useCallback((slug: string, session: string, push = true) => {
+    clearRoom?.()
+    const query = new URLSearchParams({ session })
+    const workspaceParam = new URLSearchParams(window.location.search).get("workspace_id")
+    if (workspaceParam) query.set("workspace_id", workspaceParam)
+    const url = `/chat/${encodeURIComponent(slug)}?${query}`
+    if (clearRoom && push && `${window.location.pathname}${window.location.search}` !== url) window.history.pushState(null, "", url)
+    else window.history.replaceState(null, "", url)
+  }, [clearRoom])
 
   /**
    * Advance the server-side read cursor (migration v130 — the unread badge's
@@ -385,10 +407,11 @@ export function ChatClient() {
   )
 
   const selectThread = useCallback(
-    (a: ChatTreeAgent, t: ChatTreeThread) => {
+    (a: ChatTreeAgent, t: ChatTreeThread, push = true) => {
+      setMobilePanel("chat")
       setAgentSlug(a.slug)
       setSessionId(t.id)
-      writeUrl(a.slug, t.id)
+      writeUrl(a.slug, t.id, push)
       markThreadRead(a.id, t.id)
     },
     [writeUrl, markThreadRead],
@@ -480,15 +503,19 @@ export function ChatClient() {
   )
 
   const startConversation = useCallback(
-    (a: ChatTreeAgent) => {
+    (a: ChatTreeAgent, push = true) => {
       // A locally minted id, not a POST. The server accepts a client-supplied
       // session_id and inserts OR IGNOREs on it, so the row appears when the
       // first message is sent — opening a conversation you never write in
       // must not leave one behind. Same contract chat-page-client relies on.
       const draft = randomUUIDv4()
+      scopeChosenRef.current = true
+      setScope("direct")
+      setMobilePanel("chat")
+      setDraftConversation({ agent: a, id: draft })
       setAgentSlug(a.slug)
       setSessionId(draft)
-      writeUrl(a.slug, draft)
+      writeUrl(a.slug, draft, push)
     },
     [writeUrl],
   )
@@ -511,7 +538,7 @@ export function ChatClient() {
    * first message is sent.
    */
   useEffect(() => {
-    if (sessionId || !tree.threadsLoaded || !agents) return
+    if (humanConversationId || sessionId || !tree.threadsLoaded || !agents) return
 
     const freshestOf = (list: ChatTreeThread[]) =>
       list.reduce<ChatTreeThread | null>((best, t) => {
@@ -532,14 +559,14 @@ export function ChatClient() {
       // fan-out cap. The sidebar names the failure and offers the retry.
       if (tree.threadErrors[named.id]) return
       const thread = freshestOf(threadsByAgent[named.id] ?? [])
-      if (thread) selectThread(named, thread)
+      if (thread) selectThread(named, thread, false)
       // The same wrong write once more, reached through the SCOPE this time.
       // Under Routines the fan-out asked for routine chats, so an agent with
       // a dozen conversations and no routine runs comes back with an empty
       // list — and "empty" here would mint a draft on top of every one of
       // them. An empty list only means "this agent has never been talked to"
       // while the question being asked is about talking.
-      else if (scope === "direct") startConversation(named)
+      else if (scope === "direct") startConversation(named, false)
       return
     }
 
@@ -550,8 +577,9 @@ export function ChatClient() {
         if (!best || at > best.at) best = { agent: a, thread: t, at }
       }
     }
-    if (best) selectThread(best.agent, best.thread)
+    if (best) selectThread(best.agent, best.thread, false)
   }, [
+    humanConversationId,
     sessionId,
     agentSlug,
     tree.threadsLoaded,
@@ -670,6 +698,13 @@ export function ChatClient() {
     [agent],
   )
 
+  // Local drafts are not server history. Show the selected draft only in
+  // Direct, and retire its placeholder as soon as the persisted row arrives.
+  const activeDraft = scope === "direct" && draftConversation?.id === sessionId &&
+    !threadsByAgent[draftConversation.agent.id]?.some((t) => t.id === sessionId)
+    ? draftConversation
+    : null
+
   const sidebar = (
     <ConversationsSidebar
       agents={agents}
@@ -691,7 +726,9 @@ export function ChatClient() {
       // Totals for the scopes this fetch is deliberately NOT returning, so
       // every bucket carries a count the way /routines' status buckets do.
       kindCounts={tree.kindCounts}
-      activeThreadId={sessionId}
+      activeThreadId={humanConversationId ? null : sessionId}
+      onUnifiedSelect={() => setDrawerOpen(false)}
+      draftConversation={humanConversationId ? null : activeDraft}
       onSelectThread={(a, t) => {
         selectThread(a, t)
         setDrawerOpen(false)
@@ -709,7 +746,7 @@ export function ChatClient() {
   )
 
   const conversation =
-    agent && sessionId ? (
+    unified?.selectedId ? <UnifiedConversationPanel onBack={() => setDrawerOpen(true)} /> : agent && sessionId ? (
       <ChatAgentProvider agent={chatAgent}>
         <ChatPanel
           key={`${agent.id}:${sessionId}`}
@@ -738,6 +775,8 @@ export function ChatClient() {
           initialInput={handoffForThisSession ? handoffPrompt ?? undefined : undefined}
           autoSendInitial={handoffForThisSession}
           mobilePanel={isMobile ? mobilePanel : undefined}
+          onMobilePanelChange={setMobilePanel}
+          onNewConversation={() => startConversation(agent)}
           onSend={handleSend}
           onReplySettled={handleReplySettled}
         />
@@ -753,6 +792,7 @@ export function ChatClient() {
           <p className="mt-1 text-label text-muted-foreground">
             Or start one with an agent from the list on the left.
           </p>
+
         </div>
       </div>
     )
@@ -780,10 +820,11 @@ export function ChatClient() {
           >
             <Menu className="h-4 w-4" />
           </button>
-          <span className="truncate type-nav font-medium">{agent?.name ?? "Chat"}</span>
+          <span className="truncate type-nav font-medium">{humanConversationId ? "Chat" : agent?.name ?? "Chat"}</span>
+
         </header>
 
-        <div
+        {!humanConversationId && <div
           role="tablist"
           aria-label="Chat panel"
           className="flex h-9 shrink-0 items-stretch border-b border-white/[0.08]"
@@ -806,7 +847,7 @@ export function ChatClient() {
               {label}
             </button>
           ))}
-        </div>
+        </div>}
 
         <div className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
 

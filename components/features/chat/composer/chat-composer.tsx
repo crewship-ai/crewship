@@ -9,6 +9,7 @@ import {
   PromptInputSubmit,
 } from "@/components/ai-elements/prompt-input"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   composeMessageWithAttachments,
@@ -65,7 +66,7 @@ interface ChatComposerProps {
   onSent?: () => void
   /** Pre-populate the input on mount / when it changes. */
   initialInput?: string
-  /** Group-chat members for @mention autocomplete (desktop only). */
+  /** Known participants for @mention autocomplete on desktop and mobile. */
   mentionMembers?: CrewMember[]
   /** The ask form the user opened from the chip rail, or null. The sheet is
    *  mounted HERE rather than in ChatPanel for two reasons that pull the same
@@ -113,12 +114,28 @@ export function ChatComposer({
   onCloseAskForm,
   renderAskTemplate,
 }: ChatComposerProps) {
-  const [input, setInput] = useState(initialInput ?? "")
+  const session = useSessionSafe()
+  const userId = session.data?.user?.id
+  // Never adopt legacy session-only drafts: another person may have written
+  // them in this browser. Anonymous/embedded composers keep text in memory.
+  const draftKey = userId ? JSON.stringify(["user", userId, sessionId]) : null
+  const inputScope = draftKey ?? JSON.stringify(["anonymous", sessionId])
+  const restoreInput = () => initialInput ?? (draftKey ? useComposerStore.getState().drafts[draftKey] : undefined) ?? ""
+  const [inputState, setInputState] = useState(() => ({ scope: inputScope, text: restoreInput() }))
+  // Resolve the new identity immediately rather than showing the previous
+  // person's text for a render while an effect catches up.
+  const input = inputState.scope === inputScope ? inputState.text : restoreInput()
+  const setInput = useCallback((text: string) => setInputState({ scope: inputScope, text }), [inputScope])
+  const setDraft = useComposerStore((s) => s.setDraft)
+  const updateInput = useCallback((text: string) => {
+    setInput(text)
+    if (draftKey) setDraft(draftKey, text)
+  }, [draftKey, setDraft, setInput])
 
   // Pre-populate input when a new session is started with a prefill value.
   useEffect(() => {
     if (initialInput) setInput(initialInput)
-  }, [initialInput])
+  }, [initialInput, setInput])
 
   // Narrow selectors: this component only ever calls the two clear actions;
   // subscribing to the whole store would re-render the composer on every
@@ -134,13 +151,16 @@ export function ChatComposer({
 
   const mentionTextareaRef = useRef<HTMLTextAreaElement>(null)
   const handleMentionPick = useCallback((member: CrewMember, atIndex: number) => {
-    setInput((prev) => {
-      const after = prev.slice(atIndex)
-      const ws = after.search(/\s/)
-      const end = ws === -1 ? prev.length : atIndex + ws
-      return prev.slice(0, atIndex) + "@" + member.slug + " " + prev.slice(end)
+    const after = input.slice(atIndex)
+    const ws = after.search(/\s/)
+    const end = ws === -1 ? input.length : atIndex + ws
+    updateInput(input.slice(0, atIndex) + "@" + member.slug + " " + input.slice(end))
+    requestAnimationFrame(() => {
+      const caret = atIndex + member.slug.length + 2
+      mentionTextareaRef.current?.focus()
+      mentionTextareaRef.current?.setSelectionRange(caret, caret)
     })
-  }, [])
+  }, [input, updateInput])
 
   // Set by handleSent, read by both submits. `useMessageSubmit` returns nothing
   // either way, and neither caller may act as though a message went out when it
@@ -191,9 +211,9 @@ export function ChatComposer({
       await handleSubmit(message)
       if (!sentRef.current) return
       setInput("")
-      clearDraft(sessionId)
+      if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, sessionId],
+    [handleSubmit, clearDraft, draftKey, setInput],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -294,17 +314,23 @@ export function ChatComposer({
     // could not send a picture. It now wraps the same AttachmentZone the
     // desktop branch uses (which is also what renders the resulting chips, so
     // an upload is visible rather than a black hole) and puts a camera next to
-    // the paperclip. Mention autocomplete stays desktop-only: it needs a
-    // keyboard-driven caret, and group chat is not a phone surface yet.
+    // the paperclip. The same mention picker also supports touch selection.
     return (
       <EnsureChatSessionProvider ensureSession={ensureSession}>
       {askSheet}
       <div className="p-3 shrink-0">
         <AttachmentZone agentId={agentId} sessionId={sessionId} showChips={!sheetOwnsChips}>
+          <MentionAutocomplete
+            text={input}
+            textareaRef={mentionTextareaRef}
+            members={mentionMembers ?? []}
+            onPick={handleMentionPick}
+          />
           <PromptInput className="rounded-xl border" onSubmit={handleTypedSubmit}>
             <PromptInputTextarea
+              ref={mentionTextareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => updateInput(e.target.value)}
               placeholder={placeholder}
               className="min-h-[44px]"
             />
@@ -337,7 +363,7 @@ export function ChatComposer({
           <PromptInputTextarea
             ref={mentionTextareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => updateInput(e.target.value)}
             placeholder={placeholder}
             className="min-h-[44px]"
           />

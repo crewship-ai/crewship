@@ -253,6 +253,15 @@ var BackupTables = []string{
 	// Previously IntentInclude but never wired into the dump (the tail of
 	// the "#4 intent→dump wiring" gap). All FK parents appear earlier, so
 	// restore order is safe.
+	"workspace_conversations",
+	"workspace_conversation_direct_pairs",
+	"workspace_conversation_members",
+	"workspace_conversation_messages",
+	"workspace_conversation_agents",
+	"workspace_conversation_agent_jobs",
+	"workspace_conversation_outbox",
+	"workspace_conversation_activity",
+	"workspace_conversation_continuations",
 	"chat_participants",          // FK chat_id → chats (scoped below)
 	"chat_read_cursors",          // FK chat_id → chats (scoped below)
 	"run_tags",                   // FK run_id → pipeline_runs; has workspace_id
@@ -433,6 +442,10 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		// keeps the next such table from repeating it.
 		return `panel_id IN (SELECT id FROM page_panels WHERE page_id IN ` +
 			`(SELECT id FROM pages WHERE workspace_id = ?))`, []any{workspaceID}, true
+	case "workspace_conversation_continuations":
+		return "source_conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "workspace_conversation_activity", "workspace_conversation_members", "workspace_conversation_messages", "workspace_conversation_agents", "workspace_conversation_agent_jobs", "workspace_conversation_outbox":
+		return "conversation_id IN (SELECT id FROM workspace_conversations WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "chat_participants", "chat_read_cursors":
 		// No workspace_id column — scoped via the chat.
 		return "chat_id IN (SELECT id FROM chats WHERE workspace_id = ?)", []any{workspaceID}, true
@@ -542,7 +555,21 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 			}
 		}
 		where, args, _ := workspaceFilterSQL(table, workspaceID)
+		if table == "agents" {
+			hasWorkspace, err := tableHasColumn(ctx, tx, "agents", "workspace_id")
+			if err != nil {
+				return nil, err
+			}
+			if hasWorkspace {
+				where = "workspace_id = ?"
+				args = []any{workspaceID}
+			}
+		}
 		if table == "users" {
+			where, args, err = includeConversationUsers(ctx, tx, workspaceID, where, args)
+			if err != nil {
+				return nil, err
+			}
 			hasPoolCreator, err := tableHasColumn(ctx, tx, "provider_login_pools", "created_by")
 			if err != nil {
 				return nil, fmt.Errorf("backup: probe provider pool creator scope: %w", err)
@@ -989,6 +1016,12 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// that OR IGNORE then swallows. Counted here, reported to the operator
 	// by the caller. See dropped_columns.go.
 	var dropped droppedColumnTally
+	conversationAssignments := map[string]bool{}
+	for _, job := range dump.Tables["workspace_conversation_agent_jobs"] {
+		if id, _ := job["assignment_id"].(string); id != "" {
+			conversationAssignments[id] = true
+		}
+	}
 	for _, table := range BackupTables {
 		rows, ok := dump.Tables[table]
 		if !ok || len(rows) == 0 {
@@ -1038,7 +1071,8 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			}
 		}
 		tableInserted := 0
-		for _, row := range rows {
+		for _, originalRow := range rows {
+			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an
 			// admin to go re-tier a credential this restore never touched

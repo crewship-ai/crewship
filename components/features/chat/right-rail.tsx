@@ -106,7 +106,7 @@ export function RightRail({ className }: { className?: string }) {
     <TooltipProvider delayDuration={400}>
       <div
         className={cn(
-          "flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-background py-2",
+          "relative z-30 flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-background py-2",
           className,
         )}
         role="tablist"
@@ -155,7 +155,7 @@ export function RightRail({ className }: { className?: string }) {
                   {/* The button's accessible name, not a decoration beside
                       one — there is no sr-only twin, so the two can never
                       say different things. */}
-                  <span className="text-[9px] font-medium leading-none tracking-tight">
+                  <span className="text-[11px] font-medium leading-none tracking-tight">
                     {label}
                   </span>
                 </Button>

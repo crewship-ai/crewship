@@ -36,6 +36,7 @@ import { useAppStore } from "@/lib/store"
 
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
+import { Volume2 } from "lucide-react"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -126,7 +127,7 @@ export const mobileNavSections = [
 // back — chat — has the breadcrumb below pointing exactly there.
 export function AppToolbar() {
   const pathname = usePathname()
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, workspace, role: workspaceRole } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const crewsStatus = useCrewsStatus(workspaceId)
   const provisioning = useProvisioningStatus(workspaceId)
@@ -309,10 +310,11 @@ export function AppToolbar() {
           <InboxBell />
         </div>
 
-        {/* Desktop: user menu */}
+
+        {/* Personal settings live in the profile menu on every screen size. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="hidden md:flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
+            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
               <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
               <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
@@ -322,14 +324,14 @@ export function AppToolbar() {
             <div className="px-2 py-3">
               <div className="flex items-center gap-3">
                 <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-10 w-10" textClassName="text-sm" />
-                <div>
-                  <div className="text-sm font-medium">{userName}</div>
-                  <div className="text-xs text-muted-foreground">{userEmail}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium" title={userName}>{userName}</div>
+                  <div className="truncate text-xs text-muted-foreground" title={userEmail}>{userEmail}</div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 mt-2">
-                <Badge variant="outline" className="text-micro px-1.5 py-0.5">Owner</Badge>
-                <span className="text-micro text-muted-foreground">Unify Technology</span>
+                <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">{workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}</Badge>
+                <span className="truncate text-micro text-muted-foreground" title={workspace?.name}>{workspace?.name}</span>
               </div>
             </div>
             <DropdownMenuSeparator />
@@ -337,6 +339,12 @@ export function AppToolbar() {
               <Link href="/settings">
                 <User className="h-4 w-4 text-muted-foreground" />
                 Profile & Settings
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="gap-3 text-xs">
+              <Link href="/settings?tab=sounds">
+                <Volume2 className="h-4 w-4 text-muted-foreground" />
+                Notification sounds
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild className="gap-3 text-xs">

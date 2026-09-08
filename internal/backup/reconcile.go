@@ -127,5 +127,12 @@ func ReconcileUsersByEmail(ctx context.Context, tx *sql.Tx, dump *DBDump) (map[s
 			}
 		}
 	}
+	if err := canonicalizeDirectPairs(dump); err != nil {
+		return nil, err
+	}
+	if err := remapContinuationRequests(dump, map[string]map[string]string{"users": remap}); err != nil {
+		return nil, err
+	}
+	reconcileConversationInboxSources(dump)
 	return remap, nil
 }
