@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api-fetch"
 // usePipelineRuns when you need per-step events for the waterfall.
 export interface PipelineRunRecord {
   id: string
+  outcome?: string
   pipeline_id: string
   pipeline_slug: string
   // Mirrors internal/pipeline/runs.go RunStatus. "waiting" is
@@ -69,6 +70,7 @@ export function usePipelineRunRecords(
   workspaceId: string | null | undefined,
   slug: string | null,
   status?: PipelineRunRecord["status"],
+  before?: string,
 ) {
   const [records, setRecords] = useState<PipelineRunRecord[]>([])
   const [loading, setLoading] = useState(false)
@@ -91,6 +93,7 @@ export function usePipelineRunRecords(
     setError(null)
     try {
       let url = `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/run-records?limit=50`
+      if (before) url += `&before=${encodeURIComponent(before)}`
       if (status) url += `&status=${encodeURIComponent(status)}`
       const res = await apiFetch(url, { signal: ctrl.signal })
       if (ctrl.signal.aborted) return
@@ -120,7 +123,7 @@ export function usePipelineRunRecords(
     } finally {
       if (!ctrl.signal.aborted) setLoading(false)
     }
-  }, [workspaceId, slug, status])
+  }, [workspaceId, slug, status, before])
 
   useEffect(() => {
     refresh()

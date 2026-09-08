@@ -367,6 +367,7 @@
       "additionalProperties": false,
       "description": "Rubric-based output evaluation by a separate grader agent. Runs after structural Validation passes. Iterates the worker if rubric fails (up to max_iterations). agent_run-only.",
       "properties": {
+        "required": {"type": "boolean", "description": "Fail closed if the grader cannot establish a verdict. Omitted preserves legacy advisory behavior on grader errors."},
         "grader_agent_slug": {
           "type": "string",
           "description": "Slug of an agent in the routine's AUTHOR crew that grades worker output. Cross-family judging recommended (smart-tier judge for fast-tier worker)."

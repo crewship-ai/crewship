@@ -209,9 +209,11 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	// main SELECT above. Best-effort: a lookup failure shouldn't sink the
 	// rest of the run detail response.
 	stepOutputs := map[string]string{}
+	outputsAvailable := true
 	if so, soErr := pipeline.NewRunStore(h.db).GetStepOutputs(r.Context(), runID); soErr == nil {
 		stepOutputs = so
 	} else {
+		outputsAvailable = false
 		h.logger.Warn("get pipeline run: step outputs", "error", soErr, "run_id", runID)
 	}
 	var inputs map[string]interface{}
@@ -277,6 +279,8 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		// gets an empty object — same shape, no error.
 		"sub_spans": h.loadRunAgentSpans(r.Context(), workspaceID, runID, resolveIOStep(r)),
 	}
+	resp["step_outputs_available"] = outputsAvailable
+	h.enrichRunDefinition(r.Context(), workspaceID, runID, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 

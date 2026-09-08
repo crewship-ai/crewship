@@ -96,9 +96,10 @@ interface Props {
   slug: string
   onClose: () => void
   onChanged: () => void
+  onRunStarted?: (runId: string) => void
 }
 
-export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: Props) {
+export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onRunStarted }: Props) {
   const router = useRouter()
   const { role } = useAbilities()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
@@ -240,7 +241,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine, inputs)
       const res = await apiFetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Prefer": "respond-async" },
         body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -302,7 +303,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
       {
 
         // Surface the just-started run's live activity rail inline.
-        if (typeof data.run_id === "string" && data.run_id) setLastRunId(data.run_id)
+        if (typeof data.run_id === "string" && data.run_id) {
+          setLastRunId(data.run_id)
+          onRunStarted?.(data.run_id)
+        }
         toast.success(`${actionLabel(action)} started`, {
           description: data.run_id
             ? `Run ${String(data.run_id).slice(0, 12)}…`
@@ -401,7 +405,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)
   const showKillControl = canKillRoutine(role)
 
-  const status = routine?.last_invocation_status?.toLowerCase()
+  const latestOutcome = runRecords[0]?.outcome
+  const status = latestOutcome === "FAILED" ? "failed" : latestOutcome === "NEEDS_HUMAN" ? "waiting" : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
   // Run-status pill routes its colors through the shared palette
   // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
   // the status pills rendered in Inbox / Issues / Activity — failed reads
@@ -411,7 +416,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
   // A live approval gate wins over the persisted last_invocation_status: the
   // run reads as "running" in the DB while parked, but the human is the
   // bottleneck, so we show the awaiting-approval state instead.
-  const runStatus: { token: string; label: string } = pendingApproval
+  const runStatus: { token: string; label: string } = pendingApproval || status === "waiting"
     ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
     : status === "completed" || status === "succeeded" || status === "success"
       ? { token: "COMPLETED", label: "Last run · completed" }
@@ -419,7 +424,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged }: P
         ? { token: "FAILED", label: "Last run · failed" }
         : status === "running"
           ? { token: "IN_PROGRESS", label: "Running…" }
-          : { token: "PENDING", label: "Never invoked" }
+          : { token: "PENDING", label: status ? `Last run · ${status}` : "Never invoked" }
 
   // Top-level tabs are collapsed to the three the redesign elevates
   // (Overview / Runs / Schedules); the four power-user surfaces

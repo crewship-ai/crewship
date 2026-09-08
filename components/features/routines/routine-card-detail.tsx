@@ -1,5 +1,7 @@
 "use client"
 
+import { Button } from "@/components/ui/button"
+
 // The routine detail, as one scrolling surface of cards.
 //
 // Replaces the five-tab shell (Overview / Preview / Runs / Schedules /
@@ -48,9 +50,10 @@ import {
   Zap,
 } from "lucide-react"
 
+import { routineRunLabel } from "./routines-workspace"
 import { cn } from "@/lib/utils"
 import { relTime, formatDurationDecimal } from "@/lib/time"
-import { Appear, DetailCard, EntityChip, Pill, StatStrip } from "@/components/ui/detail"
+import { Appear, DetailCard, EntityChip, Pill } from "@/components/ui/detail"
 import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useAutomations } from "@/hooks/use-automations"
@@ -65,6 +68,7 @@ import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { apiFetch } from "@/lib/api-fetch"
 import { toast } from "sonner"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
+import { RoutineStepDefinition } from "./routine-step-definition"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineBudgetCard } from "./routine-budget-card"
 import { RoutineEditorTab } from "./routine-editor-tab"
@@ -143,6 +147,7 @@ export function RoutineCardDetail({
   statusPills,
   editRequest = 0,
 }: Props) {
+  const [view, setView] = React.useState("definition")
   const reduceMotion = useReducedMotion()
   const [editing, setEditing] = React.useState(false)
   React.useEffect(() => {
@@ -245,31 +250,11 @@ export function RoutineCardDetail({
   React.useEffect(() => {
     if (triggerKind === "automations" && myAutomations.length === 0) setTriggerKind("schedules")
   }, [triggerKind, myAutomations.length])
-  const nextRun = React.useMemo(() => {
-    const upcoming = mine
-      .filter((s) => s.enabled && s.next_run_at)
-      .map((s) => new Date(s.next_run_at!).getTime())
-      .filter((t) => Number.isFinite(t))
-      .sort((a, b) => a - b)
-    return upcoming[0] ?? null
-  }, [mine])
-
   const steps = React.useMemo(() => {
     const raw = (routine.definition as { steps?: unknown })?.steps
     return Array.isArray(raw) ? (raw as { type?: string }[]) : []
   }, [routine.definition])
 
-  const stats = React.useMemo(() => summarise(records), [records])
-  const estimatedCost = React.useMemo(() => {
-    const raw = (routine.definition as { estimated_cost_usd?: unknown })?.estimated_cost_usd
-    return typeof raw === "number" && raw > 0 ? raw : null
-  }, [routine.definition])
-
-  const agentPct = React.useMemo(() => {
-    if (steps.length === 0) return 0
-    const opaque = steps.filter((st) => st.type === "agent_run").length
-    return Math.round((opaque / steps.length) * 100)
-  }, [steps])
   // The agent the routine runs through, for the avatar. Manifest first —
   // it is derived from the step graph — falling back to nothing rather
   // than guessing from the author, who may not be an agent at all.
@@ -303,7 +288,7 @@ export function RoutineCardDetail({
                     {routine.name || routine.slug}
                   </h1>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                    <span className="font-mono">{routine.slug}</span>
+
                     {routine.head_version != null && (
                       <>
                         <span aria-hidden>·</span>
@@ -348,9 +333,6 @@ export function RoutineCardDetail({
                   </Pill>
                 </span>
               )}
-              {steps.length > 0 && (
-                <Pill tone={agentPct >= 60 ? "warn" : "default"}>{agentPct}% agent steps</Pill>
-              )}
               <Pill tone="default">
                 {steps.length} {steps.length === 1 ? "step" : "steps"}
               </Pill>
@@ -360,40 +342,9 @@ export function RoutineCardDetail({
         </DetailCard>
       </Appear>
 
-      <Appear order={1}>
-        <StatStrip
-          items={[
-            {
-              label: "Next run",
-              value: nextRun ? relTime(new Date(nextRun).toISOString()) : "—",
-            },
-            {
-              label: "Last run",
-              value: routine.last_invoked_at ? relTime(routine.last_invoked_at) : "never",
-              tone: toneOf(routine.last_invocation_status),
-            },
-            { label: "Runs", value: String(routine.invocation_count ?? 0) },
-            {
-              label: "Pass rate",
-              value: stats.passRate === null ? "—" : `${stats.passRate}%`,
-            },
-            {
-              label: "Avg duration",
-              value: stats.avgMs > 0 ? formatDurationDecimal(stats.avgMs) : "—",
-              mono: true,
-            },
-            // The author's own estimate, straight from the definition.
-            // The dry-run panel computed the same number and charged a
-            // round-trip and a full-width report for it.
-            {
-              label: "Est. cost",
-              value: estimatedCost !== null ? `$${estimatedCost.toFixed(4)}` : "—",
-              mono: true,
-            },
-          ]}
-        />
-      </Appear>
-
+      <nav aria-label="Routine detail" className="flex gap-2 border-b pb-2">{["definition", "history", "settings"].map(v => <button key={v} className={cn("rounded-md px-3 py-2 text-sm capitalize", view === v ? "bg-muted font-medium" : "text-muted-foreground")} onClick={() => setView(v)} aria-pressed={view === v}>{v}</button>)}</nav>
+      {view === "settings" && <div className="space-y-4"><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} concurrencyKey={concurrencyKey} maxConcurrent={maxConcurrent} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><RoutineVersionsTab workspaceId={workspaceId} slug={routine.slug} onRolledBack={onChanged} /><details className="rounded-xl border p-4"><summary>Technical metadata</summary><Metadata routine={routine} steps={steps.length} /></details></div>}
+      {view === "definition" &&
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
         <Appear order={2} className="xl:col-span-2 2xl:col-span-3">
           <DetailCard
@@ -449,6 +400,7 @@ export function RoutineCardDetail({
                   only: animating the width itself fights the responsive
                   floors above, which are the thing keeping the graph
                   readable. */}
+              {selected && !editing && <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0"><button onClick={() => setSelected(null)} className="mb-3 text-xs text-muted-foreground">Close step detail</button><RoutineStepDefinition step={(routine.definition.steps as Record<string, unknown>[] | undefined)?.find(s => s.id === selected)} /></aside>}
               <AnimatePresence initial={false}>
                 {editing && (
                   <motion.aside
@@ -475,7 +427,7 @@ export function RoutineCardDetail({
         <div className="flex flex-col gap-4">
           <Appear order={3}>
             <LastRunCard
-              status={routine.last_invocation_status}
+              status={lastRun?.outcome === "FAILED" ? "failed" : lastRun?.outcome === "NEEDS_HUMAN" ? "needs attention" : routine.last_invocation_status}
               at={routine.last_invoked_at}
               runId={lastRun?.id}
               durationMs={lastRun?.duration_ms}
@@ -648,19 +600,11 @@ export function RoutineCardDetail({
               overview, which put a third card about money on one row —
               and before that on a tab nobody opened. Here it sits next
               to what the routine costs. */}
-          <Appear order={7}>
-            <RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} />
-          </Appear>
-
-          <Appear order={8}>
-            <DetailCard title="Metadata">
-              <Metadata routine={routine} steps={steps.length} />
-            </DetailCard>
-          </Appear>
         </div>
       </div>
 
-      <Appear order={9}>
+      }
+      {view === "history" && <Appear order={9}>
         <RunsCard
           slug={routine.slug}
           workspaceId={workspaceId}
@@ -668,7 +612,7 @@ export function RoutineCardDetail({
           manage={manageRuns}
           onManageChange={setManageRuns}
         />
-      </Appear>
+      </Appear>}
     </div>
   )
 }
@@ -682,23 +626,6 @@ function toneOf(status?: string): "success" | "destructive" | "default" {
   if (s === "completed" || s === "succeeded" || s === "success") return "success"
   if (s === "failed" || s === "error") return "destructive"
   return "default"
-}
-
-function summarise(records: { status: string; duration_ms?: number }[]) {
-  if (records.length === 0) return { passRate: null as number | null, avgMs: 0 }
-  const terminal = records.filter((r) => {
-    const s = r.status?.toLowerCase()
-    return s === "completed" || s === "succeeded" || s === "failed" || s === "error"
-  })
-  const ok = terminal.filter((r) => {
-    const s = r.status?.toLowerCase()
-    return s === "completed" || s === "succeeded"
-  }).length
-  const durations = records.map((r) => r.duration_ms ?? 0).filter((d) => d > 0)
-  return {
-    passRate: terminal.length > 0 ? Math.round((ok / terminal.length) * 100) : null,
-    avgMs: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
-  }
 }
 
 /**
@@ -776,7 +703,7 @@ function LastRunCard({
           href={activityHref(slug, runId)}
           className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
         >
-          Open full trace
+          Open run
           <ArrowUpRight className="h-3 w-3" />
         </Link>
       </div>
@@ -801,9 +728,9 @@ function Fact({ label, value }: { label: string; value: string }) {
  * the context they came with.
  */
 function activityHref(slug: string, runId?: string): string {
-  const params = new URLSearchParams({ pipeline: slug })
+  const params = new URLSearchParams({ slug })
   if (runId) params.set("run", runId)
-  return `/activity?${params.toString()}`
+  return `/routines?${params.toString()}`
 }
 
 function ScheduleList({
@@ -814,7 +741,7 @@ function ScheduleList({
   if (schedules.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
-        No cron triggers. Press Manage to add one.
+        Run manually or choose a date and repetition under Manage.
       </p>
     )
   }
@@ -1010,7 +937,7 @@ function RunsCard({
           <RoutineRunsTab workspaceId={workspaceId} slug={slug} />
         </div>
       ) : (
-        <RunsList slug={slug} records={records} />
+        <RunsList key={slug} slug={slug} records={records} workspaceId={workspaceId} />
       )}
     </DetailCard>
   )
@@ -1018,19 +945,25 @@ function RunsCard({
 
 function RunsList({
   slug,
-  records,
+  workspaceId,
 }: {
   slug: string
   records: PipelineRunRecord[]
+  workspaceId: string
 }) {
+  const [pages, setPages] = React.useState<string[]>([])
+  const before = pages.at(-1)
+  const { records, error, loading, refresh } = usePipelineRunRecords(workspaceId, slug, undefined, before)
   return (
     <>
+      {error && <p role="alert" className="p-4 text-sm text-destructive">Run history could not be loaded. <button onClick={refresh}>Retry</button></p>}
+      {loading && <p className="p-4 text-sm text-muted-foreground">Loading history…</p>}
       {records.length === 0 ? (
         <p className="px-4 py-3 text-[12px] text-muted-foreground">No runs recorded yet.</p>
       ) : (
         <ul className="divide-y divide-border/40">
-          {records.slice(0, 8).map((r) => {
-            const tone = toneOf(r.status)
+          {records.map((r) => {
+            const tone = toneOf(r.outcome === "FAILED" ? "failed" : r.outcome === "NEEDS_HUMAN" ? "waiting" : r.status)
             const Icon = tone === "success" ? CheckCircle2 : tone === "destructive" ? XCircle : Clock
             // Not `r.triggered_via`. Every deferred run is stored as
             // "schedule", automations included, so the raw enum reports a cron
@@ -1053,7 +986,7 @@ function RunsList({
                     )}
                   />
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px] text-foreground/85">{r.id}</div>
+                    <div className="truncate font-mono text-[11px] text-foreground/85">{new Date(r.started_at).toLocaleString()} · {routineRunLabel(r)}</div>
                     <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                       <span>{prov.label}</span>
                       {prov.source && (
@@ -1084,14 +1017,9 @@ function RunsList({
           })}
         </ul>
       )}
-      <div className="border-t border-border/60 px-4 py-2">
-        <Link
-          href={activityHref(slug)}
-          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-        >
-          All runs in Activity
-          <ArrowUpRight className="h-3 w-3" />
-        </Link>
+      <div className="flex gap-2 border-t border-border/60 px-4 py-2">
+        {pages.length > 0 && <Button variant="outline" size="sm" disabled={loading} onClick={() => setPages(pages.slice(0,-1))}>Newer runs</Button>}
+        {records.length === 50 && <Button variant="outline" size="sm" disabled={loading} onClick={() => setPages([...pages, records[records.length-1].id])}>Older runs</Button>}
       </div>
     </>
   )

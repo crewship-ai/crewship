@@ -2,6 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -370,13 +373,16 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 
 	// argv = [interpreter tokens...] + script path + rendered args.
 	argv := append(strings.Fields(req.Interpreter), append([]string{req.Path}, req.Args...)...)
-	// stderr → a per-(run,step) file in the writable tmpfs; deterministic name
-	// so a re-run overwrites rather than accumulates. Sanitized so it can't
-	// break out of the redirect target in the shell string.
-	stderrFile := "/tmp/crewship-script-" + sanitizeForPath(req.PipelineRunID) + "-" + sanitizeForPath(req.StepID) + ".err"
-	// `sh -c '"$@" 2>FILE' crewship-script <argv...>` — $0 is the label,
-	// "$@" expands to argv; the shell's exit status is the script's.
-	cmd := append([]string{"sh", "-c", `"$@" 2>` + stderrFile, "crewship-script"}, argv...)
+
+	// Each invocation owns a process group and private control directory.
+	// Foreach items/retries cannot overwrite a sibling's PID or stderr.
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return ScriptRunResult{}, err
+	}
+	controlDir := "/tmp/crewship-script-" + hex.EncodeToString(nonce[:])
+	stderrFile := controlDir + "/stderr"
+	cmd := append([]string{"setsid", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir}, argv...)
 
 	// #1473: a script step runs inside the agent container but used to build
 	// its environment from the step's own inputs alone, so it carried no
@@ -427,24 +433,39 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	if err != nil {
 		return ScriptRunResult{}, fmt.Errorf("script runner: exec: %w", err)
 	}
+
 	readDone := make(chan struct{})
+	watcherDone := make(chan error, 1)
 	go func() {
 		select {
 		case <-execCtx.Done():
-			_ = execRes.Reader.Close() // unblock the pending read
+			_ = execRes.Reader.Close()
+			stopErr := r.stopScriptProcess(ctx, containerID, controlDir)
+			watcherDone <- stopErr
 		case <-readDone:
+			watcherDone <- nil
 		}
 	}()
-	stdout, _ := io.ReadAll(io.LimitReader(execRes.Reader, int64(maxBytes)))
+	stdout, readErr := io.ReadAll(io.LimitReader(execRes.Reader, int64(maxBytes)+1))
 	close(readDone)
 	_ = execRes.Reader.Close()
-
-	if execCtx.Err() != nil {
-		// Deadline fired (or the run was cancelled) mid-exec. The in-container
-		// process is NOT force-killed by closing the attach — it stays bounded
-		// by the container's pid/mem caps and TTL. Report honestly.
-		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
-			fmt.Errorf("script runner: script timed out after %ds (in-container process may still be running)", req.TimeoutSec)
+	stopErr := <-watcherDone
+	if execCtx.Err() != nil || readErr != nil || len(stdout) > maxBytes {
+		if stopErr == nil {
+			stopErr = r.stopScriptProcess(ctx, containerID, controlDir)
+		}
+		reason := "script output read failed"
+		if execCtx.Err() != nil {
+			reason = "script cancelled or timed out"
+		}
+		if len(stdout) > maxBytes {
+			stdout = stdout[:maxBytes]
+			reason = "script output exceeded limit"
+		}
+		if stopErr != nil {
+			return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process termination could not be confirmed: %w", reason, stopErr)
+		}
+		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1}, fmt.Errorf("%s; process group stopped", reason)
 	}
 
 	running, exitCode, inspErr := r.container.ExecInspect(execCtx, execRes.ExecID)
@@ -452,18 +473,18 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 		// Unknown outcome must NOT read as success — a failed inspect would
 		// otherwise default exitCode to 0 and falsely mark the step COMPLETED.
 		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
-			fmt.Errorf("script runner: exec inspect failed (outcome unknown, refusing to assume exit 0): %w", inspErr)
+			errors.Join(fmt.Errorf("script runner: exec inspect failed (outcome unknown, refusing to assume exit 0): %w", inspErr), r.stopScriptProcess(ctx, containerID, controlDir))
 	}
 	if running {
 		return ScriptRunResult{Stdout: string(stdout), ExitCode: -1},
-			fmt.Errorf("script runner: process still reported running after stream EOF — outcome unknown")
+			errors.Join(fmt.Errorf("script runner: process still reported running after stream EOF — outcome unknown"), r.stopScriptProcess(ctx, containerID, controlDir))
 	}
 
 	res := ScriptRunResult{Stdout: string(stdout), ExitCode: exitCode}
 
 	// On failure, surface stderr (and clean the temp file). Happy path leaves
-	// the tiny file in tmpfs; it's overwritten on the next same-step run and
-	// cleared when the container recycles.
+	// control directory in tmpfs until the container recycles. Every invocation
+	// owns a distinct directory, including concurrent items and retries.
 	if exitCode != 0 {
 		if errRes, e := r.container.Exec(ctx, provider.ExecConfig{
 			ContainerID: containerID,
@@ -495,4 +516,61 @@ func sanitizeForPath(s string) string {
 		return "none"
 	}
 	return b.String()
+}
+
+// Arguments stay positional: neither paths nor user arguments become shell code.
+const scriptProcessWrapper = `umask 077
+control=$1
+shift
+mkdir "$control" || exit 125
+printf '%s' "$$" > "$control/pid"
+"$@" 2>"$control/stderr"
+`
+
+const scriptStopWrapper = `control=$1
+n=0
+while [ ! -s "$control/pid" ] && [ "$n" -lt 20 ]; do sleep 0.05; n=$((n+1)); done
+[ -s "$control/pid" ] || exit 1
+read -r pid < "$control/pid" || :
+case "$pid" in ''|*[!0-9]*) exit 1;; esac
+/bin/kill -KILL -- "-$pid" 2>/dev/null || :
+n=0
+while [ "$n" -lt 20 ]; do
+  live=$(ps -eo pgid=,stat= | awk -v group="$pid" '$1 == group && $2 !~ /^Z/ { print $1 }')
+  [ -z "$live" ] && exit 0
+  sleep 0.05
+  n=$((n+1))
+done
+exit 1
+`
+
+func (r *OrchestratorRunner) stopScriptProcess(ctx context.Context, containerID, controlDir string) error {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	res, err := r.container.Exec(stopCtx, provider.ExecConfig{ContainerID: containerID, Cmd: []string{"sh", "-c", scriptStopWrapper, "crewship-script-stop", controlDir}, User: "1001:1001"})
+	if err != nil {
+		return err
+	}
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-stopCtx.Done():
+			_ = res.Reader.Close()
+		case <-done:
+		}
+	}()
+	_, readErr := io.Copy(io.Discard, io.LimitReader(res.Reader, 4096))
+	close(done)
+	_ = res.Reader.Close()
+	if readErr != nil {
+		return readErr
+	}
+	running, code, err := r.container.ExecInspect(stopCtx, res.ExecID)
+	if err != nil {
+		return err
+	}
+	if running || code != 0 {
+		return fmt.Errorf("stop process group: exit %d, running %t", code, running)
+	}
+	return nil
 }

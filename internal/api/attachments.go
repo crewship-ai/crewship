@@ -472,6 +472,20 @@ func attachmentBlobIsUnreferenced(ctx context.Context, db *sql.DB, workspaceID, 
 		workspaceID, sha).Scan(&refs); err != nil {
 		return false, err
 	}
+	if refs > 0 {
+		return false, nil
+	}
+	// Legacy isolated stores have no routine artifacts table. Production applies
+	// both migrations before serving, so every artifact owns its shared blob.
+	var present int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master WHERE name='pipeline_run_artifacts'`).Scan(&present); err != nil {
+		return false, err
+	}
+	if present > 0 {
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_run_artifacts a JOIN pipeline_runs r ON r.id=a.run_id WHERE r.workspace_id=? AND a.sha256=?`, workspaceID, sha).Scan(&refs); err != nil {
+			return false, err
+		}
+	}
 	return refs == 0, nil
 }
 

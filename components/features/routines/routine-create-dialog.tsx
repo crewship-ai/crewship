@@ -1,5 +1,6 @@
 "use client"
 
+import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
@@ -12,6 +13,8 @@ import {
   Wrench,
   Search,
 } from "lucide-react"
+import { FormField } from "@/components/features/chat/asks/form-field"
+import { slashFieldsFromRoutineInputs, routineInputsFromValues, isMissingRequired, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
@@ -252,6 +255,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const [editorKey, setEditorKey] = useState(0)
   const [parseError, setParseError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"none" | "testing" | "saving">("none")
+  const [trigger, setTrigger] = useState<RoutineTriggerDraft>({ kind: "manual", cron: "0 9 * * 1-5", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", at: "" })
+  const [sourcesAndOutput, setSourcesAndOutput] = useState("")
+  const [scheduledValues, setScheduledValues] = useState<Record<string,string>>({})
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
   const [skipTestGate, setSkipTestGate] = useState(false)
   // saveToken captured from the most recent successful /test_run.
@@ -359,6 +365,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
 
   if (!open) return null
 
+  const scheduledFields = slashFieldsFromRoutineInputs(Array.isArray(parsedDSL?.inputs) ? parsedDSL.inputs as RoutineInputSpec[] : [])
   const slug = (parsedDSL?.["name"] as string) || "my-routine"
 
   const applyTemplate = (templateId: string) => {
@@ -465,7 +472,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       if (!res.ok) {
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
-        toast.error("Test run failed", { description: msg })
+        toast.error("Definition validation failed", { description: msg })
         return { passed: false, token: null }
       }
       // DRY_RUN_OK is the dry-run validation's pass status; COMPLETED is
@@ -484,15 +491,15 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         setSaveToken(token)
       }
       if (passed) {
-        toast.success("Test run passed")
+        toast.success("Definition validated — no work was executed")
       } else {
-        toast.error("Test run failed", { description: data.error ?? "see details below" })
+        toast.error("Definition validation failed", { description: data.error ?? "see details below" })
       }
       return { passed, token }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setTestResult({ passed: false, details: msg })
-      toast.error("Test run errored", { description: msg })
+      toast.error("Definition validation unavailable", { description: msg })
       return { passed: false, token: null }
     } finally {
       setBusy("none")
@@ -518,6 +525,18 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         description: description || (parsed["description"] as string | undefined) || "",
         definition: parsed,
         skip_test_gate: skipTestGate,
+      }
+      const values = Object.fromEntries(scheduledFields.map(f => [f.name, scheduledValues[f.name] ?? f.default ?? ""]))
+      if (trigger.kind === "schedule" || trigger.kind === "once") {
+        const missing = scheduledFields.find(f => isMissingRequired(f, values[f.name]))
+        if (missing) throw new Error(`Fill in ${missing.name} before activating this start.`)
+      }
+      const scheduledInputs = routineInputsFromValues(scheduledFields, values)
+      if (trigger.kind === "schedule") body.trigger = { kind: "schedule", cron: trigger.cron, timezone: trigger.timezone, inputs: scheduledInputs }
+      if (trigger.kind === "manual") body.trigger = { kind: "manual" }
+      if (trigger.kind === "once") {
+        if (!trigger.at || !(Date.parse(trigger.at) > Date.now())) throw new Error("Choose a future date and time")
+        body.trigger = { kind: "once", fire_at: new Date(trigger.at).toISOString(), inputs: scheduledInputs }
       }
       // The server clears the save test-gate ONLY via the HMAC save_token
       // (minted by /test_run) or the OWNER/ADMIN skip — it no longer trusts a
@@ -565,7 +584,10 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const handleDescribe = () => {
     const text = goal.trim()
     if (!describeLead || !text) return
-    const prompt = `Author a routine for me: ${text}`
+    const prompt = `Author a routine for me: ${text}
+Sources and expected outputs: ${sourcesAndOutput || "Clarify these with me."}
+Requested start: ${JSON.stringify(trigger.kind === "once" && trigger.at ? { ...trigger, fire_at: new Date(trigger.at).toISOString() } : trigger)}
+Use scripts for deterministic work and agents where judgment is needed. Show a readable recipe and expected outputs before saving. Distinguish static validation from a real trial. Use outcomes.required for checks that must block unverified results.`
     router.push(
       `/chat/${encodeURIComponent(describeLead.slug)}?prompt=${encodeURIComponent(prompt)}`,
     )
@@ -648,6 +670,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   // and no prompt appears. `forkSearch` is deliberately absent — it filters a
   // list rather than composing anything.
   const dirty =
+    Object.keys(scheduledValues).length > 0 ||
+    sourcesAndOutput.trim() !== "" ||
+    trigger.kind !== "manual" ||
     goal.trim() !== "" ||
     name.trim() !== "" ||
     description.trim() !== "" ||
@@ -673,7 +698,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
       ? "Testing…"
       : busy === "saving"
         ? "Saving…"
-        : "Test & Save"
+        : "Validate & Save"
 
   return (
     <CreateSurface
@@ -824,6 +849,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               </CreateSurfaceField>
             </CreateSurfaceSection>
 
+            <CreateSurfaceField label="Sources and expected outputs (optional)" htmlFor="routine-sources-output"><textarea id="routine-sources-output" value={sourcesAndOutput} onChange={e => setSourcesAndOutput(e.target.value)} className="min-h-20 w-full rounded-md border bg-background p-2 text-sm" placeholder="What should it work with, and what should you receive?" /></CreateSurfaceField>
+            <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then show a
               readable preview — nothing is saved without you. It grounds the draft in your crew's connected
@@ -844,7 +871,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
             onCancel={onClose}
             primaryLabel={`Draft with ${describeLead?.name ?? "a Lead"}`}
             primaryIcon={Sparkles}
-            primaryDisabled={!describeLead || !goal.trim()}
+            primaryDisabled={!describeLead || !goal.trim() || (trigger.kind === "once" && !(Date.parse(trigger.at) > Date.now()))}
             onPrimary={handleDescribe}
           />
         </>
@@ -1001,6 +1028,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
                 </CreateSurfaceField>
               </CreateSurfaceSection>
 
+              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
+              {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
               <CreateSurfaceSection title="Starter templates" icon={Wrench} accent="slate">
                 {STARTER_TEMPLATES.map((t) => (
                   <CreateSurfaceTile
@@ -1125,7 +1154,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
               )}
             >
               <div className="flex items-center gap-1.5 font-medium">
-                {testResult.passed ? "Test passed" : "Test failed"}
+                {testResult.passed ? "Definition valid" : "Definition invalid"}
               </div>
               <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
             </div>

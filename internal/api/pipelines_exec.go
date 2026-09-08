@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -44,6 +46,7 @@ type runRequestBody struct {
 	// Any of DelaySeconds>0 or DebounceKey set parks the trigger in
 	// pending_runs; the dispatcher fires it priority-first, expiring it
 	// if TTLSeconds elapses first. Priority orders the dispatch queue.
+	FireAt               string `json:"fire_at,omitempty"`
 	DelaySeconds         int    `json:"delay_seconds,omitempty"`
 	TTLSeconds           int    `json:"ttl_seconds,omitempty"`
 	DebounceKey          string `json:"debounce_key,omitempty"`
@@ -202,7 +205,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// fires it priority-first once fire_at arrives (and expires it if
 	// ttl elapses first). Immediate runs (no delay/debounce) fall through
 	// to the synchronous path below unchanged.
-	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "") {
+	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "") {
 		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body)
 		return
 	}
@@ -267,7 +270,46 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": dispatch.RunID, "status": "IN_PROGRESS"})
 		return
 	}
-	res, err := exec.Run(r.Context(), input)
+	var res *pipeline.RunResult
+	if strings.Contains(r.Header.Get("Prefer"), "respond-async") {
+		type finishedRun struct {
+			result *pipeline.RunResult
+			err    error
+		}
+		started := make(chan string, 1)
+		finished := make(chan finishedRun, 1)
+		input.OnStarted = func(id string) {
+			select {
+			case started <- id:
+			default:
+			}
+		}
+		finish := beginBackgroundWork()
+		parent := h.lifecycleCtx
+		if parent == nil {
+			parent = context.Background()
+		}
+		go func() {
+			defer finish()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					finished <- finishedRun{err: fmt.Errorf("routine panicked: %v", recovered)}
+				}
+			}()
+			result, runErr := exec.Run(parent, input)
+			finished <- finishedRun{result, runErr}
+		}()
+		select {
+		case id := <-started:
+			w.Header().Set("Preference-Applied", "respond-async")
+			writeJSON(w, http.StatusAccepted, map[string]string{"run_id": id, "status": "IN_PROGRESS"})
+			return
+		case done := <-finished:
+			res, err = done.result, done.err
+		}
+	} else {
+		res, err = exec.Run(r.Context(), input)
+	}
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal
 		// error. Map before the catch-all.
@@ -738,7 +780,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	if tagFilter != "" {
 		records, err = h.runStore.ListByTag(r.Context(), p.ID, tagFilter, limit)
 	} else {
-		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit, r.URL.Query().Get("before"))
 	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)

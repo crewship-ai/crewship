@@ -728,7 +728,7 @@ func (s *RunStore) Get(ctx context.Context, runID string) (*RunRecord, error) {
 
 // ListByPipeline returns runs for a pipeline ordered newest-first.
 // Limit caps payload size; status filter optional.
-func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status RunStatus, limit int) ([]*RunRecord, error) {
+func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status RunStatus, limit int, before ...string) ([]*RunRecord, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -738,7 +738,11 @@ func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status
 		q += ` AND status = ?`
 		args = append(args, string(status))
 	}
-	q += ` ORDER BY started_at DESC LIMIT ?`
+	if len(before) > 0 && before[0] != "" {
+		q += ` AND (started_at,id) < (SELECT started_at,id FROM pipeline_runs WHERE id=? AND pipeline_id=?)`
+		args = append(args, before[0], pipelineID)
+	}
+	q += ` ORDER BY started_at DESC,id DESC LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)

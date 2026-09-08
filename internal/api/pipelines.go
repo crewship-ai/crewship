@@ -21,6 +21,7 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
+	storagePath  string
 	db           *sql.DB
 	logger       *slog.Logger
 	store        *pipeline.Store

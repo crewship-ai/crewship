@@ -87,7 +87,7 @@ describe("New routine on CreateSurface", () => {
   it("still test-runs inline and spends the minted save_token on save", async () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.click(screen.getByRole("button", { name: /test & save/i }))
+    fireEvent.click(screen.getByRole("button", { name: /validate & save/i }))
 
     await waitFor(() => {
       expect(h.calls.some((c) => c.url.endsWith("/pipelines/save"))).toBe(true)

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -30,6 +31,7 @@ import (
 // compatible with.
 type triggerRequestBody struct {
 	Kind                   string         `json:"kind"`
+	FireAt                 string         `json:"fire_at,omitempty"`
 	CronExpr               string         `json:"cron"`
 	Timezone               string         `json:"timezone"`
 	CatchupPolicy          string         `json:"catchup_policy,omitempty"`
@@ -52,7 +54,7 @@ func triggerInputFromBody(trigger *triggerRequestBody, activation string) (*pipe
 	}
 	kind := pipeline.TriggerKind(strings.TrimSpace(trigger.Kind))
 	switch kind {
-	case pipeline.TriggerKindSchedule, pipeline.TriggerKindManual:
+	case pipeline.TriggerKindSchedule, pipeline.TriggerKindManual, pipeline.TriggerKindOnce:
 	case "":
 		return nil, errors.New(`trigger.kind is required ("schedule" or "manual")`)
 	default:
@@ -67,8 +69,20 @@ func triggerInputFromBody(trigger *triggerRequestBody, activation string) (*pipe
 	if kind == pipeline.TriggerKindSchedule && strings.TrimSpace(trigger.CronExpr) == "" {
 		return nil, errors.New("trigger.cron is required for trigger.kind \"schedule\"")
 	}
+	var fireAt time.Time
+	if kind == pipeline.TriggerKindOnce {
+		var err error
+		fireAt, err = time.Parse(time.RFC3339, trigger.FireAt)
+		if err != nil {
+			return nil, errors.New("trigger.fire_at must include a date, time and timezone offset")
+		}
+		if activation != "" {
+			return nil, errors.New("one-time start requires an active routine")
+		}
+	}
 	return &pipeline.TriggerInput{
 		Kind:                   kind,
+		FireAt:                 fireAt,
 		CronExpr:               trigger.CronExpr,
 		Timezone:               trigger.Timezone,
 		CatchupPolicy:          trigger.CatchupPolicy,
@@ -103,6 +117,10 @@ type triggerResponse struct {
 func toTriggerResponse(trigger *pipeline.TriggerInput, sched *pipeline.Schedule) *triggerResponse {
 	if trigger == nil {
 		return nil
+	}
+	if trigger.Kind == pipeline.TriggerKindOnce {
+		at := trigger.FireAt.UTC().Format(time.RFC3339)
+		return &triggerResponse{Kind: "once", FirstFireAt: &at, Enabled: true}
 	}
 	if trigger.Kind == pipeline.TriggerKindManual || sched == nil {
 		return &triggerResponse{Kind: string(pipeline.TriggerKindManual)}

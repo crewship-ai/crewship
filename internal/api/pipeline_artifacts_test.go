@@ -1,0 +1,130 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRoutineArtifacts_SnapshotAndSharedBlobOwnership(t *testing.T) {
+	h, db, user, ws := runsHandlerRig(t)
+	crew := seedTestCrew(t, db, ws)
+	seedRunsPipeline(t, db, ws, "artifact_pipeline", "files")
+	seedRunRow(t, db, ws, "artifact_pipeline", "files", "artifact_run", "completed")
+	if _, err := db.Exec(`INSERT INTO pipeline_step_executions(id,run_id,step_id,execution_path,attempt,kind,status,started_at) VALUES ('artifact_execution','artifact_run','write','/write',1,'script','completed','2026-09-08T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	h.storagePath = root
+	shared := filepath.Join(root, "crews", crew, "shared")
+	if err := os.MkdirAll(shared, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(shared, "report.txt")
+	os.WriteFile(file, []byte("first immutable result"), 0600)
+	os.WriteFile(filepath.Join(root, "outside.txt"), []byte("private"), 0600)
+	os.Symlink(filepath.Join(root, "outside.txt"), filepath.Join(shared, "escape.txt"))
+	publisher := NewRoutineArtifactPublisher(db, root)
+	ctx := context.Background()
+	output := `{"artifacts":[{"kind":"file","path":"/crew/shared/report.txt"},{"kind":"file","path":"/crew/shared/escape.txt"},{"kind":"json","label":"Summary","content":{"count":4}}]}`
+	if err := publisher.PublishRunArtifacts(ctx, ws, crew, "artifact_run", "artifact_execution", output, "available"); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(file, []byte("replaced file"), 0600)
+	if err := publisher.PublishRunArtifacts(ctx, ws, crew, "artifact_run", "artifact_execution", output, "available"); err != nil {
+		t.Fatal(err)
+	}
+	var sha, id string
+	if err := db.QueryRow(`SELECT id,sha256 FROM pipeline_run_artifacts WHERE label='report.txt'`).Scan(&id, &sha); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readAttachmentBlob(root, ws, sha)
+	if err != nil || string(data) != "first immutable result" {
+		t.Fatalf("snapshot mutated: %q %v", data, err)
+	}
+	if unreferenced, err := attachmentBlobIsUnreferenced(ctx, db, ws, sha); err != nil || unreferenced {
+		t.Fatalf("GC would erase owned output: %v %v", unreferenced, err)
+	}
+	var state string
+	db.QueryRow(`SELECT state FROM pipeline_run_artifacts WHERE label='escape.txt'`).Scan(&state)
+	if state != "unavailable" {
+		t.Fatal("symlink escape was read")
+	}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/artifacts?download="+id, nil), user, ws, "OWNER")
+	req.SetPathValue("runId", "artifact_run")
+	rr := httptest.NewRecorder()
+	h.RunArtifacts(rr, req)
+	if rr.Code != 200 || rr.Body.String() != "first immutable result" {
+		t.Fatalf("download: %d %s", rr.Code, rr.Body.String())
+	}
+	req = withWorkspaceUser(httptest.NewRequest("GET", "/artifacts?download="+id, nil), user, "foreign", "OWNER")
+	req.SetPathValue("runId", "artifact_run")
+	rr = httptest.NewRecorder()
+	h.RunArtifacts(rr, req)
+	if rr.Code != 404 {
+		t.Fatal("foreign download not masked")
+	}
+	if err := publisher.PublishRunArtifacts(ctx, ws, crew, "artifact_run", "artifact_execution", "Read /crew/shared/unrelated.txt", "draft"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	db.QueryRow(`SELECT count(*) FROM pipeline_run_artifacts`).Scan(&count)
+	if count != 3 {
+		t.Fatalf("inferred a read as output: %d", count)
+	}
+}
+
+func TestRoutineArtifacts_PaginationAndLazyContent(t *testing.T) {
+	h, db, user, ws := runsHandlerRig(t)
+	seedRunsPipeline(t, db, ws, "artifact_pages", "pages")
+	seedRunRow(t, db, ws, "artifact_pages", "pages", "paged_run", "completed")
+	if _, err := db.Exec(`INSERT INTO pipeline_step_executions(id,run_id,step_id,execution_path,attempt,kind,status,started_at) VALUES ('paged_execution','paged_run','write','/write',1,'script','completed','2026-09-08T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 52; i++ {
+		if _, err := db.Exec(`INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,content,created_at) VALUES (?,'paged_run','paged_execution','text',?,'available','immutable text','2026-09-08T00:00:00Z')`, fmt.Sprint("artifact_", i), fmt.Sprint(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := func(scope, query string) *httptest.ResponseRecorder {
+		req := withWorkspaceUser(httptest.NewRequest("GET", "/artifacts"+query, nil), user, scope, "OWNER")
+		req.SetPathValue("runId", "paged_run")
+		rr := httptest.NewRecorder()
+		h.RunArtifacts(rr, req)
+		return rr
+	}
+	var page struct {
+		Artifacts []map[string]any `json:"artifacts"`
+		Cursor    string           `json:"next_cursor"`
+	}
+	rr := request(ws, "")
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Artifacts) != 50 || page.Cursor == "" {
+		t.Fatalf("page: %s", rr.Body.String())
+	}
+	if _, ok := page.Artifacts[0]["content"]; ok {
+		t.Fatal("list downloaded content")
+	}
+	rr = request(ws, "?after="+page.Cursor)
+	json.Unmarshal(rr.Body.Bytes(), &page)
+	if len(page.Artifacts) != 2 {
+		t.Fatalf("second page: %s", rr.Body.String())
+	}
+	rr = request(ws, "?artifact_id=artifact_0")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), "immutable text") {
+		t.Fatal(rr.Body.String())
+	}
+	if request("foreign", "?artifact_id=artifact_0").Code != 404 {
+		t.Fatal("foreign content exposed")
+	}
+	if request(ws, "?after=-1").Code != 400 {
+		t.Fatal("invalid cursor accepted")
+	}
+}

@@ -1,0 +1,238 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/pipeline"
+)
+
+type declaredRunArtifact struct {
+	Kind    string          `json:"kind"`
+	Label   string          `json:"label"`
+	Path    string          `json:"path"`
+	Content json.RawMessage `json:"content"`
+	URL     string          `json:"url"`
+}
+
+// NewRoutineArtifactPublisher shares immutable blobs, locks and file checks with
+// Issue attachments. Only explicit artifacts in JSON or the handoff are captured.
+func NewRoutineArtifactPublisher(db *sql.DB, storageRoot string) pipeline.ArtifactPublisher {
+	return pipeline.ArtifactPublishFunc(func(ctx context.Context, workspaceID, crewID, runID, executionID, output, state string) error {
+		var envelope struct {
+			Artifacts []declaredRunArtifact `json:"artifacts"`
+		}
+		_ = json.Unmarshal([]byte(output), &envelope)
+		if handoff := orchestrator.ParseHandoff(output); handoff.Parsed && handoff.Artifacts != "" {
+			for _, path := range strings.FieldsFunc(handoff.Artifacts, func(r rune) bool { return r == ',' || r == '\n' || r == ';' }) {
+				path = strings.Trim(strings.TrimSpace(path), "`\" ")
+				if strings.HasPrefix(path, "/crew/shared/") {
+					envelope.Artifacts = append(envelope.Artifacts, declaredRunArtifact{Kind: "file", Path: path})
+				}
+			}
+		}
+		if len(envelope.Artifacts) == 0 {
+			return nil
+		}
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		// Scope is derived again from the durable run; an adapter cannot choose
+		// another workspace's blob namespace by supplying a different argument.
+		var actualWorkspace string
+		if err := db.QueryRowContext(persistCtx, `SELECT workspace_id FROM pipeline_runs WHERE id=?`, runID).Scan(&actualWorkspace); err != nil {
+			return err
+		}
+		if actualWorkspace != workspaceID {
+			return errors.New("artifact workspace mismatch")
+		}
+		for i, artifact := range envelope.Artifacts {
+			if i >= 20 {
+				break
+			}
+			kind := artifact.Kind
+			if kind == "" && artifact.Path != "" {
+				kind = "file"
+			}
+			switch kind {
+			case "file", "text", "json", "external_record", "action_receipt":
+			default:
+				continue
+			}
+			label := artifact.Label
+			if label == "" {
+				label = filepath.Base(artifact.Path)
+			}
+			if label == "" || label == "." {
+				label = kind
+			}
+			artifactState, reason, sha, contentType := state, "", "", ""
+			source := artifact.URL
+			if kind == "file" {
+				source = artifact.Path
+			}
+			content := string(artifact.Content)
+			unlock := func() {}
+			if kind == "file" {
+				data, err := readRoutineArtifact(storageRoot, crewID, artifact.Path)
+				if err == nil {
+					contentType, err = resolveAttachmentType(artifact.Path)
+				}
+				if err != nil {
+					artifactState = "unavailable"
+					reason = "Declared file could not be snapshotted: missing, unsupported or outside shared storage."
+				} else {
+					sha = attachmentDigest(data)
+					unlock = lockAttachmentBlob(workspaceID, sha)
+					if _, _, err = storeAttachmentBlob(storageRoot, workspaceID, data); err != nil {
+						unlock()
+						return err
+					}
+				}
+			}
+			_, err := db.ExecContext(persistCtx, `INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,content_type,sha256,content,source,error,created_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(step_execution_id,kind,label,source) DO NOTHING`, "art_"+generateCUID(), runID, executionID, kind, label, artifactState, contentType, sha, content, source, reason, time.Now().UTC().Format(time.RFC3339Nano))
+			unlock()
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+func readRoutineArtifact(storageRoot, crewID, path string) ([]byte, error) {
+	if storageRoot == "" || !safeIDPattern.MatchString(crewID) || !strings.HasPrefix(path, "/crew/shared/") {
+		return nil, errors.New("invalid shared file")
+	}
+	relative := strings.TrimPrefix(path, "/crew/shared/")
+	if !filepath.IsLocal(relative) || strings.HasPrefix(relative, ".memory/") {
+		return nil, errors.New("invalid shared file")
+	}
+	root, err := os.OpenRoot(filepath.Join(storageRoot, "crews", crewID, "shared"))
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	file, err := root.Open(relative)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > agentAttachmentUploadBytes {
+		return nil, errors.New("unsupported file")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, agentAttachmentUploadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > agentAttachmentUploadBytes {
+		return nil, errors.New("file too large")
+	}
+	return data, nil
+}
+func (h *PipelineHandler) RunArtifacts(w http.ResponseWriter, r *http.Request) {
+	if !canRole(RoleFromContext(r.Context()), "read") {
+		replyError(w, 403, "Forbidden")
+		return
+	}
+	ws, runID := WorkspaceIDFromContext(r.Context()), r.PathValue("runId")
+	var exists int
+	err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM pipeline_runs WHERE id=? AND workspace_id=?`, runID, ws).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, 404, "run not found")
+		return
+	}
+	if err != nil {
+		replyError(w, 500, "load run")
+		return
+	}
+	if id := r.URL.Query().Get("download"); id != "" {
+		var sha, label, contentType string
+		err := h.db.QueryRowContext(r.Context(), `SELECT sha256,label,content_type FROM pipeline_run_artifacts WHERE id=? AND run_id=? AND kind='file'`, id, runID).Scan(&sha, &label, &contentType)
+		if err != nil || sha == "" {
+			replyError(w, 404, "artifact unavailable")
+			return
+		}
+		data, err := readAttachmentBlob(h.storagePath, ws, sha)
+		if err != nil {
+			replyError(w, 404, "artifact content unavailable")
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": label}))
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Write(data)
+		return
+	}
+	if id := r.URL.Query().Get("artifact_id"); id != "" {
+		var content string
+		err := h.db.QueryRowContext(r.Context(), `SELECT content FROM pipeline_run_artifacts WHERE id=? AND run_id=?`, id, runID).Scan(&content)
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, 404, "artifact not found")
+			return
+		}
+		if err != nil {
+			replyError(w, 500, "load artifact content")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"id": id, "content": content})
+		return
+	}
+	var after int64
+	if raw := r.URL.Query().Get("after"); raw != "" {
+		after, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil || after < 0 {
+			replyError(w, 400, "invalid cursor")
+			return
+		}
+	}
+	rows, err := h.db.QueryContext(r.Context(), `SELECT a.rowid,a.id,a.step_execution_id,a.kind,a.label,a.state,a.content_type,a.sha256,length(a.content),a.source,a.error,a.created_at,e.execution_path,e.attempt FROM pipeline_run_artifacts a JOIN pipeline_step_executions e ON e.id=a.step_execution_id WHERE a.run_id=? AND a.rowid>? ORDER BY a.rowid LIMIT 51`, runID, after)
+	if err != nil {
+		replyError(w, 500, "load artifacts")
+		return
+	}
+	defer rows.Close()
+	artifacts := make([]map[string]any, 0)
+	truncated := false
+	var next int64
+	for rows.Next() {
+		var id, execution, kind, label, state, media, sha, source, reason, at, path string
+		var attempt, contentSize int
+		var seq int64
+		if err := rows.Scan(&seq, &id, &execution, &kind, &label, &state, &media, &sha, &contentSize, &source, &reason, &at, &path, &attempt); err != nil {
+			replyError(w, 500, "read artifacts")
+			return
+		}
+		if len(artifacts) == 50 {
+			truncated = true
+			break
+		}
+		next = seq
+		artifacts = append(artifacts, map[string]any{"id": id, "step_execution_id": execution, "kind": kind, "label": label, "state": state, "media_type": media, "sha256": sha, "content_bytes": contentSize, "source": source, "error": reason, "created_at": at, "execution_path": path, "attempt": attempt})
+	}
+	if err := rows.Err(); err != nil {
+		replyError(w, 500, fmt.Sprint("read artifacts: ", err))
+		return
+	}
+	var cursor any
+	if truncated {
+		cursor = strconv.FormatInt(next, 10)
+	}
+	writeJSON(w, 200, map[string]any{"artifacts": artifacts, "truncated": truncated, "next_cursor": cursor})
+}

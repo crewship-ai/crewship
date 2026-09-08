@@ -12,6 +12,8 @@ import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { RoutineOnceSchedule } from "./routine-once-schedule"
+import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
@@ -337,27 +339,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                 className="mt-1.5 h-9 text-sm"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Cron expression</FieldLabel>
-                <Input
-                  aria-label="Cron expression"
-                  value={cronExpr}
-                  onChange={(e) => setCronExpr(e.target.value)}
-                  className="mt-1.5 h-9 font-mono text-sm"
-                />
-                <p className="mt-1.5 text-[11px] text-muted-foreground">{describeCron(cronExpr)}</p>
-              </div>
-              <div>
-                <FieldLabel>Timezone</FieldLabel>
-                <Input
-                  aria-label="Timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="mt-1.5 h-9 text-sm"
-                />
-              </div>
-            </div>
+            <RoutineRecurrenceFields cron={cronExpr} timezone={timezone} onCronChange={setCronExpr} onTimezoneChange={setTimezone} />
             <div>
               <FieldLabel>Inputs (JSON)</FieldLabel>
               <textarea
@@ -382,6 +364,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
         </Card>
       )}
 
+      <RoutineOnceSchedule key={slug} workspaceId={workspaceId} slug={slug} />
       <RoutineScheduleEditorDialog
         schedule={editing}
         submitting={editSaving}

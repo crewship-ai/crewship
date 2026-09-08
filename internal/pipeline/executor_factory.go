@@ -165,6 +165,12 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	}
 	if d.RunStore != nil {
 		exec = exec.WithRunStore(d.RunStore)
+		if d.DB != nil {
+			exec = exec.WithExecutionStore(NewExecutionStore(d.DB))
+			if publisher, ok := d.Runner.(ArtifactPublisher); ok {
+				exec.executionStore.publisher = publisher
+			}
+		}
 	}
 	if d.CodeRunner != nil {
 		exec = exec.WithCodeRunner(d.CodeRunner)

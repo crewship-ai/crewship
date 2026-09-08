@@ -208,6 +208,7 @@ describe("chain depth on composed runs", () => {
   it("marks a composed run with how deep in the chain it sits", () => {
     h.records = [{ ...baseRun, triggered_via: "call_pipeline", chain_depth: 2 }]
     renderCard()
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
     expect(screen.getByTestId("run-chain-depth-run-1")).toHaveTextContent("2")
   })
 
@@ -223,6 +224,7 @@ describe("chain depth on composed runs", () => {
       },
     ]
     renderCard()
+    fireEvent.click(screen.getByRole("button", { name: "history" }))
     const row = screen.getByTestId("run-row-run-1")
     expect(row).toHaveTextContent("automation")
     expect(row).toHaveTextContent("Triage new bugs")

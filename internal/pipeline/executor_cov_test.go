@@ -603,6 +603,33 @@ func TestExecutor_Outcomes_Paths(t *testing.T) {
 		}
 	})
 
+	t.Run("required grader infrastructure error blocks downstream", func(t *testing.T) {
+		exec, runner, cleanup := mkExec(t, "", errors.New("grader fatal: container gone"))
+		defer cleanup()
+		dsl := mkDSL("")
+		dsl.Steps[0].Outcomes.Required = true
+		dsl.Steps = append(dsl.Steps, Step{ID: "publish", Type: StepAgentRun, AgentSlug: "publisher", Prompt: "publish"})
+		res := runIt(t, exec, dsl)
+		if res.Status != "FAILED" || !strings.Contains(res.ErrorMessage, "required outcomes check unavailable") {
+			t.Fatalf("required check must fail closed: %+v", res)
+		}
+		if len(runner.calls) != 2 {
+			t.Fatalf("downstream must not execute: %d calls", len(runner.calls))
+		}
+	})
+
+	t.Run("required malformed verdict blocks downstream", func(t *testing.T) {
+		exec, runner, cleanup := mkExec(t, "This is not a grading verdict", nil)
+		defer cleanup()
+		dsl := mkDSL("")
+		dsl.Steps[0].Outcomes.Required = true
+		dsl.Steps = append(dsl.Steps, Step{ID: "publish", Type: StepAgentRun, AgentSlug: "publisher", Prompt: "publish"})
+		res := runIt(t, exec, dsl)
+		if res.Status != "FAILED" || len(runner.calls) != 2 {
+			t.Fatalf("invalid required review advanced: %+v, calls=%d", res, len(runner.calls))
+		}
+	})
+
 	t.Run("grader reject with abort", func(t *testing.T) {
 		exec, _, cleanup := mkExec(t, `{"passed":false,"per_criterion":{"tone":false},"feedback":"too rude"}`, nil)
 		defer cleanup()
