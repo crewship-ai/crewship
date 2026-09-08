@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useMemo, useState } from "react"
+import { useCallback, useId, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import { Clock, Cpu, HardDrive, MemoryStick, Network, Package, TriangleAlert } from "lucide-react"
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/layout/create-surface"
 import { useAbilities } from "@/hooks/use-abilities"
 import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "../registry-presets"
+import type { RuntimeConfigValue } from "../runtime-config"
 import { BaseImageRow } from "./base-image"
 import { Chip, ChipRow, CustomNumberChip, DomainChips, prettyMemory } from "./runtime-controls"
 import {
@@ -52,6 +53,13 @@ interface StepProps extends Props {
 export function StepContainer({ state, setState, onPickImage, activeSection }: StepProps) {
   const { role } = useAbilities()
   const canEditPrivileged = role === "OWNER" || role === "ADMIN"
+  // RuntimeConfig emits when its generated configuration changes. Keep this
+  // callback stable when a sibling field (network, size, navigation) changes.
+  const updateRuntime = useCallback((value: RuntimeConfigValue) => setState({
+    runtimeImage: value.runtimeImage,
+    devcontainerConfig: value.devcontainerConfig,
+    miseConfig: value.miseConfig,
+  }), [setState])
 
   return (
     <div className="flex flex-col gap-4">
@@ -79,11 +87,7 @@ export function StepContainer({ state, setState, onPickImage, activeSection }: S
           devcontainerConfig: state.devcontainerConfig,
           miseConfig: state.miseConfig,
         }}
-        onChange={(v) => setState({
-          runtimeImage: v.runtimeImage,
-          devcontainerConfig: v.devcontainerConfig,
-          miseConfig: v.miseConfig,
-        })}
+        onChange={updateRuntime}
         canEditPrivileged={canEditPrivileged}
         layout="sections"
         focusedSection={activeSection ? activeSection === "versions" ? "versions" : "tools" : undefined}
