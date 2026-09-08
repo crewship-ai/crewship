@@ -61,7 +61,7 @@ export function RoutineRunInputsDialog({
 }: RoutineRunInputsDialogProps) {
   if (inputs === null || (!inputs.length && !versionChoices?.length)) return null
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
       <DialogContent className="border-border bg-card sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Run {routineName}</DialogTitle>
