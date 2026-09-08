@@ -175,6 +175,7 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		return fmt.Errorf("pipeline: %d steps exceeds the %d step limit", len(dsl.Steps), MaxPipelineSteps)
 	}
 
+	errs.add("/inputs", validateInputForms(dsl))
 	errs.add("/agentless", validateAgentless(dsl))
 	errs.add("/slash", validateSlash(dsl))
 	errs.add("/integrations_required", validateIntegrationsRequired(dsl))

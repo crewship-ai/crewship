@@ -58,6 +58,8 @@ export type FormFieldOption = string | { value: string; label?: string }
  */
 
 export interface FormFieldSpec {
+  value_type?: string
+  allow_custom?: boolean
   name: string
   type: string
   required?: boolean
@@ -366,6 +368,7 @@ export function FormField({
       )
 
     case "select":
+      if (field.allow_custom) return <div className="space-y-1">{label}<Input id={id} list={`${id}-choices`} value={value} onChange={onChange} placeholder={field.placeholder ?? "Choose or type an answer"} /><datalist id={`${id}-choices`}>{options.map(o => <option key={optionValue(o)} value={optionValue(o)}>{optionLabel(o)}</option>)}</datalist>{help}</div>
       return (
         <div className="space-y-1">
           {label}
@@ -386,19 +389,19 @@ export function FormField({
       )
 
     case "multiselect": {
-      const selected = new Set(splitMulti(value))
+      let selectedValues = splitMulti(value)
+      if (field.value_type === "array") {
+        try { const parsed: unknown = JSON.parse(value || "[]"); selectedValues = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [] } catch { selectedValues = [] }
+      }
+      const selected = new Set(selectedValues)
       const toggle = (v: string, on: boolean) => {
         const next = new Set(selected)
         if (on) next.add(v)
         else next.delete(v)
         // Emit in schema order, not click order — the rendered message must
         // not depend on which box the user happened to tick first.
-        emit(
-          options
-            .map(optionValue)
-            .filter((o) => next.has(o))
-            .join(MULTI_SEPARATOR),
-        )
+        const ordered = options.map(optionValue).filter(o => next.has(o))
+        emit(field.value_type === "array" ? JSON.stringify(ordered) : ordered.join(MULTI_SEPARATOR))
       }
       return (
         <div className="space-y-1">

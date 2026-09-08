@@ -763,6 +763,11 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
 	}
+	if in.Mode != ModeDryRun {
+		if err := ValidateFormInputs(dsl, in.Inputs); err != nil {
+			return nil, err
+		}
+	}
 	// Apply per-step prompt/model overrides (v121) over the versioned
 	// DSL. No-op when the store isn't wired or has no rows for this
 	// pipeline — the run then executes exactly as authored.
@@ -1183,6 +1188,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	}
 
 	dsl := in.dsl
+	if in.Mode != ModeDryRun {
+		if err := ValidateFormInputs(dsl, in.Inputs); err != nil {
+			return nil, err
+		}
+	}
 	pipelineID := ""
 	pipelineSlug := dsl.Name
 	if in.pipeline != nil {

@@ -204,6 +204,10 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// dispatcher path doesn't re-check), which fails fast on a forgotten
 	// integration rather than after the delay elapses.
 	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if err := pipeline.ValidateFormInputs(dsl, body.Inputs); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}
@@ -422,6 +426,10 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// Integration + resource preconditions (same fail-open contract as Run).
 	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if err := pipeline.ValidateFormInputs(dsl, body.Inputs); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if h.gateMissingIntegrations(w, r, body.WorkspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}

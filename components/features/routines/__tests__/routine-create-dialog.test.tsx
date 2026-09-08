@@ -76,7 +76,7 @@ describe("<RoutineCreateDialog>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     const typed = "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n";
     act(() => lastDocChange?.(typed))
-    fireEvent.click(screen.getByRole("button", { name: "Outputs", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
     expect(screen.getByText("report")).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
@@ -88,8 +88,8 @@ describe("<RoutineCreateDialog>", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     act(() => lastDocChange?.("dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n"))
-    fireEvent.click(screen.getByRole("button", { name: "Outputs", exact: true }))
-    expect(screen.getByRole("heading", { name: "Outputs" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
+    expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible()
   })
 
   it("hides the test-gate escape hatch from a role the server would refuse", () => {

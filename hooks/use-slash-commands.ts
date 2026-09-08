@@ -14,6 +14,11 @@ import { apiFetch } from "@/lib/api-fetch"
  */
 
 export interface SlashFormField {
+  options?: string[]
+  allow_custom?: boolean
+  placeholder?: string
+  min?: number
+  max?: number
   label?: string
   name: string
   /** The widget to draw: text, textarea, cron, timezone, secret, slug,

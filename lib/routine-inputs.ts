@@ -36,6 +36,12 @@ export const SLASH_ROUTINE_ID_PREFIX = "routine.run:"
 
 /** One declared input, as it appears in a routine's definition JSON. */
 export interface RoutineInputSpec {
+  widget?: string
+  options?: string[]
+  allow_custom?: boolean
+  placeholder?: string
+  min?: number
+  max?: number
   label?: string
   name: string
   /** JSON data type: string | integer | number | boolean | array | object. */
@@ -138,7 +144,12 @@ export function slashFieldsFromRoutineInputs(
     .map((i) => ({
       name: i.name,
       ...(i.label ? { label: i.label } : {}),
-      type: widgetForInputType(i.type),
+      type: i.options?.length ? (i.type === "array" ? "multiselect" : "select") : i.widget || widgetForInputType(i.type),
+      options: Array.isArray(i.options) ? [...new Set(i.options.filter(o => typeof o === "string" && o !== ""))] : undefined,
+      allow_custom: i.allow_custom,
+      placeholder: i.placeholder,
+      min: i.min,
+      max: i.max,
       required: Boolean(i.required),
       default: formatInputDefault(i.default),
       value_type: i.type ?? "",
@@ -284,6 +295,7 @@ export function coerceRoutineInput(
 export function isMissingRequired(field: SlashFormField, value: string | undefined): boolean {
   if (!field.required) return false
   if (field.value_type === "boolean") return false
+  if (field.type === "multiselect" && value === "[]") return true
   return !value?.trim()
 }
 
@@ -320,7 +332,16 @@ export function routineInputsFromValues(
   for (const [name, raw] of Object.entries(values)) {
     const field = byName.get(name)
     if (raw === "" && field?.value_type !== "boolean") continue
-    out[name] = field ? coerceRoutineInput(field.value_type, raw, name) : raw
+    const parsed = field ? coerceRoutineInput(field.value_type, raw, name) : raw
+    if (field?.options?.length && !field.allow_custom) {
+      const chosen = Array.isArray(parsed) ? parsed : [parsed]
+      if (chosen.some(v => typeof v !== "string" || !field.options!.includes(v))) throw new RoutineInputError(name, "Choose an available answer")
+    }
+    if (typeof parsed === "number" && field) {
+      if (field.min != null && parsed < field.min) throw new RoutineInputError(name, `Minimum is ${field.min}`)
+      if (field.max != null && parsed > field.max) throw new RoutineInputError(name, `Maximum is ${field.max}`)
+    }
+    out[name] = parsed
   }
   return out
 }

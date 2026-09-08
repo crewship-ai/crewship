@@ -224,6 +224,10 @@ type ExecutionTier struct {
 // (e.g. Max=0.5 would round to 0). Validation rejects fractional
 // bounds when the input Type is "integer".
 type InputSpec struct {
+	Widget      string   `json:"widget,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	AllowCustom bool     `json:"allow_custom,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
 	Label       string   `json:"label,omitempty"`
 	Name        string   `json:"name"`
 	Type        string   `json:"type"` // string | integer | number | boolean | array | object

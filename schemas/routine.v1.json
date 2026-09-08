@@ -159,6 +159,10 @@
       "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
+        "widget": { "type": "string", "enum": ["text", "textarea", "number", "boolean", "select", "multiselect"] },
+        "options": { "type": "array", "maxItems": 200, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "allow_custom": { "type": "boolean", "description": "Permit a custom answer alongside a single-choice string list." },
+        "placeholder": { "type": "string" },
         "label": { "type": "string", "description": "Human-readable field name; name stays the stable input key." },
         "name": {
           "type": "string",

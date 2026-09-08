@@ -319,3 +319,32 @@ History/Activity. Drafts are explicitly unsaved in-memory buffers, not persisted
 server drafts. Forks identify their source and create a separate routine. Existing
 metadata and arbitrary DSL fields remain supported; this is not yet a visual
 step-construction engine.
+
+## Prepared input forms
+
+Overview now owns What you provide (editable questions and form preview) and
+What you receive; Inputs/Outputs are no longer separate navigation destinations.
+The author can set a question label, stable variable name, help text, answer
+kind, required flag, prepared choices, custom-answer permission, typed default
+and numeric bounds. Defaults can be cleared. Supported controls are short/long
+text, single choice, multiple choice, whole/decimal number, boolean and JSON
+object/list. Preview answers are local, not saved run inputs. Step cards expose
+script/code configuration when declared.
+
+InputSpec adds optional widget, options (string choices), allow_custom and
+placeholder metadata. Data type remains independent of presentation. Multiple
+choice uses an array of strings, JSON-encoded in the shared form's string state,
+so commas/newlines in values do not become delimiters. The existing Ask forms'
+multiselect encoding is preserved unless value_type explicitly says array.
+Single-choice custom answers use an editable suggestion field. These fields
+flow through the shared Routines/Calendar form mapping and the server's Chat
+slash catalog. No database migration: definitions and historical versions
+already store JSON.
+
+New form declarations opt into static/default/choice/type/required/bounds checks.
+The run API rejects invalid answers before enqueue; executor entry and nested
+execution also enforce the checks, including defaults. Legacy unannotated
+inputs retain their existing runtime contract. Strings entered as answers remain
+data; {{ inputs.name }} is how authors reference variables in recipe steps, not
+an invitation to recursively evaluate user answers. No credential values are
+introduced as a new form field type.
