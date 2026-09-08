@@ -144,8 +144,8 @@ describe("SEALED", () => {
 describe("the offered better path", () => {
   it("puts rotation on the same screen and hands off when it is chosen", () => {
     const { onRotateInstead } = renderDialog()
-    expect(screen.getByText(/have you considered rotating/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /rotate instead/i }))
+    expect(screen.getByText(/already have a replacement/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /replace value instead/i }))
     expect(onRotateInstead).toHaveBeenCalled()
   })
 })

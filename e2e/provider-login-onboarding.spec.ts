@@ -51,7 +51,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.getByText("Connection details", { exact: true }).click()
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/provider-detail-${viewport.width}.png` })
-    await page.getByRole("button", { name: "Edit", exact: true }).first().click()
+    await page.getByRole("button", { name: "Edit provider", exact: true }).first().click()
     await expect(page.getByRole("dialog", { name: /Edit provider/ })).toBeVisible()
     await expect(page.getByRole("checkbox", { name: "Replace the stored secret" })).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Work ChatGPT")
@@ -60,6 +60,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole("heading", { name: "Work ChatGPT", exact: true })).toBeVisible()
     expect(patch).not.toHaveProperty("value")
     expect(patch).not.toHaveProperty("provider")
+    expect(patch).not.toHaveProperty("security_level")
     expect(patch).not.toHaveProperty("token_expires_at")
   })
   test(`provider-first onboarding and zero-account filters at ${viewport.width}px`, async ({ page }) => {
@@ -97,11 +98,12 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.getByRole("button", { name: "Back", exact: true }).click()
     await page.getByRole("button", { name: /^Gemini \/ Google/ }).click()
     await expect(page.getByRole("link", { name: "Get API key" })).toHaveAttribute("href", "https://aistudio.google.com/apikey")
-    await page.getByRole("button", { name: /^Google account/ }).click()
+    await page.getByRole("button", { name: /^Import Gemini login/ }).click()
     await expect(page.getByLabel(/Gemini login/)).toBeVisible()
     await page.getByLabel(/Gemini login/).fill("fixture-only-not-a-token")
     await page.getByRole("button", { name: "Back", exact: true }).click()
     await page.getByRole("button", { name: /^Grok \/ xAI/ }).click()
+    await page.getByRole("button", {name: "Change and clear value", exact: true}).click()
     await expect(page.getByLabel("API key", { exact: true })).toHaveValue("")
     await expect(page.getByRole("button", { name: /^Subscription/ })).toHaveCount(0)
     await expect(page.getByRole("button", { name: /Sign in with a code/ })).toHaveCount(0)
@@ -110,7 +112,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByText("Name and labels · Grok / xAI", { exact: true })).toBeVisible()
     await page.screenshot({ path: `/tmp/provider-guided-grok-${viewport.width}.png` })
     await page.getByRole("button", { name: "Continue", exact: true }).click()
-    await expect(page.getByText("Account protection", { exact: true })).toBeVisible()
+    await expect(page.getByText("How will you use it?", { exact: true })).toBeVisible()
     await expect(page.getByRole("group", { name: "How closely Keeper guards it" })).toHaveCount(0)
     await expect(async () => {
       const box = await page.getByRole("dialog").boundingBox()
@@ -122,7 +124,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 
   test(`credential metadata editing at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
-    const credential = { id: "fixture-secret", name: "Example certificate", description: "Browser fixture — not a real secret", type: "CERT", provider: "NONE", scope: "WORKSPACE", status: "ACTIVE", crew_id: null, crew_ids: [], tags: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", last_used_ips: [], agent_names: [], _count_agent_credentials: 0, security_level: 3 }
+    const credential = { id: "fixture-secret", name: "Example certificate", description: "Browser fixture — not a real secret", type: "CERT", provider: "NONE", scope: "WORKSPACE", status: "ACTIVE", crew_id: null, crew_ids: [], tags: [], created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z", last_used_ips: [], agent_names: ["Alex", "Jamie"], agent_ids: ["agent-alex", "agent-jamie"], _count_agent_credentials: 2, security_level: 3 }
     const fields = [{ key: "ca_pem", value: "old-public-fixture", is_secret: false }, { key: "key_pem", value: null, is_secret: true }]
     let patch: Record<string, unknown> | undefined
     await page.route("**/api/**", async (route) => {
@@ -152,11 +154,13 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     if (viewport.width < 640) await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
     await page.getByText("Example certificate", { exact: true }).first().click()
     await expect(page.getByTestId("connection-verification")).toContainText("Connection not verified")
+    await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Alex")
+    await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Jamie")
     await expect(page.getByTestId("credential-access-summary")).toContainText("Your access:")
-    await expect(page.getByText("Properties & protection", { exact: true })).toBeVisible()
+    await expect(page.getByText("Access & security", { exact: true })).toBeVisible()
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/credential-detail-${viewport.width}.png` })
-    await page.getByRole("button", { name: "Edit", exact: true }).first().click()
+    await page.getByRole("button", { name: "Edit credential", exact: true }).first().click()
     await expect(page.getByRole("dialog", { name: "Edit credential" })).toBeVisible()
     await expect(page.getByLabel(/^Replace certificate/)).toHaveCount(0)
     await page.getByLabel("Name", { exact: true }).fill("Renamed certificate")
@@ -189,5 +193,84 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     expect(patch).not.toHaveProperty("value")
     expect(patch?.security_level).toBe(3)
     expect(patch?.tags).toEqual(["production"])
+  })
+}
+
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  test(`login secret uses shared design and keeps protection advanced at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    let saved: Record<string, unknown> | undefined
+    await page.route("**/api/**", async (route) => {
+      const path = new URL(route.request().url()).pathname
+      let body: unknown = []
+      if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
+      else if (path === "/api/v1/credentials" && route.request().method() === "POST") {
+        saved = route.request().postDataJSON()
+        body = { id: "new-fixture", ...saved }
+      }
+      else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/credentials")
+    await page.getByRole("button", { name: "Add secret", exact: true }).first().click()
+    await page.getByRole("button", { name: /^Login/ }).click()
+    await page.getByLabel("Name", { exact: true }).fill("support-login")
+    await page.getByLabel("Username", { exact: true }).fill("support-bot")
+    await page.getByLabel("Password", { exact: true }).fill("fixture-only-password")
+    await expect(page.getByLabel("Account label", { exact: true })).not.toBeVisible()
+    await page.screenshot({ path: `/tmp/credential-add-login-${viewport.width}.png` })
+    await page.getByRole("button", { name: "Continue", exact: true }).click()
+    await expect(page.getByRole("group", { name: "How closely Keeper guards it" })).not.toBeVisible()
+    await page.locator("summary").filter({ hasText: /Access & security/ }).click()
+    await expect(page.getByRole("group", { name: "How closely Keeper guards it" })).toBeVisible()
+    const box = await page.getByRole("dialog").boundingBox()
+    expect(box!.x).toBeGreaterThanOrEqual(-1)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1)
+    await page.getByRole("button", { name: /^Save secret$/ }).click()
+    await expect.poll(() => saved?.username).toBe("support-bot")
+    expect(saved?.type).toBe("USERPASS")
+    expect(saved?.provider).toBe("NONE")
+    expect(saved?.value).toBe("fixture-only-password")
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`file upload and explicit agent assignment at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({width, height: 900})
+    const writes: {path: string; body: Record<string, unknown>}[] = []
+    await page.route("**/api/**", async (route) => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname
+      let body: unknown = []
+      if (path === "/api/auth/session") body = {user:{id:"test-user",email:"ui@example.test"},expires:"2099-01-01T00:00:00Z"}
+      else if (path === "/api/v1/workspaces") body = [{id:"test-workspace",name:"Fixture workspace",slug:"fixture",currentUserRole:"OWNER"}]
+      else if (path === "/api/v1/agents") body = [{id:"agent-alex",name:"Alex"}]
+      else if (path === "/api/v1/credentials/bindings") body = {bindings:[]}
+      else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
+      if (request.method() === "POST" && path.startsWith("/api/v1/credentials")) {
+        writes.push({path,body:request.postDataJSON()}); body = {id:"fixture-saved"}
+      }
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(body)})
+    })
+    await page.goto("/credentials")
+    await page.getByRole("button", {name:"Add secret",exact:true}).first().click()
+    await page.getByRole("button", {name:/^File JSON/}).click()
+    await page.getByLabel("Name",{exact:true}).fill("Deployment config")
+    const contents = '{\r\n  "fixture": true\r\n}\r\n'
+    await page.getByLabel("Choose credential file",{exact:true}).setInputFiles({name:"deployment.json",mimeType:"application/json",buffer:Buffer.from(contents)})
+    await expect(page.getByText(/^deployment\.json/)).toBeVisible()
+    await expect(page.getByRole("button",{name:"Replace file",exact:true})).toBeVisible()
+    await page.getByRole("button",{name:"Continue",exact:true}).click()
+    await page.getByRole("button",{name:"Assign now",exact:true}).click()
+    await page.getByRole("checkbox",{name:"Alex",exact:true}).check()
+    await page.getByLabel("Variable name",{exact:true}).fill("DEPLOYMENT_CONFIG")
+    await page.screenshot({path:`/tmp/credential-entry-assignment-${width}.png`})
+    await page.getByRole("button",{name:"Save & assign",exact:true}).click()
+    await expect.poll(() => writes.length).toBe(3)
+    expect(writes[0].body).toMatchObject({name:"Deployment config",value:contents,scope:"WORKSPACE",type:"GENERIC_SECRET"})
+    expect(writes[0].body.crew_ids).toBeUndefined()
+    expect(writes[1].body).toMatchObject({key:"filename",value:"deployment.json"})
+    expect(writes[2].body).toMatchObject({scope:"AGENT",agent_id:"agent-alex",slot:"DEPLOYMENT_CONFIG"})
   })
 }

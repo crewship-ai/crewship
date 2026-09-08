@@ -411,8 +411,9 @@ describe("tier facet", () => {
     expect(screen.queryByText("Tier")).not.toBeInTheDocument()
   })
 
-  it("lists every tier in the rail, not behind the Filter button", () => {
+  it("lists every tier in the Filter popover", () => {
     renderSidebar({ credentials: CREDS, tiers: TIERS })
+    openFilter()
     expect(screen.getByText("Tier")).toBeInTheDocument()
     for (const t of TIERS) {
       expect(screen.getByRole("button", { name: new RegExp(t.label) })).toBeInTheDocument()
@@ -424,17 +425,20 @@ describe("tier facet", () => {
   // apart from "the console does not track that".
   it("keeps an empty tier row rather than omitting it the way the other facets do", () => {
     renderSidebar({ credentials: CREDS, tiers: TIERS })
+    openFilter()
     const l4 = screen.getByRole("button", { name: /L4 · critical/ })
     expect(l4).toHaveTextContent("0")
   })
 
   it("selects a tier, and clicking the selected one clears it", () => {
     const { onFiltersChange } = renderSidebar({ credentials: CREDS, tiers: TIERS })
+    openFilter()
     fireEvent.click(screen.getByRole("button", { name: /L2 · medium/ }))
     expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: "2" }))
 
     const onSecond = vi.fn()
     renderSidebar({ credentials: CREDS, tiers: TIERS, filters: { tier: "2" }, onFiltersChange: onSecond })
+    fireEvent.click(screen.getAllByRole("button", { name: /filter/i })[1])
     fireEvent.click(screen.getAllByRole("button", { name: /L2 · medium/ })[1])
     expect(onSecond).toHaveBeenCalledWith(expect.objectContaining({ tier: null }))
   })
@@ -445,19 +449,21 @@ describe("tier facet", () => {
       tiers: TIERS,
       filters: { tier: "4" },
     })
+    openFilter()
     fireEvent.click(screen.getByRole("button", { name: /any tier/i }))
     expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: null }))
   })
 
   it("marks the selected tier as pressed so the rail says what the list is showing", () => {
     renderSidebar({ credentials: CREDS, tiers: TIERS, filters: { tier: "1" } })
+    openFilter()
     expect(screen.getByRole("button", { name: /L1 · low/ })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByRole("button", { name: /any tier/i })).toHaveAttribute("aria-pressed", "false")
   })
 
   // Tier lives in the rail, like status — so clearing the dropdown's facets
   // must not silently undo a selection the rail is still showing as pressed.
-  it("survives Clear filters, the way status does", () => {
+  it("clears the tier with the other popover filters", () => {
     const { onFiltersChange } = renderSidebar({
       credentials: CREDS,
       tiers: TIERS,
@@ -465,12 +471,12 @@ describe("tier facet", () => {
     })
     openFilter()
     fireEvent.click(screen.getByRole("button", { name: /clear all/i }))
-    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: "4", brand: [] }))
+    expect(onFiltersChange).toHaveBeenCalledWith(expect.objectContaining({ tier: null, brand: [] }))
   })
 
-  it("does not inflate the Filter button badge — it is already on screen", () => {
+  it("counts a selected tier in the Filter button badge", () => {
     renderSidebar({ credentials: CREDS, tiers: TIERS, filters: { tier: "4" } })
-    expect(screen.getByRole("button", { name: /filter/i })).not.toHaveTextContent("1")
+    expect(screen.getByRole("button", { name: /filter/i })).toHaveTextContent("1")
   })
 })
 

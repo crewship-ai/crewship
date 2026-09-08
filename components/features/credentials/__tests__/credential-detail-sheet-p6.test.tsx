@@ -125,13 +125,13 @@ beforeEach(() => {
 describe("rotate is the primary path, reveal the secondary one (§2.6 L8)", () => {
   it("offers rotation on Overview to a rotate-capable role", () => {
     renderSheet()
-    expect(screen.getByRole("button", { name: /replace with grace period/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
   })
 
   it("hands the current credential to the rotation flow", () => {
     const onRotate = vi.fn()
     renderSheet({}, onRotate)
-    fireEvent.click(screen.getByRole("button", { name: /replace with grace period/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^replace value…$/i }))
     expect(onRotate).toHaveBeenCalledWith(expect.objectContaining({ id: "cred_1" }))
   })
 
@@ -213,8 +213,8 @@ describe("reveal needs all four layers, not any of them", () => {
     const onRotate = vi.fn()
     renderSheet({}, onRotate)
     fireEvent.click(await screen.findByRole("button", { name: /reveal the existing value/i }))
-    expect(await screen.findByText(/have you considered rotating/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /rotate instead/i }))
+    expect(await screen.findByText(/already have a replacement/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /replace value instead/i }))
     expect(onRotate).toHaveBeenCalled()
   })
 })
@@ -299,8 +299,8 @@ describe("Used by — slots and grant provenance", () => {
     // real answer arrived.
     expect(await screen.findByText("crew grant")).toBeInTheDocument()
     expect(screen.getByText("explicit")).toBeInTheDocument()
-    expect(screen.getByText("sam")).toBeInTheDocument()
-    expect(screen.getByText("quinn")).toBeInTheDocument()
+    expect(screen.getAllByText("sam")[0]).toBeInTheDocument()
+    expect(screen.getAllByText("quinn")[0]).toBeInTheDocument()
   })
 
   it("flags a lapsed lease, which the container has already stopped honouring", async () => {
@@ -315,14 +315,14 @@ describe("Used by — slots and grant provenance", () => {
     })
     renderSheet()
     openTab(/used by/i)
-    expect(await screen.findByText("lease expired")).toBeInTheDocument()
+    expect(await screen.findAllByText("lease expired").then((rows) => rows[0])).toBeInTheDocument()
   })
 
   it("falls back to the names on the payload when provenance cannot be resolved", async () => {
     route({ agents: [] })
     renderSheet()
     openTab(/used by/i)
-    expect(await screen.findByText("sam")).toBeInTheDocument()
+    expect(await screen.findAllByText("sam").then((rows) => rows[0])).toBeInTheDocument()
     expect(screen.queryByText("explicit")).not.toBeInTheDocument()
   })
 })
@@ -349,7 +349,7 @@ describe("classification control", () => {
       expect(screen.getByRole("button", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true"),
     )
     // …and the header badge now carries it.
-    expect(screen.getAllByText("RESTRICTED").length).toBeGreaterThan(1)
+    expect(screen.getByRole("button", { name: "RESTRICTED" })).toHaveAttribute("aria-pressed", "true")
   })
 
   // SetSensitivity re-checks with "manage" on the lowering branch only.

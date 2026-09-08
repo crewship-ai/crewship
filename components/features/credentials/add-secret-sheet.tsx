@@ -54,7 +54,7 @@ interface AddSecretSheetProps {
   workspaceId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
+  onSuccess: (credentialId?: string) => void
   /** Tags already in use across the workspace, for the autocomplete in the form. */
   knownTags?: string[]
   /** Where the wizard starts — the Providers tab opens it on its own shape,
@@ -108,15 +108,15 @@ export function AddSecretSheet({ workspaceId, open, onOpenChange, onSuccess, kno
           still in state is a leak waiting for a screenshot. */}
       {open && (
         <AddCredentialWizard
-          key="open"
+          key={workspaceId}
           workspaceId={workspaceId}
           knownTags={knownTags}
           initial={initial}
           onDirtyChange={setDirty}
           primaryRef={primaryRef}
           onCancel={() => onOpenChange(false)}
-          onSuccess={() => {
-            onSuccess()
+          onSuccess={(credentialId) => {
+            onSuccess(credentialId)
             onOpenChange(false)
           }}
         />

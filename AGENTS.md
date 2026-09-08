@@ -3,6 +3,8 @@
 Concise entrypoint for AI agents and new contributors working in this repo.
 For contributor process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+**Codex sessions:** read [`CODEX.md`](CODEX.md) for the instance map and basic operating instructions.
+
 **Design context lives in two places, and they are not copies.**
 [`docs/prd/`](docs/prd/) is tracked, ships with the repo, and holds the
 release-1.0 audit, the readiness report and the session handoffs — start there.
