@@ -5,6 +5,21 @@ the session report and PR #2430. The session report remains untracked.
 
 ## Acceptance scope
 
+### Pool API review follow-up (2026-09-07, PR #2450)
+
+The create operation now declares its required JSON body and 400 validation
+response through route-specific OpenAPI metadata. Other operations retain their
+existing body requirements. CLI pool create/list/get and every new flag are
+documented in the user-facing credential reference; the strict documentation
+inventory passes (the earlier inventory unit tests did not exercise this gate).
+
+Normal duplicate-name writers were already serialized by immediate transactions:
+a two-connection, twenty-create regression passes even before this fix. The
+insert now also maps the specific workspace/name conflict to `ErrConflict`,
+without swallowing other constraint errors. A test-only trigger exercises that
+insert-time branch and rollback; this test failed before the fix and now passes.
+This remains administrative definition management, not runtime pool enablement.
+
 ### Provider-first UI follow-up
 
 User's 2026-09-06 screenshots exposed provider selection hidden in the decorative
@@ -85,7 +100,102 @@ Opaque Claude setup-tokens no longer imply a Max plan. The environment and
 new ledger events say `Claude (plan unknown)` unless plan metadata was supplied.
 Existing historical ledger labels are not rewritten.
 
+## P-D foundation in progress — #2440 (2026-09-07)
+
+`internal/providerpool` adds the metadata-only selection/storage foundation:
+
+- A pool is a named set of accounts, **not a grant**. Creating it does not
+  create or alter `credential_bindings`; ordinary scope/slot uniqueness stays.
+- Lowest numeric priority first, then least-recently-selected sequence, with
+  account ID as a stable tie-breaker. A SQLite write transaction reserves each
+  turn; no in-memory cursor is lost on restart. Snapshot reads do not rotate.
+- Expired, revoked, cooling-down and intervention-blocked accounts cannot win.
+  An entirely unavailable pool returns an error, never the first cooled account.
+  Refresh must finish outside the selection transaction and before selection.
+- Provider, billing mode and owner are revalidated at every selection. Mixed
+  owners require explicit per-pool consent, even when one member is inactive.
+  Legacy subscription blobs need importing as `PROVIDER_LOGIN` before pooling;
+  their encrypted expiry cannot safely be inferred by this metadata-only store.
+- Typed observations persist cooldown deadlines or billing/authentication blocks;
+  no raw upstream message, token or invented quota percentage is stored.
+  Stale observations cannot shorten a deadline. Clearing uses a revision check
+  and retains a tombstone so an old success cannot clear a newer failure.
+  Observations also carry a fingerprint of the encrypted access material used
+  by the request, checked transactionally; a late failure after refresh or
+  re-import cannot block the replacement token. The store hashes ciphertext
+  for this provenance check, but never decrypts or returns secret values.
+- Membership has tenant checks in both the reader and database triggers,
+  including parent workspace changes. Pool definitions/members are included in
+  backup; instance-local availability observations are excluded from restore.
+
+**Not wired or shipped as a user feature yet:** pool CRUD/RBAC endpoints,
+CLI/UI management, scope/slot pool bindings, run-start authorization/selection,
+sidecar grantee reconciliation, provider-event observation producers and measured
+quota windows. The store is an internal foundation; it does not establish that
+pooling or automatic failover works in dev3. No running agent is switched or
+automatically replayed by this change.
+
+Integration boundary for the next slice: despite its name,
+`loadDeliveredCredentialsForRun` is also used by the agent-configuration resolver.
+Calling `Choose` there would consume turns during configuration loads and would
+not guarantee selection for each actual run. Wire authorized selection at the
+orchestrator's run boundary, before sidecar/environment/auth-file construction.
+Native auth files currently live in the agent's shared HOME; overlapping runs
+must not rewrite that file with different pool accounts. Solve that lifecycle
+constraint (including detached execs) before enabling native pool bindings.
+Read-only payer metadata must identify a pool, not claim its next candidate is
+the credential paying for an already-running task.
+
+Verification entry points: `go test -race ./internal/providerpool -count=1`
+(selection, concurrent transactions, restart, tenant guards, stale observations),
+`go test ./internal/backup -count=1`, and the full Go verification loop. Record
+the actual results in the PR rather than treating these commands as evidence
+that they have run.
+
+Rate limits are not necessarily per key: OpenAI API limits can be shared by an
+organization/project and model family. A different key is not extra quota.
+See [OpenAI rate limits](https://developers.openai.com/api/docs/guides/rate-limits).
+
 ## Remaining design constraints
+
+### P-D administrative API slice — #2440
+
+The follow-up API exposes `POST /api/v1/provider-logins/pools`,
+`GET /api/v1/provider-logins/pools` and `GET /api/v1/provider-logins/pools/{poolId}`.
+All three require OWNER/ADMIN; creation additionally uses the route's
+`credentials:write` scope for scoped CLI tokens. Creation takes `name`,
+`provider`, `mode`, optional `allow_cross_owner` (default false), and `members`
+containing `credential_id` and optional integer `priority` (default zero).
+Unknown fields and bodies over 64 KiB are rejected. One to 100 members are
+allowed; IDs and names are checked within the same immediate transaction as
+creation. Missing and foreign-workspace member IDs produce the same 400 error.
+Duplicate workspace-local names produce 409 without changing the existing set.
+
+Lists return `{items, next_cursor}` with at most 100 definitions; pass a non-null
+cursor as `?after=...`. A definition includes its member count; the detail also
+includes member IDs/priorities, including revoked accounts for diagnosis.
+These explicit response DTOs never include token material or internal request
+generation fingerprints. Reads do not rotate accounts. Creation uses the
+existing best-effort administrative audit (not a transactional audit guarantee).
+
+CLI counterparts are `credential pool list [--after <cursor>]`,
+`credential pool get <pool-id>` and:
+
+```sh
+crewship credential pool create --name "OpenAI accounts" --provider OPENAI \
+  --mode api_key --member ACCOUNT_ID --member OTHER_ACCOUNT_ID=10
+```
+
+Replace the example IDs with credential IDs, not tokens. Lower numeric priority wins. Cross-owner
+consent is never implied: use `--allow-cross-owner` only intentionally. JSON
+output preserves pagination metadata; human output warns that these definitions
+do not grant access. CLI tests use a stub server, not dev3 accounts.
+
+This is not complete pool CRUD: edit/delete, UI, scope
+bindings, run-start selection and observation producers remain follow-up work.
+No pool created through this API authorizes credential delivery or changes an
+existing agent's payer. Role, scope, tenant, pagination, validation, audit and
+non-disclosure regressions live in `internal/api/provider_pool_test.go`.
 
 P-D is not just wiring existing selection helpers. PRD section 5.4 assumes
 several bindings can share a scope and slot, but the shipped unique index
@@ -117,6 +227,29 @@ Primary-source starting points for P-F:
   contract must be read from Grok's implementation, not a Claude parser alias.
 
 Neither `copilot` nor `grok` was found on this host's PATH during this checkpoint.
+
+### Grok binary-only probe (2026-09-07)
+
+The official [installer source](https://x.ai/cli/install.sh) resolves the stable
+artifact to `https://x.ai/cli/grok-1.0.13-linux-x86_64.gz`. The installer was
+**read, not executed** (it changes shell configuration and reads local auth).
+Downloaded/decompressed binary SHA-256:
+`edf79521581bb5e6b95abef848491a6a742e860da3e237ebe86a280d30dce4c1`.
+
+In a disposable Alpine container with no network, no credentials, read-only
+rootfs, dropped capabilities and UID 1001, it reported
+`grok 1.0.13 (5e9a58528b76)`. `--no-auto-update --no-memory --help` exited 0;
+an invented flag before `--help` exited 2 (negative control). Its own help says
+`streaming-json` is ACP-session-update NDJSON, distinct from the separate
+`streaming-messages-json` format. The unauthenticated headless invocation emitted
+a JSON `type: error` / `message` envelope and exited 1, not a successful run.
+
+Local evidence: `/tmp/grok-1.0.13-help.log`, `/tmp/grok-1.0.13-flags.log`,
+`/tmp/grok-1.0.13-control.log`, `/tmp/grok-1.0.13-offline-stream.log`.
+This verifies binary/flag/error-shape compatibility only. Successful message,
+tool and usage streams, MCP/tool isolation, authentication, billing and an
+installed Crewship adapter remain unverified/unimplemented. No real provider
+account or paid model call was used.
 
 ## Integration verification checkpoint
 
