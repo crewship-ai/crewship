@@ -519,11 +519,13 @@ func sanitizeForPath(s string) string {
 }
 
 // Arguments stay positional: neither paths nor user arguments become shell code.
-const scriptProcessWrapper = `umask 077
+const scriptProcessWrapper = `original_umask=$(umask)
+umask 077
 control=$1
 shift
 mkdir "$control" || exit 125
 printf '%s' "$$" > "$control/pid"
+umask "$original_umask"
 "$@" 2>"$control/stderr"
 `
 

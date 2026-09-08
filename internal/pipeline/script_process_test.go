@@ -44,10 +44,17 @@ func TestScriptProcessWrapper_PreservesForkedChildExit(t *testing.T) {
 	if _, err := exec.LookPath("setsid"); err != nil {
 		t.Skip("setsid unavailable")
 	}
-	command := exec.Command("setsid", "--fork", "--wait", "sh", "-c", scriptProcessWrapper, "fixture", filepath.Join(t.TempDir(), "control"), "sh", "-c", "echo partial; exit 7")
+	root := t.TempDir()
+	artifact := filepath.Join(root, "artifact.txt")
+	command := exec.Command("sh", "-c", `umask 022; exec "$@"`, "fixture", "setsid", "--fork", "--wait", "sh", "-c", scriptProcessWrapper, "fixture", filepath.Join(root, "control"), "sh", "-c", `echo result > "$1"; echo partial; exit 7`, "fixture", artifact)
 	output, err := command.CombinedOutput()
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 7 || !strings.Contains(string(output), "partial") {
 		t.Fatalf("script failure was lost: %q %v", output, err)
 	}
+	info, statErr := os.Stat(artifact)
+	if statErr != nil || info.Mode().Perm() != 0644 {
+		t.Fatalf("control umask leaked into artifact: %v %v", info, statErr)
+	}
+
 }
