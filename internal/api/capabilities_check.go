@@ -129,8 +129,8 @@ func InvalidateCapabilityCache(workspaceID, userID string) {
 //   - capsJSON IS NULL → role-derived fallback. Legacy /
 //     upgrade-in-progress path: a row exists but the application
 //     write that should fill the column hasn't happened. Falling back
-//     to the role bundle keeps a fresh INSERT working before the
-//     backfill catches up.
+//     to the historical role bundle plus the current OWNER/ADMIN reveal
+//     default keeps fresh memberships usable. The v109 backfill is immutable.
 //   - capsJSON IS valid JSON with at least one known entry → that set
 //     verbatim. Operator intent honoured.
 //   - capsJSON IS present but ParseCapabilities returns nil (empty
@@ -141,7 +141,13 @@ func InvalidateCapabilityCache(workspaceID, userID string) {
 //     role-derived privileges.
 func resolveCapabilitiesFromRow(capsJSON sql.NullString, role string) map[string]struct{} {
 	if !capsJSON.Valid {
-		return FallbackCapabilitiesForRole(role)
+		caps := FallbackCapabilitiesForRole(role)
+		// Current product default, separate from the immutable v109 backfill.
+		// Explicit capability sets below always win, including a revoked grant.
+		if role == "OWNER" || role == "ADMIN" {
+			caps[CapabilityCredentialReveal] = struct{}{}
+		}
+		return caps
 	}
 	caps := ParseCapabilities(capsJSON.String)
 	if caps == nil {

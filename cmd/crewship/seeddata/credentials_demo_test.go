@@ -1,10 +1,40 @@
 package seeddata
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestDemoCredentialsV2_FileAndKeyPairShapes(t *testing.T) {
+	seen := map[string]bool{}
+	for _, dc := range DemoCredentials() {
+		if dc.Def.Name != "demo-v2-json-file" && dc.Def.Name != "demo-v2-key-pair" {
+			continue
+		}
+		seen[dc.Def.Name] = true
+		if dc.Def.Type != "GENERIC_SECRET" {
+			t.Errorf("%s: wrong storage type", dc.Def.Name)
+		}
+		if dc.Def.Provider == "NONE" || dc.Def.Provider == "" {
+			t.Errorf("%s: missing brand", dc.Def.Name)
+		}
+		if dc.Def.Name == "demo-v2-json-file" {
+			if !json.Valid([]byte(dc.Def.Value)) {
+				t.Error("file demo is not JSON")
+			}
+			if len(dc.Fields) == 0 || dc.Fields[0].Key != "filename" || dc.Fields[0].Secret {
+				t.Error("file name must be present and non-secret")
+			}
+		} else if len(dc.Fields) == 0 || dc.Fields[0].Key != "access_key_id" || dc.Fields[0].Secret {
+			t.Error("key pair must carry a non-secret ID")
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatal("missing v2 demo shapes")
+	}
+}
 
 // The demo vault ships with the product. These tests are about what it must
 // never contain and never imply, not about how many rows it has.

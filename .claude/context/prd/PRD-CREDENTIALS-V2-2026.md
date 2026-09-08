@@ -442,9 +442,12 @@ ne výchozí stav.
 #### L2 · Žádné trvalé oprávnění
 
 Reveal vyžaduje capability `credentials:reveal` na membershipu (v109 JSON pole).
-Role ji **nezakládá automaticky** — ani OWNER. Přidělení capability je
-journalované a je vidět v Settings. Doporučený default pro korporát: capability
-drží 2 lidé, ne celý ADMIN tým.
+**Změna zadání 2026-09-08:** OWNER a ADMIN bez explicitní sady capabilities
+ji mají výchozí; obsahuje ji také preset `admin`. Explicitní sada má přednost,
+takže odebrání zůstává účinné. Existující uložené sady se hromadně nepřepisují.
+Přidělení nebo odebrání capability je journalované a je vidět v Settings.
+Workspace musí stále povolit reveal; interaktivní session, scope, klasifikace
+a audit zůstávají nezávislé podmínky. Korporát může grant omezit individuálně.
 
 #### L3 · Obřad jednoho revealu
 

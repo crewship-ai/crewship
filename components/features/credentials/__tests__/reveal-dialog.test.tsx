@@ -3,8 +3,8 @@
 // happen as much as about what must.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { RevealDialog, MIN_REVEAL_REASON_LENGTH } from "../reveal-dialog"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { RevealDialog, MIN_REVEAL_REASON_LENGTH, REVEAL_VISIBLE_MS } from "../reveal-dialog"
 
 const h = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
@@ -31,6 +31,59 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof RevealDialo
 beforeEach(() => {
   h.apiFetch.mockReset()
   h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ value: "ghp_secret" }) })
+})
+
+describe("bounded reveal lifetime", () => {
+  it("hides the value when the tab becomes hidden", async () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    await screen.findByTestId("revealed-value")
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true)
+    try {
+      fireEvent(document, new Event("visibilitychange"))
+      expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
+    } finally { hidden.mockRestore() }
+  })
+  it("hides a value after 30 seconds and requires a new reason", async () => {
+    renderDialog()
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+    // Capture the timer without advancing the test framework's own timers.
+    const timer = vi.spyOn(window, "setTimeout")
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+      await screen.findByTestId("revealed-value")
+      const call = timer.mock.calls.find(([, delay]) => delay === REVEAL_VISIBLE_MS)
+      expect(call).toBeDefined()
+      act(() => { (call![0] as () => void)() })
+      expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
+      expect(screen.getByLabelText(/reason/i)).toHaveValue("")
+      expect(screen.getByRole("button", { name: /reveal the existing value/i })).toBeDisabled()
+    } finally { timer.mockRestore() }
+  })
+
+  it("does not carry a pending reveal into a different credential", async () => {
+    let finish!: (response: unknown) => void
+    h.apiFetch.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const { rerender } = renderDialog()
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    const signal = h.apiFetch.mock.calls[0][1].signal as AbortSignal
+    rerender(<RevealDialog workspaceId="ws2" credentialId="other" credentialName="OTHER" open onOpenChange={() => {}} onRotateInstead={() => {}} />)
+    expect(signal.aborted).toBe(true)
+    await act(async () => { finish({ ok: true, json: async () => ({ value: "old-private-value" }) }) })
+    expect(screen.queryByText("old-private-value")).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/reason/i)).toHaveValue("")
+  })
+
+  it("refuses a malformed successful response", async () => {
+    h.apiFetch.mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+    renderDialog()
+    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invalid reveal response")
+    expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
+  })
 })
 
 describe("the reason floor", () => {
@@ -107,7 +160,7 @@ describe("the result", () => {
     // No second bite: the reason field and the reveal button are gone.
     expect(screen.queryByLabelText(/reason/i)).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/shown once/i)).toBeInTheDocument()
+    expect(screen.getByText(/hidden automatically after 30 seconds/i)).toBeInTheDocument()
   })
 
   it("forgets the value when the dialog closes", async () => {
