@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check, Cpu } from "lucide-react"
+import { Check, Cpu, Users, HardDrive, Package, Boxes, Network } from "lucide-react"
 
 import {
   CreateSurface,
@@ -20,7 +20,8 @@ import { apiFetch } from "@/lib/api-fetch"
 import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
-import { StepContainer } from "./create-crew/step-container"
+import { EditorLayout, EditorPanel } from "./editor-layout"
+import { StepContainer, type EnvironmentSection } from "./create-crew/step-container"
 import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
 import { ImportCrewPanel } from "./create-crew/import-panel"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -38,20 +39,7 @@ export interface CreateCrewDialogProps {
   crew?: CrewRecord
 }
 
-/**
- * Four steps, and everything that counts them says four.
- *
- * There were five, and the counter beside the title said "step N of 4"
- * because Review was read as the confirmation rather than a question — a
- * wording that survived from an older strip and left the header claiming
- * "step 3 of 4" above a row of five chips.
- *
- * Runtime is gone as a step of its own. Resource limits are an
- * administrator's question and now sit folded inside Container; the egress
- * control went with them, next to the image it applies to. What is left is
- * four questions, counted honestly, and a phone progress bar whose
- * `aria-valuenow` matches its max.
- */
+/** Creation keeps the guided lineup flow; editing uses focused settings sections. */
 const CREW_STEPS: CreateSurfaceStep[] = [
   { id: "identity", label: "Identity" },
   { id: "lineup", label: "Lineup" },
@@ -67,6 +55,7 @@ const STEP_DESCRIPTION: Record<WizardStep, string> = {
 
 export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, crew }: CreateCrewDialogProps) {
   const router = useRouter()
+  const [section, setSection] = useState("identity")
   const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [step, setStep] = useState<WizardStep>(1)
   const [state, setStateFull] = useState<WizardState>(INITIAL_STATE)
@@ -87,7 +76,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         allowedDomains: Array.isArray(crew.allowed_domains) ? crew.allowed_domains : parseDomains(crew.allowed_domains),
         mcpConfig: crew.mcp_config_json ?? "", runtimeImage: crew.runtime_image ?? "", devcontainerConfig: crew.devcontainer_config ?? "", miseConfig: crew.mise_config ?? "",
       } : INITIAL_STATE
-      baseline.current = next; setStateFull(next); setEnvironmentOpen(false); setStep(1); setBusy(false); setRefusal(null)
+      baseline.current = next; setStateFull(next); setSection("identity"); setEnvironmentOpen(false); setStep(1); setBusy(false); setRefusal(null)
     }
     wasOpen.current = open
   }, [open, crew])
@@ -188,7 +177,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
     <CreateSurface
       open={open}
       onOpenChange={onOpenChange}
-      size="lg"
+      size={crew ? "xl" : "lg"}
+      className={crew ? "h-[92dvh] sm:h-[min(85dvh,720px)]" : undefined}
       dirty={dirty}
       discardLabel="this crew"
       onSubmit={() => {
@@ -208,9 +198,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         context="Crews"
         title={
           panel === "image"
-            ? "Base image — new crew"
+            ? `Base image — ${crew ? crew.name : "new crew"}`
             : panel === "icon"
-              ? "Icon — new crew"
+              ? `Icon — ${crew ? crew.name : "new crew"}`
               : panel === "import"
                 ? "Import — new crew"
                 : crew ? `Edit ${crew.name}` : "New crew"
@@ -248,7 +238,15 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         />
       )}
 
-      <CreateSurfaceBody className="space-y-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
+      <EditorLayout label="Crew editor sections" active={section} onChange={setSection} hidden={!crew || !!panel} sections={[
+        { id: "identity", label: "Identity", icon: Users },
+        { id: "environment", label: "Environment", icon: HardDrive },
+        { id: "tools", label: "Tools", icon: Package },
+        { id: "versions", label: "Tool versions", icon: Boxes },
+        { id: "network", label: "Network", icon: Network },
+        { id: "limits", label: "Resource limits", icon: Cpu },
+      ]}>
+      <CreateSurfaceBody className="min-w-0 space-y-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
         {panel === "image" && (
           <BaseImagePanel
             value={effectiveBaseImage(state)}
@@ -298,7 +296,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
           />
         )}
         {!panel && step === 1 && (
-          <StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} />
+          <EditorPanel active={!crew || section === "identity"}><StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} /></EditorPanel>
         )}
         {!panel && !crew && step === 2 && (
           <StepLineup
@@ -308,7 +306,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
             onImport={() => setPanel("import")}
           />
         )}
-        {!panel && (crew || step === 4 || step === 3) && (
+        {!panel && crew && <div hidden={section === "identity"}><StepContainer state={state} setState={setState} activeSection={(section === "identity" ? "environment" : section) as EnvironmentSection} onPickImage={() => setPanel("image")} /></div>}
+        {!panel && !crew && (step === 4 || step === 3) && (
           <CreateSurfaceDisclosure key={String(environmentOpen)} label="Environment and runtime" icon={Cpu} accent="teal" defaultOpen={environmentOpen || step === 3}>
             <StepContainer state={state} setState={setState} onPickImage={() => { setEnvironmentOpen(true); setPanel("image") }} />
           </CreateSurfaceDisclosure>
@@ -321,6 +320,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
           />
         )}
       </CreateSurfaceBody>
+      </EditorLayout>
 
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
@@ -333,6 +333,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
           hint={
             panel
               ? undefined
+              : crew ? "⌘+Enter to save · Esc cancel"
               : step === 4
                 ? "⌘+Enter to confirm · Esc cancel"
                 : "⌘+Enter to continue"
@@ -377,7 +378,7 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
     return true // empty
   }
   // step === 3 (Container) is always valid: image and tooling are optional,
-  // an empty allowlist is an explicit choice that locks all egress, and the
+  // an empty allowlist still permits provider APIs and platform connections, and the
   // sizing chips cannot produce a zero — CustomNumberChip refuses anything
   // outside [MIN, MAX] and keeps the previous value.
   return true

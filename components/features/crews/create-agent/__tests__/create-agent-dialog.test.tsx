@@ -108,7 +108,7 @@ describe("CreateAgentDialog", () => {
   // It now mounts components/layout/create-surface.tsx like every other
   // create door, so the assertions below are about the SHELL, not about
   // anything this dialog draws itself.
-  it("mounts the shared CreateSurface shell at size lg", () => {
+  it("mounts the shared CreateSurface shell at size xl", () => {
     renderDialog()
     const content = document.querySelector('[data-slot="dialog-content"]')
     expect(content).not.toBeNull()
@@ -116,7 +116,7 @@ describe("CreateAgentDialog", () => {
     // The shell's own geometry: the surface group, the fixed lg width,
     // and the bottom-sheet breakpoint it brings for free.
     expect(cls).toContain("group/surface")
-    expect(cls).toContain("sm:max-w-[800px]")
+    expect(cls).toContain("sm:max-w-[960px]")
     expect(cls).toContain("max-sm:rounded-t-2xl")
   })
 
@@ -352,31 +352,29 @@ describe("CreateAgentDialog", () => {
   // write sites. So the sentence sent a user to a tab that will never grow
   // the control. Whatever the enforce-or-remove decision turns out to be,
   // this door must not name another screen as the place to set them.
-  describe("the 'not editable here' note", () => {
-    /** Opens Advanced and returns the paragraph that lists the three names. */
-    async function findNote() {
-      renderDialog()
-      fireEvent.click(await screen.findByRole("button", { name: /advanced/i }))
-      const code = await screen.findByText("temperature")
-      const note = code.closest("p")
-      expect(note).not.toBeNull()
-      return note!
-    }
+  it("keeps model and duration edits when changing sections and sends them only on submit", async () => {
+    const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Ada", slug: "ada" })))
+    renderDialog()
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Ada" } })
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
+    fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
+    fireEvent.click(screen.getByRole("button", { name: "Instructions and persona", exact: true }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Agent system prompt" }), { target: { value: "Review documents carefully." } })
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
+    expect(screen.getByRole("radio", { name: /^Codex CLI/ })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByLabelText("Maximum run duration")).toHaveValue(15)
+    expect(agentsPost(spy)).toBeUndefined()
+    fireEvent.click(screen.getByRole("button", { name: "Create agent", exact: true }))
+    await waitFor(() => expect(agentsPost(spy)).toBeDefined())
+    expect(JSON.parse(String((agentsPost(spy)![1] as RequestInit).body))).toMatchObject({ cli_adapter: "CODEX_CLI", llm_provider: "OPENAI", timeout_seconds: 900, system_prompt: "Review documents carefully." })
+  })
 
-    it("still names the three settings it cannot offer", async () => {
-      const note = await findNote()
-      expect(note.textContent).toContain("temperature")
-      expect(note.textContent).toContain("max_tokens")
-      expect(note.textContent).toContain("delegation caps")
-    })
-
-    it("does NOT point at the agent canvas — or any other screen", async () => {
-      const note = await findNote()
-      // The canvas is the specific lie; "after create" was the promise that
-      // some later screen carries these. Neither may come back.
-      expect(note.textContent).not.toMatch(/canvas/i)
-      expect(note.textContent).not.toMatch(/after create/i)
-    })
+  it("does not show obsolete settings as instructions to the user", () => {
+    renderDialog()
+    expect(screen.queryByText("temperature")).not.toBeInTheDocument()
+    expect(screen.queryByText("max_tokens")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /advanced/i })).not.toBeInTheDocument()
   })
 
   // -- The crew field is a picker, not a native list ----------------------

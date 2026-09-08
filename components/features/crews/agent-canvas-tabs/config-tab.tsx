@@ -303,7 +303,7 @@ export interface ConfigTabProps {
   onSelectCrew: (slug: string | null) => void
 }
 
-export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly = false }: ConfigTabProps & { supplementalOnly?: boolean }) {
+export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly = false, omitBilling = false }: ConfigTabProps & { supplementalOnly?: boolean; omitBilling?: boolean }) {
   const isLead = agent.agent_role === "LEAD"
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
   const tools = agent.cli_tools ?? []
@@ -456,7 +456,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly 
       </Appear>
       )}
 
-      {supplementalOnly && <section className="space-y-2"><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p><PaysWithRow workspaceId={agent.workspace_id} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} /></section>}
+      {supplementalOnly && !omitBilling && <section className="space-y-2"><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p><PaysWithRow workspaceId={agent.workspace_id} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} /></section>}
 
       {/* Scheduling an agent directly is a second cron alongside routines —
           internal/scheduler/scheduler.go registers one entry per agent with

@@ -107,7 +107,7 @@ describe("<StepContainer> — network", () => {
   // platform has. The mechanism stays one switch away.
   it("starts open, and says so", () => {
     renderStep()
-    expect(screen.getByText("Open egress")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: /^Open network/ })).toBeInTheDocument()
     expect(screen.queryByText(/Allowed hosts/)).toBeNull()
   })
 
@@ -123,22 +123,22 @@ describe("<StepContainer> — network", () => {
 
   it("switching on the allowlist patches networkMode and reveals the editor", () => {
     const { setState, rerender } = renderStep()
-    fireEvent.click(screen.getByRole("switch", { name: /allowlist/i }))
+    fireEvent.click(screen.getByRole("radio", { name: /^Selected hosts/ }))
     expect(setState).toHaveBeenCalledWith({ networkMode: "restricted" })
 
-    rerender(<StepContainer state={{ ...INITIAL_STATE, networkMode: "restricted" }} setState={setState} />)
+    rerender(<StepContainer state={{ ...INITIAL_STATE, networkMode: "restricted" }} setState={setState} onPickImage={vi.fn()} />)
     expect(screen.getByText(/Allowed hosts/)).toBeInTheDocument()
   })
 
-  it("switching back to open clears the domains rather than hiding them", () => {
+  it("switching back to open preserves the host list in the unsaved draft", () => {
     const { setState } = renderStep({ networkMode: "restricted", allowedDomains: ["github.com"] })
-    fireEvent.click(screen.getByRole("switch", { name: /allowlist/i }))
-    expect(setState).toHaveBeenCalledWith({ networkMode: "free", allowedDomains: [] })
+    fireEvent.click(screen.getByRole("radio", { name: /^Open network/ }))
+    expect(setState).toHaveBeenCalledWith({ networkMode: "free" })
   })
 
-  it("warns that an empty allowlist locks everything", () => {
+  it("explains that provider-only access is not offline", () => {
     renderStep({ networkMode: "restricted", allowedDomains: [] })
-    expect(screen.getByText(/locks all egress/i)).toBeInTheDocument()
+    expect(screen.getByText(/not a fully offline mode/i)).toBeInTheDocument()
   })
 
   it("does not warn once a host is listed", () => {
@@ -147,7 +147,7 @@ describe("<StepContainer> — network", () => {
   })
 
   it("advertises wildcard subdomain support", () => {
-    renderStep({ networkMode: "restricted" })
+    renderStep({ networkMode: "restricted", allowedDomains: ["example.com"] })
     expect(screen.getByText(/\*\.github\.com/)).toBeInTheDocument()
   })
 })

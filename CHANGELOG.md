@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.
+
 - Crew and agent Work tabs use shared concept icons and dashboard cards. Routines replaces the generic Automations link with crew-owned routine previews; issue and mission links preserve the selected team or agent.
 
 - Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.

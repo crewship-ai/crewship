@@ -75,7 +75,7 @@ function setupFetch({ bindFails = false } = {}) {
 }
 
 function renderDialog() {
-  return render(
+  const result = render(
     <CreateAgentDialog
       workspaceId="ws-1"
       open
@@ -85,6 +85,8 @@ function renderDialog() {
       onCreated={vi.fn()}
     />,
   )
+  fireEvent.click(screen.getByRole("button", { name: "Permissions", exact: true }))
+  return result
 }
 
 async function createWith(grants: RegExp[]) {

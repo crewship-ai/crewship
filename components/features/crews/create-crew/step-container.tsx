@@ -1,16 +1,14 @@
 "use client"
 
-import { useMemo } from "react"
+import { useId, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
-import { Clock, Cpu, Globe, HardDrive, MemoryStick, Network, Package, ShieldCheck, TriangleAlert } from "lucide-react"
+import { Clock, Cpu, HardDrive, MemoryStick, Network, Package, TriangleAlert } from "lucide-react"
 import {
   CreateSurfaceDisclosure,
   CreateSurfaceGrid,
   CreateSurfaceNotice,
   CreateSurfaceSection,
-  CreateSurfaceToggleRow,
 } from "@/components/layout/create-surface"
-import { Switch } from "@/components/ui/switch"
 import { useAbilities } from "@/hooks/use-abilities"
 import { PACKAGE_REGISTRY_DOMAINS, mergeDomains } from "../registry-presets"
 import { BaseImageRow } from "./base-image"
@@ -42,37 +40,16 @@ interface Props {
   setState: (patch: Partial<WizardState>) => void
 }
 
+export type EnvironmentSection = "environment" | "tools" | "versions" | "network" | "limits"
+
 interface StepProps extends Props {
+  activeSection?: EnvironmentSection
   /** Opens the wizard's base-image panel. The catalogue is not on this step. */
   onPickImage: () => void
 }
 
-/**
- * Everything about the box the crew runs in, on one step.
- *
- * This used to be two: a Runtime step that opened on CPU, memory and an
- * allowlist, and a Container step underneath it. Three things were wrong with
- * that and all three are product decisions, recorded here because the code no
- * longer shows what it used to be:
- *
- *  · **Sizing led the step.** It is an administrator's question — the defaults
- *    hold two agents and the server already returns sizing advisories — so it
- *    is folded away under a summary rather than being the first thing a new
- *    user is asked to have an opinion about.
- *  · **Egress defaulted to an allowlist** that is still maturing. A
- *    half-working allowlist fails as a silent timeout deep inside a run, which
- *    is the worst failure shape a platform has. Open is the default and the
- *    allowlist is one switch away, because "we will throttle later" only works
- *    if the throttle is already built.
- *  · **MCP had a card of its own.** Tools reach agents through Composio and
- *    the integrations surface now; a crew-level MCP editor in the create path
- *    was a second way to say the same thing, and the one nobody uses.
- *
- * Base image and preinstalled tooling still come from `RuntimeConfig`, which
- * reads the real `/api/v1/features/catalog` and already brand-colours the
- * image icons — the chrome around it changed, not the capability inside it.
- */
-export function StepContainer({ state, setState, onPickImage }: StepProps) {
+/** Shared environment controls: one creation step, or focused sections in Edit. */
+export function StepContainer({ state, setState, onPickImage, activeSection }: StepProps) {
   const { role } = useAbilities()
   const canEditPrivileged = role === "OWNER" || role === "ADMIN"
 
@@ -81,9 +58,10 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
       {/* Base image: one row saying what the crew runs on, and a panel to
           change it in. The catalogue used to be nine radio rows inline, on a
           step that also carries tooling, network and sizing. */}
-      <CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
+      <div hidden={!!activeSection && activeSection !== "environment"}><CreateSurfaceSection title="Base image" icon={HardDrive} accent="teal">
         <BaseImageRow state={state} onChange={onPickImage} />
-      </CreateSurfaceSection>
+        {activeSection && <p className="text-sm text-muted-foreground">The base operating system shared by every agent in this crew. Add packages under Tools, or choose specific language versions under Tool versions.</p>}
+      </CreateSurfaceSection></div>
 
       {/* Sections, not a tab strip.
        *
@@ -95,7 +73,7 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
        * sections docs/prd/create-surface-parity.md §6.3 leads with, plus
        * three disclosures for what it does
        * not show. Nothing is removed; see the note on the prop. */}
-      <RuntimeConfig
+      <div hidden={!!activeSection && !["tools", "versions"].includes(activeSection)}><RuntimeConfig
         value={{
           runtimeImage: state.runtimeImage,
           devcontainerConfig: state.devcontainerConfig,
@@ -108,6 +86,7 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
         })}
         canEditPrivileged={canEditPrivileged}
         layout="sections"
+        focusedSection={activeSection ? activeSection === "versions" ? "versions" : "tools" : undefined}
         // The row above owns the image; without this the catalogue would be
         // on the step twice.
         hideBaseImage
@@ -115,11 +94,12 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
         // component's own 420px both landed roughly two screens down, which
         // is the "where did it go" the old two-step wizard had for other
         // reasons.
-        browserHeight="240px"
+        browserHeight={activeSection ? "360px" : "240px"}
       />
 
-      <NetworkSection state={state} setState={setState} />
-      <SizeDisclosure state={state} setState={setState} />
+      </div>
+      <div hidden={!!activeSection && activeSection !== "network"}><NetworkSection state={state} setState={setState} /></div>
+      <div hidden={!!activeSection && activeSection !== "limits"}><SizeDisclosure state={state} setState={setState} defaultOpen={!!activeSection} /></div>
     </div>
   )
 }
@@ -128,47 +108,28 @@ export function StepContainer({ state, setState, onPickImage }: StepProps) {
 // Egress
 // =============================================================================
 
-/**
- * Two modes, because there is no third one to offer.
- *
- * "Open egress" reads like a middle setting with a wilder one behind it. It
- * is not: `free` is already the maximum this platform can hand out. The
- * sidecar's dial guard is `p.allowPrivate || p.freeMode` (sidecar/proxy.go),
- * so free mode skips the domain allowlist AND permits RFC1918 and loopback —
- * your LAN, and anything listening on the host.
- *
- * What stays blocked in free mode is link-local and cloud metadata:
- * 169.254.169.254 is the AWS/GCP instance-metadata endpoint, and reaching it
- * hands an agent the host's IAM role. That is not a strictness dial we are
- * declining to turn up; it is the one address that must never be reachable,
- * and a "YOLO" switch that unblocked it would be a credential-exfiltration
- * feature. So the honest UI is two modes with the open one saying plainly how
- * far it already goes — not three with a third that cannot mean anything new.
- */
 function NetworkSection({ state, setState }: Props) {
+  const modeId = useId()
+  const [editingHosts, setEditingHosts] = useState(false)
   const restricted = state.networkMode === "restricted"
-
+  const mode = !restricted ? "free" : state.allowedDomains.length || editingHosts ? "hosts" : "providers"
   return (
-    <CreateSurfaceSection title="Network" icon={Network} accent="purple" hint="Where the container may connect.">
-      <CreateSurfaceToggleRow
-        icon={restricted ? ShieldCheck : Globe}
-        accent={restricted ? "green" : "amber"}
-        label={restricted ? "Allowlist" : "Open egress"}
-        hint={
-          restricted
-            ? "Only the listed hosts, plus the provider APIs the sidecar always permits."
-            : "Any host, plus your private network and localhost. Cloud metadata stays blocked."
-        }
-        control={
-          <Switch
-            checked={restricted}
-            onCheckedChange={(on) => setState(on ? { networkMode: "restricted" } : { networkMode: "free", allowedDomains: [] })}
-            aria-label="Restrict egress to an allowlist"
-          />
-        }
-      />
-
-      {restricted && (
+    <CreateSurfaceSection title="Network" icon={Network} accent="purple" hint="Connections allowed for every agent in this crew.">
+      <div role="radiogroup" aria-label="Network access" className="space-y-2">
+        {[
+          { value: "providers", label: "Provider APIs only", hint: "Block general internet access; keep the connections needed to run AI models." },
+          { value: "hosts", label: "Selected hosts", hint: "Allow provider APIs and the domains you list below." },
+          { value: "free", label: "Open network", hint: "Allow internet, private network and localhost. Cloud metadata stays blocked." },
+        ].map(option => <label key={option.value} className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 ${mode === option.value ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"}`}>
+          <input type="radio" name={modeId} value={option.value} checked={mode === option.value} onChange={() => {
+            setEditingHosts(option.value === "hosts")
+            setState(option.value === "free" ? { networkMode: "free" } : option.value === "providers" ? { networkMode: "restricted", allowedDomains: [] } : { networkMode: "restricted" })
+          }} className="mt-1 accent-primary" />
+          <span><span className="block text-sm font-medium">{option.label}</span><span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span></span>
+        </label>)}
+      </div>
+      <p className="text-sm text-muted-foreground">{mode === "free" ? "This is the broadest network access available in Crewship." : mode === "providers" ? "Only the provider APIs and platform connections always permitted by Crewship. This is not a fully offline mode." : "Only the listed hosts, plus the provider APIs and platform connections always permitted by Crewship."}</p>
+      {mode === "hosts" && (
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
@@ -189,7 +150,7 @@ function NetworkSection({ state, setState }: Props) {
           <DomainChips value={state.allowedDomains} onChange={(v) => setState({ allowedDomains: v })} />
           {state.allowedDomains.length === 0 && (
             <CreateSurfaceNotice tone="warn" icon={TriangleAlert}>
-              An empty allowlist locks all egress. Add at least one host unless that is what you mean.
+              No extra hosts are allowed yet. Provider APIs and platform connections remain available.
             </CreateSurfaceNotice>
           )}
         </div>
@@ -202,14 +163,14 @@ function NetworkSection({ state, setState }: Props) {
 // Sizing — folded away, because it is an administrator's question
 // =============================================================================
 
-function SizeDisclosure({ state, setState }: Props) {
+function SizeDisclosure({ state, setState, defaultOpen = false }: Props & { defaultOpen?: boolean }) {
   const summary = useMemo(() => {
     const ttl = state.ttlHours == null ? "no auto-stop" : `stops after ${state.ttlHours} h`
     return `${state.cpus} ${state.cpus === 1 ? "core" : "cores"} · ${prettyMemory(state.memoryMB)} · ${ttl}`
   }, [state.cpus, state.memoryMB, state.ttlHours])
 
   return (
-    <CreateSurfaceDisclosure icon={Cpu} accent="slate" label="Size" summary={summary}>
+    <CreateSurfaceDisclosure icon={Cpu} accent="slate" label="Size" summary={summary} defaultOpen={defaultOpen}>
       <CreateSurfaceGrid>
         <SizeField icon={MemoryStick} label="Memory" help="Hard limit" cli={`--memory-mb ${state.memoryMB}`}>
           <ChipRow>

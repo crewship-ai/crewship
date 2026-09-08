@@ -10,6 +10,7 @@ import {
   Cpu,
   Image as ImageIcon,
   KeyRound,
+  MessageSquare,
   Layers,
   Sparkles,
   TriangleAlert,
@@ -25,7 +26,6 @@ import {
   CreateSurface,
   CreateSurfaceBody,
   CreateSurfaceChoice,
-  CreateSurfaceDisclosure,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceGrid,
@@ -49,7 +49,6 @@ import {
   useAgentAccessCatalog,
   type AgentAccessSelection,
 } from "./agent-access"
-import { defaultModelForProvider, isKnownModel } from "./llm-models"
 import {
   applyPersonaDefaults,
   initialAgentDraft,
@@ -59,12 +58,12 @@ import {
   type CrewLite,
 } from "./types"
 import { AskFormsBuilder } from "../ask-forms-builder"
-import { WorkspaceGlyph } from "../workspace-visuals"
+import { EditorLayout, EditorPanel } from "../editor-layout"
+import { AgentModelSettings } from "./agent-model-settings"
+import { PaysWithRow } from "../agent-canvas-tabs/pays-with-row"
 import { PersonaDraft } from "../persona-draft"
-import { ConfigModel } from "../canvas/config-model"
 import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
 import type { AgentRecord } from "../agent-canvas-tabs/types"
-import type { LLMProvider } from "@/lib/entities"
 import type { AgentDraft } from "./types"
 
 export interface CreateAgentDialogProps {
@@ -90,29 +89,7 @@ const INPUT_CLASS =
   "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 max-sm:min-h-12 max-sm:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
-const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
-const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"] as const
-
-/** Single-screen Create Agent dialog. Replaces the 3-step wizard with one
- *  surface that mirrors the field set of POST /api/v1/agents 1:1.
- *
- *  Mounts the shared shell (components/layout/create-surface.tsx) at size
- *  `lg`, so the overlay, the focus trap, Esc, ⌘↵, the discard guard, the
- *  bottom-sheet phone layout and the never-scrolling footer are one
- *  implementation rather than this file's own. What is left here is the
- *  form and the submit.
- *
- *  Layout (top → bottom):
- *    - Template: one row stating the current pick, opening the catalogue
- *    - Identity: avatar (picker) | name | crew | slug | role | role title |
- *      description
- *    - Persona textarea (always visible, pre-filled from chosen template)
- *    - Runtime: model select + memory toggle (90% of users stop here)
- *    - Advanced disclosure: tool_profile + cli_adapter + llm_provider +
- *      timeout + lead_mode (visible only for LEAD role)
- *
- *  Submit body matches the fields in internal/api/agents_create.go's
- *  createAgentRequest struct — there's a unit test guarding the shape. */
+/** Shared create/edit form with persistent drafts and focused settings sections. */
 export function CreateAgentDialog({
   workspaceId,
   open,
@@ -127,6 +104,7 @@ export function CreateAgentDialog({
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
   const router = useRouter()
+  const [section, setSection] = useState("identity")
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
   const [persona, setPersona] = useState<string | null | undefined>(undefined)
   const [baseline, setBaseline] = useState<AgentDraft | null>(null)
@@ -160,6 +138,7 @@ export function CreateAgentDialog({
   useEffect(() => {
     if (open && !wasOpenRef.current) {
       const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
+      setSection("identity")
       setDraft(next)
       setBaseline(next)
       setExtra({})
@@ -338,7 +317,8 @@ export function CreateAgentDialog({
       <CreateSurface
         open={open}
         onOpenChange={onOpenChange}
-        size="lg"
+        size="xl"
+        className="h-[92dvh] sm:h-[min(85dvh,720px)]"
         dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
         discardLabel="this agent"
         onSubmit={() => {
@@ -363,14 +343,14 @@ export function CreateAgentDialog({
           onClose={() => onOpenChange(false)}
         />
 
-        {!pickerOpen && <nav aria-label="Agent editor sections" className="flex shrink-0 gap-2 overflow-x-auto border-b border-border/60 px-4 py-3">{[["Identity", ImageIcon], ["Instructions", Brain], ["Runtime", Cpu], ["Capabilities", KeyRound]].map(([label, Icon]) => <button type="button" key={String(label)} className="flex shrink-0 items-center gap-2 rounded-xl px-2 py-1 text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary" onClick={(event) => {
-          const surface = event.currentTarget.closest('[role="dialog"]')
-          const target = Array.from(surface?.querySelectorAll('h3,[data-editor-advanced]') ?? []).find(node => node !== event.currentTarget && (label === 'Capabilities' ? node.hasAttribute('data-editor-advanced') : node.tagName === 'H3' && node.textContent === label))
-          if (label === "Capabilities") { const disclosure = target?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]'); disclosure?.click() }
-          if (target instanceof HTMLElement) { target.tabIndex = -1; target.focus({ preventScroll: true }) }
-          target?.scrollIntoView({ block: "start", behavior: "smooth" })
-        }}><WorkspaceGlyph icon={Icon as typeof Brain} tone={label === "Identity" || label === "Instructions" ? "purple" : "blue"} />{String(label)}</button>)}</nav>}
-        <CreateSurfaceBody className="flex flex-col gap-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
+        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen} sections={[
+          { id: "identity", label: "Identity", icon: ImageIcon },
+          { id: "model", label: "Model and execution", icon: Cpu },
+          { id: "instructions", label: "Instructions and persona", icon: Brain },
+          { id: "access", label: "Permissions", icon: KeyRound },
+          { id: "chat", label: "Chat", icon: MessageSquare },
+        ]}>
+        <CreateSurfaceBody className="min-w-0 space-y-5">
           {/* The avatar picker is a PANEL: the surface swaps its body for it
               and the back arrow returns. It used to be a second Radix dialog
               stacked on this one — two focus traps, two Escape handlers, and
@@ -410,6 +390,7 @@ export function CreateAgentDialog({
               is up: the panel replaces the body, it does not sit beside it. */}
           {!pickerOpen && (
             <>
+          <EditorPanel active={section === "identity"}>
           {/* ─── Template ───
               One line, not a wall of pills.
               
@@ -642,6 +623,8 @@ export function CreateAgentDialog({
           </CreateSurfaceSection>
 
           {agent && draft.crewSlug !== baseline?.crewSlug && <CreateSurfaceNotice tone="warn">Moving this agent changes its inherited access, shared knowledge, and runtime environment.</CreateSurfaceNotice>}
+          </EditorPanel>
+          <EditorPanel active={section === "instructions"}>
           {/* ─── Persona ─── */}
           <CreateSurfaceSection
             title="Instructions"
@@ -707,16 +690,8 @@ WORK STYLE: …`}
             </div>
           </CreateSurfaceSection>
 
-          {/* ─── Runtime (model + memory only — most common) ─── */}
-          <CreateSurfaceSection title="Runtime" icon={Cpu} accent="teal">
-            <ConfigModel draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={(model) => setDraft({ ...draft, llmModel: model })} />
-
-            {/* "on" / "off" restated the switch beside it and said nothing
-                about what is being switched. The agent canvas already words
-                this properly ("Memory between sessions — without it every
-                session starts from nothing", config-tab.tsx); the create form
-                was the one place that only had the state. Same sentence, so
-                the two surfaces cannot drift into describing it differently. */}
+          {agent && <PersonaDraft workspaceId={workspaceId} agentId={agent.id} value={persona} onChange={setPersona} />}
+          <CreateSurfaceSection title="Memory" icon={Brain} accent="purple">
             <CreateSurfaceToggleRow
               concept="memory"
               label="Memory between sessions"
@@ -734,111 +709,9 @@ WORK STYLE: …`}
               }
             />
           </CreateSurfaceSection>
-
-          {/* ─── Tools & notifications ───
-              Between Runtime and Advanced on purpose. It is not advanced —
-              "which tools may this one call" is a question people have while
-              filling the form, and the answer differs from its crew's more
-              often than not: a Security Analyst and a Copywriter in the same
-              container should not hold the same integrations. The crew's
-              Container step decides what is INSTALLED; this decides what this
-              agent may CALL and where it may post. */}
-          {!agent && <AgentAccessSection
-            catalog={accessCatalog}
-            selection={access}
-            onChange={setAccess}
-          />}
-
-
-          {/* ─── Advanced ───
-              The lid carries the CURRENT values, not the field names: the
-              point of a disclosure is that you can decide not to open it.
-              Wrapped in its own `shrink-0`: the body is a flex column that is
-              shorter than its content on any viewport (twenty fields do not
-              fit in 92dvh), so every child is a shrinkable flex item — and
-              `CreateSurfaceDisclosure`'s own root carries `overflow-hidden`.
-              Per the flex sizing spec, a flex item's automatic minimum size
-              collapses to 0 the moment its overflow is not `visible`, so this
-              was the one section with nothing stopping flex-shrink from
-              eating it down to ~2px while its siblings (no overflow-hidden of
-              their own, so a real min-content floor) kept their full size —
-              measured: the whole "Advanced" row rendered under 2px tall,
-              button included, on a phone viewport. `shrink-0` on a plain
-              wrapper div moves the flex item one level up, off the
-              overflow-hidden element, so IT keeps its content-based min size
-              and the disclosure inside renders at its real height again. */}
-          <div className="shrink-0" data-editor-advanced="true">
-          <CreateSurfaceDisclosure
-            icon={Wrench}
-            accent="amber"
-            label="Advanced"
-            summary={`${draft.toolProfile.toLowerCase()} tools · ${draft.cliAdapter
-              .toLowerCase()
-              .replace(/_/g, " ")} · ${draft.llmProvider.toLowerCase()} · ${Math.round(
-              draft.timeoutSeconds / 60,
-            )} min${draft.agentRole === "LEAD" ? ` · ${draft.leadMode}` : ""}`}
-          >
-            <CreateSurfaceField label="Tool profile" hint="what tools the agent can call">
-              <CreateSurfaceChoice
-                ariaLabel="Tool profile"
-                value={draft.toolProfile}
-                options={TOOL_PROFILES.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => setDraft({ ...draft, toolProfile: v })}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceField label="CLI adapter" hint="which CLI runs in the container">
-              <CreateSurfaceChoice
-                ariaLabel="CLI adapter"
-                value={draft.cliAdapter}
-                options={CLI_ADAPTERS.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => setDraft({ ...draft, cliAdapter: v })}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceField label="LLM provider" hint="changing this swaps the model list">
-              <CreateSurfaceChoice
-                ariaLabel="LLM provider"
-                value={draft.llmProvider}
-                options={LLM_PROVIDERS.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => {
-                  // Auto-reset model to the provider's default when
-                  // the user toggles. The previous model string is
-                  // (almost certainly) wrong for the new provider —
-                  // claude-opus on OPENAI would be a runtime error
-                  // hours later.
-                  const newProvider: LLMProvider = v
-                  const keepModel = isKnownModel(newProvider, draft.llmModel)
-                  setDraft({
-                    ...draft,
-                    llmProvider: newProvider,
-                    llmModel: keepModel ? draft.llmModel : defaultModelForProvider(newProvider),
-                  })
-                }}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceGrid>
-              <CreateSurfaceField label="Timeout" htmlFor="agent-timeout" hint="seconds">
-                <input
-                  id="agent-timeout"
-                  type="number"
-                  step="60"
-                  min="60"
-                  max="7200"
-                  value={draft.timeoutSeconds}
-                  onChange={(e) => {
-                    // Guard against NaN ('' / non-numeric) and clamp to a
-                    // sane range. Without this, an empty field would set
-                    // timeout=NaN which the API would reject as 400 with
-                    // a confusing 'invalid integer' message.
-                    const raw = Number(e.target.value)
-                    const safe = Number.isFinite(raw) ? Math.min(7200, Math.max(60, raw)) : 1800
-                    setDraft({ ...draft, timeoutSeconds: safe })
-                  }}
-                  className={cn(INPUT_CLASS, "font-mono")}
-                />
-              </CreateSurfaceField>
+          </EditorPanel>
+          <EditorPanel active={section === "model"}>
+            <AgentModelSettings workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
               {draft.agentRole === "LEAD" && (
                 <CreateSurfaceField label="Lead mode" htmlFor="agent-lead-mode">
                   <select
@@ -849,44 +722,30 @@ WORK STYLE: …`}
                     }
                     className={INPUT_CLASS}
                   >
-                    <option value="active">active</option>
-                    <option value="passive">passive</option>
+                    <option value="active">Active — plans work for the crew</option>
+                    <option value="passive">Passive — responds when invoked</option>
                   </select>
                 </CreateSurfaceField>
               )}
-            </CreateSurfaceGrid>
-
-            {/* These three are columns in the v01 migration with no read and
-                no write site anywhere in the product — see #1781. This note
-                used to end "set on the agent canvas after create", which sent
-                the user to a tab that deliberately does not carry them
-                (agent-canvas-tabs/config-tab.tsx). Whether the columns get
-                enforced or dropped is still open; until it is decided, the
-                only honest thing this door can say is that nothing sets them.
-                Do not name another screen here again. */}
-            <p className="text-[10.5px] text-muted-foreground">
-              Not editable here:{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                temperature
-              </code>
-              ,{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                max_tokens
-              </code>
-              ,{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                delegation caps
-              </code>{" "}
-              — no API exposes these, so they cannot be set anywhere.
-            </p>
-          </CreateSurfaceDisclosure>
-          {!agent && <CreateSurfaceDisclosure label="Chat suggestions and forms"><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async (value) => { setExtra((current) => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={(value) => { setExtra((current) => ({ ...current, ask_forms: value })) }} /></CreateSurfaceDisclosure>}
-          {agent && <CreateSurfaceDisclosure label="Persona"><PersonaDraft workspaceId={workspaceId} agentId={agent.id} value={persona} onChange={setPersona} /></CreateSurfaceDisclosure>}
-          {agent && <CreateSurfaceDisclosure label="Chat and additional settings"><ConfigTab supplementalOnly agent={{ ...agent, ...extra }} crews={crews} patch={async (body) => { setExtra((current) => ({ ...current, ...body })) }} onSelectCrew={() => {}} /></CreateSurfaceDisclosure>}
-          </div>
+          </EditorPanel>
+          <EditorPanel active={section === "access"}>
+            <CreateSurfaceSection title="Tool access" icon={Wrench} accent="amber" hint="The runner's built-in tools. Credentials and integrations have separate permissions.">
+              <CreateSurfaceChoice ariaLabel="Tool access" value={draft.toolProfile} onChange={toolProfile => setDraft({ ...draft, toolProfile })} options={TOOL_PROFILES.map(value => ({ value, label: { MINIMAL: "Read and plan", CODING: "Workspace work", FULL: "Full tool access" }[value] }))} />
+              <p className="text-sm text-muted-foreground">{{ MINIMAL: "Requests a restricted tool set or read-only planning mode, depending on the runner.", CODING: "Read and edit workspace files, and run commands inside the crew container.", FULL: "All tools exposed by the runner. Crew permissions and network rules still apply." }[draft.toolProfile]}</p>
+              <p className="text-xs text-muted-foreground">Enforcement depends on the selected runner. This setting does not change the crew's network access.</p>
+            </CreateSurfaceSection>
+            {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
+            {agent && <CreateSurfaceSection title="Provider account" icon={KeyRound}><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} />}</CreateSurfaceSection>}
+            {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Work → Skills and access.</p>}
+          </EditorPanel>
+          <EditorPanel active={section === "chat"}>
+            {!agent && <CreateSurfaceSection title="Chat suggestions and forms" icon={MessageSquare}><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async value => { setExtra(current => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={value => { setExtra(current => ({ ...current, ask_forms: value })) }} /></CreateSurfaceSection>}
+            {agent && <ConfigTab supplementalOnly omitBilling agent={{ ...agent, ...extra }} crews={crews} patch={async body => { setExtra(current => ({ ...current, ...body })) }} onSelectCrew={() => {}} />}
+          </EditorPanel>
             </>
           )}
         </CreateSurfaceBody>
+        </EditorLayout>
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
