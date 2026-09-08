@@ -79,6 +79,7 @@ describe("<RoutineCreateDialog>", () => {
     const typed = "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n";
     act(() => lastDocChange?.(typed))
     fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
+    fireEvent.click(screen.getByText("Results", { exact: true }))
     expect(screen.getByText("report")).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
@@ -91,7 +92,7 @@ describe("<RoutineCreateDialog>", () => {
     fireEvent.click(screen.getByText("Write it yourself"))
     act(() => lastDocChange?.("dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n"))
     fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
-    expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible()
+    expect(screen.getByLabelText("Name")).toBeVisible()
   })
 
   it("hides the test-gate escape hatch from a role the server would refuse", () => {
@@ -218,7 +219,7 @@ describe("New routine — every mode offers a Cancel", () => {
     // behaviour the two new footers were measured against.)
     const { onClose } = openDialog()
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.change(screen.getByPlaceholderText("Friendly name"), {
+    fireEvent.change(screen.getByPlaceholderText("Routine name"), {
       target: { value: "nightly sweep" },
     })
 
@@ -317,7 +318,7 @@ describe("New routine — the discard guard follows the draft, not the screen", 
   it("asks about an editor draft carried back to the tiles too", () => {
     const { onClose } = openDialog()
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.change(screen.getByPlaceholderText("Friendly name"), {
+    fireEvent.change(screen.getByPlaceholderText("Routine name"), {
       target: { value: "nightly sweep" },
     })
     back()

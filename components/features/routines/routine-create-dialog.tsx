@@ -6,6 +6,8 @@ import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { motion, useReducedMotion } from "motion/react"
+import { RoutineRecipeSteps } from "./routine-recipe-steps"
 import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -30,6 +32,7 @@ import {
   CreateSurfaceChoice,
   CreateSurfaceDescriptionInput,
   CreateSurfaceField,
+  CreateSurfaceTitleInput,
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceLoading,
@@ -197,6 +200,7 @@ interface RoutineListItem {
 
 export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, routine, initialDraft, advancedDetails }: Props) {
   const router = useRouter()
+  const reduceMotion = useReducedMotion()
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
@@ -685,7 +689,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "fork one of your own routines"
         : mode === "advanced"
-          ? "Prepare your recipe, review its steps, then validate and save."
+          ? "Set up the recipe. Save when ready."
           // The entry screen had no subtitle, so three tiles appeared with
           // nothing saying they are three routes to the same place. People
           // read a picker as "which kind am I making", and the answer is that
@@ -1017,29 +1021,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               <nav aria-label="Recipe sections" className="space-y-1">
                 {["Overview", "Steps", "Schedule", "Validate", "Code"].map(item => <button key={item} type="button" aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)} className={cn("w-full rounded-xl px-3 py-2.5 text-left text-sm hover:bg-muted", section === item ? "bg-primary/10 text-primary" : "text-muted-foreground")}>{item}</button>)}
               </nav>
-              <p className="mt-auto px-2 pt-6 text-xs leading-relaxed text-muted-foreground">Work is not executed while you edit or validate.</p>
+              <p className="mt-auto px-2 pt-6 text-xs leading-relaxed text-muted-foreground">Editing does not run work.</p>
             </aside>
             <div className={cn("min-w-0 flex-1 overflow-y-auto p-5 sm:p-7", section === "Code" && "hidden")}>
-              <h2 className="text-lg font-medium">{section === "Validate" ? "Review before saving" : section}</h2>
-              <p className="mb-6 mt-1 text-sm text-muted-foreground">{({ Overview: "Give your routine a clear purpose and choose the team responsible for it.", Inputs: "What this recipe needs before it can start.", Steps: "The recipe your agents and tools will follow.", Outputs: "What this recipe declares it will produce.", Schedule: "Choose when the saved routine should start.", Validate: "Check the definition without executing agents, scripts or external actions." } as Record<string, string>)[section]}</p>
+              {section !== "Overview" && <motion.header key={section} initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }} className="mb-5"><h2 className="text-lg font-medium">{section === "Steps" ? "Workflow" : section === "Validate" ? "Ready to save?" : "When it runs"}</h2></motion.header>}
               <div hidden={section !== "Overview"} className="space-y-6">
                 {forkSource && <p className="rounded-xl border p-3 text-sm">Based on {forkSource}. Saving creates a separate routine.</p>}
-              <CreateSurfaceSection title="Routine details" concept="routines">
-                <div className="flex items-center gap-4"><CrewIconPopover modal icon={icon} color={color} size="lg" ariaLabel="Choose routine icon and color" onIconChange={setIcon} onColorChange={setColor} /><div><p className="text-sm font-medium">Icon and color</p><p className="mt-1 text-xs text-muted-foreground">Your routine’s identity in the sidebar, calendar and history.</p></div></div>
-                <CreateSurfaceField
-                  label="Name"
-                  htmlFor="routine-name"
-                  hint="Display name shown in Routines and Calendar."
-                >
-                  <Input
-                    id="routine-name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Friendly name"
-                    className={CREATE_SURFACE_INPUT}
-                  />
-                </CreateSurfaceField>
-
+              <CreateSurfaceSection title="Identity" concept="routines">
+                <div className="flex items-center gap-3"><CrewIconPopover modal icon={icon} color={color} size="lg" ariaLabel="Choose routine icon and color" onIconChange={setIcon} onColorChange={setColor} /><CreateSurfaceTitleInput id="routine-name" aria-label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="Routine name" /></div>
                 <CreateSurfaceField label="Description" htmlFor="routine-description">
                   <CreateSurfaceDescriptionInput
                     id="routine-description"
@@ -1047,14 +1036,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     onChange={(e) => { setDescription(e.target.value); if (parsedDSL) replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, description: e.target.value }) : JSON.stringify({ ...parsedDSL, description: e.target.value }, null, 2), { baseline: false }) }}
                     rows={3}
                     placeholder="One-line summary"
-                    className="resize-none rounded-md border border-hairline bg-background p-1.5"
+                    className="min-h-24 resize-y border-0 bg-transparent px-0 text-sm focus-visible:ring-0"
                   />
                 </CreateSurfaceField>
 
                 <CreateSurfaceField
-                  label="Author crew"
+                  label="Team"
                   htmlFor="routine-author-crew"
-                  hint="Crew whose agents and credentials run this routine."
+
                 >
                   <CrewPicker
                     id="routine-author-crew"
@@ -1066,12 +1055,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     clearLabel="— choose at runtime —"
                   />
                 </CreateSurfaceField>
-                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint={routine ? "Permanent identifier. Editing saves a new version of this routine." : "Unique name used in links and code. Edit it in Code."}><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField>
+
               </CreateSurfaceSection>
 
-                {definitionRows(parsedDSL?.steps).some(s => s.type === "agent_run") && <section className="space-y-4 rounded-2xl border border-hairline p-5"><h3 className="font-medium">Agents doing the work</h3><p className="text-sm text-muted-foreground">Choose who handles each agent step. Scripts and other steps run as defined in the recipe.</p>{definitionRows(parsedDSL?.steps).map((step, index) => step.type === "agent_run" ? <div key={index} className="space-y-2"><label id={`agent-step-label-${index}`} className="text-sm">{String(step.name || step.id)}</label><Select value={String(step.agent_slug || "")} onValueChange={agent_slug => { if (!parsedDSL) return; const steps = definitionRows(parsedDSL.steps).map((s, i) => i === index ? { ...s, agent_slug } : s); replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, steps }) : JSON.stringify({ ...parsedDSL, steps }, null, 2), { baseline: false }) }} disabled={!authorCrewId}><SelectTrigger aria-labelledby={`agent-step-label-${index}`} className="h-11 w-full rounded-xl bg-muted/30"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{!agents.some(a => a.crew_id === authorCrewId && a.slug === step.agent_slug) && step.agent_slug ? <SelectItem value={String(step.agent_slug)} disabled>{String(step.agent_slug)} · choose an agent from this crew</SelectItem> : null}{agents.filter(a => a.crew_id === authorCrewId).map(a => <SelectItem key={a.id} value={a.slug}><span className="inline-flex items-center gap-2"><AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style || describeCrew?.avatar_style} avatarUrl={a.avatar_url} className="h-6 w-6" alt="" /><span>{a.name}</span><span className="text-xs text-muted-foreground">{a.role_title || a.agent_role.toLowerCase()}</span></span></SelectItem>)}</SelectContent></Select></div> : null)}{!authorCrewId && <p className="text-xs text-muted-foreground">Choose a crew above to see its agents.</p>}<p className="text-xs text-muted-foreground">Nested workflows and review agents can be configured in Code.</p></section>}
-                {parsedDSL && (parsedDSL.inputs == null || (Array.isArray(parsedDSL.inputs) && parsedDSL.inputs.every(i => i != null && typeof i === "object" && typeof i.name === "string"))) ? <RoutineInputFormBuilder inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]} onChange={inputs => replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, inputs }) : JSON.stringify({ ...parsedDSL, inputs }, null, 2), { baseline: false })} /> : <p className="text-sm text-destructive">Fix the input declarations in Code to edit the start form.</p>}
-                <section aria-label="What you receive" className="space-y-3 rounded-2xl border border-hairline p-5"><h3 className="font-medium">What you receive</h3>{definitionRows(parsedDSL?.outputs).map((output, i) => <div key={i}><p className="text-sm">{String(output.label || output.name || "Result")}</p><p className="text-sm text-muted-foreground">{String(output.description || "No description supplied by the author.")}</p></div>)}{!definitionRows(parsedDSL?.outputs).length && <p className="text-sm text-muted-foreground">No outputs declared yet.</p>}<button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit expected results in Code →</button></section>
+                {definitionRows(parsedDSL?.steps).some(s => s.type === "agent_run") && <section className="space-y-4 rounded-2xl border border-hairline p-5"><h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Agents</h3>{definitionRows(parsedDSL?.steps).map((step, index) => step.type === "agent_run" ? <div key={index} className="space-y-2"><label id={`agent-step-label-${index}`} className="text-sm">{String(step.name || step.id)}</label><Select value={String(step.agent_slug || "")} onValueChange={agent_slug => { if (!parsedDSL) return; const steps = definitionRows(parsedDSL.steps).map((s, i) => i === index ? { ...s, agent_slug } : s); replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, steps }) : JSON.stringify({ ...parsedDSL, steps }, null, 2), { baseline: false }) }} disabled={!authorCrewId}><SelectTrigger aria-labelledby={`agent-step-label-${index}`} className="h-11 w-full rounded-xl bg-muted/30"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{!agents.some(a => a.crew_id === authorCrewId && a.slug === step.agent_slug) && step.agent_slug ? <SelectItem value={String(step.agent_slug)} disabled>{String(step.agent_slug)} · choose an agent from this crew</SelectItem> : null}{agents.filter(a => a.crew_id === authorCrewId).map(a => <SelectItem key={a.id} value={a.slug}><span className="inline-flex items-center gap-2"><AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style || describeCrew?.avatar_style} avatarUrl={a.avatar_url} className="h-6 w-6" alt="" /><span>{a.name}</span><span className="text-xs text-muted-foreground">{a.role_title || a.agent_role.toLowerCase()}</span></span></SelectItem>)}</SelectContent></Select></div> : null)}{!authorCrewId && <p className="text-xs text-muted-foreground">Choose a crew above to see its agents.</p>}</section>}
+                <details className="group rounded-2xl border border-hairline"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span className="text-sm font-medium">Start form</span><span className="text-xs text-muted-foreground">{definitionRows(parsedDSL?.inputs).length ? `${definitionRows(parsedDSL?.inputs).length} questions` : "No questions"} · Edit</span></summary><div className="border-t border-hairline p-4">                {parsedDSL && (parsedDSL.inputs == null || (Array.isArray(parsedDSL.inputs) && parsedDSL.inputs.every(i => i != null && typeof i === "object" && typeof i.name === "string"))) ? <RoutineInputFormBuilder inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]} onChange={inputs => replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, inputs }) : JSON.stringify({ ...parsedDSL, inputs }, null, 2), { baseline: false })} /> : <p className="text-sm text-destructive">Fix the input declarations in Code to edit the start form.</p>}
+</div></details>
+                <details className="rounded-2xl border border-hairline"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4"><span className="text-sm font-medium">Results</span><span className="text-xs text-muted-foreground">{definitionRows(parsedDSL?.outputs).length} declared · View</span></summary><div className="space-y-3 border-t border-hairline p-4">{definitionRows(parsedDSL?.outputs).map((output, i) => <div key={i}><p className="text-sm">{String(output.label || output.name || "Result")}</p><p className="text-sm text-muted-foreground">{String(output.description || "No description supplied by the author.")}</p></div>)}{!definitionRows(parsedDSL?.outputs).length && <p className="text-sm text-muted-foreground">No outputs declared yet.</p>}<button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit expected results in Code →</button></div></details>
+                <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-xs text-muted-foreground">Technical identity</summary><div className="mt-4">                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint={routine ? "Permanent identifier. Editing saves a new version of this routine." : "Unique name used in links and code. Edit it in Code."}><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField></div></details>
                 {advancedDetails && <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Access, budget and technical details</summary><div className="mt-4 space-y-4"><p className="text-xs text-muted-foreground">Budget and connection changes apply immediately.</p>{advancedDetails}</div></details>}
                 {!routine && <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Choose a starter template</summary><div className="mt-4 grid gap-3 sm:grid-cols-3">
 
@@ -1085,8 +1076,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 ))}
                 </div></details>}
               </div>
-              {section === "Steps" && <div className="space-y-4">{definitionRows(parsedDSL?.steps).map((step, i) => <div key={i} className="rounded-2xl border border-hairline p-4"><h3 className="font-medium">{i + 1}. {String(step.name || step.id || "Step")}</h3><p className="mt-1 text-xs text-muted-foreground">{String(step.type || "Unspecified").replaceAll("_", " ")}{step.agent_slug ? ` · ${step.agent_slug}` : ""}</p>{(step.description || step.prompt) ? <p className="mt-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">{String(step.description || step.prompt)}</p> : null}{(step.script || step.code) ? <details className="mt-3"><summary className="cursor-pointer text-sm text-primary">View script configuration</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted/30 p-3 text-xs">{JSON.stringify(step.script || step.code, null, 2)}</pre></details> : null}</div>)}<div className="relative h-[380px] overflow-hidden rounded-2xl border border-hairline">{parsedDSL ? <RoutineDefinitionCanvas definition={parsedDSL} slug={slug} name={name || slug} /> : <p className="p-5 text-sm text-muted-foreground">Fix the definition in Code to display its steps.</p>}</div><button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit steps in Code →</button></div>}
-              {section === "Schedule" && routine && <div className="space-y-5"><p className="text-sm text-muted-foreground">These are the routine’s existing starts. Schedule changes apply immediately, independently of saving the recipe.</p><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div>}
+              {section === "Steps" && (parsedDSL ? <RoutineRecipeSteps definition={parsedDSL} slug={slug} name={name || slug} onChange={next => replaceBuffer(dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2), { baseline: false })} onOpenCode={() => setSection("Code")} /> : <p className="text-sm text-destructive">Fix the definition in Code to see its steps.</p>)}
+              {section === "Schedule" && routine && <div className="space-y-5"><p className="text-sm text-muted-foreground">Schedule changes apply immediately.</p><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><details className="rounded-xl border border-hairline p-4"><summary className="cursor-pointer text-xs text-muted-foreground">Event triggers · Webhooks</summary><div className="mt-4"><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div></details></div>}
               {section === "Schedule" && !routine && <div className="space-y-5">              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
               {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
 <p className="text-sm text-muted-foreground">Saving activates the selected schedule. Leave “When I start it” selected to save without an automatic start.</p></div>}

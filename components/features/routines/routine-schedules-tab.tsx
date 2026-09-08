@@ -137,13 +137,13 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
 
       <section aria-label="Schedules" className="space-y-4">
         <h2 className="text-base font-medium">Schedules</h2>
-        <RoutineOnceSchedule key={slug} workspaceId={workspaceId} slug={slug} />
+
 
       {/* List card */}
       {ours.length === 0 && !formOpen ? (
         <Card title="Repeating schedules">
           <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <p className="text-sm text-muted-foreground">No repeating schedules. One-time starts are listed above.</p>
+            <p className="text-sm text-muted-foreground">Choose the days and time this routine should repeat.</p>
             <Button size="sm" onClick={() => setFormOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Add schedule</Button>
           </div>
         </Card>
@@ -196,12 +196,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                     )}
                     <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12px] text-muted-foreground">
-                    <span>{s.cron_expr}</span>
-                    <span className="opacity-60">·</span>
-                    <span>{s.timezone}</span>
-                    <span className="text-foreground/70">— {describeCron(s.cron_expr)}</span>
-                  </div>
+                  <div className="text-xs text-muted-foreground"><span className="text-foreground/80">{describeCron(s.cron_expr)}</span><span> · {s.timezone}</span></div>
                   {health.reason && (
                     <p
                       className={cn(
@@ -312,7 +307,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
               />
             </div>
             <RoutineRecurrenceFields cron={cronExpr} timezone={timezone} onCronChange={setCronExpr} onTimezoneChange={setTimezone} />
-            <div>
+            <details><summary className="cursor-pointer text-xs text-muted-foreground">Advanced inputs · JSON</summary><div className="mt-3">
               <FieldLabel>Inputs (JSON)</FieldLabel>
               <textarea
                 aria-label="Inputs JSON"
@@ -324,6 +319,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                 Passed as inputs to every invocation. Leave as <span className="font-mono">{`{}`}</span> for default inputs.
               </p>
             </div>
+            </details>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setFormOpen(false)} disabled={busy} className="h-9 px-4">
                 Cancel
@@ -336,6 +332,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
         </Card>
       )}
 
+      <RoutineOnceSchedule key={slug} workspaceId={workspaceId} slug={slug} />
       </section>
       <details className="rounded-xl border border-border/60 bg-card p-4"><summary className="cursor-pointer text-xs text-muted-foreground">Advanced execution settings</summary>
       {/* §13.2 "If it overlaps" — read-only: concurrency_key/max_concurrent

@@ -371,3 +371,21 @@ existing schedule/webhook managers; changes there, and budget changes, apply
 immediately and say so. They are independent of the unsaved recipe buffer.
 Creation continues to use atomic recipe+trigger save. Static validation is still
 required and never executes work. No database migration or Issues contract change.
+
+## Readable authoring hierarchy (2026-09-08 refinement)
+
+Use the shared New Project identity pattern: icon and name on one line, a short
+brief and team. Start form and declared results are counted disclosures; technical
+identity is secondary. Preserve the explorer and builder navigation.
+
+Steps has mutually exclusive List / Graph views. Compact step rows show the
+actual action and input condition; selecting one reveals its editable fields.
+Edits retain unknown configuration, dependencies and conditions. On small screens
+the selected inspector replaces the list, with an explicit return. Animations
+respect reduced motion. This is recipe configuration, never simulated execution.
+
+Recurrence uses day/week/month presets, including weekends and multiple weekdays.
+Unsupported cron stays intact in Advanced. One-time scheduling uses an English
+calendar picker plus time. Repeating schedules are primary, one-time starts
+secondary, event triggers expandable. Scheduling still uses existing APIs; no
+new database representation or execution contract is introduced.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { RoutineDateTimePicker } from "./routine-date-time-picker"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 
@@ -55,7 +55,7 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
     <p className="text-xs text-muted-foreground">{Intl.DateTimeFormat().resolvedOptions().timeZone} · Includes starts added from Calendar. Each runs once.</p>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {pending.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 p-3 text-sm"><div><span className="block font-medium">{new Date(p.fire_at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span><span className="text-xs text-muted-foreground">Scheduled · One-time start</span></div><Button size="sm" variant="ghost" disabled={busy} onClick={() => cancel(p.id)}>Cancel scheduled start</Button></div>)}
-    <details open={pending.length === 0}><summary className="cursor-pointer text-xs text-primary">Schedule a one-time start</summary><div className="mt-3 flex flex-wrap gap-2"><Input aria-label="One-time date and time" lang="en-GB" className="max-w-xs" type="datetime-local" value={at} onChange={e => setAt(e.target.value)} /><Button disabled={busy || !at || !(Date.parse(at) > Date.now())} onClick={prepare}>Schedule once</Button></div></details>
+    <details><summary className="cursor-pointer text-xs text-primary">Schedule a one-time start</summary><div className="mt-3 flex flex-wrap gap-2"><RoutineDateTimePicker label="One-time date and time" value={at} onChange={setAt} /><Button disabled={busy || !at || !(Date.parse(at) > Date.now())} onClick={prepare}>Schedule once</Button></div></details>
     <RoutineRunInputsDialog submitLabel="Schedule" inputs={specs} routineName={slug} submitting={busy} onCancel={() => setSpecs(null)} onRun={schedule} />
   </section>
 }
