@@ -201,3 +201,43 @@ external source data. The existing current governance and runtime override
 contracts still apply. Native unsaved-change protection covers editor closing,
 its recipe tabs, anchor navigation and browser unload; it is not a shared
 cross-page draft store.
+
+### Unified follow-up verification
+
+Application head `c6bce70c3` (including `0fb27303b` and `fb949cdba`). The final
+layout places Result beside Progress and removes duplicate version controls
+from the trigger card. Inputs cannot dismiss an in-flight start through the
+close button; the regression test covers that path.
+
+- Full Go suite: all 135 test packages passed in `/tmp/routines-unified-go.log`;
+  API 197.111s and database 492.436s, using TMPDIR=/dev/shm and -timeout=40m.
+  Full go vet and the commit-time golangci gate passed.
+- Full frontend: 642 files / 8,005 tests passed. The later version-archive test
+  proves comparison/restoration never writes HEAD; 3 focused files / 8 tests
+  passed. After final layout/dialog changes, 27 Routines files / 204 tests
+  passed, including 11 input-dialog tests. TypeScript passed.
+- Full ESLint: 0 errors, 32 existing warnings. Final changed-file lint is clean.
+  Worktree webpack production export and actual dev1 production builds passed.
+- Public browser evidence: `/tmp/routines-unified-live.log`, screenshots
+  `/tmp/routines-unified-live-*.png`. Original sidebar, both user-provided URLs,
+  calendar, versions, input review, Activity deep link and mobile width passed.
+  No browser page errors or document overflow. Preparing v1 of the hybrid
+  fixture left HEAD at v2. QUA-12 remained REVIEW; QUA-13 remained TODO.
+- Live isolated manual fixture `test-routines-unified-20260908`: original
+  `run_cmtsp6yx400011c8985e5`; browser Run again selected executed v1 and created
+  `run_cmtsp705r0002de04422f`, retaining the historical input and leaving HEAD
+  at v2. Then v3 introduced an approval: `run_cmtsp70lm0003c81f02b6` linked the
+  exact Inbox item `ibx_waitpoint_2534407ffc90116688c9fc70108461d7` and browser
+  Stop cancelled the run and removed its pending waitpoint. No future start
+  was created. Evidence: `/tmp/routines-unified-actions.log`.
+- Backup before the new live fixture:
+  `/tmp/crewship-dev1-before-routines-unified-20260908/crewship.db` (0600).
+- Concurrent uncommitted verification fixes in the main clone were preserved
+  via path-scoped stashes during builds and reapplied afterwards. They are NOT
+  part of this application deployment. A separate binary patch backup is at
+  `/tmp/routines-unified-preserved-peer-wip.patch`; stash IDs are recorded in
+  `/tmp/routines-unified-peer-stash-id` and `...-peer-final-stash-id`.
+
+These results verify the listed paths, not every future integration or model.
+PR #2460 remains unmerged and requires actual current-head review; CodeRabbit
+has reported rate limiting rather than a completed review.
