@@ -112,6 +112,16 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		for key, values := range response.header {
 			w.Header()[key] = values
 		}
+		// The proxied body is this API's own JSON error document, and it can
+		// quote a value the caller supplied (a slug inside a validation
+		// message). Naming the type rather than letting net/http sniff the
+		// bytes keeps a browser that reaches this endpoint directly from
+		// reading such a quote as markup. SecurityHeaders already sends
+		// nosniff and a default-src 'none' CSP; this is the same rule stated
+		// where the bytes are written.
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		}
 		w.WriteHeader(response.code)
 		_, _ = w.Write(response.body.Bytes())
 		return

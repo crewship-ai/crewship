@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -541,17 +540,6 @@ func issueDeleteRefusal(identifier, currentStatus string) string {
 	}
 	return msg + ". Move it to " + best + " first, then delete:\n  " +
 		strings.Join(steps, "\n  ") + "\n  crewship issue delete " + identifier
-}
-
-// addIssueComment inserts a comment on an issue (used by best-effort flows
-// like auto-posted review notes; distinct from the public CreateComment
-// handler in issue_handler_comments.go).
-func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorType, authorID, body string) {
-	commentID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = h.db.ExecContext(ctx,
-		`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		commentID, missionID, authorType, authorID, body, now, now)
 }
 
 // issueSelectQuery returns the base SELECT query for fetching issues.
