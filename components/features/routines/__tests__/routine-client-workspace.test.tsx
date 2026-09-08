@@ -48,6 +48,16 @@ describe("client routine workspace", () => {
     await waitFor(() => expect(h.api).toHaveBeenCalledWith("/api/v1/workspaces/ws/pipelines/runs/run_1/cancel", { method: "POST" }))
     expect(h.refresh).toHaveBeenCalled()
   })
+  it("opens historical step details and readable saved inputs, never current defaults", () => {
+    h.run = { ...h.run, inputs: { text: "Saved answer" } }
+    h.dsl = { inputs: [{ name: "text", label: "Original prompt" }], steps: [{ id: "historical-step", type: "agent_run" }] }
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Inputs", exact: true }))
+    expect(screen.getByText("Original prompt")).toBeInTheDocument()
+    expect(screen.getByText("Saved answer")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Workflow", exact: true }))
+    expect(screen.getByRole("combobox", { name: "Explore a step" })).toHaveValue("historical-step")
+  })
   it("keeps unavailable step evidence distinct from no output", () => {
     h.run = { ...h.run, step_outputs_available: false, output: undefined }
     h.dsl = null

@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 export const ROUTINE_VIEWS = ["definition", "history", "versions", "plan"] as const
@@ -14,6 +15,6 @@ export function RoutineNavigation({ slug, view, onChange, runId }: { slug: strin
     ? <Link key={v} className={tabClass(view === v)} href={`/routines?${new URLSearchParams({ slug, run: runId! })}`} aria-current={view === v ? "page" : undefined}>Run</Link>
     : onChange ? <button key={v} className={tabClass(view === v)} onClick={() => onChange(v as RoutineView)} aria-pressed={view === v}>{labels[v as RoutineView]}</button> : <Link key={v} className={tabClass(view === v)} href={routineViewHref(slug, v as RoutineView)} aria-current={view === v ? "page" : undefined}>{labels[v as RoutineView]}</Link>)}</nav>
 }
-export function RoutineSubNavigation({ items, value, onChange, label }: { items: readonly string[]; value: string; onChange: (value: string) => void; label: string }) {
-  return <nav aria-label={label} className="flex flex-wrap gap-2 border-b border-border pb-2">{items.map(t => <button key={t} className={tabClass(value === t)} onClick={() => onChange(t)} aria-pressed={value === t}>{t[0].toUpperCase() + t.slice(1)}</button>)}</nav>
+export function RoutineSubNavigation({ items, value, onChange, label, icons }: { icons?: Record<string, LucideIcon>; items: readonly string[]; value: string; onChange: (value: string) => void; label: string }) {
+  return <nav aria-label={label} className="flex flex-wrap gap-2 border-b border-border pb-2">{items.map(t => { const Icon = icons?.[t]; return <button key={t} className={cn(tabClass(value === t), "inline-flex items-center gap-2")} onClick={() => onChange(t)} aria-pressed={value === t}>{Icon && <Icon className="h-4 w-4" aria-hidden="true" />}{t[0].toUpperCase() + t.slice(1)}</button> })}</nav>
 }
