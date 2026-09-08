@@ -304,3 +304,43 @@ afterwards; it is not part of this build.
 The full Go suite also passed all 135 packages (database 385.768s), using
 TMPDIR=/dev/shm, -p 3 and -timeout=40m; log `/tmp/routines-plan-go.log`.
 PR #2460 remains unmerged: CodeRabbit is rate-limited, not a completed review.
+
+## Guided creation editor (2026-09-08)
+
+Dev1 application commits `d67c6c0d0` and `212ecb0f1` introduce a wider manual
+creation editor with the original gray styling and a left section navigator.
+Overview separates name, description and crew from templates. Inputs/Outputs
+read the live declarations; Steps shows readable summaries and the graph; Code
+keeps full YAML/JSON editing; Schedule and Validate have their own sections.
+Forks identify their source. Description edits in Code update the Overview.
+
+The test-run bypass was removed from this creation UI. Validate definition
+accurately names static test_run validation, and Validate & Save still spends
+the minted save token. Real execution remains Run after saving. Configured
+schedules activate on save, stated explicitly in Schedule. No database migration
+or new draft lifecycle is claimed: the editor explicitly labels drafts Unsaved.
+Visual input/step construction remains a later slice; the present cards are
+readable views with direct navigation to Code for changes.
+
+211 tests in 30 Routines frontend files passed after the final change, including
+buffer preservation through sections/graph, incomplete output declarations,
+source-copy isolation, discard guards and validation-token save ordering.
+TypeScript, full go vet, full ESLint (0 errors, 32 existing warnings), changed-file
+lint and production builds passed. The final dev1 build serves `212ecb0f1`.
+Concurrent main-clone Go verification WIP was stashed only during builds and
+reapplied after reload; it is not shipped with this change.
+
+Public browser verification on the final build passed all sections, an invalid
+recipe with a link back to Code, successful DRY_RUN_OK validation, preservation
+of typed code through graph/section switches, and loading Morning briefing as a
+separate copy with its source visible. Desktop 1440px and phone 390px screenshots
+were inspected; the phone save action fits within the viewport. No browser page
+errors, save requests, routine starts or schedule writes were made. Evidence:
+`/tmp/routines-author-live-final.log`, `/tmp/routines-author-overview.png`,
+`/tmp/routines-author-steps.png`, `/tmp/routines-author-validation.png`,
+`/tmp/routines-author-mobile.png` and `/tmp/routines-author-fork.png`.
+
+The full Go suite passed all 135 packages on this implementation as well
+(`/tmp/routines-author-go.log`, TMPDIR=/dev/shm, -p 3, -timeout=40m).
+PR #2460 remains unmerged and requires actual review; CodeRabbit has reported
+rate limiting rather than a completed review.
