@@ -83,6 +83,7 @@ export interface AgentSkillRow {
 }
 
 export interface AgentCredRow {
+  source?: string
   id: string
   credential_id: string
   credential_name: string

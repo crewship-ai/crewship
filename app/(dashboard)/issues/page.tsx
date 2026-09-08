@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { OrchestrationPageShell } from "@/components/features/orchestration/orchestration-page-shell"
 
 // /issues — top-level Issues surface. Carved out of the legacy
@@ -8,5 +9,5 @@ import { OrchestrationPageShell } from "@/components/features/orchestration/orch
 // Graph/Timeline/Feed now live on /activity, and Routines lives on
 // /routines as a top-level page in its own right.
 export default function IssuesPage() {
-  return <OrchestrationPageShell mode="issues" />
+  return <Suspense><OrchestrationPageShell mode="issues" /></Suspense>
 }

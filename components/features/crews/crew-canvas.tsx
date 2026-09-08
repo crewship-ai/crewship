@@ -7,6 +7,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { CreateCrewDialog } from "./create-crew-dialog"
+import { CrewRestartButton } from "./crew-restart-button"
 import { MemoryWorkspace } from "./memory-workspace"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
 import { usePagedList } from "@/hooks/use-paged-list"
@@ -345,7 +346,11 @@ export function CrewCanvas({
         <OverviewTab
           workspaceId={workspaceId}
           crewId={crew.id}
+          crewSlug={crew.slug}
+          crewName={crew.name}
+          avatarStyle={crew.avatar_style}
           agentsForCrew={agentsForCrew}
+          onSelectAgent={onSelectAgent}
           onOpenTeam={() => setTab("roster")}
           teamLoading={roster.loading}
           teamError={roster.error}
@@ -374,6 +379,7 @@ export function CrewCanvas({
       </CanvasTabPanel>
       <CreateCrewDialog workspaceId={workspaceId} crew={crew} open={editOpen} onOpenChange={setEditOpen} onCreated={() => { onCrewChanged(); void fetchCrew() }} />
       <Dialog open={adminOpen} onOpenChange={setAdminOpen}><DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>Crew administration</DialogTitle><DialogDescription>Access policies, integrations and container operations. Each control applies its own change.</DialogDescription></DialogHeader>
+        <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onCrewChanged} />
         <SettingsTab workspaceId={workspaceId} crew={crew} agentsForCrew={agentsForCrew} integrations={integrations} patch={patch} applyAvatarStyle={applyAvatarStyle} onDelete={() => setConfirmDelete(true)} />
       </DialogContent></Dialog>
       <ConfirmDialog

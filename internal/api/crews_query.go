@@ -25,7 +25,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	// ?q= is the server-side search every paged list takes (#2303): a
 	// client that only holds one page cannot search the rest of the list
 	// itself. Case-insensitive substring on name and slug.
-	searchSQL, searchArgs := listSearchClause(r, "c.name", "c.slug")
+	searchSQL, searchArgs := listSearchClause(r, "c.name", "c.slug", "c.description")
 	total, err := countListRows(r.Context(), h.db,
 		`SELECT COUNT(*) FROM crews c WHERE c.workspace_id = ? AND c.deleted_at IS NULL AND c.kind != 'setup'`+searchSQL,
 		append([]any{workspaceID}, searchArgs...)...)
@@ -57,6 +57,10 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Do not "optimise" this into a join without re-running that
 	// measurement. TestCrewListCountsGoldenFixture locks the observable
 	// contract if you do.
+	order := "c.created_at DESC, c.id DESC"
+	if r.URL.Query().Get("order") == "name" {
+		order = "c.name COLLATE NOCASE ASC, c.id ASC"
+	}
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains, c.allow_private_endpoints,
@@ -78,7 +82,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		-- c.id DESC is the pagination tiebreaker: c.created_at is second-precision,
 		-- so timestamp ties are realistic and would otherwise make LIMIT/OFFSET
 		-- windows drop or duplicate rows between pages.
-		ORDER BY c.created_at DESC, c.id DESC
+		ORDER BY `+order+`
 		LIMIT ? OFFSET ?
 	`, append(append([]any{workspaceID}, searchArgs...), limit, offset)...)
 	if err != nil {

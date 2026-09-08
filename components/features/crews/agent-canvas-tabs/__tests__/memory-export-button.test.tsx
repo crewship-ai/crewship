@@ -63,19 +63,19 @@ describe("MemoryExportButton", () => {
   // An agent that has never written memory is not a failure, and a red
   // error for it would send the operator looking for a bug.
   it("says there is nothing yet rather than reporting a failure", async () => {
-    apiFetch.mockResolvedValue({ ok: false, status: 404 })
+    apiFetch.mockResolvedValue(new Response(JSON.stringify({ error: "this scope holds no memory yet" }), { status: 404 }))
     render(<MemoryExportButton crewId="crew-1" agentSlug="alex" />)
     fireEvent.click(screen.getByTestId("memory-export-button"))
 
     await waitFor(() =>
-      expect(screen.getByTestId("memory-export-error").textContent).toMatch(/no memory/i),
+      expect(screen.getByTestId("memory-export-error").textContent).toMatch(/no saved notes/i),
     )
     expect(screen.getByTestId("memory-export-error")).toHaveAttribute("aria-live", "polite")
     expect(clicked).toBeNull()
   })
 
   it("reports a real failure and downloads nothing", async () => {
-    apiFetch.mockResolvedValue({ ok: false, status: 500 })
+    apiFetch.mockResolvedValue(new Response(JSON.stringify({ error: "could not read memory" }), { status: 500 }))
     render(<MemoryExportButton crewId="crew-1" agentSlug="alex" />)
     fireEvent.click(screen.getByTestId("memory-export-button"))
 

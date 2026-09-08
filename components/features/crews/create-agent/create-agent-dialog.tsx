@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Cpu,
   Image as ImageIcon,
+  KeyRound,
   Layers,
   Sparkles,
   TriangleAlert,
@@ -58,6 +59,7 @@ import {
   type CrewLite,
 } from "./types"
 import { AskFormsBuilder } from "../ask-forms-builder"
+import { WorkspaceGlyph } from "../workspace-visuals"
 import { PersonaDraft } from "../persona-draft"
 import { ConfigModel } from "../canvas/config-model"
 import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
@@ -361,7 +363,14 @@ export function CreateAgentDialog({
           onClose={() => onOpenChange(false)}
         />
 
-        <CreateSurfaceBody className="flex flex-col gap-5">
+        {!pickerOpen && <nav aria-label="Agent editor sections" className="flex shrink-0 gap-2 overflow-x-auto border-b border-border/60 px-4 py-3">{[["Identity", ImageIcon], ["Instructions", Brain], ["Runtime", Cpu], ["Capabilities", KeyRound]].map(([label, Icon]) => <button type="button" key={String(label)} className="flex shrink-0 items-center gap-2 rounded-xl px-2 py-1 text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary" onClick={(event) => {
+          const surface = event.currentTarget.closest('[role="dialog"]')
+          const target = Array.from(surface?.querySelectorAll('h3,[data-editor-advanced]') ?? []).find(node => node !== event.currentTarget && (label === 'Capabilities' ? node.hasAttribute('data-editor-advanced') : node.tagName === 'H3' && node.textContent === label))
+          if (label === "Capabilities") { const disclosure = target?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]'); disclosure?.click() }
+          if (target instanceof HTMLElement) { target.tabIndex = -1; target.focus({ preventScroll: true }) }
+          target?.scrollIntoView({ block: "start", behavior: "smooth" })
+        }}><WorkspaceGlyph icon={Icon as typeof Brain} tone={label === "Identity" || label === "Instructions" ? "purple" : "blue"} />{String(label)}</button>)}</nav>}
+        <CreateSurfaceBody className="flex flex-col gap-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
           {/* The avatar picker is a PANEL: the surface swaps its body for it
               and the back arrow returns. It used to be a second Radix dialog
               stacked on this one — two focus traps, two Escape handlers, and
@@ -758,7 +767,7 @@ WORK STYLE: …`}
               wrapper div moves the flex item one level up, off the
               overflow-hidden element, so IT keeps its content-based min size
               and the disclosure inside renders at its real height again. */}
-          <div className="shrink-0">
+          <div className="shrink-0" data-editor-advanced="true">
           <CreateSurfaceDisclosure
             icon={Wrench}
             accent="amber"

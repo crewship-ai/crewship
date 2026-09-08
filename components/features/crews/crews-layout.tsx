@@ -8,7 +8,7 @@ import type { AgentRecord } from "./agent-canvas-tabs/types"
 import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { AgentCanvas } from "@/components/features/crews/agent-canvas"
 import { CrewCanvas } from "@/components/features/crews/crew-canvas"
-import { EmptyRoster } from "@/components/features/crews/empty-roster"
+import { CrewCatalog } from "@/components/features/crews/crew-catalog"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
@@ -369,10 +369,10 @@ export function CrewsLayout({
                   provisioning={provisioning}
                 />
               ) : (
-                <EmptyRoster
-                  showCrews
+                <CrewCatalog
+                  onCrewSelect={selectCrew}
+                  workspaceId={workspaceId}
                   agents={agents}
-                  crews={crews}
                   onAgentSelect={handleAgentSelectBySlug}
                 />
               )}

@@ -182,14 +182,14 @@ func (h *AgentInboxHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// SUM over cost_ledger rows where agent_id matches. Table may not exist
 	// in older workspaces — tolerate the failure silently rather than 500
 	// the whole inbox.
-	monthStart := time.Now().UTC().Format("2006-01") + "-01T00:00:00Z"
+	monthStart := time.Now().UTC().Format("2006-01") + "-01T00:00:00.000Z"
 	var costUSD sql.NullFloat64
 	var callCount sql.NullInt64
 	var tokenTotal sql.NullInt64
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(cost_usd), 0), COUNT(*), COALESCE(SUM(input_tokens + output_tokens), 0)
 		FROM cost_ledger
-		WHERE workspace_id = ? AND agent_id = ? AND created_at >= ?
+		WHERE workspace_id = ? AND agent_id = ? AND ts >= ?
 	`, workspaceID, agentID, monthStart).Scan(&costUSD, &callCount, &tokenTotal); err != nil {
 		h.logger.Debug("inbox: cost ledger (may be missing table)", "err", err, "agent_id", agentID)
 		resp.Unavailable = append(resp.Unavailable, "cost")

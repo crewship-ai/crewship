@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check } from "lucide-react"
+import { Check, Cpu } from "lucide-react"
 
 import {
   CreateSurface,
@@ -248,7 +248,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
         />
       )}
 
-      <CreateSurfaceBody>
+      <CreateSurfaceBody className="space-y-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
         {panel === "image" && (
           <BaseImagePanel
             value={effectiveBaseImage(state)}
@@ -309,7 +309,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, c
           />
         )}
         {!panel && (crew || step === 4 || step === 3) && (
-          <CreateSurfaceDisclosure key={String(environmentOpen)} label="Environment and runtime" defaultOpen={environmentOpen || step === 3}>
+          <CreateSurfaceDisclosure key={String(environmentOpen)} label="Environment and runtime" icon={Cpu} accent="teal" defaultOpen={environmentOpen || step === 3}>
             <StepContainer state={state} setState={setState} onPickImage={() => { setEnvironmentOpen(true); setPanel("image") }} />
           </CreateSurfaceDisclosure>
         )}

@@ -202,6 +202,7 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
       )}
       {sub === "persona" && (
         <PersonaPanel
+          key={`${workspaceId}:${agentId}:${crewId ?? ""}`}
           agentId={agentId}
           crewId={crewId}
           workspaceId={workspaceId}

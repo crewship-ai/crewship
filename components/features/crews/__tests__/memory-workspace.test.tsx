@@ -9,7 +9,7 @@ describe('Memory workspace', () => {
   it('shows the current note when versioning is disabled', async () => {
     vi.spyOn(global, 'fetch').mockImplementation(async (url) => String(url).includes('/versions') ? new Response(JSON.stringify({ entries: [], projection: { state: 'unavailable' } })) : response([document('AGENT.md', 'Live knowledge without history')]))
     render(<MemoryWorkspace workspaceId="ws1" agentId="a1" memoryEnabled />)
-    fireEvent.click(await screen.findByRole('button', { name: 'AGENT.md' }))
+    await screen.findByText('Live knowledge without history')
     expect(screen.getByText('Live knowledge without history')).toBeVisible()
     const details = screen.getByText('Version history').closest('details')!
     details.open = true; fireEvent(details, new Event('toggle'))
@@ -28,9 +28,28 @@ describe('Memory workspace', () => {
     const view = render(<MemoryWorkspace workspaceId="ws1" agentId="a1" />)
     await waitFor(() => expect(resolveFirst).toBeDefined())
     view.rerender(<MemoryWorkspace workspaceId="ws1" agentId="a2" />)
-    fireEvent.click(await screen.findByRole('button', { name: 'BRIEF.md' }))
+    await screen.findByText('New agent only')
     resolveFirst(response([document('AGENT.md', 'Old private content')]))
     await waitFor(() => expect(screen.getByText('New agent only')).toBeVisible())
     expect(screen.queryByText('Old private content')).not.toBeInTheDocument()
   })
+})
+
+it('refreshes all personal resources from the main refresh button', async () => {
+  let reads = 0
+  vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    const path = String(url)
+    if (path.includes('/user-model')) { reads++; return new Response(JSON.stringify({ exists: false, facts: [] })) }
+    if (path.includes('/peer-cards')) return new Response(JSON.stringify({ peers: [] }))
+    if (path.includes('/peer-consent')) return new Response(JSON.stringify({ opted_out: false }))
+    return response([])
+  })
+  render(<MemoryWorkspace workspaceId="ws1" agentId="a1" />)
+  await screen.findByText('No saved notes yet.')
+  fireEvent.click(screen.getByRole('button', { name: 'About me' }))
+  await screen.findByText('No saved preferences yet.')
+  expect(reads).toBe(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+  await screen.findByText('Personal memory refreshed.')
+  expect(reads).toBe(2)
 })

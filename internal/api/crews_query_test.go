@@ -247,3 +247,30 @@ func TestCrewListPaginationWithCounts(t *testing.T) {
 		t.Errorf("row 1 = %s/%d, want crew-p2/2", got[1].ID, got[1].Count.Agents)
 	}
 }
+
+func TestCrewList_SearchPurposeAndStableNamePages(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedCrewRow(t, db, "vivid-z", wsID, "Zulu", "vivid-z")
+	seedCrewRow(t, db, "vivid-a", wsID, "Alpha", "vivid-a")
+	for _, id := range []string{"vivid-z", "vivid-a"} {
+		if _, err := db.Exec(`UPDATE crews SET description = 'Website delivery' WHERE id = ?`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewCrewHandler(db, newTestLogger())
+	for page, want := range []string{"vivid-a", "vivid-z"} {
+		r := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/crews?q=delivery&order=name&limit=1&offset=%d", page), nil)
+		r = withWorkspaceUser(r, userID, wsID, "OWNER")
+		w := httptest.NewRecorder()
+		h.List(w, r)
+		var rows []crewResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || len(rows) != 1 || rows[0].ID != want || w.Header().Get("X-Total-Count") != "2" {
+			t.Fatalf("page %d: %d %s", page, w.Code, w.Body.String())
+		}
+	}
+}

@@ -126,6 +126,7 @@ export function AgentCanvas({
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [inboxError, setInboxError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
 
   // Reset to Overview when switching agents.
@@ -148,13 +149,14 @@ export function AgentCanvas({
     // Clear previous agent's data immediately so a stale inbox / peer list
     // never leaks into the next selection while the request is in flight.
     setInbox({ count: 0 })
+    setInboxError(null)
     setPeerMessages([])
     apiFetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
       .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data) => {
         if (cancelled || !data) return
         const unavailable: string[] = data.unavailable ?? []
-        if (unavailable.length) setActivityError("Some activity could not be loaded.")
+        if (unavailable.length) setInboxError(`Some summary data is unavailable: ${unavailable.map(value => ({ cost: "costs", peers: "agent collaboration", approvals: "approvals", assignments: "assignments", escalations: "escalations" }[value] ?? "activity")).join(", ")}.`)
         const approvals = unavailable.includes("approvals") ? 0 : Number(data.approvals_pending ?? 0)
         const peers: PeerMessageRowType[] = Array.isArray(data.peer_messages) ? data.peer_messages : []
         const total = approvals
@@ -163,7 +165,7 @@ export function AgentCanvas({
         setInbox({ count: total, summary: parts.join(" · "), cost: !unavailable.includes("cost") && typeof data.cost_usd_this_month === "number" ? data.cost_usd_this_month : undefined })
         setPeerMessages(peers)
       })
-      .catch(() => { if (!cancelled) setActivityError("Some activity could not be loaded.") })
+      .catch(() => { if (!cancelled) setInboxError("Approvals and activity summary could not be loaded.") })
     return () => { cancelled = true }
   }, [agentId, workspaceId, revision])
 
@@ -183,13 +185,15 @@ export function AgentCanvas({
     apiFetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
       .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data: RunRowType[] | null) => {
-        if (!cancelled && Array.isArray(data)) setRuns(data)
+        if (!Array.isArray(data)) throw new Error("Invalid runs response")
+        if (!cancelled) setRuns(data)
       })
       .catch(() => { if (!cancelled) setActivityError("Some activity could not be loaded.") })
     apiFetch(`/api/v1/agents/${agentId}/chats?kind=direct&workspace_id=${workspaceId}`)
       .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data: ChatRowType[] | null) => {
-        if (!cancelled && Array.isArray(data)) setChats(data)
+        if (!Array.isArray(data)) throw new Error("Invalid chats response")
+        if (!cancelled) setChats(data)
       })
       .catch(() => { if (!cancelled) setActivityError("Some activity could not be loaded.") })
     return () => { cancelled = true }
@@ -339,7 +343,7 @@ export function AgentCanvas({
             agentId={agent.id}
             avatarUrl={agent.avatar_url}
             className={cn(
-              "h-12 w-12 rounded-xl transition-transform group-hover:scale-[1.06]",
+              "h-16 w-16 rounded-xl ring-4 ring-purple/10 transition-transform group-hover:scale-[1.06]",
               isRunning && "ring-2 ring-success/40",
             )}
           />
@@ -415,14 +419,6 @@ export function AgentCanvas({
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => toast.info("Container restart will land in a follow-up")}
-                  className="flex items-center gap-2"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  <span>Restart container</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
                   onClick={() => setConfirmDelete(true)}
                   className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
@@ -434,6 +430,7 @@ export function AgentCanvas({
           </div>
         </div>
 
+        {agent.description && <p className="mt-2 max-w-prose text-sm text-muted-foreground">{agent.description}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <StatusPill status={statusKey} live={isRunning} size="md" />
           {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
@@ -513,7 +510,7 @@ export function AgentCanvas({
       </div>
 
       <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
-      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={activityError} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} onEdit={() => setEditOpen(true)} revision={revision} />}
+      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} onEdit={() => setEditOpen(true)} revision={revision} />}
       {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} slug={agent.slug} name={agent.name} />}
       {tab === "work" && (
         <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab

@@ -104,10 +104,10 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
       cached.issues.fresh, cached.credentials.fresh, cached.skills.fresh, cached.pipelines.fresh,
     ]).then(([i, c, s, p]) => {
       if (controller.signal.aborted) return
-      setIssues(i.status === "fulfilled" ? i.value : [])
-      setCredentials(c.status === "fulfilled" ? c.value : [])
-      setSkills(s.status === "fulfilled" ? s.value : [])
-      setPipelines(p.status === "fulfilled" ? p.value : [])
+      setIssues(i.status === "fulfilled" ? i.value : cached.issues.value ?? [])
+      setCredentials(c.status === "fulfilled" ? c.value : cached.credentials.value ?? [])
+      setSkills(s.status === "fulfilled" ? s.value : cached.skills.value ?? [])
+      setPipelines(p.status === "fulfilled" ? p.value : cached.pipelines.value ?? [])
       setError([i, c, s, p].some((result) => result.status === "rejected") ? "Some work and access data could not be loaded." : null)
       setLoading(false)
     })
@@ -136,7 +136,7 @@ export interface AgentTrigger {
   automatic: boolean
 }
 
-export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): AgentTrigger[] {
+export function deriveTriggers(agent: AgentRecord, _peerMessageCount: number): AgentTrigger[] {
   const triggers: AgentTrigger[] = []
 
   if (agent.schedule_cron) {
@@ -164,15 +164,6 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
     })
   }
 
-  if (agent.agent_role === "LEAD" || peerMessageCount > 0) {
-    triggers.push({
-      kind: "delegation",
-      title: "Delegated by a peer",
-      subtitle: peerMessageCount > 0 ? `${peerMessageCount} recent conversations` : "Agent collaboration",
-      meta: "allowed",
-      automatic: true,
-    })
-  }
 
   triggers.push({
     kind: "manual",
