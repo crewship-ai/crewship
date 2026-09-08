@@ -53,6 +53,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"id": str(), "name": str(),
 	}, "id")
 	issue := obj(map[string]any{
+		"work_mode": str(), "work_revision": integer(), "worker_user_id": nullable("string"), "worker_name": nullable("string"), "work_note": str(), "work_stopping": boolean(),
 		"id": str(), "workspace_id": str(), "crew_id": str(),
 		"crew_name": str(), "crew_slug": str(), "number": nullable("integer"),
 		"identifier": nullable("string"), "title": str(), "description": nullable("string"),
@@ -70,7 +71,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"created_by": ref("IssueCreator"), "authored_via": nullable("string"),
 	}, "id", "workspace_id", "crew_id", "title", "status", "priority", "sort_order", "mission_type", "lead_agent_id", "created_at", "updated_at", "labels",
 		"number", "identifier", "description", "assignee_type", "assignee_id", "due_date", "completed_at",
-		"project_id", "estimate", "parent_issue_id", "milestone_id", "sub_issues_count", "comment_count")
+		"project_id", "estimate", "parent_issue_id", "milestone_id", "sub_issues_count", "comment_count", "work_mode", "work_revision", "work_note", "work_stopping")
 
 	installedAgent := obj(map[string]any{
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(),

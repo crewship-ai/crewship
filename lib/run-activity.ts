@@ -442,7 +442,9 @@ export function isRunInFlight(entryTypes: string[]): boolean {
 
 /** Map a run's journal entries to readable rows, oldest first, noise removed. */
 export function humanizeRun(entries: JournalEntry[]): RunActivityRow[] {
+  const startedTraces = new Set(entries.filter((e) => e.entry_type === "run.started" && e.trace_id).map((e) => e.trace_id))
   return entries
+    .filter((e) => !(e.entry_type === "assignment.running" && e.trace_id && startedTraces.has(e.trace_id)))
     .map(humanizeEntry)
     .filter((r): r is RunActivityRow => r !== null)
     .sort((a, b) => {
@@ -577,7 +579,7 @@ export function withAwaitingApproval(
 // ---- tiny helpers ----------------------------------------------------------
 
 function actorLabel(e: JournalEntry): string | undefined {
-  return str(e.payload, "triggered_by", "actor_name") ?? e.actor_id ?? undefined
+  return str(e.payload, "triggered_by", "actor_name") ?? undefined
 }
 
 function stepLabel(n: number | undefined): string | null {

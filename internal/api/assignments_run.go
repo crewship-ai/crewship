@@ -338,6 +338,12 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Keep the dispatched body and every journal emission on the persisted issue.
+	body.MissionID = missionID
+	if missionID != "" {
+		r = r.WithContext(journal.WithMission(r.Context(), missionID))
+	}
+
 	assignmentID, err := insertCappedAssignment(r.Context(), h.db, scope, delegationLim,
 		agentCaller(assignedByID), cappedAssignment{
 			WorkspaceID:     body.WorkspaceID,
@@ -378,10 +384,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if len(taskPreviewForSummary) > 120 {
 		taskPreviewForSummary = taskPreviewForSummary[:120] + "…"
 	}
-	// MissionID intentionally NOT set — body.ChatID is a chat session
-	// id, which only sometimes corresponds to a row in `missions`
-	// (group_id linkage). Setting it would FK-fail under tests + any
-	// non-mission assignment. chat_id lives in payload + refs instead.
+	// The validated issue identity is carried by the journal context. Ordinary
+	// chat assignments keep only their chat reference.
 	if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -395,6 +399,7 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			"assignment_id": assignmentID,
 			"chat_id":       body.ChatID,
 			"target_slug":   body.TargetSlug,
+			"actor_name":    target.Name,
 			"target_id":     target.ID,
 			"task":          body.Task,
 		},
@@ -938,6 +943,27 @@ func (h *AssignmentHandler) runAssignment(
 	})
 	acc = bufAcc
 	handler := func(event orchestrator.AgentEvent) {
+		if body.MissionID != "" && h.hub != nil {
+			metadata := map[string]any{"agent_id": target.ID, "agent_name": target.Name, "run_id": runID, "assignment_id": assignmentID}
+			if original, ok := event.Metadata.(map[string]any); ok {
+				for key, value := range original {
+					metadata[key] = value
+				}
+			}
+			typ := event.Type
+			if typ == "error" {
+				typ = "assignment_error"
+			}
+			if typ == "done" {
+				typ = "assignment_done"
+			}
+			metadata["agent_id"] = target.ID
+			metadata["agent_name"] = target.Name
+			metadata["run_id"] = runID
+			metadata["assignment_id"] = assignmentID
+			h.hub.EmitSessionEvent(body.ChatID, ws.ChatEvent{Type: typ, Content: event.Content, Metadata: metadata})
+		}
+
 		if event.Type == "text" && event.Content != "" {
 			outputParts = append(outputParts, event.Content)
 		}
@@ -1084,7 +1110,7 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 	// is always true for sub-agent runs.
 	req.ChatID = body.ChatID
 	req.ContainerID = containerID
-	req.UserMessage = body.Task
+	req.UserMessage = body.Task + orchestrator.AssignmentOutcomeInstructions
 	req.AgentRole = agentRole
 	req.SkipSidecar = skipSidecar
 	req.SkipConvHistory = true
@@ -1447,6 +1473,10 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 	}
 
+	if status == "COMPLETED" {
+		h.publishIssueDeliverables(ctx, assignmentID, result)
+	}
+
 	// Drain the queue: now that this assignment's slot is free,
 	// promote the oldest QUEUED row for the same crew (if any)
 	// before doing any further work. Done BEFORE the mission
@@ -1518,6 +1548,22 @@ func (h *AssignmentHandler) finishAssignment(
 					// landed in assignments.error_message + the run journal
 					// entry above, unsanitized, for operators.
 					commentBody = fmt.Sprintf("**%s encountered an issue.** %s", agentName, userFacingAssignmentError(errMsg))
+				} else if outcome == orchestrator.OutcomeNeedsHuman || outcome == orchestrator.OutcomePartial || outcome == orchestrator.OutcomeFailed {
+					label := "reported an incomplete result"
+					if outcome == orchestrator.OutcomeNeedsHuman {
+						label = "needs your input"
+					}
+					if outcome == orchestrator.OutcomeFailed {
+						label = "encountered an issue"
+					}
+					summary := orchestrator.ParseHandoff(result).Summary
+					if cp := orchestrator.ParseCheckpoint(result); cp.Blockers != "" {
+						summary = cp.Blockers
+					}
+					if summary == "" {
+						summary = defaultedReason
+					}
+					commentBody = fmt.Sprintf("**%s %s.**\n\n%s", agentName, label, summary)
 				} else if result != "" {
 					handoff := orchestrator.ParseHandoff(result)
 					if handoff.Parsed && handoff.Summary != "" {
@@ -1542,8 +1588,10 @@ func (h *AssignmentHandler) finishAssignment(
 					switch {
 					case status == "CANCELLED":
 						action = actionTaskCancelled
-					case errMsg != "":
+					case errMsg != "" || outcome == orchestrator.OutcomeFailed || outcome == orchestrator.OutcomePartial:
 						action = actionTaskFailed
+					case outcome == orchestrator.OutcomeNeedsHuman:
+						action = actionCommented
 					}
 					// Through the shared emitter, not a bare INSERT — the
 					// second of the two writers §9.1 (#2332/B1) named as

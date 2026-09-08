@@ -22,6 +22,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#get-issue-crew-scoped) | Get an issue within a crew |
 | `PATCH` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#update-issue) | Update an issue |
 | `DELETE` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#delete-issue) | Delete an issue |
+| `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/work`](#transfer-issue-work) | Transfer work between people and agents |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/start`](#start-issue) | Start issue execution |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/stop`](#stop-issue) | Stop a running issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/review`](#review-issue) | Submit a review decision |
@@ -29,6 +30,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/events`](#list-events) | The same log, seq-cursored, for resync after a dropped realtime frame |
+| `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result`](#get-full-run-result) | Read the full stored result |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/runs`](#list-runs) | List an issue's agent task-runs |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/sessions`](#list-sessions) | List an issue's agent sessions |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints`](#list-checkpoints) | List a session's checkpoints |
@@ -382,6 +384,51 @@ DELETE /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 
 Drive an issue through agent execution: start, stop, and review.
 
+### Transfer Issue Work
+
+```http
+POST /api/v1/crews/{crewId}/issues/{identifier}/work?workspace_id={workspaceId}
+```
+
+Changes the current worker while preserving the accountable owner. Human
+handoffs pause automatic assignments and create a targeted in-product Inbox
+message. Agent handoffs prepare a new step for an explicit **Start work**.
+
+**Auth:** authenticated workspace `OWNER`, `ADMIN`, or `MANAGER` (`create`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `operation_id` | string | Yes | Stable ID for retries, at most 100 characters |
+| `revision` | integer | Yes | Current `work_revision` returned by Get Issue |
+| `action` | string | Yes | `take_over`, `handoff_human`, `handoff_agent`, or `submit` |
+| `target_id` | string | For handoff | User or agent ID in this workspace |
+| `note` | string | Except takeover | Result, verification or next instructions, at most 20,000 bytes |
+
+```json
+{"operation_id":"review-handoff-1","revision":3,"action":"handoff_human","target_id":"user_123","note":"Please verify the attached report."}
+```
+
+**Response:** `200 OK` — `{"revision":4,"status":"TODO"}`. A replay of the
+same request returns `{"revision":4,"replayed":true}` without repeating its
+effects. Human `submit` returns status `REVIEW`. Read the issue again for
+`work_mode`, `worker_user_id`, `worker_name`, `work_note`, `work_revision`, and
+`work_stopping`. While stopping is true, active runs have received cancellation
+but have not yet finished; handing back or submitting must wait.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid action, missing note/target, oversized input, or target outside the workspace |
+| `401` | Not authenticated |
+| `403` | Role cannot change work |
+| `404` | Issue not found in this crew and workspace |
+| `409` | Stale revision, reused operation ID with different content, closed issue, held target agent, or active runs preventing handback/submission |
+| `500` | Transaction could not be committed |
+
+The work state, cancellation, comment and audit receipt commit together.
+WebSocket events: `issue.updated`; human handoff also emits `inbox.updated`.
+
 ### Start Issue
 
 ```
@@ -396,7 +443,7 @@ used to be sufficient; it is not anymore — the delegate must specifically be
 an executable agent). This:
 
 1. Creates a synthetic chat session for the mission
-2. Creates or resets tasks (resets existing tasks to PENDING for re-runs)
+2. Creates or resets unfinished tasks to PENDING; completed and skipped history stays intact
 3. Transitions status to `IN_PROGRESS`
 4. Starts the MissionEngine asynchronously
 
@@ -415,7 +462,7 @@ an executable agent). This:
 |---|---|
 | `400` | Issue not in BACKLOG/TODO; or no agent delegate (`"Issue must have an agent delegate before starting"`); or the delegate is not an executable agent — soft-deleted or `PENDING_REVIEW` (`"Issue delegate is not an executable agent"`) |
 | `404` | Issue not found |
-| `409` | Issue was already started by another request |
+| `409` | Issue was already started by another request, or work is held by a human |
 
 **WebSocket event:** `issue.started` on `workspace:{workspaceId}`
 
@@ -740,6 +787,36 @@ One call is not guaranteed to return the whole gap: a response is capped at 500 
 
 ---
 
+### Get Full Run Result
+
+```http
+GET /api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result?workspace_id={workspaceId}
+```
+
+Returns the full stored result on demand. `runId` is the assignment `id` from
+List Runs, not its trace ID. The assignment must belong to the supplied issue.
+The list exposes `result_truncated` for a shortened preview and `result_stale`
+when its recorded brief revision predates the current issue brief.
+
+**Auth:** any authenticated workspace member (`read`). No request body.
+**Query parameter:** `workspace_id` selects the authenticated workspace.
+
+**Response:** `200 OK`
+
+```json
+{"result_summary":"All findings and their evidence…","outcome":"SUCCEEDED","status":"COMPLETED"}
+```
+
+`result_summary` is the stored agent-authored text and may be empty. The
+endpoint does not invent a deliverable or confirm acceptance of the issue.
+
+| Status | Condition |
+|---|---|
+| `401` | Not authenticated |
+| `403` | Workspace access denied |
+| `404` | Run is absent or belongs to another issue/crew/workspace |
+| `500` | Stored result could not be read |
+
 ## Runs
 
 The agent executions behind an issue. Issues run on the mission engine (not pipelines), so a "run" is a mission task backed by an `assignments` row.
@@ -995,7 +1072,11 @@ Threaded discussion on an issue, ordered oldest-first.
 GET /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspaceId}
 ```
 
-Returns all comments on an issue, ordered by creation date ascending.
+Returns comments on an issue in chronological order. Legacy reads without
+`page_size` return all comments. Set `page_size=100` for the latest page
+(maximum 100) and pass its oldest comment ID as `before_id` to read older
+messages. `X-Has-More: true` indicates another page. The stable timestamp + ID
+cursor is not shifted by a newly posted comment.
 
 **Request:** `crewId` and `identifier` are required path parameters; `workspace_id` selects the workspace. No request body.
 

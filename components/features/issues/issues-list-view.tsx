@@ -16,6 +16,7 @@ import { LabelBadge } from "./label-badge"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { formatRelativeTime } from "@/lib/time"
 import { apiFetch } from "@/lib/api-fetch"
+import { getIssueWorker } from "@/lib/issue-execution"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
@@ -202,7 +203,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               (PRIORITY_ORDER[b.priority || "none"] ?? 4))
           )
         case "assignee":
-          return dir * (a.assignee_name || "").localeCompare(b.assignee_name || "")
+          return dir * (getIssueWorker(a).name || "").localeCompare(getIssueWorker(b).name || "")
         case "crew":
           return dir * (a.crew_name || "").localeCompare(b.crew_name || "")
         case "updated":
@@ -434,7 +435,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   </div>
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground truncate">
-                  {issue.assignee_name || "--"}
+                  {getIssueWorker(issue).name || "--"}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground truncate">
                   {issue.crew_name || "--"}

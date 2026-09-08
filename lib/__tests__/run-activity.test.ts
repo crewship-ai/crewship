@@ -366,3 +366,12 @@ describe("extractVerdict", () => {
     expect(v!.verdict).toBe("fallback verdict text")
   })
 })
+
+it("collapses duplicate lifecycle starts only within the same trace", () => {
+  const rows = humanizeRun([
+    entry({id:"a",entry_type:"assignment.running",trace_id:"run-1"}),
+    entry({id:"b",entry_type:"run.started",trace_id:"run-1"}),
+    entry({id:"c",entry_type:"assignment.running",trace_id:"run-2"}),
+  ])
+  expect(rows.map((row) => row.id).sort()).toEqual(["b","c"])
+})

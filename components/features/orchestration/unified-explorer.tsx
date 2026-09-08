@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react"
 import { motion } from "motion/react"
+import { UserRound } from "lucide-react"
+import { getIssueWorker } from "@/lib/issue-execution"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { STATUS_CHIPS } from "@/components/features/issues/issues-status-chips"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
@@ -71,10 +73,11 @@ export function UnifiedExplorer({
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
 
   const agents = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>()
+    const map = new Map<string, { id: string; name: string; isHuman: boolean }>()
     for (const i of issues) {
-      if (i.assignee_id && i.assignee_name) {
-        map.set(i.assignee_id, { id: i.assignee_id, name: i.assignee_name })
+      const worker = getIssueWorker(i)
+      if (worker.id && worker.name) {
+        map.set(worker.id, { id: worker.id, name: worker.name, isHuman: worker.isHuman })
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
@@ -195,8 +198,8 @@ export function UnifiedExplorer({
 
           {agents.length > 0 && (
             <SidebarFacet
-              label="Agents"
-              resetLabel="All agents"
+              label="Workers"
+              resetLabel="All workers"
               resetActive={!filterAgentId}
               onReset={() => onAgentFilter(null)}
             >
@@ -206,7 +209,7 @@ export function UnifiedExplorer({
                   active={filterAgentId === a.id}
                   onToggle={() => toggleAgent(a.id)}
                 >
-                  <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />
+                  {a.isHuman ? <UserRound className="h-4 w-4 shrink-0" /> : <AgentAvatar seed={a.id} className="h-4 w-4 rounded-full shrink-0" />}
                   {a.name}
                 </SidebarFacetOption>
               ))}
@@ -301,8 +304,10 @@ export function UnifiedExplorer({
               </div>
               <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
               <span className="text-foreground/80 truncate flex-1">{issue.title}</span>
-              {issue.assignee_id && (
-                <AgentAvatar seed={issue.assignee_id} alt={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
+              {getIssueWorker(issue).id && (
+                getIssueWorker(issue).isHuman
+                  ? <UserRound aria-label={getIssueWorker(issue).name || "Human worker"} className="h-4 w-4 shrink-0" />
+                  : <AgentAvatar seed={getIssueWorker(issue).id!} alt={getIssueWorker(issue).name || ""} className="h-4 w-4 rounded-full shrink-0" />
               )}
               <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
             </SidebarRow>

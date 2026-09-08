@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -26,9 +27,11 @@ import (
 // helpers in inbox_writer.go. This handler is strictly the read +
 // state-flip surface the UI consumes.
 type InboxHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
-	hub    *ws.Hub
+	// Bounded stripes serialize decisions on the same card without retaining IDs.
+	actLocks [64]sync.Mutex
+	db       *sql.DB
+	logger   *slog.Logger
+	hub      *ws.Hub
 
 	// mentionDispatch and journal serve Act (inbox_act.go, B15): an answer
 	// on a run_needs_human card resumes the run through the same door an

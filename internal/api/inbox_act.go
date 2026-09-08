@@ -34,6 +34,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ const (
 // runNeedsHumanActions is what B6 puts on every new run_needs_human card.
 var runNeedsHumanActions = []inbox.Action{
 	{ID: inboxActAnswer, Label: "Answer", Effect: "Delivers your input to the agent's session and resumes the run from its checkpoint", Irreversible: false},
-	{ID: inboxActTakeOver, Label: "Take over", Effect: "Opens the issue for you to continue; the agent's session goes idle", Irreversible: false},
+	{ID: inboxActTakeOver, Label: "Take over", Effect: "Transfers the issue to you and pauses automatic agent work", Irreversible: false},
 	{ID: inboxActDismiss, Label: "Dismiss", Effect: "No further work now; the agent's session goes idle", Irreversible: false},
 }
 
@@ -130,6 +131,11 @@ func (h *InboxHandler) Act(w http.ResponseWriter, r *http.Request) {
 
 	// The card, within the caller's visibility (same clause as Get/Patch).
 	visClause, visArgs := inboxVisibilityClause(user.ID, role)
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(id))
+	lock := &h.actLocks[hash.Sum32()%uint32(len(h.actLocks))]
+	lock.Lock()
+	defer lock.Unlock()
 	var (
 		kind, sourceID, state, payloadJSON string
 		resolvedAction, resolvedBy         sql.NullString
@@ -173,10 +179,10 @@ func (h *InboxHandler) Act(w http.ResponseWriter, r *http.Request) {
 		agentVersion              sql.NullInt64
 	)
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(a.group_id, a.chat_id), a.assigned_to_id, a.session_id,
+		SELECT COALESCE(a.mission_id, a.group_id, a.chat_id), a.assigned_to_id, a.session_id,
 		       m.identifier, m.title, m.crew_id, s.state, s.agent_version
 		  FROM assignments a
-		  LEFT JOIN missions m ON m.id = COALESCE(a.group_id, a.chat_id)
+		  LEFT JOIN missions m ON m.id = COALESCE(a.mission_id, a.group_id, a.chat_id) AND m.workspace_id=a.workspace_id
 		  LEFT JOIN issue_agent_sessions s ON s.id = a.session_id
 		 WHERE a.id = ? AND a.workspace_id = ?`, sourceID, workspaceID,
 	).Scan(&missionID, &agentID, &sessionID, &identifier, &title, &crewID, &sessionState, &agentVersion)
@@ -198,6 +204,11 @@ func (h *InboxHandler) Act(w http.ResponseWriter, r *http.Request) {
 	if agentVersion.Valid {
 		v := agentVersion.Int64
 		receipt.AgentVersion = &v
+	}
+
+	if body.Action == inboxActTakeOver {
+		h.takeOverIssue(w, r, workspaceID, missionID, identifier.String, crewID.String, id, user.ID, payloadJSON, receipt)
+		return
 	}
 
 	switch body.Action {
@@ -303,6 +314,9 @@ func (h *InboxHandler) Act(w http.ResponseWriter, r *http.Request) {
 // into payload_json under "receipt", keeping every other payload key
 // (who_can_act, context, ...) as the producer wrote it.
 func (h *InboxHandler) resolveCardWithReceipt(ctx context.Context, id, userID, action, payloadJSON string, receipt inboxActReceipt) error {
+	return resolveInboxCardWithReceipt(ctx, h.db, id, userID, action, payloadJSON, receipt)
+}
+func resolveInboxCardWithReceipt(ctx context.Context, q dbConn, id, userID, action, payloadJSON string, receipt inboxActReceipt) error {
 	payload := map[string]any{}
 	if strings.TrimSpace(payloadJSON) != "" {
 		_ = json.Unmarshal([]byte(payloadJSON), &payload)
@@ -312,7 +326,7 @@ func (h *InboxHandler) resolveCardWithReceipt(ctx context.Context, id, userID, a
 	if err != nil {
 		return err
 	}
-	res, err := h.db.ExecContext(ctx, `
+	res, err := q.ExecContext(ctx, `
 		UPDATE inbox_items
 		   SET state = 'resolved', resolved_at = ?, resolved_by_user_id = ?, resolved_action = ?,
 		       payload_json = ?, updated_at = ?

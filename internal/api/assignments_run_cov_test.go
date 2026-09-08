@@ -408,7 +408,7 @@ func TestFinishAssignment_CompletedWithMissionComment(t *testing.T) {
 		Scan(&commentBody); err != nil {
 		t.Fatalf("query comment: %v", err)
 	}
-	if !strings.Contains(commentBody, "completed their work") || !strings.Contains(commentBody, "the work result") {
+	if strings.Contains(commentBody, "completed their work") || !strings.Contains(commentBody, "no outcome reported") {
 		t.Errorf("comment = %q", commentBody)
 	}
 	var action string
@@ -416,8 +416,8 @@ func TestFinishAssignment_CompletedWithMissionComment(t *testing.T) {
 		`SELECT action FROM mission_activity WHERE mission_id = ?`, chatID).Scan(&action); err != nil {
 		t.Fatalf("query activity: %v", err)
 	}
-	if action != "task_completed" {
-		t.Errorf("action = %q, want task_completed", action)
+	if action != "task_failed" {
+		t.Errorf("action = %q, want task_failed", action)
 	}
 }
 

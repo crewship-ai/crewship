@@ -103,7 +103,7 @@ func TestBuildAssignmentRunRequest_ThroughBuilder(t *testing.T) {
 	if req.AgentRole != "AGENT" || !req.SkipSidecar || !req.SkipConvHistory {
 		t.Errorf("dispatch flags wrong: role=%q skipSidecar=%v skipConv=%v", req.AgentRole, req.SkipSidecar, req.SkipConvHistory)
 	}
-	if req.ContainerID != "cid-1" || req.UserMessage != "ship it" {
+	if req.ContainerID != "cid-1" || !strings.HasPrefix(req.UserMessage, "ship it") || !strings.Contains(req.UserMessage, "---HANDOFF---") {
 		t.Errorf("container/message not set: cid=%q msg=%q", req.ContainerID, req.UserMessage)
 	}
 }

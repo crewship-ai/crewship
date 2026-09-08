@@ -40,6 +40,7 @@ function issue(over: Partial<Mission> = {}): Mission {
     pattern: null,
     identifier: "ENG-4",
     priority: "medium",
+    assignee_type: "agent",
     assignee_id: "agent-robin",
     assignee_name: "Robin",
     crew_name: "Engineering",
@@ -204,7 +205,7 @@ describe("IssueCardDetail", () => {
         project={null}
       />,
     )
-    expect(screen.getByText(/Not started yet/)).toBeInTheDocument()
+    expect(screen.getByText(/No agent runs yet/)).toBeInTheDocument()
   })
 
   it("lists every run with its status as a word, and links the run when it has one", () => {
@@ -224,7 +225,7 @@ describe("IssueCardDetail", () => {
     // Both runs, not runs[0] alone; the raw enum never reaches the screen.
     const rows = screen.getAllByTestId("issue-run-row")
     expect(rows).toHaveLength(2)
-    expect(within(rows[0]).getByText("Done")).toBeInTheDocument()
+    expect(within(rows[0]).getByText("Outcome not reported")).toBeInTheDocument()
     expect(within(rows[1]).getByText("Failed")).toBeInTheDocument()
     expect(screen.queryByText("COMPLETED")).toBeNull()
     expect(screen.getByText("exit 1")).toBeInTheDocument()

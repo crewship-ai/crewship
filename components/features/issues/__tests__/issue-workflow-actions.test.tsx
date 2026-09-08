@@ -45,14 +45,35 @@ function setup(over: Partial<Mission> = {}) {
 }
 
 describe("IssueWorkflowActions", () => {
-  it("offers Start work only once somebody is assigned", () => {
+  it("offers Start work only once an agent is assigned", () => {
     setup({ status: "TODO" })
     expect(screen.queryByRole("button", { name: /start work/i })).toBeNull()
     cleanup()
 
-    const onAction = setup({ status: "TODO", assignee_id: "agent-robin" })
+    const onAction = setup({ status: "TODO", assignee_type: "agent", assignee_id: "agent-robin" })
     fireEvent.click(screen.getByRole("button", { name: /start work/i }))
     expect(onAction).toHaveBeenCalledWith("start", undefined)
+  })
+
+  it("does not offer agent execution for a human-only issue", () => {
+    setup({ status: "TODO", assignee_type: "user", assignee_id: "user-1", owner: { id: "user-1", name: "Marta" } })
+    expect(screen.queryByRole("button", { name: /start work/i })).toBeNull()
+  })
+
+  it("uses the delegate when ownership is represented by the legacy assignee", () => {
+    const onAction = setup({ status: "TODO", assignee_type: "user", assignee_id: "user-1", owner: { id: "user-1", name: "Marta" }, delegate: { id: "agent-robin", name: "Robin" } })
+    fireEvent.click(screen.getByRole("button", { name: /start work/i }))
+    expect(onAction).toHaveBeenCalledWith("start", undefined)
+  })
+
+  it("supports the typed delegate without legacy assignment fields", () => {
+    setup({ status: "TODO", delegate: { id: "agent-robin", name: "Robin" } })
+    expect(screen.getByRole("button", { name: /start work/i })).toBeEnabled()
+  })
+
+  it("does not guess that an untyped legacy assignee is an agent", () => {
+    setup({ status: "TODO", assignee_id: "unknown-identity" })
+    expect(screen.queryByRole("button", { name: /start work/i })).toBeNull()
   })
 
   it("offers Stop while the work is running", () => {
