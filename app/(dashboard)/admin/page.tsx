@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo,
-  AlertTriangle, Bell, Gauge,
+  Shield, AlertTriangle,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -15,6 +14,7 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
+import { sections, initialAdminTab, ALL_TABS } from "./navigation"
 import type {
   TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth,
   LicenseInfo, TelemetryInfo, VersionInfo, SecurityPosture, JournalIntegrity,
@@ -41,10 +41,7 @@ import { RateLimitsTab } from "./tabs/rate-limits-tab"
  * only surface what actually works. Reintroduce them one at a time when
  * each has a real backend to talk to.
  */
-interface NavSection {
-  label: string
-  items: { key: TabKey; label: string; icon: React.ElementType }[]
-}
+
 
 /**
  * One line per section, under the heading — the same shape Settings uses.
@@ -64,56 +61,6 @@ const SECTION_ABOUT: Partial<Record<TabKey, string>> = {
   security: "Who may read a secret: the judge that decides, and the checks around it.",
   reviews: "What the judge has decided, and what is waiting on a human.",
   backups: "Snapshots of this instance, and restoring from one.",
-}
-
-const sections: NavSection[] = [
-  {
-    label: "Platform",
-    items: [
-      { key: "overview", label: "Overview", icon: LayoutDashboard },
-    ],
-  },
-  {
-    label: "Organizations",
-    items: [
-      { key: "workspaces", label: "Workspaces", icon: Building },
-      { key: "users", label: "Users", icon: Users },
-    ],
-  },
-  {
-    label: "Infrastructure",
-    items: [
-      { key: "providers", label: "Runtime", icon: Server },
-      { key: "notifications", label: "Notifications", icon: Bell },
-      { key: "ratelimits", label: "Rate Limiters", icon: Gauge },
-    ],
-  },
-  {
-    label: "Security",
-    items: [
-      { key: "security", label: "Keeper", icon: Shield },
-      { key: "reviews", label: "Keeper reviews", icon: ListTodo },
-    ],
-  },
-  {
-    label: "Data",
-    items: [
-      { key: "backups", label: "Backups", icon: Database },
-    ],
-  },
-]
-
-const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.map((i) => i.key))
-
-/**
- * Resolve the section from `?tab=`, falling back to Overview.
- *
- * Exported so the deep-link contract is testable on its own — the same reason
- * initialSettingsTab is.
- */
-export function initialAdminTab(search: string): TabKey {
-  const t = new URLSearchParams(search).get("tab")
-  return t && (ALL_TABS as string[]).includes(t) ? (t as TabKey) : "overview"
 }
 
 export default function AdminPage() {

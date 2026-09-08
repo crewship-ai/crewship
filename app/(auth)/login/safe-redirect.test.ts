@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { safeRedirectPath } from "./page"
+import { safeRedirectPath } from "./safe-redirect"
 
 // safe-redirect.test.ts pins the post-login open-redirect guard. The TS
 // guard mirrors the server-side isSafeRedirect (internal/api/helpers.go):
