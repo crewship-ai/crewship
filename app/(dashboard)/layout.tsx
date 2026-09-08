@@ -15,6 +15,7 @@ import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
+import { NotificationSoundEvents } from "@/components/layout/notification-sound-events"
 
 export default function DashboardLayout({
   children,
@@ -64,6 +65,7 @@ export default function DashboardLayout({
           </SidebarInset>
         </SidebarProvider>
         <RealtimeToasts />
+        <NotificationSoundEvents />
       </ActiveRoutineRunsProvider>
       </JournalLookupProvider>
     </RealtimeProvider>

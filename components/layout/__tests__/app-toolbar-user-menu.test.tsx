@@ -28,7 +28,7 @@ vi.mock("@/hooks/use-realtime", () => ({ useRealtime: () => ({ status: "connecte
 vi.mock("@/hooks/use-engine-status", () => ({ useEngineStatus: () => ({ status: "connected" }) }))
 vi.mock("@/hooks/use-crews-status", () => ({ useCrewsStatus: () => null }))
 vi.mock("@/hooks/use-provisioning-status", () => ({ useProvisioningStatus: () => null }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", role: "VIEWER", workspace: { name: "Example workspace" } }) }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/lib/store", () => ({
@@ -58,6 +58,17 @@ function openUserMenu() {
 }
 
 describe("AppToolbar — user menu links", () => {
+  it("shows the actual membership and workspace in the profile header", () => {
+    openUserMenu()
+    expect(screen.getByText("Viewer")).toBeVisible()
+    expect(screen.getByText("Example workspace")).toBeVisible()
+    expect(screen.queryByText("Owner")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unify Technology")).not.toBeInTheDocument()
+  })
+  it("offers sound settings inside the profile menu", () => {
+    openUserMenu()
+    expect(screen.getByRole("menuitem", { name: "Notification sounds" })).toHaveAttribute("href", "/settings?tab=sounds")
+  })
   beforeEach(() => cleanup())
 
   it.each([

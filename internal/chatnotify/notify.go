@@ -180,6 +180,7 @@ func (n *Notifier) NotifyAssistantReply(ctx context.Context, rn chatbridge.Reply
 			Blocking:     false,
 			Payload: map[string]interface{}{
 				"chat_id":    rn.ChatID,
+				"replied_at": repliedAtISO,
 				"agent_id":   rn.AgentID,
 				"agent_slug": rn.AgentSlug,
 				"chat_title": title.String,

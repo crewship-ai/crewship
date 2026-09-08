@@ -43,15 +43,18 @@ vi.mock("@/components/features/chat/conversations-sidebar", async () => {
       onScopeChange,
       threadsByAgent,
       activeThreadId,
+      draftConversation,
     }: {
       scope: string
       onScopeChange: (s: string) => void
       threadsByAgent: Record<string, { id: string }[]>
       activeThreadId?: string | null
+      draftConversation?: { id: string } | null
     }) => (
       <div
         data-testid="sidebar"
         data-scope={scope}
+        data-draft={draftConversation?.id ?? ""}
         data-holds-active={String(
           Object.values(threadsByAgent).some((list) =>
             list.some((t) => t.id === activeThreadId),
@@ -69,17 +72,19 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
     agentSlug,
     sessionId,
     sessionOrigin,
+    onNewConversation,
   }: {
     agentSlug: string
     sessionId: string
     sessionOrigin?: string | null
+    onNewConversation?: () => void
   }) => (
     <div
       data-testid="chat-panel"
       data-agent={agentSlug}
       data-session={sessionId}
       data-origin={sessionOrigin ?? "(none)"}
-    />
+    ><button onClick={onNewConversation}>New session</button></div>
   ),
 }))
 
@@ -241,4 +246,22 @@ describe("<ChatClient> — a deep link brings the column to the conversation", (
     // An unresolvable session leaves the scope where the reader put it.
     expect(screen.getByTestId("sidebar").getAttribute("data-scope")).toBe("direct")
   })
+  it("starts a distinct local draft for the current agent and returns to Direct", async () => {
+    setUrl("/chat/casey", "?session=direct-1")
+    render(<ChatClient />)
+    await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("scope-routine"))
+    await waitFor(() => expect(screen.getByTestId("sidebar")).toHaveAttribute("data-scope", "routine"))
+    fireEvent.click(screen.getByRole("button", { name: "New session" }))
+    const draft = screen.getByTestId("chat-panel").getAttribute("data-session")!
+    expect(draft).not.toBe("direct-1")
+    expect(draft).toMatch(/^[0-9a-f-]{36}$/)
+    expect(screen.getByTestId("chat-panel")).toHaveAttribute("data-agent", "casey")
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-scope", "direct")
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-draft", draft)
+    expect(apiFetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "New session" }))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-session")).not.toBe(draft)
+  })
+
 })

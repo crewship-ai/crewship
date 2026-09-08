@@ -13,6 +13,24 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
 
+- **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.
+
+- **Personal notification sounds** — five original short tones, separate Chat/Inbox choices, previews, volume and Do not disturb in Settings → Account → Notification sounds, with a desktop/mobile toolbar shortcut. Authorized fresh human messages and important unread Inbox items can alert after audio is enabled; focused reading, muted rooms, duplicate tabs and history reloads remain quiet.
+
+- **Team demo seed** — Thomas, Paul, Peter, Anna, Sofia and Emma have real workspace roles, distinct bundled portraits and independently authored Chat messages. `seed team-chat` adds only this demo to an existing workspace; `seed --with-team-chat` and `./dev.sh seed` include it in a full demo. Private random credentials and stable room/message references support reruns without resetting users or replacing custom avatars.
+
+- **Chat continuations** — Add people opens a fresh private group from a direct message; Invite agent explicitly opens a workspace channel with the selected agent. Original private history stays private. Atomic creation and durable retry IDs prevent duplicate rooms after uncertain responses, including backup/fork restoration.
+
+- **Team Chat identity and activity** — profile portraits and agent avatars, room icons, day dividers, compact author groups and Markdown bring shared rooms closer to agent chat. Channel creators can subscribe to linked issue/routine journal updates; trusted Crewship cards never invoke agents. Explicit agent mentions receive a bounded, workspace-scoped work snapshot for status questions. Repeatable demo-account and live CLI scenarios cover real colleague messages, routine results and agent replies.
+
+- **Chat room CLI** — `crewship chat room` manages human direct messages, private groups and mixed workspace channels, including members, agent mentions/jobs, message pagination, safe retries, mute and read cursors. Existing agent-session commands remain available under Chat.
+
+- **Unified Chat** — agent sessions, direct messages and shared rooms use one Chat sidebar and New chat menu. Human room links open under `/chat`, with old links redirected compatibly.
+
+- **Human direct messages** — open a colleague conversation from the workspace people picker and reuse the same private history on subsequent opens. Direct conversations keep their two original participants; ordinary groups and channels remain separate.
+
+- **People and workspace channels in Chat** — create participant-only human groups or workspace-readable channels without an agent, manage participants, and keep ordered history with safe send retries. Unread conversation activity reaches the existing inbox through a durable outbox, with personal mute and read cursors. Channel agents join visibly and respond only to explicitly selected mentions through the existing assignment queue; private groups remain human-only because agent execution records are workspace-visible.
+
 - **Provider pool definitions** (#2440) — owners/admins can create, list and inspect explicit account sets through the API and `credential pool create/list/get`. Creation requires credential write scope for scoped CLI tokens; cross-workspace members are rejected. This prepares pool management only: it does not assign accounts, enable runtime failover or add pool controls to the UI.
 
 - **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
@@ -52,6 +70,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Dependency updates for 2026-09-07** — the week's five Dependabot groups landed together, because two of them shared `pnpm-lock.yaml` and no merge order avoided rebasing the rest. Go modules (10): `age` 1.3.1→1.3.2, `go-jose/v4` 4.1.4→4.1.5, `go-containerregistry` 0.22.0→0.22.1, `klauspost/compress` 1.19.2→1.20.0, `moby/moby/api` 1.55.0→1.56.0, `moby/moby/client` 0.5.1→0.6.0, `shoutrrr` 0.18.0→0.19.0, `goldmark` 1.8.5→1.8.6, `x/crypto` 0.55.0→0.56.0, `modernc.org/sqlite` 1.57.0→1.58.0. npm production group (41, mostly transitive; the direct ones are `@sentry/nextjs` 10.70.0→10.73.0 and `@codemirror/state` 6.7.1→6.7.3) and `@types/node` 26.4.0→26.4.1. GitHub Actions: `anthropics/claude-code-action` v1.0.210→v1.0.216, `docker/setup-qemu-action` v4.2.0→v4.3.0.
 
 ### Fixed
+
+- **Agent reply audio** — direct agent answers now play the selected Chat cue on successful completion, including while focused, and deduplicate against their Inbox projection. Saved audio opt-in reactivates on the next real interaction after reload. Sound settings are linked from the profile menu on desktop/mobile.
+
+- **Create-only member provisioning** — automation can reject existing accounts before changing membership or account-setup tokens. The team seed and CLI create-only flag verify server support first.
+
+- **Chat sidebar hierarchy** — one New chat entry, People/Agents/Team spaces sections and expandable per-agent sessions replace overlapping facet grids. Per-agent New session stays explicit, selection highlights are exclusive, and section/history expansion persists per user and workspace.
+
+- **CLI automation output** — workspace creation, member provisioning and chat attachment upload now honor JSON/YAML/NDJSON output instead of mixing human-readable success text into scripts. Invalid attachment responses return an error.
 
 - **`TestSessionMessagesWithStore` raced its own `TempDir` cleanup** (#2452) — `New()` spawns the catalog and runtime refreshers, which write into `<BasePath>/catalog-cache` on their own schedule; the test never stopped them, so `t.TempDir()` removed the directory underneath a live goroutine and cleanup failed with `directory not empty`. Latent since the refreshers landed and surfaced on the linux-arm64 runner, which is slow enough to lose the race. `t.Cleanup(s.StopBackground)` — the one-liner every other boot test in the package already carries, and the reason `StopBackground` binds to `bgCtx` in the first place.
 
@@ -207,6 +233,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   so leaving it to rot tells operators their agents cannot read crew memory
   when they can.
 - **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
+- **Starting another conversation with the same agent was hard to find and disabled in Commands.** Chat now has a visible New conversation button and a working New session command, selects a clearly labelled draft, and returns to Direct when starting from Issues or Routines. Unsent message drafts are restored for their author, and mention keyboard navigation no longer resets the selection or reopens after Escape.
+- **Chat Files and Team could show empty or misleading panels.** Mobile Files now loads with error/retry states, Team replaces the empty More panel without a duplicate tab strip, and file Preview opens the editor or offers a download. File edits survive desktop drawer closing and panel tab switches; explicit discard actions ask before losing changes. Team shows crew members separately from agent collaboration, filters history before pagination, and refreshes on relevant realtime events. Agent links open the selected agent, and reconnect notices no longer cover header controls.
 
 - **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
 

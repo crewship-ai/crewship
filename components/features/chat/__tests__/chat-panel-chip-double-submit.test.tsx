@@ -37,7 +37,7 @@ const chatStub = {
 
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chatStub }))
 vi.mock("@/hooks/use-auth", () => ({
-  useSession: () => ({ data: { user: { id: "user-1" } } }),
+  useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),

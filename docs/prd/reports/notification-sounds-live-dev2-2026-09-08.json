@@ -1,0 +1,23 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "workspace_id": "cmtplws8h000276fa560f",
+  "checks": [
+    "Initial history and two fresh tabs do not create or play audio",
+    "All five previews start their real native audio nodes; Enable itself stays silent",
+    "A real WebSocket-delivered human message plays exactly one soft-pop across two tabs",
+    "Own human messages do not play a notification",
+    "Master Disable sounds suppresses incoming messages",
+    "Do not disturb suppresses incoming messages",
+    "Chat preset Off suppresses incoming messages",
+    "Zero volume suppresses incoming messages",
+    "Personal room mute suppresses incoming messages in both tabs",
+    "Actively focused conversation at latest message stays silent across tabs",
+    "Reload and renewed audio activation never replay historical messages",
+    "Desktop/mobile personal settings are accessible with no browser runtime errors"
+  ],
+  "page_errors": [],
+  "audio_evidence": "Native OscillatorNode.start calls in running AudioContexts; physical speaker output is not measured.",
+  "conversation_id": "cmtsdck9c4c75f5be551c29bf14e83c81",
+  "status": "passed",
+  "artifacts": "assets/notification-sounds-dev2"
+}

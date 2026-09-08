@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { useHotkeys } from "react-hotkeys-hook"
 
@@ -23,6 +23,10 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
   const setOpen = useDrawerStore((s) => s.setOpen)
   const setWidth = useDrawerStore((s) => s.setWidth)
   const activeTab = useDrawerStore((s) => s.activeTab)
+  // Once opened, retain the editor buffer when the rail, Escape or backdrop
+  // hides the drawer. Before the first open the panel remains lazy-mounted.
+  const [hasOpened, setHasOpened] = useState(open)
+  useEffect(() => { if (open) setHasOpened(true) }, [open])
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
 
   useHotkeys(
@@ -64,9 +68,9 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
 
   return (
     <AnimatePresence>
-      {open && (
+      {(open || hasOpened) && (
         <>
-          {mode === "overlay" && (
+          {open && mode === "overlay" && (
             <motion.div
               key="drawer-backdrop"
               initial={{ opacity: 0 }}
@@ -89,9 +93,10 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: width + 24, opacity: 0 }}
             transition={spring.smooth}
-            style={{ width }}
+            hidden={!open}
+            style={{ width, display: open ? undefined : "none" }}
             className={cn(
-              "absolute top-0 right-12 bottom-0 z-20 bg-background border-l shadow-xl flex",
+              "absolute top-0 right-14 bottom-0 z-20 bg-background border-l shadow-xl flex",
               mode === "push" && "static shadow-none",
               className,
             )}
@@ -99,6 +104,20 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
             <div
               role="separator"
               aria-orientation="vertical"
+              aria-label="Resize chat side panel"
+              aria-valuemin={280}
+              aria-valuemax={720}
+              aria-valuenow={width}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                const next = event.key === "ArrowLeft" ? width + 20
+                  : event.key === "ArrowRight" ? width - 20
+                  : event.key === "Home" ? 280
+                  : event.key === "End" ? 720 : null
+                if (next === null) return
+                event.preventDefault()
+                setWidth(next)
+              }}
               className="w-1 cursor-col-resize bg-transparent hover:bg-primary/30 transition-colors shrink-0"
               onMouseDown={handleDragStart}
             />

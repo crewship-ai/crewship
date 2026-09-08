@@ -161,17 +161,25 @@ var workspaceCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}
 
-		return resolvedFormatter(cmd).AutoHuman(created, func() {
-			cli.PrintSuccess(fmt.Sprintf("Workspace created: %s (%s)", created.Slug, created.ID))
-		})
+		f := resolvedFormatter(cmd)
+		if !f.RoutesToHuman() {
+			return f.Machine(created)
+		}
+		if f.Format == "quiet" {
+			_, err := fmt.Fprintln(f.Writer, created.ID)
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Workspace created: %s (%s)", created.Slug, created.ID))
+		return nil
 	},
 }
 

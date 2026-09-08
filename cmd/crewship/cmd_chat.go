@@ -27,15 +27,20 @@ import (
 // path returns the raw message list for scripting.
 var chatCmd = &cobra.Command{
 	Use:   "chat <chat-id>",
-	Short: "Show the full message history of a chat session",
+	Short: "Manage agent sessions and shared chat rooms",
 	Long: `Print every message in a chat session — user prompts, assistant
 responses, tool calls — as a rendered markdown transcript.
+
+Use 'chat room' for direct messages, private groups and workspace channels
+with people and explicitly mentioned agents.
 
 Examples:
   crewship chat c_abc123
   crewship chat c_abc123 --no-markdown    # plain text
   crewship chat c_abc123 --format json | jq '.[] | {role, content}'
-  crewship chat c_abc123 --since 24h      # filter by time (client-side)`,
+  crewship chat c_abc123 --since 24h      # filter by time (client-side)
+  crewship chat room list
+  crewship chat room direct <user-id>`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -346,11 +351,22 @@ Examples:
 		}
 
 		var result struct {
-			Filename  string `json:"filename"`
-			Size      int    `json:"size"`
-			AgentPath string `json:"agent_path"`
+			Filename  string `json:"filename" yaml:"filename"`
+			Size      int64  `json:"size" yaml:"size"`
+			Path      string `json:"path" yaml:"path"`
+			AgentPath string `json:"agent_path" yaml:"agent_path"`
 		}
-		_ = cli.ReadJSON(resp, &result)
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+		f := newFormatter()
+		if !f.RoutesToHuman() {
+			return f.Machine(result)
+		}
+		if f.Format == "quiet" {
+			_, err := fmt.Fprintln(f.Writer, result.Path)
+			return err
+		}
 		if result.AgentPath != "" {
 			cli.PrintSuccess(fmt.Sprintf("Uploaded %s (%d bytes) → %s",
 				result.Filename, result.Size, result.AgentPath))

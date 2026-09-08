@@ -857,7 +857,7 @@ cmd_seed() {
   (
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a
-    ./crewship seed --server "http://localhost:${GO_PORT:-8080}"
+    ./crewship seed --server "http://localhost:${GO_PORT:-8080}" --with-team-chat "$@"
   )
 
   ok "Seed complete."
@@ -971,7 +971,7 @@ case "${1:-help}" in
   status)    cmd_status ;;
   deploy)    cmd_deploy "${2:-}" ;;
   nuke)      cmd_nuke "$@" ;;
-  seed)      cmd_seed ;;
+  seed)      shift; cmd_seed "$@" ;;
   logs)      cmd_logs ;;
   logs:go)   cmd_logs_go ;;
   logs:next) cmd_logs_next ;;
@@ -984,7 +984,7 @@ case "${1:-help}" in
     echo "  status            Show branch / build / service status"
     echo "  deploy <ref>      Switch to <ref> and restart (stashes WIP)"
     echo "                    ref = branch | pr/<NUM> | tag | <sha>"
-    echo "  seed              Seed database with demo data (requires running server)"
+    echo "  seed [flags]      Seed demo data and team colleagues (requires running server)"
     echo "  nuke              Factory reset (destroy all data, containers, start fresh)"
     echo "  logs              Tail combined logs"
     echo "  logs:go           Tail crewship logs only"
