@@ -26,6 +26,7 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/start`](#start-issue) | Start issue execution |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/stop`](#stop-issue) | Stop a running issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/review`](#review-issue) | Submit a review decision |
+| `PUT` | [`/api/v1/crews/{crewId}/issues/{identifier}/review-policy`](#set-review-policy) | Turn client acceptance on or off |
 | `PATCH` | [`/api/v1/issues/bulk`](#bulk-update) | Bulk-update up to 100 issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
@@ -428,6 +429,41 @@ but have not yet finished; handing back or submitting must wait.
 
 The work state, cancellation, comment and audit receipt commit together.
 WebSocket events: `issue.updated`; human handoff also emits `inbox.updated`.
+
+### Set Review Policy
+
+```http
+PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy?workspace_id={workspaceId}
+```
+
+Turns client acceptance on or off for one issue. Acceptance can change only
+before work starts: the update is refused once the issue leaves `TODO`/
+`BACKLOG` or while any assignment is still live, so a stale browser cannot
+quietly drop the acceptance step on work already in flight.
+
+**Auth:** authenticated workspace `OWNER`, `ADMIN`, or `MANAGER` (`create`).
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `revision` | integer | Yes | Current `work_revision` returned by Get Issue |
+| `client_review_required` | boolean | Yes | Whether the result needs client acceptance |
+
+```json
+{"revision":3,"client_review_required":true}
+```
+
+**Response:** `200 OK` — `{"revision":4,"client_review_required":true}`. The
+revision is the new one; send it with the next change.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing `revision` or `client_review_required`, or malformed JSON |
+| `401` | Not authenticated |
+| `403` | Role cannot change the policy |
+| `409` | Stale revision, issue past `TODO`/`BACKLOG`, or work already running |
+| `500` | Update could not be committed |
 
 ### Start Issue
 

@@ -41,6 +41,31 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{
+		name:    "GET .../pipelines/calendar",
+		pointer: "/components/schemas/RoutineCalendarResponse",
+		value:   routineCalendarResponse{},
+	},
+	{
+		name:    "GET .../pipeline-runs/{runId}/executions (page)",
+		pointer: "/components/schemas/PipelineRunStepExecutionList",
+		value:   pipelineRunStepExecutionList{},
+	},
+	{
+		name:    "GET .../pipeline-runs/{runId}/executions?execution_id=",
+		pointer: "/components/schemas/PipelineRunStepExecutionOutput",
+		value:   pipelineRunStepExecutionOutput{},
+	},
+	{
+		name:    "GET .../pipeline-runs/{runId}/artifacts (page)",
+		pointer: "/components/schemas/PipelineRunArtifactList",
+		value:   pipelineRunArtifactList{},
+	},
+	{
+		name:    "GET .../pipeline-runs/{runId}/artifacts?artifact_id=",
+		pointer: "/components/schemas/PipelineRunArtifactContent",
+		value:   pipelineRunArtifactContent{},
+	},
+	{
 		name:    "PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy",
 		pointer: "/components/schemas/IssueReviewPolicyResponse",
 		value:   issueReviewPolicyResponse{},

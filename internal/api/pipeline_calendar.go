@@ -25,7 +25,7 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		return
 	}
 	ws := WorkspaceIDFromContext(r.Context())
-	events := make([]map[string]any, 0)
+	events := make([]routineCalendarEvent, 0)
 	truncated := false
 	schedules, err := pipeline.NewScheduleStore(h.db).List(r.Context(), ws)
 	if err != nil {
@@ -59,7 +59,11 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 				truncated = true
 				break
 			}
-			events = append(events, map[string]any{"id": s.ID + ":" + at.UTC().Format(time.RFC3339), "kind": "planned", "at": at.UTC().Format(time.RFC3339), "slug": p.Slug, "name": p.Name, "schedule_id": s.ID, "timezone": s.Timezone})
+			events = append(events, routineCalendarEvent{
+				ID: s.ID + ":" + at.UTC().Format(time.RFC3339), Kind: "planned",
+				At: at.UTC().Format(time.RFC3339), Slug: p.Slug, Name: p.Name,
+				ScheduleID: s.ID, Timezone: s.Timezone,
+			})
 		}
 		if len(occurrences) > 0 && occurrences[len(occurrences)-1].Before(end) {
 			truncated = true
@@ -88,7 +92,7 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			truncated = true
 			break
 		}
-		events = append(events, map[string]any{"id": id, "kind": "pending", "at": at, "slug": slug, "name": name})
+		events = append(events, routineCalendarEvent{ID: id, Kind: "pending", At: at, Slug: slug, Name: name})
 	}
 	if err := pending.Err(); err != nil {
 		pending.Close()
@@ -114,11 +118,11 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			truncated = true
 			break
 		}
-		events = append(events, map[string]any{"id": id, "kind": "run", "at": at, "slug": slug, "name": name, "status": status, "outcome": outcome})
+		events = append(events, routineCalendarEvent{ID: id, Kind: "run", At: at, Slug: slug, Name: name, Status: status, Outcome: outcome})
 	}
 	if rows.Err() != nil {
 		replyError(w, 500, "read calendar runs")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"events": events, "truncated": truncated})
+	writeJSON(w, 200, routineCalendarResponse{Events: events, Truncated: truncated})
 }

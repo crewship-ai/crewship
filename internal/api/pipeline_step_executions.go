@@ -36,7 +36,7 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 			replyError(w, 500, "load execution output")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": executionID, "output": output})
+		writeJSON(w, 200, pipelineRunStepExecutionOutput{ID: executionID, Output: output})
 		return
 	}
 	after := int64(0)
@@ -56,7 +56,7 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer rows.Close()
-	records := make([]map[string]any, 0)
+	records := make([]pipelineRunStepExecution, 0)
 	var next int64
 	more := false
 	for rows.Next() {
@@ -73,15 +73,20 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 			break
 		}
 		next = seq
-		records = append(records, map[string]any{"id": id, "parent_execution_id": parent.String, "step_id": step, "execution_path": path, "attempt": attempt, "kind": kind, "status": status, "agent_slug": agent, "model": model, "started_at": started, "ended_at": ended.String, "error": reason, "output_bytes": size})
+		records = append(records, pipelineRunStepExecution{
+			ID: id, ParentExecutionID: parent.String, StepID: step, ExecutionPath: path,
+			Attempt: attempt, Kind: kind, Status: status, AgentSlug: agent, Model: model,
+			StartedAt: started, EndedAt: ended.String, Error: reason, OutputBytes: size,
+		})
 	}
 	if rows.Err() != nil {
 		replyError(w, 500, "read step executions")
 		return
 	}
-	var cursor any
+	var cursor *string
 	if more {
-		cursor = strconv.FormatInt(next, 10)
+		encoded := strconv.FormatInt(next, 10)
+		cursor = &encoded
 	}
-	writeJSON(w, 200, map[string]any{"rows": records, "next_cursor": cursor})
+	writeJSON(w, 200, pipelineRunStepExecutionList{Rows: records, NextCursor: cursor})
 }

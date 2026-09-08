@@ -192,7 +192,7 @@ func (h *PipelineHandler) RunArtifacts(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "load artifact content")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": id, "content": content})
+		writeJSON(w, 200, pipelineRunArtifactContent{ID: id, Content: content})
 		return
 	}
 	var after int64
@@ -209,7 +209,7 @@ func (h *PipelineHandler) RunArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	artifacts := make([]map[string]any, 0)
+	artifacts := make([]pipelineRunArtifact, 0)
 	truncated := false
 	var next int64
 	for rows.Next() {
@@ -225,15 +225,20 @@ func (h *PipelineHandler) RunArtifacts(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		next = seq
-		artifacts = append(artifacts, map[string]any{"id": id, "step_execution_id": execution, "kind": kind, "label": label, "state": state, "media_type": media, "sha256": sha, "content_bytes": contentSize, "source": source, "error": reason, "created_at": at, "execution_path": path, "attempt": attempt})
+		artifacts = append(artifacts, pipelineRunArtifact{
+			ID: id, StepExecutionID: execution, Kind: kind, Label: label, State: state,
+			MediaType: media, SHA256: sha, ContentBytes: contentSize, Source: source,
+			Error: reason, CreatedAt: at, ExecutionPath: path, Attempt: attempt,
+		})
 	}
 	if err := rows.Err(); err != nil {
 		replyError(w, 500, fmt.Sprint("read artifacts: ", err))
 		return
 	}
-	var cursor any
+	var cursor *string
 	if truncated {
-		cursor = strconv.FormatInt(next, 10)
+		encoded := strconv.FormatInt(next, 10)
+		cursor = &encoded
 	}
-	writeJSON(w, 200, map[string]any{"artifacts": artifacts, "truncated": truncated, "next_cursor": cursor})
+	writeJSON(w, 200, pipelineRunArtifactList{Artifacts: artifacts, Truncated: truncated, NextCursor: cursor})
 }
