@@ -40,8 +40,10 @@ func (h *AssignmentHandler) publishIssueDeliverables(ctx context.Context, assign
 		if !strings.HasPrefix(path, "/crew/shared/") {
 			continue
 		}
-		relative := strings.TrimPrefix(path, "/crew/shared/")
-		if strings.HasPrefix(relative, ".memory/") || !filepath.IsLocal(relative) {
+		// Clean first: "./.memory/notes" and ".memory//notes" are local paths
+		// that reach the same files while sliding past a literal prefix test.
+		relative := filepath.Clean(strings.TrimPrefix(path, "/crew/shared/"))
+		if relative == ".memory" || strings.HasPrefix(relative, ".memory/") || !filepath.IsLocal(relative) {
 			continue
 		}
 		file, err := root.Open(relative)

@@ -120,3 +120,20 @@ func TestIssueTakeoverCancelsParkedRoutineAndItsApproval(t *testing.T) {
 		t.Fatalf("orphaned state: %s %s %s", run, point, item)
 	}
 }
+
+// A mission without an issue_work row must still read. The row comes from a
+// trigger and a backfill, neither of which covers a mission_type flipped by an
+// UPDATE or a bundle restored without the table — and losing the whole issue
+// detail to a 500 is a far worse failure than reporting revision 0.
+func TestIssueDetail_SurvivesMissingWorkRow(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-82", "IN_PROGRESS")
+	if _, err := h.db.Exec(`DELETE FROM issue_work WHERE mission_id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.Get(rec, covIWReq(user, ws, "OWNER", "GET", "", crew, "ENG-82"))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+}

@@ -140,7 +140,11 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 	}
 
 	// Per-item inputs = parent inputs + the loop variable.
-	itemInputs := make(map[string]any, len(in.Inputs)+1)
+	// Capacity hint only, and deliberately without the `+1` for the loop
+	// variable: CodeQL reads any arithmetic in a make() size as a possible
+	// overflow (go/allocation-size-overflow) and one extra bucket is not
+	// worth a suppression comment on a hot path.
+	itemInputs := make(map[string]any, len(in.Inputs))
 	for k, v := range in.Inputs {
 		itemInputs[k] = v
 	}

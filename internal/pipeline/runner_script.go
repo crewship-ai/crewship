@@ -197,7 +197,9 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 
 	// Env: declared inputs → CREWSHIP_INPUT_*, plus explicit (rendered) env.
 	// Fresh map so the script gets only what we promised — no orchestrator leak.
-	envIn := make(map[string]string, len(parentRender.Inputs)+len(step.Script.Env))
+	// Hint on the larger of the two sources rather than their sum — see
+	// executor_foreach.go: a summed make() size trips go/allocation-size-overflow.
+	envIn := make(map[string]string, len(parentRender.Inputs))
 	for k, v := range parentRender.Inputs {
 		envIn["CREWSHIP_INPUT_"+strings.ToUpper(k)] = stringify(v)
 	}
