@@ -38,7 +38,7 @@ func (h *IssueHandler) loadIssueExecution(ctx context.Context, issue *issueRespo
 	if err != nil {
 		return err
 	}
-	rows, err := h.db.QueryContext(ctx, `SELECT a.id,agent.name,CASE WHEN a.status='RUNNING' AND COALESCE(a.exec_id,'')='' THEN 'PREPARING' ELSE a.status END,COALESCE(a.outcome,''),COALESCE(a.run_id,''),EXISTS(SELECT 1 FROM mission_tasks t WHERE t.id=? AND t.assignment_id=a.id) FROM assignments a JOIN agents agent ON agent.id=a.assigned_to_id WHERE a.issue_execution_id=? ORDER BY a.created_at DESC,a.id DESC LIMIT 50`, reviewTask, execution.ID)
+	rows, err := h.db.QueryContext(ctx, `SELECT a.id,agent.name,CASE WHEN a.status='RUNNING' AND COALESCE(a.exec_id,'')='' THEN 'PREPARING' ELSE a.status END,COALESCE(a.outcome,''),COALESCE((SELECT je.trace_id FROM journal_entries je WHERE je.mission_id=a.mission_id AND je.entry_type='run.started' AND json_extract(je.payload,'$.assignment_id')=a.id ORDER BY je.ts DESC LIMIT 1),''),EXISTS(SELECT 1 FROM mission_tasks t WHERE t.id=? AND t.assignment_id=a.id) FROM assignments a JOIN agents agent ON agent.id=a.assigned_to_id WHERE a.issue_execution_id=? ORDER BY a.created_at DESC,a.id DESC LIMIT 50`, reviewTask, execution.ID)
 	if err != nil {
 		return err
 	}

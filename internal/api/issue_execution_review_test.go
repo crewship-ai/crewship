@@ -79,3 +79,16 @@ func TestIssueRoutineStart_ValidatesStoredInputsBeforeDispatch(t *testing.T) {
 		t.Fatal(status)
 	}
 }
+
+func TestIssueExecutionDetailReadsTheRealRunProjection(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-81", "IN_PROGRESS")
+	if _, err := h.db.Exec(`INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at) SELECT 'detail-execution',mission_id,revision,brief_revision,'working',?,'2026-09-08','2026-09-08' FROM issue_work WHERE mission_id=?`, lead, id); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.Get(rec, covIWReq(user, ws, "OWNER", "GET", "", crew, "ENG-81"))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+}

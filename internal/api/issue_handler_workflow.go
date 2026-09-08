@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/missionactivity"
 )
 
@@ -146,6 +147,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	if err = tx.Commit(); err != nil {
 		internalError(w, r, h.logger, "review: commit", err)
 		return
+	}
+	if h.journal != nil {
+		_, _ = h.journal.Emit(ctx, journal.Entry{WorkspaceID: wsID, CrewID: crewID, MissionID: missionID, Type: journalTypeForIssueAction(issueAction(activity)), Severity: journal.SeverityInfo, ActorType: journal.ActorUser, ActorID: user.ID, Summary: commentBody, Payload: issueEventPayload(issueEvent{MissionID: missionID, Action: issueAction(activity), Details: commentBody, From: fromStatus, To: toStatus})})
 	}
 	if toStatus == "DONE" {
 		emitMissionOutcomeLessonAsync(ctx, h.db, h.storagePath, missionID, "DONE", h.logger)
