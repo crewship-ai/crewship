@@ -169,7 +169,7 @@ export function RoutineScheduleEditorDialog({
                   <p className="mb-1 text-muted-foreground">Next {preview.occurrences.length} fire times ({preview.timezone}):</p>
                   <ul className="space-y-0.5 font-mono text-[11px]">
                     {preview.occurrences.map((o) => (
-                      <li key={o}>{new Date(o).toLocaleString(undefined, { timeZone: preview.timezone })}</li>
+                      <li key={o}>{new Date(o).toLocaleString("en-GB", { timeZone: preview.timezone })}</li>
                     ))}
                   </ul>
                 </div>

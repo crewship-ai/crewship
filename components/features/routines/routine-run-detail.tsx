@@ -105,7 +105,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     <RoutineNavigation slug={run.pipeline_slug} view="history" />
     <header className="space-y-2">
       <Link className="text-xs text-muted-foreground hover:text-foreground" href={routineViewHref(run.pipeline_slug, "history")}>← All runs</Link>
-      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3"><h2 className="text-lg font-semibold">Run · {new Date(run.started_at).toLocaleString()}</h2><Pill tone={presentation.tone}>{presentation.label}</Pill></div><Link className="text-xs text-primary hover:underline" href={activityHref}>Open in Activity ↗</Link></div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-3"><h2 className="text-lg font-semibold">Run · {new Date(run.started_at).toLocaleString("en-GB")}</h2><Pill tone={presentation.tone}>{presentation.label}</Pill></div><Link className="text-xs text-primary hover:underline" href={activityHref}>Open in Activity ↗</Link></div>
       <p className="text-xs text-muted-foreground">{run.triggered_via} · {formatDurationMs(run.duration_ms)}{run.pipeline_version != null && <> · Executed recipe <Link className="text-primary" href={`${routineViewHref(run.pipeline_slug, "versions")}&version=${run.pipeline_version}`}>v{run.pipeline_version}</Link></>}</p>
       {run.issue_identifier && <Link className="text-xs text-primary" href={`/issues?issue=${encodeURIComponent(run.issue_identifier)}`}>Issue · {run.issue_identifier} ↗</Link>}
     </header>

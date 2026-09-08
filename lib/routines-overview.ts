@@ -277,7 +277,7 @@ export function dayBuckets(now: Date, days: number): Day[] {
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)
     out.push({
-      label: d.toLocaleDateString(undefined, { weekday: "short" }),
+      label: d.toLocaleDateString("en-GB", { weekday: "short" }),
       isToday: i === 0,
     })
   }

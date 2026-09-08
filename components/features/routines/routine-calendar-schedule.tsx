@@ -45,7 +45,7 @@ export function RoutineCalendarSchedule({ workspaceId, routines, date, onClose, 
       const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/run`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fire_at: at.toISOString(), inputs }) })
       const data = await res.json()
       if (!res.ok || !data.pending_id) throw new Error(data.error || data.detail || "Could not schedule this routine.")
-      toast.success(`Routine scheduled for ${at.toLocaleString()}`)
+      toast.success(`Routine scheduled for ${at.toLocaleString("en-GB")}`)
       onScheduled()
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setSaving(false) }

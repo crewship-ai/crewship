@@ -291,3 +291,12 @@ respecting the existing 32-day API bound. The pending-run calendar query now
 filters by workspace AND displayed interval before limiting. The generic list's
 implicit fallback to 50 rows previously hid distant dates. Dense responses mark
 truncated explicitly. No migration or separate calendar database is introduced.
+
+### English presentation and unified Plan visibility
+
+Routines explicitly formats dates/weekdays/months in en-GB; the browser's
+local timezone is retained. This separates application language from execution
+timezone. Plan's Schedules section contains both one-time starts (including
+Calendar additions) and repeating schedules. An empty recurring list must never
+claim that no schedules exist. One-time rows lead, and technical concurrency
+settings are collapsed below the scheduling controls.

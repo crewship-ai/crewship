@@ -809,7 +809,7 @@ function RunsList({
                     )}
                   />
                   <div className="min-w-0">
-                    <div className="truncate font-mono text-[11px] text-foreground/85">{new Date(r.started_at).toLocaleString()} · {routineRunLabel(r)}</div>
+                    <div className="truncate font-mono text-[11px] text-foreground/85">{new Date(r.started_at).toLocaleString("en-GB")} · {routineRunLabel(r)}</div>
                     <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                       <span>{prov.label}</span>
                       {r.pipeline_version != null && <span>· v{r.pipeline_version}</span>}

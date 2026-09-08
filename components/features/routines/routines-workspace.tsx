@@ -43,7 +43,7 @@ function RecentRoutineRuns({ workspaceId, routines }: { workspaceId: string; rou
         return <Link key={run.id} href={routineRunHref(run.pipeline_slug, run.id)} className="flex flex-wrap items-center gap-3 border-b border-white/[0.04] px-4 py-3 text-xs last:border-0 hover:bg-muted/30">
           <CrewIcon icon={resolveRoutineIcon(routine ?? { slug: run.pipeline_slug })} color={resolveRoutineColor(routine ?? { slug: run.pipeline_slug })} size="sm" />
           <span className="min-w-0 flex-1">{run.pipeline_name || run.pipeline_slug}</span>
-          <span className="text-muted-foreground">{new Date(run.started_at).toLocaleString()}</span>
+          <span className="text-muted-foreground">{new Date(run.started_at).toLocaleString("en-GB")}</span>
           <span>{routineRunLabel(run)}</span>
         </Link>
       })}
