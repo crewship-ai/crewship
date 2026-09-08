@@ -201,7 +201,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
 
   // ── Shared meta ────────────────────────────────────────────────────
   const [icon, setIcon] = useState(routine ? resolveRoutineIcon(routine) : "workflow")
-  const [color, setColor] = useState(routine ? resolveRoutineColor(routine) : "purple")
+  const [color, setColor] = useState(routine ? resolveRoutineColor(routine) : "violet")
   const savedRecipe = useRef<string | null>(null)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -362,7 +362,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
 
   useEffect(() => {
     if (!open) return
-    const changed = liveText !== pristineText.current || name !== (routine?.name ?? "") || description !== (routine?.description ?? "") || authorCrewId !== (routine?.author_crew_id ?? "") || icon !== (routine ? resolveRoutineIcon(routine) : "workflow") || color !== (routine ? resolveRoutineColor(routine) : "purple") || goal.trim() !== "" || trigger.kind !== "manual" || sourcesAndOutput.trim() !== "" || Object.keys(scheduledValues).length > 0
+    const changed = liveText !== pristineText.current || name !== (routine?.name ?? "") || description !== (routine?.description ?? "") || authorCrewId !== (routine?.author_crew_id ?? "") || icon !== (routine ? resolveRoutineIcon(routine) : "workflow") || color !== (routine ? resolveRoutineColor(routine) : "violet") || goal.trim() !== "" || trigger.kind !== "manual" || sourcesAndOutput.trim() !== "" || Object.keys(scheduledValues).length > 0
     if (!changed) return
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     const onNavigate = (event: MouseEvent) => {
@@ -706,7 +706,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     description !== (routine?.description ?? "") ||
     authorCrewId !== (routine?.author_crew_id ?? "") ||
     icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
-    color !== (routine ? resolveRoutineColor(routine) : "purple") ||
+    color !== (routine ? resolveRoutineColor(routine) : "violet") ||
     liveText !== pristineText.current
 
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
@@ -1195,7 +1195,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
           />
 
           <CreateSurfaceFooter
-            hint="Unsaved recipe · Validation does not run work"
+            hint={routine ? "Saving creates a new version · Validation does not run work" : "Unsaved recipe · Validation does not run work"}
             onCancel={onClose}
             secondary={
               <span className="max-sm:hidden"><CreateSurfaceSecondaryAction

@@ -403,3 +403,35 @@ Phone 390px fits the complete form; no browser page errors. Screenshots:
 Final dev1 application is `8eda95134`; main-clone peer Go verification WIP was
 restored after both deployments and was not shipped. PR #2460 remains unmerged
 and still requires actual current-head review.
+
+## Shared recipe builder for Edit
+
+The routine and historical run headers now expose Edit. It opens the same
+builder used by New routine, with saved identity, description, inputs, recipe
+and author crew prefilled. Settings is removed from the navigation; access,
+budget and metadata remain expandable in the builder. Old settings links open
+the new editor. Existing schedule/webhook managers are available under Schedule
+and explicitly apply changes immediately. Saving an edited recipe omits trigger
+creation and cannot rename its slug. Historical restoration remains an unsaved
+draft. The existing acting-agent ID is preserved for the unchanged author crew.
+
+Creation and editing offer the shared icon/color picker and crew-scoped avatar
+choices for each top-level agent_run step. Nested and review agent configuration
+remains in Code. Appearance-save failures report partial success and retry only
+the appearance write; they do not repeat recipe or trigger creation.
+
+Verified on dev1 through the real browser: create a manual fixture with a violet
+star and Casey, reopen prefilled, save version 2 under the same ID, discard edits
+without changing the stored name, add a future one-time start and preserve its
+exact pending record when saving version 3, cancel that start and delete the
+fixture. No agent work was executed. Original Routine playground is unchanged.
+Legacy edit URL and 390px mobile layout passed without horizontal overflow.
+No browser page errors. Evidence: /tmp/routine-builder-live.log,
+/tmp/routine-builder-schedule-live.log, /tmp/routine-builder-edit.png,
+/tmp/routine-builder-mobile.png. Peer WIP was stashed only during service build
+and restored afterwards. Only dev1 was deployed.
+
+Checks: 32 Routines frontend files / 217 tests; full Go suite, 135 tested packages
+(API 126.073s, database 458.178s); go vet; TypeScript; production export; ESLint
+zero errors / 32 existing warnings. Changed-file lint has no warnings. PR #2460
+remains unmerged and needs a review of its current application head.
