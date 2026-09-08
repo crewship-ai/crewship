@@ -38,4 +38,4 @@ Ověřeno:
 - Crews a cache: 68 souborů, 709 testů prošlo. Dodatečný průchod Memory/editor/katalog/Settings privacy: 43 testů prošlo, včetně osmi testů sdílené osobní paměti. Tím je opraven předchozí CI pád šesti zastaralých Settings testů.
 - `pnpm lint`: 0 chyb, 32 existujících varování. `pnpm build`: statický export prošel.
 - `agents-invariants` a `docs-inventory -strict`: prošly.
-- Živý browser: všechny uvedené pohledy prošly. Jediná odpověď 404 byla očekávaný prázdný export; UI ji správně vysvětlilo. Backendová chyba nákladů se ověří po reloadu Dev2.
+- Živý browser: všechny uvedené pohledy prošly. Jediná odpověď 404 byla očekávaný prázdný export; UI ji správně vysvětlilo. Po nasazení `65219cc4` na Dev2 v 16:33 UTC vrací agent inbox 200 bez `unavailable` a API health je `ok`. Veřejné `/crews` vrací 200. Kompletní živý browserový průchod po reloadu prošel znovu bez JS chyb. Naplněný izolovaný průchod navíc ověřil graf, aktuální poznámku bez historie, Create/Edit, vytvoření crew a mobilní dialog bez přetečení.
