@@ -52,6 +52,9 @@ func init() {
 	seedCmd.Flags().Bool("wait-provision", false, "Block until all crews finish provisioning (default: fire-and-forget, seed returns while provisioning runs in the background)")
 	seedCmd.Flags().Bool("test-backup", false, "After seeding, run a backup/restore round-trip self-test on one crew (implies --wait-provision)")
 	seedCmd.Flags().Bool("with-memory", false, "Pre-seed agent memory tiers (AGENT.md / CREW.md / PERSONA.md / pins.md / daily/{date}.md / learned.md) for the demo workspace; useful for memory-recall demos and live GDPR/RBAC tests")
+	seedCmd.Flags().Bool("with-team-chat", false, "Add six fictional colleagues with real roles, local avatars and human Chat examples; signup is not required")
+	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
+	seedCmd.AddCommand(newSeedTeamChatCmd())
 	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
 }
 
@@ -431,6 +434,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if withTeam, _ := cmd.Flags().GetBool("with-team-chat"); withTeam {
+		stateDir, _ := cmd.Flags().GetString("state-dir")
+		if _, err := seedTeamChat(ctx, client, stateDir); err != nil {
+			return fmt.Errorf("--with-team-chat: %w", err)
+		}
+	}
 	// ── Phase 11: Summary + deferred provisioning errors ──
 	// Surface whatever triggerProvisions or waitForProvisions reported
 	// now that the rest of the seed has completed. In async mode triggerErr

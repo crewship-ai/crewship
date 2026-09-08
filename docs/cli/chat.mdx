@@ -352,3 +352,51 @@ Adding the first participant flips the chat to group visibility, after which the
 - [`crewship ask`](/cli/ask) — one-shot prompt (also creates a chat, tagged `origin=CLI`).
 - [`crewship session`](/cli/session) — browser session management, unrelated noun.
 - [Conversations API](/api-reference/conversations) — the underlying endpoints.
+
+### Continue into a new room
+
+Keep the original private discussion and start a separate room with fresh
+history. A private group continuation requires a DM and at least one additional
+human. Inviting an agent from a private discussion requires explicitly choosing
+a new workspace-visible channel; old private history is never copied.
+
+```bash
+crewship chat room continue DM_ID --kind group --title "Planning" --member USER_ID --client-id planning-request-1
+crewship chat room continue PRIVATE_ROOM_ID --kind channel --title "Team and agent" --agent AGENT_ID --client-id channel-request-1
+```
+
+Repeat `--member` to add workspace humans. Both original DM participants (or the
+existing private group roster for a channel) are retained. Use the same
+`--client-id` when retrying the same request after a lost response; a different
+payload with that ID is rejected. Joining the agent does not start work: send a
+new message with `--mention-agent AGENT_ID` when ready.
+
+### Room history, read cursors and notification controls
+
+`crewship chat room messages ROOM_ID` returns the latest page. `--limit` defaults
+to 100 and accepts 1–100. Use `--before-sequence N` (positive) for older history
+or `--after-sequence N` (nonnegative) to catch up; the two flags are mutually
+exclusive. `--after-sequence 0` starts at the beginning. JSON includes `has_more`;
+messages within each page are ordered by sequence.
+
+```bash
+crewship chat room messages ROOM_ID --before-sequence 101 --limit 50
+crewship chat room messages ROOM_ID --after-sequence 150
+crewship chat room read ROOM_ID --sequence 175
+crewship chat room mute ROOM_ID --muted=true
+crewship chat room mute ROOM_ID --muted=false
+```
+
+`crewship chat room read` requires `--sequence` (nonnegative): pass the last
+message actually read. The server only advances your own read cursor.
+`crewship chat room mute` defaults `--muted` to true; explicitly pass false to
+restore your room notifications. Neither command changes another user's state.
+
+`crewship chat room activity ROOM_ID` reads the channel's activity settings.
+To change them, the channel creator must explicitly provide both `--issues` and
+`--routines`; omitting only one is an error. Both are false by default. Enabling
+starts with future events, without replaying historical issues or routine runs.
+
+```bash
+crewship chat room activity ROOM_ID --issues=true --routines=false
+```

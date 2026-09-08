@@ -107,6 +107,8 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
+	"workspace_conversation_messages":   {{column: "subject_agent_id", refTable: "agents", refColumn: "id"}},
+	"workspace_conversation_agent_jobs": {{column: "assignment_id", refTable: "assignments", refColumn: "id"}},
 	// journal_chain_checkpoints.workspace_id (v152,
 	// migrate_consts_v152_journal_hash_chain.go) is a bare TEXT column:
 	// the table stores removed (seq, hash) JSON rather than row refs, so
@@ -395,6 +397,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				}
 			}
 		}
+	}
+	if err := remapConversationMetadata(dump, idMap); err != nil {
+		return err
 	}
 	return nil
 }

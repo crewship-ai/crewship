@@ -63,7 +63,7 @@ export function AgentStrip({
   const credentials = agent._count?.credentials ?? null
   const large = size === "lg"
   return (
-    <div className={cn("flex min-w-0 items-center gap-3", className)} data-testid="agent-strip">
+    <div className={cn("flex min-w-0 items-center gap-3", trailing && "flex-wrap gap-y-2", className)} data-testid="agent-strip">
       <span className="relative shrink-0">
         <AgentAvatar
           seed={agent.avatar_seed || agent.slug}
@@ -87,12 +87,12 @@ export function AgentStrip({
           )}
         />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className={cn("flex min-w-0 flex-1 flex-col gap-0.5", trailing && "min-w-[160px]")}>
         <span className="flex min-w-0 flex-wrap items-center gap-2">
           <span className={cn("truncate font-semibold", large ? "text-heading" : "text-body")}>{agent.name}</span>
           <StatusPill tone={st.tone} label={st.label} live={st.live} />
         </span>
-        <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-label text-muted-foreground">
+        <span className={cn("flex min-w-0 items-center gap-1.5 text-label text-muted-foreground", large ? "flex-wrap" : "overflow-hidden whitespace-nowrap [&>*]:shrink-0")}>
           {agent.role_title && <span className="truncate">{agent.role_title}</span>}
           {agent.crew && (
             <>
@@ -129,7 +129,7 @@ export function AgentStrip({
           <Link href={entityHref({ kind: "journal", agentSlug: agent.slug })} className="hover:underline">runs</Link>
         </span>
       </span>
-      {trailing && <span className="flex shrink-0 items-center gap-2">{trailing}</span>}
+      {trailing && <span className="ml-auto flex shrink-0 flex-wrap items-center gap-2">{trailing}</span>}
     </div>
   )
 }

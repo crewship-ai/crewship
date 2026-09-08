@@ -1,0 +1,26 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "user_id": "b4c27e82-6218-4470-9a38-9a2fdddeba02",
+  "fixture_directory": "preview-demo-2026-09-08-fc52510a",
+  "fixture_origin": "Synthetic QA PDF/image/code uploaded by supported owner CLI; no agent execution.",
+  "checks": [
+    "Emma VIEWER opens a real two-page PDF in Files, renders distinct pages and zooms with same-origin PDF assets",
+    "PDF download preserves exact uploaded bytes and filename",
+    "PNG preview decodes the uploaded 900×500 image",
+    "Code files keep the existing text editor preview",
+    "The same output PDF opens through the Crew tree and crew-scoped download route",
+    "At 390px mobile width, Files tab opens PDF preview, renders page two and does not overflow the document"
+  ],
+  "page_errors": [],
+  "failed_resources": [],
+  "pdf_assets": [
+    "https://crewship-dev2.unifylab.cz/pdfjs/pdf.worker.min.mjs",
+    "https://crewship-dev2.unifylab.cz/pdfjs/pdf.worker.min.mjs",
+    "https://crewship-dev2.unifylab.cz/pdfjs/pdf.worker.min.mjs"
+  ],
+  "agent_id": "cmtpmjabx002425d82ae7",
+  "limitations": [
+    "Crew root listing currently exposes the output tree; actual shared-volume sample is readable with CLI --path shared but is not discoverable from that UI root."
+  ],
+  "status": "passed"
+}

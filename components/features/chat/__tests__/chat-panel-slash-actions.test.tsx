@@ -34,7 +34,7 @@ const chatStub = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => chatStub }))
-vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: "user-1" } } }) }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test", loading: false }) }))
 
 // Neighbours that open their own surfaces and are not what this file is about.

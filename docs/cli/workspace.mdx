@@ -198,6 +198,11 @@ account when needed, adds the membership, and prints a one-time setup link.
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--role <ROLE>` | `MEMBER` | Role to grant: `ADMIN`, `MANAGER`, `MEMBER`, or `VIEWER`. |
+| `--create-only` | `false` | Require a new account. If the email already exists, return `409` before changing membership, role or setup tokens. |
+
+Use `--create-only` for isolated demo provisioning when an existing person must
+remain untouched. The default provisioning behavior is unchanged when omitted;
+the flag does not reset an existing account’s password.
 
 ## Examples
 

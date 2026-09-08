@@ -1,3 +1,4 @@
+import { UnifiedChatProvider } from "@/components/features/conversations/unified-chat"
 import { Suspense } from "react"
 
 import { ChatClient } from "./chat-client"
@@ -20,7 +21,7 @@ export default function ChatPage() {
         </div>
       }
     >
-      <ChatClient />
+      <UnifiedChatProvider><ChatClient /></UnifiedChatProvider>
     </Suspense>
   )
 }

@@ -1,3 +1,4 @@
+vi.mock("../right-panel-tabs/team-tab", () => ({ TeamTab: () => null }))
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react"
 
