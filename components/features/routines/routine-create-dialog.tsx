@@ -389,6 +389,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const handleDocChange = (next: string) => {
     bufferRef.current = next
     setLiveText(next)
+    const parsed = parseRoutineBuffer(next, dslFormat)
+    if (parsed.ok) setDescription(String(parsed.parsed.description ?? ""))
     setParseError(null)
     setTestResult(null)
     setSaveToken(null)
@@ -1128,7 +1130,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               <div className="flex items-center gap-1.5 font-medium">
                 {testResult.passed ? "Definition valid" : "Definition invalid"}
               </div>
-              <p className="mt-0.5 font-mono text-[10px] opacity-80">{testResult.details}</p>
+              <p className="mt-0.5 max-h-24 overflow-y-auto break-words font-mono text-[10px] opacity-80">{testResult.details}</p>
             </div>
           )}
 
@@ -1141,13 +1143,13 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             hint="Unsaved recipe · Validation does not run work"
             onCancel={onClose}
             secondary={
-              <CreateSurfaceSecondaryAction
+              <span className="max-sm:hidden"><CreateSurfaceSecondaryAction
                 icon={FlaskConical}
                 onClick={handleTestRun}
                 disabled={busy !== "none"}
               >
                 {busy === "testing" ? "Validating…" : "Validate definition"}
-              </CreateSurfaceSecondaryAction>
+              </CreateSurfaceSecondaryAction></span>
             }
             primaryLabel={advancedPrimaryLabel}
             primaryIcon={Save}
