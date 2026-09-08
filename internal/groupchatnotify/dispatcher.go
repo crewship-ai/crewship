@@ -86,18 +86,19 @@ func (d *Dispatcher) Drain(ctx context.Context) error {
 }
 
 func (d *Dispatcher) project(ctx context.Context, event groupchat.Event) ([]string, error) {
-	conn, err := d.db.Conn(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return nil, err
-	}
-	defer conn.ExecContext(context.Background(), "ROLLBACK")
+	var userIDs []string
+	err := groupchat.WithWriteTransaction(ctx, d.db, func(conn *sql.Conn) error {
+		var err error
+		userIDs, err = d.projectInTransaction(ctx, conn, event)
+		return err
+	})
+	return userIDs, err
+}
+
+func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, event groupchat.Event) ([]string, error) {
 	var workspaceID, authorID string
 	var sequence int64
-	err = conn.QueryRowContext(ctx, `SELECT c.workspace_id, COALESCE(m.author_user_id,''),m.sequence
+	err := conn.QueryRowContext(ctx, `SELECT c.workspace_id, COALESCE(m.author_user_id,''),m.sequence
  FROM workspace_conversations c JOIN workspaces w ON w.id=c.workspace_id
  JOIN workspace_conversation_messages m ON m.conversation_id=c.id AND m.id=?
  WHERE c.id=? AND c.deleted_at IS NULL AND w.deleted_at IS NULL`, event.MessageID, event.ConversationID).Scan(&workspaceID, &authorID, &sequence)
@@ -166,9 +167,6 @@ func (d *Dispatcher) project(ctx context.Context, event groupchat.Event) ([]stri
 				return nil, err
 			}
 		}
-	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return nil, err
 	}
 	return userIDs, nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/groupchat"
 )
 
 // authorizeConversationAssignment is the final gate for queued channel work.
@@ -20,6 +21,11 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
 	if err != nil {
 		return false, err
 	}
+	release, err := groupchat.AcquireWriteAdmission(ctx, h.db)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	c, err := h.db.Conn(ctx)
 	if err != nil {
 		return false, err

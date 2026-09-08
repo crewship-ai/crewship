@@ -34,6 +34,12 @@ explicit. Message persistence and its outbox event commit atomically. Retries wi
 the same key and different contents return conflict. Reads are cursor-paginated;
 reconnect reloads persisted history, not only process-memory frames.
 
+Conversation writes, inbox projection and agent-job transactions share a
+context-aware admission queue per database handle before acquiring a pooled
+connection. This prevents queued chat writers from exhausting the read pool
+or repeatedly overtaking each other in SQLite busy waits. SQLite still arbitrates
+writes from other subsystems and processes; this is not a distributed lock.
+
 Outbox delivery is at least once. Consumers must be idempotent. Realtime events
 are advisory invalidations on authorized user channels, containing identifiers
 only. Durable history is authoritative. Inbox aggregates unread activity per
@@ -57,7 +63,7 @@ Ten concurrent human senders and a workspace roster of 100+ are acceptance
 scenarios, not a performance guarantee. Measure on isolated real SQLite files
 with WAL and a five-connection pool; include duplicate retries and reopen/replay.
 An in-memory test alone is not evidence about SQLite write contention.
-The opt-in 100-active-client HTTP acceptance is now implemented; see
+The 100-active-client HTTP acceptance runs in the normal and race Go suites; see
 [reproduction and measured limits](../../e2e/workspace-conversations-load.md).
 It tests short concurrent bursts, not sustained mixed agent/chat production load.
 A single-node deployment remains the current target. PostgreSQL and distributed

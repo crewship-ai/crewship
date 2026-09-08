@@ -70,6 +70,11 @@ func (h *AssignmentHandler) ProcessConversationJobs(ctx context.Context) error {
 }
 
 func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id string) (string, error) {
+	release, err := groupchat.AcquireWriteAdmission(ctx, h.db)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	c, err := h.db.Conn(ctx)
 	if err != nil {
 		return "", err
@@ -138,6 +143,7 @@ func (h *AssignmentHandler) prepareConversationJob(ctx context.Context, id strin
 				return "", err
 			}
 			c.Close()
+			release()
 			if status == "COMPLETED" {
 				if result == "" {
 					result = "The agent completed this request without a text reply."

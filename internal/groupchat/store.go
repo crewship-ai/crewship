@@ -105,21 +105,9 @@ func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }
 // Take the SQLite write reservation before reading. This avoids deferred
 // transaction read-to-write upgrades failing with SQLITE_BUSY_SNAPSHOT.
 func (s *Store) write(ctx context.Context, fn func(querier) error) error {
-	c, err := s.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	if _, err = c.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return err
-	}
-	defer c.ExecContext(context.Background(), "ROLLBACK") // also rolls back canceled requests
-	if err = fn(c); err != nil {
-		return err
-	}
-	_, err = c.ExecContext(ctx, "COMMIT")
-	return err
+	return WithWriteTransaction(ctx, s.db, func(c *sql.Conn) error { return fn(c) })
 }
+
 func workspaceMember(ctx context.Context, q querier, w, u string) error {
 	var ok int
 	err := q.QueryRowContext(ctx, `SELECT 1 FROM workspace_members m JOIN workspaces w ON w.id=m.workspace_id JOIN users usr ON usr.id=m.user_id WHERE m.workspace_id=? AND m.user_id=? AND w.deleted_at IS NULL`, w, u).Scan(&ok)
@@ -404,8 +392,10 @@ func (s *Store) AcknowledgeEvent(ctx context.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("%w: event ID", ErrInvalid)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE workspace_conversation_outbox SET delivered_at=COALESCE(delivered_at,?) WHERE id=?`, now(), id)
-	return err
+	return s.write(ctx, func(q querier) error {
+		_, err := q.ExecContext(ctx, `UPDATE workspace_conversation_outbox SET delivered_at=COALESCE(delivered_at,?) WHERE id=?`, now(), id)
+		return err
+	})
 }
 
 // AddMember explicitly grants existing history to another current workspace member.
