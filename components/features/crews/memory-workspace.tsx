@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { BookOpen, Brain, Download, RefreshCw, ShieldCheck, Users } from "lucide-react"
+import { BookOpen, Brain, Download, RefreshCw, ShieldCheck, Users, Languages, MessageSquare, Palette, CheckCheck, Info, SlidersHorizontal, Trash2, ChevronRight } from "lucide-react"
 import { WorkspaceEmpty, WorkspaceGlyph } from "./workspace-visuals"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
@@ -119,6 +119,17 @@ function RecordedVersion({ sha, path, workspaceId }: { sha: string; path: string
   return <div className="mt-4 rounded-xl border border-border p-4"><p className="font-medium text-foreground">Recorded version</p><p className="text-xs mt-1">Historical snapshot. The current note remains above.</p>{state.error ? <p role="alert" className="mt-3">This version could not be read.</p> : state.content === undefined ? <p className="mt-3">Loading version…</p> : <pre className="mt-3 whitespace-pre-wrap break-words font-sans">{state.content || "This version is empty."}</pre>}</div>
 }
 
+function preferencePresentation(key: string) {
+  const known: Record<string, { label: string; icon: typeof Info }> = {
+    jazyk: { label: "Jazyk", icon: Languages }, language: { label: "Language", icon: Languages },
+    styl_odpovedi: { label: "Styl odpovědí", icon: MessageSquare }, response_style: { label: "Response style", icon: MessageSquare },
+    vzhled_aplikace: { label: "Vzhled aplikace", icon: Palette }, design_preferences: { label: "Design preferences", icon: Palette },
+    overeni_prace: { label: "Ověření práce", icon: CheckCheck }, ukazka: { label: "Ukázková data", icon: Info },
+  }
+  const fallback = key.replace(/[_-]+/g, " ").trim()
+  return known[key] ?? { label: fallback.charAt(0).toLocaleUpperCase() + fallback.slice(1), icon: SlidersHorizontal }
+}
+
 interface MyModel { exists: boolean; content?: string; facts: { key: string; value: string }[] }
 interface MyCards { peers: { id: string; agent_slug: string; content?: string }[] }
 export function PersonalMemory({ workspaceId, refreshRevision = 0 }: { workspaceId: string; refreshRevision?: number }) {
@@ -137,12 +148,29 @@ export function PersonalMemory({ workspaceId, refreshRevision = 0 }: { workspace
   }
   return <div className="space-y-4">
     {refreshRevision > 0 && <p role="status" className="text-xs text-muted-foreground">{model.error || cards.error || consent.error ? "Some personal data could not be refreshed." : model.data && cards.data && consent.data ? "Personal memory refreshed." : "Refreshing personal memory…"}</p>}
-    <div className="rounded-2xl border border-border p-5"><div className="flex items-center gap-3"><WorkspaceGlyph icon={ShieldCheck} tone="purple" /><h3 className="font-medium">About me in this workspace</h3></div><p className="text-sm text-muted-foreground mt-1">Your retained preferences and notes from working with agents. This view uses your signed-in identity.</p>
-      {consent.data && <div className="flex flex-wrap items-center gap-3 mt-4 text-sm"><span>Personalization {consent.data.opted_out ? "off" : "on"}</span><Button variant="outline" size="sm" onClick={() => setAction({ path: "peer-consent", label: consent.data!.opted_out ? "Enable personalization" : "Turn off personalization and forget saved profiles", body: { opted_out: !consent.data!.opted_out } })}>{consent.data.opted_out ? "Enable" : "Turn off and forget"}</Button></div>}
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3"><WorkspaceGlyph icon={ShieldCheck} tone="purple" /><div><h3 className="font-medium">About me in this workspace</h3><p className="mt-1 max-w-xl text-sm text-muted-foreground">Preferences for your signed-in account, shared across your work with agents in this workspace.</p></div></div>
+        {consent.data && <div className="flex flex-wrap items-center gap-3 text-sm"><span className={cn("rounded-full border px-2.5 py-1 text-xs", consent.data.opted_out ? "border-border text-muted-foreground" : "border-success/20 bg-success/10 text-success")}>Personalization {consent.data.opted_out ? "off" : "on"}</span><Button variant="outline" size="sm" onClick={() => setAction({ path: "peer-consent", label: consent.data!.opted_out ? "Enable personalization" : "Turn off personalization and forget saved profiles", body: { opted_out: !consent.data!.opted_out } })}>{consent.data.opted_out ? "Enable" : "Turn off and forget"}</Button></div>}
+      </div>
       {(model.error || cards.error || consent.error || error) && <p role="alert" className="mt-3 text-sm text-destructive">{error || "Some personal data could not be loaded."} <button className="underline" onClick={() => setRevision((n) => n + 1)}>Retry</button></p>}
     </div>
-    <section className="rounded-2xl border border-border p-5"><h3 className="font-medium">Saved preferences</h3>{!model.data ? <p className="text-sm mt-3">{model.error ? "Unavailable" : "Loading…"}</p> : !model.data.exists ? <p className="text-sm text-muted-foreground mt-3">No saved preferences yet.</p> : <><ul className="divide-y divide-border mt-3">{(model.data.facts ?? []).map((fact) => <li key={fact.key} className="flex items-start justify-between gap-4 py-3"><div className="min-w-0"><div className="text-xs text-muted-foreground">{fact.key.replaceAll('_', ' ')}</div><p className="text-sm break-words">{fact.value}</p></div><Button size="sm" variant="ghost" onClick={() => setAction({ path: `user-model/facts/${encodeURIComponent(fact.key)}`, label: `Forget ${fact.key}` })}>Forget</Button></li>)}</ul>{model.data.content && !model.data.facts?.length && <pre className="whitespace-pre-wrap break-words text-sm my-3">{model.data.content}</pre>}<Button size="sm" variant="outline" onClick={() => setAction({ path: "user-model", label: "Forget all saved preferences" })}>Forget all preferences</Button><p className="mt-3 text-xs text-muted-foreground">Deleting a preference removes its saved value. Future conversations may teach it again while personalization is on. Original-message evidence is not yet recorded for these preferences.</p></>}</section>
-    <section className="rounded-2xl border border-border p-5"><h3 className="font-medium">Notes about working with me</h3><p className="text-sm text-muted-foreground mt-2">Automatic agent-specific profile generation is not available in this release. Existing notes, if any, remain readable.</p>{cards.data?.peers?.map((card) => <div key={card.id} className="mt-4"><h4 className="text-sm">{card.agent_slug}</h4><pre className="mt-2 whitespace-pre-wrap break-words text-sm font-sans">{card.content ?? "Content unavailable"}</pre></div>)}{!!cards.data?.peers.length && <Button className="mt-4" size="sm" variant="outline" onClick={() => setAction({ path: "peer-cards", label: "Forget all agent notes about me" })}>Forget these notes</Button>}</section>
+    <section className="space-y-4" aria-label="Saved preferences">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><SlidersHorizontal aria-hidden="true" className="size-4 text-muted-foreground" /><h3 className="font-medium">Saved preferences</h3>{model.data && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{model.data.facts?.length ?? 0}</span>}</div>{model.data?.exists && <Button size="sm" variant="ghost" onClick={() => setAction({ path: "user-model", label: "Forget all saved preferences" })}><Trash2 className="size-3.5" />Forget all preferences</Button>}</div>
+      {!model.data ? <p className="text-sm">{model.error ? "Unavailable" : "Loading…"}</p> : !model.data.exists ? <div className="rounded-2xl border border-border bg-card"><WorkspaceEmpty icon={SlidersHorizontal} title="No saved preferences yet." description="Your retained preferences will appear here as individual cards." /></div> : <>
+        <ul className="grid gap-3 sm:grid-cols-2">{(model.data.facts ?? []).map(fact => {
+          const { label, icon: Icon } = preferencePresentation(fact.key)
+          return <li key={fact.key} className="min-w-0 rounded-2xl border border-border bg-card p-4"><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2.5"><Icon aria-hidden="true" className="size-4 shrink-0 text-purple" /><h4 className="break-words text-sm font-medium">{label}</h4></div><Button size="icon-sm" variant="ghost" aria-label={`Forget ${label}`} title={`Forget ${label}`} onClick={() => setAction({ path: `user-model/facts/${encodeURIComponent(fact.key)}`, label: `Forget ${label}` })}><Trash2 className="size-3.5 text-muted-foreground" /></Button></div><p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{fact.value}</p></li>
+        })}</ul>
+        {model.data.content && !model.data.facts?.length && <div className="rounded-2xl border border-border bg-card p-5"><MarkdownContent className="break-words [overflow-wrap:anywhere]">{model.data.content}</MarkdownContent></div>}
+        <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">How forgetting works</summary><p className="mt-2 max-w-3xl leading-relaxed">Deleting a preference removes its saved value. Future conversations may teach it again while personalization is on. Original-message evidence is not yet recorded for these preferences.</p></details>
+      </>}
+    </section>
+    <section className="space-y-3" aria-label="Notes about working with me">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><MessageSquare aria-hidden="true" className="size-4 text-muted-foreground" /><h3 className="font-medium">Notes about working with me</h3>{cards.data && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{cards.data.peers.length}</span>}</div>{!!cards.data?.peers.length && <Button size="sm" variant="ghost" onClick={() => setAction({ path: "peer-cards", label: "Forget all agent notes about me" })}><Trash2 className="size-3.5" />Forget these notes</Button>}</div>
+      <p className="text-xs leading-relaxed text-muted-foreground">Automatic agent-specific profile generation is not available in this release. Existing notes, if any, remain readable.</p>
+      {!cards.data ? <p className="text-sm text-muted-foreground">{cards.error ? "Unavailable" : "Loading…"}</p> : !cards.data.peers.length ? <div className="rounded-2xl border border-border bg-card"><WorkspaceEmpty icon={MessageSquare} title="No agent notes yet." description="Saved notes about working with you will appear here, grouped by agent." /></div> : cards.data.peers.map((card, index) => <details key={card.id} open={index === 0} className="group min-w-0 rounded-2xl border border-border bg-card"><summary className="flex cursor-pointer list-none items-center gap-3 p-4 [&::-webkit-details-marker]:hidden"><WorkspaceGlyph icon={Brain} tone="purple" /><div className="min-w-0 flex-1"><h4 className="break-words text-sm font-medium">@{card.agent_slug}</h4><p className="mt-0.5 text-xs text-muted-foreground">Notes about working with you</p></div><ChevronRight aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-open:rotate-90" /></summary><div className="min-w-0 border-t border-border p-5">{card.content === undefined ? <p className="text-sm text-muted-foreground">Content unavailable</p> : <MarkdownContent className="break-words [overflow-wrap:anywhere] [&_ul]:list-disc [&_ol]:list-decimal">{card.content || "This note is empty."}</MarkdownContent>}</div></details>)}
+    </section>
     <ConfirmDialog open={!!action} onOpenChange={(open) => { if (!open) setAction(null) }} title={action?.label ?? "Update personal memory"} description="This applies to your personal data in this workspace." confirmLabel="Confirm" onConfirm={perform} />
   </div>
 }

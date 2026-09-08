@@ -71,3 +71,11 @@ Validation: 35 Crews frontend test files / 305 tests passed, including Markdown 
 Live Dev2 browser verification passed after reload: crew Markdown headings, content search, no-results + clear, pinned notes, workspace switching, mobile without horizontal overflow and agent archive search. No browser console errors or failed API reads. Screenshots: `/tmp/memory-notes-desktop.png`, `/tmp/memory-notes-mobile.png`. Go web, scripts and tools tests passed; internal/cmd suite is still running in `/tmp/memory-ui-go-tests.log`.
 
 Additional live checks passed: keyboard note selection, downloading the selected original Markdown (correct filename and exact expected content), and scrolling the mobile list and reader. Internal/API and database regression tests were still running at handoff; their result is not claimed green. Unified exec session: 71448, log `/tmp/memory-ui-go-tests.log`.
+
+## About me — readable personal memory
+
+Personal preferences use responsive two-column cards with icons, readable labels and individually labelled forget actions. Known keys receive presentation labels only; deletion still targets the exact original key. The account-wide personalization status is a compact header badge. Agent notes are expandable cards with sanitized Markdown, and each remains attributed to its returned agent slug. Bulk delete actions keep their confirmation dialogs; the detailed forgetting explanation is available below the preferences.
+
+Validation: seven focused memory tests passed, including rendered peer Markdown and confirmation-before-delete with the original fact key. ESLint: zero errors, 32 existing warnings. Production build and Go vet passed. Deployed Dev2; browser verified cards, Markdown, canceling individual deletion and personalization changes, collapse/reopen, mobile without overflow and Refresh. No personal data was changed in live verification. Screenshots: `/tmp/memory-about-desktop.png`, `/tmp/memory-about-mobile.png`.
+
+Earlier broad Go regression completed: all internal packages passed, including API (686s) and database (699s). The sole failure was cmd/crewship compilation racing the new web export (embedded asset filenames replaced during build); a CLI + web rerun was started after deployment completed, log `/tmp/memory-about-go-retry.log`.

@@ -92,3 +92,23 @@ it('resets the note search when switching knowledge scope', async () => {
   expect(screen.getByText('Crew shared context')).toBeVisible()
   expect(screen.queryByText('Agent unique phrase')).not.toBeInTheDocument()
 })
+
+it('renders personal notes as Markdown and confirms forgetting with the original fact key', async () => {
+  const fetch = vi.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+    const path = String(url)
+    if (init?.method === 'DELETE') return new Response('{}')
+    if (path.includes('/user-model')) return new Response(JSON.stringify({ exists: true, facts: [{ key: 'styl_odpovedi', value: 'Short and clear' }] }))
+    if (path.includes('/peer-cards')) return new Response(JSON.stringify({ peers: [{ id: 'p1', agent_slug: 'alice', content: '# Working together\n\n- Confirm open questions' }] }))
+    if (path.includes('/peer-consent')) return new Response(JSON.stringify({ opted_out: false }))
+    return response([])
+  })
+  render(<MemoryWorkspace workspaceId="ws1" agentId="a1" />)
+  await screen.findByText('No saved notes yet.')
+  fireEvent.click(screen.getByRole('button', { name: 'About me' }))
+  expect(await screen.findByRole('heading', { name: 'Working together' })).toBeVisible()
+  expect(screen.getByRole('heading', { name: 'Styl odpovědí' })).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Forget Styl odpovědí' }))
+  expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm', exact: true }))
+  await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => String(url).includes('/user-model/facts/styl_odpovedi?workspace_id=ws1') && init?.method === 'DELETE')).toBe(true))
+})
