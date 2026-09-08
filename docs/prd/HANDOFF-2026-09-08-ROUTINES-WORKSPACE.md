@@ -617,3 +617,52 @@ that exact identifier. Final state fixture evidence:
 byte-for-byte and removed only its own temporary stash. The PR remains unmerged;
 CodeRabbit was rate-limited without a substantive review. Existing CI timestamp
 lint concerns documented above have not been repaired by this UI-only increment.
+
+## Detail polish — step icons, agent links and readable requirements
+
+Deployed on dev1 only: `bdb229a4e` (main UI change `64d297f30`). The requested
+screenshots belong to `ci-nightly-triage` (Nightly CI — triage):
+https://crewship-dev1.unifylab.cz/routines?slug=ci-nightly-triage
+
+- Saved steps now carry colored type icons and order badges. Agent steps use
+  the saved avatar when available. Original detail disclosures and Workflow map
+  remain available; dependencies/conditions still determine execution.
+- Before you start groups input questions and expected outputs in readable
+  cards with icons, humanized fallback labels, type, required/optional status,
+  default-presence indicator and description. Default values are not exposed.
+- Header, Access and agent reach use the same saved agent identity and link to
+  `/crews?agent=<slug>`. A shared cached lookup deduplicates requests, ignores
+  old workspace responses, and distinguishes lookup failure from no agents.
+- Triggers is named When it runs, with icon tabs for Schedules and Webhooks,
+  plus Automations when relevant. Edit schedules opens existing recurring and
+  one-time scheduling; Manage webhooks opens existing webhook management.
+  Known cron expressions use the existing English description helper.
+- Access separates agents, credential requirements, integrations, network hosts
+  and Crewship writes. Credentials/Integrations links go to their real directory
+  pages, not fabricated entity IDs. Credentials show scope; AI CLI token is
+  distinct from CLI token (the shared legacy label helper conflates these).
+  Hosts expand as declarations, not arbitrary external links or health claims.
+
+Verification: 242 Routines tests are covered by the full suite plus the corrected
+focused rerun; two new directory tests additionally cover concurrent consumers,
+workspace switching and lookup failure. The final credential distinction passed
+13 focused tests. TypeScript passed; full ESLint has zero errors and 32 existing
+warnings; final changed-file lint passed. Both actual production exports passed.
+All 135 Go test packages passed in one `go test ./... -count=1 -timeout=30m` run
+(API 673.670s, database 781.913s), followed by successful `go vet ./...`.
+No backend or database changes in this increment.
+
+Final authenticated browser verification on the deployed application passed:
+type icons, all 10 steps, actual stored Morgan image loaded, direct Morgan profile,
+input labels, both token kinds and real credential-directory links, host disclosure,
+actual Add schedule / Add webhook management controls, and 390px layout after
+collapse animation settles. No JavaScript page errors. No live routine was run,
+no schedule or webhook was created. The first mobile screenshot caught the
+sidebar mid-transition; the settled layout and permanent expand rail were verified.
+Evidence: `/tmp/routines-polish-live-final.log`,
+`/tmp/routines-polish-{overview,webhooks,morgan,mobile}.png`,
+`/tmp/routines-polish-go.log`, `/tmp/routines-polish-vet.log`,
+`/tmp/routines-polish-tests-final.log`, `/tmp/routines-polish-last-tests.log`,
+`/tmp/routines-polish-credentials-test.log`, `/tmp/routines-polish-final-build.log`.
+Peer tracked WIP was restored byte-for-byte after both service builds; only the
+session's temporary stashes were removed. PR #2460 remains unmerged.
