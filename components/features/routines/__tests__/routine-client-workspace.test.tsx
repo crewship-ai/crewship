@@ -74,9 +74,10 @@ describe("recorded result rendering", () => {
     expect(screen.getByRole("cell", { name: "Available" })).toBeInTheDocument()
     expect(container.querySelector("script")).toBeNull()
   })
-  it("preserves structured output as readable JSON", () => {
-    const { container } = render(<RoutineResultContent output={'{"available":false,"count":0}'} />)
-    expect(container.querySelector("pre")?.textContent).toContain('"available": false')
-    expect(container.querySelector("pre")?.textContent).toContain('"count": 0')
+  it("preserves structured output and large identifiers without rounding", () => {
+    const { container } = render(<RoutineResultContent output={'{"available":false,"count":0,"id":9007199254740993}'} />)
+    expect(container.querySelector("pre")?.textContent).toContain('"available":false')
+    expect(container.querySelector("pre")?.textContent).toContain('"count":0')
+    expect(container.querySelector("pre")?.textContent).toContain('9007199254740993')
   })
 })
