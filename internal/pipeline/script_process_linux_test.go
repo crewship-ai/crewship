@@ -1,3 +1,5 @@
+//go:build linux
+
 package pipeline
 
 import (
@@ -12,7 +14,7 @@ import (
 
 func TestScriptProcessStop_KillsChildBeforeSideEffect(t *testing.T) {
 	if _, err := exec.LookPath("setsid"); err != nil {
-		t.Skip("setsid unavailable")
+		t.Fatal("Linux script process tests require setsid from util-linux")
 	}
 	root := t.TempDir()
 	control := filepath.Join(root, "control")
@@ -42,7 +44,7 @@ func TestScriptProcessStop_KillsChildBeforeSideEffect(t *testing.T) {
 // Without --wait it then reports 0 even when the actual script fails.
 func TestScriptProcessWrapper_PreservesForkedChildExit(t *testing.T) {
 	if _, err := exec.LookPath("setsid"); err != nil {
-		t.Skip("setsid unavailable")
+		t.Fatal("Linux script process tests require setsid from util-linux")
 	}
 	root := t.TempDir()
 	artifact := filepath.Join(root, "artifact.txt")

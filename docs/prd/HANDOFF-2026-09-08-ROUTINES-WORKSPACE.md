@@ -142,3 +142,36 @@ that guarantee. Custom crew images must provide setsid, ps, awk and /bin/kill.
 Historical records are not synthesized for older runs. A shared generic artifact
 renderer is provided; specialized document previews and an independent business
 acceptance workflow are not. Issues remains the source of client acceptance.
+
+
+## Original navigation restored after user review
+
+Application commit `187e9d32d` is deployed only on dev1. The user explicitly
+rejected replacing the left explorer and original visual design. The PRD now
+records the explorer as the primary catalog, with the original dashboard cards
+and additive Overview / Calendar / Recent runs navigation. Icon/color editing
+in the routine header is retained. Selecting the routine from its historical
+run returns to the definition; explorer filters survive local selection.
+
+Verification on the public dev1 URL: search with no matches, status filters,
+opening a routine through the filtered explorer, history-to-run navigation,
+returning through that same explorer, mobile collapse/expand, icon PATCH and
+reload, calendar, once/repeat controls and output view. No page errors or mobile
+width overflow. The fixture icon was restored after the check. QUA-12 remains
+REVIEW, QUA-13 TODO; historical recipe versions remain distinct (1 and 2).
+Screenshots and browser evidence: `/tmp/routines-sidebar-*.png`,
+`/tmp/routines-sidebar-browser.log`, `/tmp/routines-sidebar-navigation-pass.log`.
+
+The 28 focused frontend files passed (248 tests), followed by the added
+failed-result/history-link regression (19 overview tests passed). TypeScript,
+production builds in the worktree and actual dev1 clone, and go vet passed.
+ESLint has zero errors and the existing 32 warnings. Full Go verification passed all 135 tested packages, recorded in
+`/tmp/routines-sidebar-go.log`. CI was requested for application
+commit 187e9d32d; CodeRabbit is still rate-limited without an actual review.
+Do not merge on that green status.
+
+CI on 187e9d32d exposed two unused helpers from the preceding implementation
+and two Linux process tests exceeding the skip budget. The follow-up removes
+only the unused helpers and makes the process tests Linux build-time tests,
+requiring util-linux setsid instead of runtime skips. This preserves runtime
+behavior and retains the real child-process cancellation/exit assertions.

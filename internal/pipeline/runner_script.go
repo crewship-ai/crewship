@@ -499,25 +499,6 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	return res, nil
 }
 
-// sanitizeForPath reduces a string to [a-zA-Z0-9_-] so it is safe to embed in
-// the stderr-redirect target of the sh wrapper (run ids are CUIDs and step ids
-// are slugs, so this is defense-in-depth against an unexpected character).
-func sanitizeForPath(s string) string {
-	var b strings.Builder
-	for _, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-':
-			b.WriteRune(c)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	if b.Len() == 0 {
-		return "none"
-	}
-	return b.String()
-}
-
 // Arguments stay positional: neither paths nor user arguments become shell code.
 const scriptProcessWrapper = `original_umask=$(umask)
 umask 077
