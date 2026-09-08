@@ -1,12 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ArrowUpRight, Bot, Brain, CheckCircle2, Clock, FolderTree, MessageSquare,
+  ArrowUpRight, Bot, Palette, ShieldCheck, CheckCircle2, Clock, FolderTree, MessageSquare,
   MoreHorizontal, Pencil, RotateCcw, Square, Trash2,
 } from "lucide-react"
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
@@ -15,7 +15,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -53,9 +52,6 @@ import type {
 
 export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
-// Two entries, not six. Four of the old tabs were relations the agent merely
-// points at; they hang off the overview's reach strip now, so a reader picks
-// between "what is going on" and "how is it set up" instead of six nouns.
 type AgentTab = "overview" | "work" | "memory"
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
@@ -85,14 +81,7 @@ export interface AgentCanvasProps {
   onOpenFiles?: () => void
 }
 
-/**
- * Agent canvas — drives the right pane when ?agent=<slug> is selected.
- * Tabbed layout: Overview / Workspace / Skills & Tools / Activity / Settings.
- *
- * Header always visible (avatar, name, slug, role, crew, status, Chat/Stop).
- * 6-stat strip below header (Sessions / Runs / Cost-30d / Skills / Creds / Last).
- * Tabs below let users focus on one concern at a time without scrolling 600+ lines.
- */
+/** Agent workspace: activity, assigned work and memory; editing shares the creation form. */
 export function AgentCanvas({
   workspaceId,
   agentSlug,
@@ -123,6 +112,15 @@ export function AgentCanvas({
   useEffect(() => { if (agent) onLoaded?.(agent) }, [agent, onLoaded])
 
   const [tab, setTab] = useState<AgentTab>("overview")
+  const accessRef = useRef<HTMLDetailsElement>(null)
+  const redirectMenuFocus = useRef(false)
+  const [accessRequested, setAccessRequested] = useState(false)
+  useEffect(() => {
+    if (tab !== "work" || !accessRequested || !accessRef.current) return
+    accessRef.current.open = true
+    accessRef.current.scrollIntoView({ block: "start" })
+    setAccessRequested(false)
+  }, [tab, accessRequested])
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [revision, setRevision] = useState(0)
@@ -402,25 +400,26 @@ export function AgentCanvas({
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[220px]">
-                <DropdownMenuLabel className="type-meta text-muted-foreground">{agent.name}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {/* Memory lives here rather than on a tab. It is four markdown
-                    files — AGENT.md, CREW.md, PERSONA.md, peer cards — that
-                    almost nobody edits, and it spent a spell bolted to the
-                    bottom of Configuration where it dwarfed every actual
-                    setting. Reachable, not resident. */}
-                <DropdownMenuItem onClick={() => setTab("memory")} className="flex items-center gap-2">
-                  <Brain className="h-4 w-4" />
-                  <span>Memory</span>
-                  <span className="type-meta ml-auto text-muted-foreground-soft">
-                    {agent.memory_enabled ? "on" : "off"}
-                  </span>
+              <DropdownMenuContent align="end" className="w-64 rounded-xl p-1.5" onCloseAutoFocus={(event) => {
+                if (redirectMenuFocus.current) {
+                  event.preventDefault()
+                  redirectMenuFocus.current = false
+                  accessRef.current?.querySelector("summary")?.focus()
+                  accessRef.current?.scrollIntoView({ block: "start" })
+                }
+              }}>
+                <DropdownMenuItem onSelect={() => setAvatarPickerOpen(true)} className="gap-3 rounded-lg p-2.5">
+                  <Palette className="h-4 w-4 text-purple" />
+                  <span>Change avatar<span className="block text-xs text-muted-foreground">Give this agent its own look</span></span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => { redirectMenuFocus.current = true; setTab("work"); setAccessRequested(true) }} className="gap-3 rounded-lg p-2.5">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  <span>Skills and access<span className="block text-xs text-muted-foreground">Capabilities and permissions</span></span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                  className="flex items-center gap-3 rounded-lg p-2.5 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span>Delete agent</span>
@@ -510,10 +509,10 @@ export function AgentCanvas({
       </div>
 
       <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
-      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} onEdit={() => setEditOpen(true)} revision={revision} />}
+      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} revision={revision} />}
       {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} slug={agent.slug} name={agent.name} />}
       {tab === "work" && (
-        <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab
+        <details ref={accessRef} className="scroll-mt-4 rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab
           accessOnly
           workspaceId={workspaceId}
           agent={agent}

@@ -39,3 +39,11 @@ Ověřeno:
 - `pnpm lint`: 0 chyb, 32 existujících varování. `pnpm build`: statický export prošel.
 - `agents-invariants` a `docs-inventory -strict`: prošly.
 - Živý browser: všechny uvedené pohledy prošly. Jediná odpověď 404 byla očekávaný prázdný export; UI ji správně vysvětlilo. Po nasazení `65219cc4` na Dev2 v 16:33 UTC vrací agent inbox 200 bez `unavailable` a API health je `ok`. Veřejné `/crews` vrací 200. Kompletní živý browserový průchod po reloadu prošel znovu bez JS chyb. Naplněný izolovaný průchod navíc ověřil graf, aktuální poznámku bez historie, Create/Edit, vytvoření crew a mobilní dialog bez přetečení.
+
+## Dotažení přehledu a nabídky agenta
+
+Na další zpětnou vazbu odstraněn spodní široký pruh opakující roli, model a Edit. Identita a editace zůstávají v hlavičce, skutečné měsíční náklady jsou kompaktní ikonový štítek vedle metrik s vlastním označením období UTC. Nabídka „…“ neopakuje jméno ani Memory/on/off (paměť má vlastní viditelnou záložku). Obsahuje Change avatar, Skills and access s krátkým vysvětlením a oddělené Delete agent se zachovaným potvrzením. Přímá zkratka přístupů přepne Work, rozbalí příslušnou sekci a přesune do ní fokus.
+
+Limity náhledů se nemění: outcomes a konverzace po 5, aktivní běhy a spolupráce po 3, přiřazené issues/missions a crew rutiny po 3, přístupy agenta 3 credentialy + 2 efektivní integrace; integrace crew po 3. Přístupy nejsou prezentovány jako chronologický seznam „latest 5“. Kompletní seznamy zůstávají v příslušných modulech.
+
+Ověření tohoto dotažení: 67 frontendových souborů / 699 testů prošlo; lint bez chyb (32 existujících warnings), produkční export a Go vet prošly. Nasazeno na Dev2; živá kontrola prohlížečem ověřila odstranění duplicitního Edit, nové položky nabídky, otevření a fokus přístupů, avatar + Cancel, potvrzení Delete + Cancel, stávající Memory/export prázdného scope a desktop/mobile bez JS chyb. Žádná změna dat při kontrole.
