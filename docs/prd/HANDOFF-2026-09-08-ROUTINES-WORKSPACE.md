@@ -7,8 +7,13 @@ PR #2448. Neither PR is merged into main.
 
 ## Implemented
 
-The catalog appears once, with attention, in-progress work, calendar and recent
-runs. Handoff results lead with their readable summary; raw protocol text is
+User correction after the initial preview: preserve the original application
+visual design and left explorer. The searchable, filterable RoutinesExplorer
+is restored across overview, definition and historical runs, including routine
+icons/colors. The landing page reuses the original dashboard cards; calendar
+and recent runs are additional tabs. The routine icon/color picker remains
+available in its header. On mobile the explorer opens over the content.
+The original standalone table wireframe is superseded by this decision. Handoff results lead with their readable summary; raw protocol text is
 expandable, and the routine-level technical dock is hidden in run detail.
 A routine has definition/history/settings views; the complete definition
 graph is initially visible and selecting a step exposes its task and settings.

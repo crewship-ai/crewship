@@ -20,6 +20,11 @@ import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
+import type { RoutineFilters } from "./routines-filter-sidebar"
+import { RoutinesExplorer } from "./routines-explorer"
 import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
@@ -27,25 +32,9 @@ import { RoutineCreateDialog } from "./routine-create-dialog"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
-// RoutinesLayout — full /routines page. Two states, no tabs: the
-// overview, or the routine you picked.
-//
-// It had three tabs. List rendered a table of every routine, beside a
-// sidebar that was already the catalog — the same list twice, and the
-// copy in the main pane was the one you could not search. Schedules
-// was a read-only table of every cron in the workspace; every action
-// on a schedule (create, pause, delete) lives on the routine's own
-// Triggers card, so the tab held no capability, only a second view of
-// one. Insights was four derived numbers and a "top routines by
-// usage" leaderboard, which is not a question anyone asks.
-//
-// The parts of those two that were load-bearing — what fires next,
-// what runs cost, what is failing — are cards on the overview now.
-// Nothing was deleted that could be done; only places where it could
-// be looked at twice.
-//
-// Graph + Timeline + Activity moved to /activity, which stays the
-// single live observability surface for the whole workspace.
+// Keep the shared explorer mounted across overview, definition and historical
+// run views. The URL identifies the routine and optional execution; filters
+// belong to the explorer and survive navigation inside this workspace.
 
 interface RoutinesLayoutProps {
   workspaceId: string
@@ -56,6 +45,22 @@ const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const isMobile = useIsMobile()
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  // On a phone the sidebar is 280px of a 390px screen — it does not
+  // sit BESIDE the content, it replaces it. Collapse it when the
+  // viewport narrows, and let it open as an overlay instead of a
+  // column, so the overview keeps the full width it was designed for.
+  useEffect(() => {
+    if (isMobile) setLeftCollapsed(true)
+  }, [isMobile])
+  const [search, setSearch] = useState("")
+  const [filters, setFilters] = useState<RoutineFilters>({
+    status: "all",
+    invocations: "all",
+    authorAgentId: null,
+    showEphemeral: false,
+  })
   // The selected routine lives in the URL: /routines?slug=<slug>.
   //
   // It used to be read from the URL once and then kept in component state,
@@ -80,11 +85,19 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
       )
       if (e.key === "/" && !isInputContext) {
-        const el = document.querySelector<HTMLInputElement>('input[aria-label="Search routines"]')
+        const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
           e.preventDefault()
           el.focus()
           el.select()
+        }
+        return
+      }
+      if (e.key === "Escape" && !isInputContext) {
+        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral) {
+          e.preventDefault()
+          setSearch("")
+          setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
         }
         return
       }
@@ -95,7 +108,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -104,9 +117,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
-    setSelectedSlug(selectedSlug === slug ? null : slug)
+    setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
     // Picking a routine on a phone means "show me that", and the
     // overlay covering it would be the opposite.
+    if (isMobile) setLeftCollapsed(true)
   }
 
   // Selected routine — looked up from the loaded pipeline list so the
@@ -179,15 +193,46 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         {/* Overlay on a phone, column everywhere else. The collapsed
             rail stays in flow at both sizes so the expand button never
             moves. */}
-        {/* Main content area — full-width.
-            With selection: breadcrumb back-bar + routine detail
-            (Overview/Editor/Runs/Versions/Schedules/Webhooks/Wait
-            tabs) edge-to-edge instead of cramming it into a 520px
-            right panel. The Editor tab in particular benefits — DSL
-            YAML wants width.
-            Without selection: the existing List / Schedules /
-            Insights tabs that the toolbar above switches between. */}
-        <div className="flex-1 overflow-hidden bg-background relative">
+        {isMobile && !leftCollapsed && (
+          <button
+            type="button"
+            aria-label="Close routine list"
+            onClick={() => setLeftCollapsed(true)}
+            className="absolute inset-0 z-20 bg-black/50"
+          />
+        )}
+        <aside
+          className={cn(
+            "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
+            leftCollapsed ? "w-9" : "w-[280px]",
+            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
+          )}
+        >
+          {leftCollapsed ? (
+            <div className="flex h-full flex-col items-center pt-1.5">
+              <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
+            </div>
+          ) : (
+            /* Explorer-style sidebar built on the shared sidebar-kit —
+               SidebarToolbar (search + Filter + collapse), a collapsible
+               STATUS bucket section, and the ROUTINES list. The collapse
+               toggle lives inside the toolbar (next to search), not as a
+               floating button. */
+            <RoutinesExplorer
+              routines={pipelines}
+              search={search}
+              onSearchChange={setSearch}
+              selectedSlug={selectedSlug}
+              onSelectRoutine={handleSelect}
+              filters={filters}
+              onChange={setFilters}
+              onToggleCollapse={() => setLeftCollapsed(true)}
+            />
+          )}
+        </aside>
+
+        {/* Overview, definition or historical run beside the explorer. */}
+        <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
             {selectedRun ? (
               <div key={selectedRun} className="absolute inset-0 overflow-auto"><ButtonBack onClick={() => setSelectedRun(null)} /><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
@@ -249,6 +294,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
+                  onFilter={(status) => setFilters(f => ({ ...f, status: status as RoutineFilters["status"] }))}
                 />
               </motion.div>
             )}

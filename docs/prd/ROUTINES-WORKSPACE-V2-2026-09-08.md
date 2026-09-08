@@ -28,11 +28,17 @@ Graf konkrétního běhu naopak musí používat jeho historickou verzi.
 
 ### A. Dashboard Routines
 
-Pořadí: co potřebuje člověka → běžící práce → katalog → plán a poslední výsledky.
-Primární tabulka obsahuje název a účel, aktuální stav, způsob spouštění,
-poslední výsledek a přímý proklik. Nepřidávat vedle ní druhý úplný katalog.
+Upřesnění uživatele 2026-09-08: zachovat původní design aplikace. Levý
+RoutinesExplorer je hlavní katalog s vyhledáváním, filtry stavů, autorů a
+použití, ikonami a barvami. Zůstává dostupný v přehledu, detailu i historii
+konkrétního běhu. Na telefonu se otevírá nad obsahem, na desktopu je standardně
+rozbalený. Úprava ikony a barvy v hlavičce rutiny zůstává zachovaná.
 
-Přepínání Rutiny / Kalendář / Poslední běhy. Kalendář zobrazuje plánované
+Hlavní plocha zachovává původní dashboardové karty a grafy sdílené s aplikací;
+nová samostatná tabulka katalogu se ruší. Původní HTML wireframe je v těchto
+vizuálních rozhodnutích překonaný tímto upřesněním.
+
+Přepínání Přehled / Kalendář / Poslední běhy. Kalendář zobrazuje plánované
 termíny, nikoli fiktivní dokončení. Kliknutí na budoucí termín otevře rutinu/plán;
 kliknutí na minulý skutečný běh otevře run. Událostní a ruční rutiny nemají
 vymyšlený next_run_at. Aktivace rutiny, pozastavený plán a výsledek posledního
