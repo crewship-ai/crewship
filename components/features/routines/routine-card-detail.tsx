@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 //   Advanced     three levels of nesting over four unrelated things.
 //                The machinery is not gone — Editor opens beside the
 //                graph, Schedules/Webhooks live inside Triggers, and
-//                Versions has its own card. Nothing that worked was
+//                Versions has its own view. Nothing that worked was
 //                deleted; it stopped being filed under a word that told
 //                the reader nothing.
 //   Wait points  belong to a RUN, not to a definition. Activity is
@@ -39,7 +39,6 @@ import {
   ChevronRight,
   Clock,
   Code2,
-  GitBranch,
   Globe,
   KeyRound,
   PenSquare,
@@ -104,7 +103,6 @@ interface Props {
   editRequest?: number
 }
 
-type SideTab = "triggers" | "versions"
 
 /**
  * Which kind of trigger the Triggers card is showing.
@@ -169,10 +167,8 @@ export function RoutineCardDetail({
     setSelected(id)
     setFocus(null)
   }, [])
-  const [sideTab, setSideTab] = React.useState<SideTab>("triggers")
   const [triggerKind, setTriggerKind] = React.useState<TriggerKind>("schedules")
   const [manageTriggers, setManageTriggers] = React.useState(false)
-  const [manageVersions, setManageVersions] = React.useState(false)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
   // per-row buttons and the RBAC handling. Dropping the tab must not
   // drop the capability, so Manage mounts the real thing rather than a
@@ -333,73 +329,14 @@ export function RoutineCardDetail({
             />
           </Appear>
 
-          {/* Triggers and Versions share one card behind a switch —
-              the mockup's arrangement, and better than two half-empty
-              cards or a tab that hides one of them. Manage reveals the
-              working editors rather than replacing them. */}
           <Appear order={4}>
             <DetailCard
-              title={sideTab === "triggers" ? TRIGGER_TITLE[triggerKind] : "Versions"}
-              subtitle={
-                sideTab === "triggers"
-                  ? triggerKind === "schedules"
-                    ? String(mine.length)
-                    : triggerKind === "automations"
-                      ? String(myAutomations.length)
-                      : undefined
-                  : routine.head_version != null
-                    ? `v${routine.head_version}`
-                    : undefined
-              }
-              icon={sideTab === "triggers" ? TRIGGER_ICON[triggerKind] : GitBranch}
+              title={TRIGGER_TITLE[triggerKind]}
+              subtitle={triggerKind === "schedules" ? String(mine.length) : triggerKind === "automations" ? String(myAutomations.length) : undefined}
+              icon={TRIGGER_ICON[triggerKind]}
               tone="purple"
-              action={
-                <div className="flex items-center gap-1">
-                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                    {(["triggers", "versions"] as const).map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => {
-                          if (t === "versions") { if (mayDiscard()) { setEditorDirty(false); setView("versions") }; return }
-                          setSideTab(t)
-                          setManageTriggers(false)
-                          setManageVersions(false)
-                        }}
-                        aria-pressed={sideTab === t}
-                        className={cn(
-                          "rounded px-1.5 py-0.5 text-[10px] font-medium capitalize transition-colors",
-                          sideTab === t
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  {/* Automations have no in-app editor to reveal, so the card
-                      does not offer one. A Manage button that opens the same
-                      read-only list is a button that lies. */}
-                  {!(sideTab === "triggers" && triggerKind === "automations") && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        sideTab === "triggers"
-                          ? setManageTriggers((v) => !v)
-                          : setManageVersions((v) => !v)
-                      }
-                      className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {(sideTab === "triggers" ? manageTriggers : manageVersions)
-                        ? "Done"
-                        : "Manage"}
-                    </button>
-                  )}
-                </div>
-              }
-              footer={
-                sideTab === "triggers" ? (
+              action={triggerKind !== "automations" && <button type="button" onClick={() => setManageTriggers(v => !v)} className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground">{manageTriggers ? "Done" : "Manage"}</button>}
+              footer={(
                   // Was a link that toggled between two kinds. A third kind
                   // makes a toggle unreadable — you cannot see the option you
                   // are not on — so the same switch the card already uses in
@@ -428,22 +365,10 @@ export function RoutineCardDetail({
                       </button>
                     ))}
                   </div>
-                ) : undefined
+                )
               }
             >
-              {sideTab === "versions" ? (
-                manageVersions ? (
-                  <RoutineVersionsTab
-                    workspaceId={workspaceId}
-                    slug={routine.slug}
-                    onRolledBack={onChanged}
-                  />
-                ) : (
-                  <p className="text-[12px] text-muted-foreground">
-                    Current recipe is v{routine.head_version ?? 1}. Open Versions to compare recipes or prepare a draft.
-                  </p>
-                )
-              ) : triggerKind === "automations" ? (
+              {triggerKind === "automations" ? (
                 <div data-testid="routine-automations" className="space-y-2.5">
                   <p className="text-[12px] text-muted-foreground">
                     <span data-testid="routine-automations-count" className="text-foreground/85">
