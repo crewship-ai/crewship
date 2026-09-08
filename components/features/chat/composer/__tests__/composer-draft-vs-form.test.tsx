@@ -13,6 +13,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 // message the user had not sent yet.
 // =============================================================================
 
+const { identity } = vi.hoisted(() => ({ identity: { id: "user-a" as string | null } }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: identity.id ? { user: { id: identity.id } } : null }) }))
+const draftKey = JSON.stringify(["user", "user-a", "sess-1"])
+
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", loading: false }),
 }))
@@ -64,14 +68,52 @@ const TYPED = "also, this is urgent"
 
 describe("a form submit leaves the composer's own draft alone", () => {
   beforeEach(() => {
+    identity.id = "user-a"
     useComposerStore.setState({ attachments: {}, drafts: {} })
     sendMessage.mockClear()
     ensureSession.mockClear()
     onCloseAskForm.mockClear()
   })
 
+  it("restores unsent text when returning to a conversation without leaking it into another session", () => {
+    const first = render(<ChatComposer {...baseProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: TYPED } })
+    first.unmount()
+    const second = render(<ChatComposer {...baseProps} sessionId="other-session" />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("")
+    second.unmount()
+    render(<ChatComposer {...baseProps} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue(TYPED)
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("isolates drafts across account switches, including without a remount", () => {
+    useComposerStore.getState().setDraft("sess-1", "legacy private text")
+    const view = render(<ChatComposer {...baseProps} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("")
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: TYPED } })
+    identity.id = "user-b"
+    view.rerender(<ChatComposer {...baseProps} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("")
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: "B's draft" } })
+    view.unmount()
+    identity.id = "user-a"
+    render(<ChatComposer {...baseProps} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue(TYPED)
+  })
+
+  it("does not persist anonymous text or carry it into an authenticated session", () => {
+    identity.id = null
+    const view = render(<ChatComposer {...baseProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: "anonymous note" } })
+    expect(useComposerStore.getState().drafts).toEqual({})
+    identity.id = "user-a"
+    view.rerender(<ChatComposer {...baseProps} />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("")
+  })
+
   it("keeps what was typed in the textarea when the sheet sends", async () => {
-    useComposerStore.getState().setDraft("sess-1", TYPED)
+    useComposerStore.getState().setDraft(draftKey, TYPED)
     render(
       <ChatComposer
         {...baseProps}
@@ -95,11 +137,11 @@ describe("a form submit leaves the composer's own draft alone", () => {
     // …and the note the user was still writing is untouched, in the box and in
     // the store that survives a reload.
     expect((textarea as HTMLTextAreaElement).value).toBe(TYPED)
-    expect(useComposerStore.getState().drafts["sess-1"]).toBe(TYPED)
+    expect(useComposerStore.getState().drafts[draftKey]).toBe(TYPED)
   })
 
   it("still clears the composer when the typed message is the one sent", async () => {
-    useComposerStore.getState().setDraft("sess-1", TYPED)
+    useComposerStore.getState().setDraft(draftKey, TYPED)
     render(<ChatComposer {...baseProps} />)
 
     const textarea = screen.getByPlaceholderText("Message Riley...")
@@ -109,6 +151,6 @@ describe("a form submit leaves the composer's own draft alone", () => {
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     expect(sendMessage.mock.calls[0][0]).toBe(TYPED)
     await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe(""))
-    expect(useComposerStore.getState().drafts["sess-1"]).toBeUndefined()
+    expect(useComposerStore.getState().drafts[draftKey]).toBeUndefined()
   })
 })

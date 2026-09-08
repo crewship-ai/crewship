@@ -409,6 +409,9 @@ func TestHandleChatMessageSuccessFullFlow(t *testing.T) {
 	if got, _ := doneMeta["message_id"].(string); got != msgs[1].ID {
 		t.Errorf("done message_id = %q, want persisted assistant id %q", got, msgs[1].ID)
 	}
+	if got, _ := doneMeta["replied_at"].(string); got != msgs[1].Timestamp.UTC().Format("2006-01-02T15:04:05.000Z") {
+		t.Errorf("done replied_at = %q, want persisted timestamp %s", got, msgs[1].Timestamp)
+	}
 	// 12 tool calls + 1 tool result = 13 summaries → capped at 10 + overflow note.
 	if !strings.Contains(msgs[1].ToolSummary, "[tool: Bash]") {
 		t.Errorf("tool summary missing tool call entries: %q", msgs[1].ToolSummary)

@@ -15,6 +15,9 @@ import (
 
 var ErrNotFound = errors.New("provider pool not found")
 
+// ErrConflict means a pool with this name already exists in the workspace.
+var ErrConflict = errors.New("provider pool name already exists")
+
 // Pool is a named set, not a permission grant. A binding layer must separately
 // authorize an agent before asking this store to select a paying account.
 type Pool struct {
@@ -52,12 +55,42 @@ func (s *Store) Create(ctx context.Context, pool Pool) error {
 		return fmt.Errorf("begin provider pool creation: %w", err)
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO provider_login_pools
+	// Validate IDs within the write transaction before inserting anything.
+	// Unknown and foreign-tenant IDs deliberately have the same error.
+	seen := make(map[string]bool, len(pool.Members))
+	for _, member := range pool.Members {
+		if member.CredentialID == "" || seen[member.CredentialID] {
+			return ErrInvalid
+		}
+		seen[member.CredentialID] = true
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM credentials WHERE id=? AND workspace_id=? AND deleted_at IS NULL)`, member.CredentialID, pool.WorkspaceID).Scan(&exists); err != nil {
+			return fmt.Errorf("validate provider pool member: %w", err)
+		}
+		if !exists {
+			return ErrInvalid
+		}
+	}
+	var duplicate bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM provider_login_pools WHERE workspace_id=? AND name=?)`, pool.WorkspaceID, strings.TrimSpace(pool.Name)).Scan(&duplicate); err != nil {
+		return fmt.Errorf("check provider pool name: %w", err)
+	}
+	if duplicate {
+		return ErrConflict
+	}
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO provider_login_pools
 		(id, workspace_id, name, provider, mode, allow_cross_owner, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, pool.ID, pool.WorkspaceID, strings.TrimSpace(pool.Name),
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, name) DO NOTHING`, pool.ID, pool.WorkspaceID, strings.TrimSpace(pool.Name),
 		providerlogin.Canonical(pool.Policy.Provider), pool.Policy.Mode, pool.Policy.AllowCrossOwner, pool.CreatedBy)
 	if err != nil {
 		return fmt.Errorf("create provider pool: %w", err)
+	}
+	count, err := inserted.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check provider pool insert: %w", err)
+	}
+	if count == 0 {
+		return ErrConflict
 	}
 	for _, member := range pool.Members {
 		_, err = tx.ExecContext(ctx, `INSERT INTO provider_login_pool_members (pool_id, credential_id, priority)

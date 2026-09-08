@@ -37,10 +37,14 @@ var workspaceMemberInviteCmd = &cobra.Command{
 
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
-		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/members/provision", map[string]string{
-			"email": args[0],
-			"role":  role,
-		})
+		body := map[string]any{"email": args[0], "role": role}
+		if createOnly, _ := cmd.Flags().GetBool("create-only"); createOnly {
+			if err := requireCreateOnlyProvision(client); err != nil {
+				return err
+			}
+			body["create_only"] = true
+		}
+		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/members/provision", body)
 		if err != nil {
 			return err
 		}
@@ -50,13 +54,23 @@ var workspaceMemberInviteCmd = &cobra.Command{
 		}
 
 		var out struct {
-			Email       string `json:"email"`
-			Role        string `json:"role"`
-			CreatedUser bool   `json:"created_user"`
-			SetupURL    string `json:"setup_url"`
-			ExpiresAt   string `json:"expires_at"`
+			Email       string `json:"email" yaml:"email"`
+			Role        string `json:"role" yaml:"role"`
+			CreatedUser bool   `json:"created_user" yaml:"created_user"`
+			SetupURL    string `json:"setup_url" yaml:"setup_url"`
+			ExpiresAt   string `json:"expires_at" yaml:"expires_at"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if !f.RoutesToHuman() {
+			return f.Machine(out)
+		}
+		if f.Format == "quiet" {
+			// Quiet identifies the member without disclosing the setup token.
+			_, err := fmt.Fprintln(f.Writer, out.Email)
 			return err
 		}
 
@@ -92,5 +106,6 @@ var workspaceMemberInviteCmd = &cobra.Command{
 
 func init() {
 	workspaceMemberInviteCmd.Flags().String("role", "MEMBER", "Role to grant: ADMIN, MANAGER, MEMBER, VIEWER")
+	workspaceMemberInviteCmd.Flags().Bool("create-only", false, "Reject existing accounts without changing their membership or setup tokens")
 	workspaceMemberCmd.AddCommand(workspaceMemberInviteCmd)
 }

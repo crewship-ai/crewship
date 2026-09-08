@@ -18,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { isPreviewable } from "@/lib/file-format"
 
 import {
   ChatTreeRow,
@@ -29,8 +30,9 @@ import {
   getChatFileIcon,
   getEditorLanguage,
 } from "./chat-tree-row"
-import { useFileEditor, type EditorScope } from "./hooks/use-file-editor"
+import { useFileEditor, fileRoute, type EditorScope } from "./hooks/use-file-editor"
 import { useUserPreference } from "@/hooks/use-user-preference"
+import { FilePreview } from "./files/file-preview"
 import { ScopeSection } from "./files/scope-section"
 import { CrewFilesScope } from "./files/crew-files-scope"
 import { TriggersTab } from "./right-panel-tabs/triggers-tab"
@@ -38,7 +40,7 @@ import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
 import { TeamTab } from "./right-panel-tabs/team-tab"
 import { DRAWER_TAB_LABELS } from "./right-rail"
-import type { DrawerTab } from "@/stores/drawer-store"
+import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 import { useChatAgent } from "./chat-agent-context"
 import { classifyAgentFile, relativeToAgent } from "./files/file-scope"
 
@@ -72,11 +74,16 @@ interface RightPanelProps {
   workspaceId: string | null
   files: FileEntry[]
   initialTab?: string
+  filesLoading?: boolean
+  filesError?: string | null
+  onRetryFiles?: () => void
+  previewFile?: { path: string } | null
+  onPreviewHandled?: (request: { path: string }) => void
   hideTabs?: boolean
   style?: React.CSSProperties
 }
 
-export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style }: RightPanelProps) {
+export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style, filesLoading, filesError, onRetryFiles, previewFile, onPreviewHandled }: RightPanelProps) {
   const chatAgent = useChatAgent()
   const crewId = chatAgent?.crewId ?? null
   const agentSlug = chatAgent?.slug ?? null
@@ -84,8 +91,11 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   // behaving like that", so it has to stay one click away — it is just not
   // the answer to "what has this agent made for me", which is the question
   // the panel is on screen to answer.
+  const [downloadFile, setDownloadFile] = useState<{ path: string; scope?: EditorScope } | null>(null)
   const [showInternals, setShowInternals] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>(initialTab ?? "files")
+  const validTab = (tab: string | undefined) => RIGHT_PANEL_TABS.some((item) => item.id === tab) ? tab! : "files"
+  const [activeTab, setActiveTab] = useState<string>(() => validTab(initialTab))
+  useEffect(() => { setActiveTab(validTab(initialTab)) }, [initialTab])
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
@@ -116,6 +126,27 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     closeEditor,
     handleEditorSave,
   } = useFileEditor({ agentId, workspaceId })
+
+  const dirtyEditorRef = React.useRef(editorDirty)
+  dirtyEditorRef.current = editorDirty
+  const openScopedFile = useCallback((node: { path: string; name: string }, scope: EditorScope) => {
+    if (isPreviewable(node.name)) {
+      if (dirtyEditorRef.current && !window.confirm("Discard unsaved file changes?")) return
+      setEditorDirty(false)
+      setDownloadFile(null)
+      openFileEditor(node, scope)
+    } else {
+      if (dirtyEditorRef.current && !window.confirm("Discard unsaved file changes?")) return
+      setEditorDirty(false)
+      closeEditor()
+      setDownloadFile({ path: node.path, scope })
+      if (window.innerWidth >= 1024) {
+        const drawer = useDrawerStore.getState()
+        drawer.setMode("push")
+        drawer.setWidth(Math.min(680, Math.max(320, window.innerWidth - 720)))
+      }
+    }
+  }, [setEditorDirty, openFileEditor, closeEditor])
 
   /**
    * What the panel lists.
@@ -165,7 +196,8 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     fetchedDirsRef.current = new Set()
     setExpanded(new Set())
     closeEditor()
-  }, [agentId, closeEditor])
+    setDownloadFile(null)
+  }, [agentId, workspaceId, closeEditor])
 
   // Replay saved expanded paths + last-opened file. Bulk-adds to
   // `expanded`; the fetch effect below handles loading children
@@ -179,12 +211,22 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     if (saved.expandedPaths.length > 0) {
       setExpanded(new Set(saved.expandedPaths))
     }
-    if (saved.lastOpenedPath) {
+    if (saved.lastOpenedPath && !previewFile && !editorFile) {
       const name = saved.lastOpenedPath.split("/").pop() ?? ""
       openFileEditor({ path: saved.lastOpenedPath, name }, AGENT_SCOPE)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, files, workspaceId])
+
+  useEffect(() => {
+    if (!previewFile) return
+    const name = previewFile.path.split("/").pop() ?? previewFile.path
+    setActiveTab("files")
+    openScopedFile({ path: previewFile.path, name }, AGENT_SCOPE)
+    // The parent owns a request, not a permanent selection. Consuming this
+    // exact object cannot clear a newer click that arrived in the meantime.
+    onPreviewHandled?.(previewFile)
+  }, [previewFile, openScopedFile, onPreviewHandled])
 
   // Persist current state. Debounced inside the useUserPreference hook.
   //
@@ -230,12 +272,12 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   // Two scopes, two trees, and the tree is named at the click — the editor
   // reads and later writes whichever one it is handed here.
   const openAgentFile = useCallback(
-    (node: TreeNode) => openFileEditor(node, AGENT_SCOPE),
-    [openFileEditor],
+    (node: TreeNode) => openScopedFile(node, AGENT_SCOPE),
+    [openScopedFile],
   )
   const openCrewFile = useCallback(
-    (node: TreeNode, crewId: string) => openFileEditor(node, { kind: "crew", crewId }),
-    [openFileEditor],
+    (node: TreeNode, crewId: string) => openScopedFile(node, { kind: "crew", crewId }),
+    [openScopedFile],
   )
 
   const toggleFolder = useCallback((path: string) => {
@@ -280,12 +322,37 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
         ))}
       </div>}
 
+      {activeTab === "files" && downloadFile && workspaceId && (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex justify-end border-b px-2 py-1">
+            <button type="button" className="hidden items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent md:flex"
+              onClick={() => { const drawer = useDrawerStore.getState(); drawer.setMode("push"); drawer.setWidth(drawer.width > 400 ? 380 : Math.min(720, Math.max(320, window.innerWidth - 720))) }}>
+              <Maximize2 className="h-3 w-3" /> Resize preview
+            </button>
+          </div>
+          <FilePreview
+            key={`${workspaceId}:${agentId}:${downloadFile.scope?.kind}:${downloadFile.scope?.kind === "crew" ? downloadFile.scope.crewId : ""}:${downloadFile.path}`}
+            url={fileRoute(downloadFile.scope ?? AGENT_SCOPE, agentId, "download", workspaceId, downloadFile.path)}
+            name={downloadFile.path.split("/").pop() ?? "File"}
+            onClose={() => setDownloadFile(null)}
+          />
+        </div>
+      )}
       {/* Tree area -- scrolls independently */}
-      <div className={cn("overflow-y-auto", editorOpen ? "flex-1 min-h-0" : "flex-1")}>
-        {activeTab === "files" && (
+      <div className={cn(downloadFile && activeTab === "files" && "hidden", "overflow-y-auto", editorOpen ? "flex-1 min-h-0" : "flex-1")}>
+        {activeTab === "files" && !downloadFile && (
           <div>
             <ScopeSection icon={BotIcon} title="Agent" count={fileCount} defaultOpen>
-              {tree.length > 0 ? (
+              {filesError ? (
+                <div role="alert" className="space-y-2 p-3 text-xs text-muted-foreground">
+                  <p>{filesError}</p>
+                  <button type="button" onClick={onRetryFiles} className="text-primary underline">Retry loading files</button>
+                </div>
+              ) : filesLoading && tree.length === 0 ? (
+                <div role="status" className="flex items-center gap-2 p-3 text-xs text-muted-foreground">
+                  <Spinner className="h-3 w-3" /> Loading agent files…
+                </div>
+              ) : tree.length > 0 ? (
                 <div className="py-0.5">
                   {tree.map((node) => (
                     <ChatTreeRow
@@ -303,7 +370,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
               ) : (
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
                   <FileText className="h-3 w-3" />
-                  No files in this session yet
+                  No agent files yet
                 </div>
               )}
               {/* The toggle sits at the FOOT of the agent scope, not in the
@@ -377,10 +444,11 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       </div>
 
       {/* Slide-up editor */}
-      {editorOpen && (
-        <div className={cn(
+      {editorFile && (
+        <div hidden={!editorOpen} className={cn(
           "flex flex-col border-t bg-[#1e1e1e] shrink-0 transition-all duration-300 ease-in-out",
           editorExpanded ? "h-[70%]" : "h-[40%]",
+          !editorOpen && "hidden",
         )}>
           {/* Editor header */}
           <div className="flex items-center justify-between px-3 py-1.5 bg-[#252526] border-b border-[#3c3c3c] shrink-0">
@@ -442,7 +510,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       )}
 
       {/* Footer (file count) -- only when no editor */}
-      {!editorOpen && activeTab === "files" && tree.length > 0 && (
+      {!editorOpen && !downloadFile && activeTab === "files" && tree.length > 0 && (
         <div className="px-3 py-1.5 border-t text-micro text-muted-foreground shrink-0">
           {fileCount} file{fileCount !== 1 ? "s" : ""}
         </div>

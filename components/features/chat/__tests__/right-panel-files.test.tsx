@@ -1,3 +1,5 @@
+vi.mock("../files/file-preview", () => ({ FilePreview: ({ url, name, onClose }: { url: string; name: string; onClose: () => void }) => <section aria-label="File preview"><span>{name}</span><output data-testid="preview-url">{url}</output><button onClick={onClose}>Back to files</button></section> }))
+vi.mock("../right-panel-tabs/team-tab", () => ({ TeamTab: () => null }))
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react"
 
@@ -44,10 +46,11 @@ vi.mock("sonner", () => ({
 // CodeMirror and exposes the bytes it was handed plus a way to save them.
 vi.mock("next/dynamic", () => ({
   default: () =>
-    function StubFileEditor({ code, onSave }: { code: string; onSave: (next: string) => void }) {
+    function StubFileEditor({ code, onSave, onDirtyChange }: { code: string; onSave: (next: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
       return (
         <div>
           <pre data-testid="editor-code">{code}</pre>
+          <textarea aria-label="File contents" defaultValue={code} onChange={() => onDirtyChange?.(true)} />
           <button type="button" onClick={() => onSave(`${code} EDITED`)}>
             stub-save
           </button>
@@ -323,4 +326,103 @@ describe("RightPanel — the open panel says which panel it is", () => {
     // is three unlabelled icons and a file tree.
     expect(await screen.findByRole("heading", { name: /^files$/i })).toBeInTheDocument()
   })
+})
+
+describe("RightPanel — file entry points and mobile navigation", () => {
+  it("switches from Files to Team when the mobile host changes the requested tab", async () => {
+    apiFetch.mockImplementation(() => ok([]))
+    const view = panel({ initialTab: "files", hideTabs: true })
+    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
+    view.rerender(<RightPanel agentId="agent-1" workspaceId={null} files={[]} initialTab="team" hideTabs />)
+    expect(await screen.findByRole("heading", { name: "Team" })).toBeInTheDocument()
+  })
+
+  it("falls back to Files for a disabled persisted tab", () => {
+    panel({ initialTab: "triggers", hideTabs: true })
+    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
+  })
+
+  it("distinguishes a failed request from an empty agent and offers retry", () => {
+    const retry = vi.fn()
+    panel({ filesError: "Couldn't load agent files.", onRetryFiles: retry })
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load agent files.")
+    expect(screen.queryByText("No agent files yet")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading files" }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
+  it("opens a transcript file through the scoped agent editor even before the tree arrives", async () => {
+    apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("generated report") }))
+    panel({ previewFile: { path: "reports/result.md" } })
+    expect(await screen.findByTestId("editor-code")).toHaveTextContent("generated report")
+    expect(apiFetch.mock.calls[0][0]).toContain("/api/v1/agents/agent-1/files/download?workspace_id=ws-1&path=reports%2Fresult.md")
+  })
+
+  it("opens binary artifacts in the scoped preview instead of the text editor", () => {
+    panel({ previewFile: { path: "result.png" } })
+    expect(screen.getByTestId("preview-url")).toHaveTextContent("/api/v1/agents/agent-1/files/download?workspace_id=ws-1&path=result.png")
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("editor-code")).not.toBeInTheDocument()
+  })
+})
+
+
+it("preserves the editor buffer while visiting another side panel", async () => {
+  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("original") }))
+  const previewFile = { path: "report.md" }
+  const view = panel({ previewFile, initialTab: "files", hideTabs: true })
+  const editor = await screen.findByRole("textbox", { name: "File contents" })
+  fireEvent.change(editor, { target: { value: "unsaved changes" } })
+  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-1" files={[]} previewFile={previewFile} initialTab="team" hideTabs />)
+  expect(screen.queryByRole("textbox", { name: "File contents" })).not.toBeInTheDocument()
+  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-1" files={[]} previewFile={previewFile} initialTab="files" hideTabs />)
+  expect(await screen.findByRole("textbox", { name: "File contents" })).toHaveValue("unsaved changes")
+})
+
+
+it("consumes a preview request once and treats nested Dockerfile as text", async () => {
+  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("FROM alpine") }))
+  const request = { path: "src/Dockerfile" }
+  const handled = vi.fn()
+  panel({ previewFile: request, onPreviewHandled: handled })
+  expect(await screen.findByTestId("editor-code")).toHaveTextContent("FROM alpine")
+  expect(handled).toHaveBeenCalledExactlyOnceWith(request)
+  expect(screen.queryByRole("button", { name: "Download file" })).not.toBeInTheDocument()
+})
+
+
+it("opens an agent PDF from the tree and returns to the same file list", () => {
+  panel({ files: [file("report.pdf", "crew-1/casey")] })
+  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
+  expect(screen.getByTestId("preview-url")).toHaveTextContent("path=crew-1%2Fcasey%2Freport.pdf")
+  fireEvent.click(screen.getByRole("button", { name: "Back to files" }))
+  expect(screen.getByRole("button", { name: /report.pdf/ })).toBeVisible()
+})
+
+it("opens crew binary files through crew authorization, never the agent route", async () => {
+  apiFetch.mockImplementation((url: string) => url.includes("/api/v1/agents/agent-1?")
+    ? ok({ id: "agent-1", crew_id: "crew-1" }) : ok([file("shared.png", "crew-1")]))
+  panel()
+  await openCrewScope()
+  fireEvent.click(await screen.findByRole("button", { name: /shared.png/ }))
+  expect(screen.getByTestId("preview-url")).toHaveTextContent("/api/v1/crews/crew-1/files/download?workspace_id=ws-1&path=crew-1%2Fshared.png")
+})
+
+it("clears a binary preview when workspace changes", () => {
+  const view = panel({ files: [file("report.pdf")] })
+  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
+  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-2" files={[]} />)
+  expect(screen.queryByTestId("preview-url")).not.toBeInTheDocument()
+})
+
+it("keeps unsaved text when opening a binary preview is cancelled", async () => {
+  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("original") }))
+  panel({ files: [file("notes.txt"), file("report.pdf")] })
+  fireEvent.click(screen.getByRole("button", { name: /notes.txt/ }))
+  fireEvent.change(await screen.findByRole("textbox", { name: "File contents" }), { target: { value: "draft" } })
+  vi.stubGlobal("confirm", vi.fn(() => false))
+  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
+  expect(screen.queryByTestId("preview-url")).not.toBeInTheDocument()
+  expect(screen.getByRole("textbox", { name: "File contents" })).toHaveValue("draft")
+  vi.unstubAllGlobals()
 })

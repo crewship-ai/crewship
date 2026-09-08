@@ -58,7 +58,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 		}, "ids", "state"),
 		"FinalCoreInvitationRequest": object(map[string]any{"email": str(), "role": str()}, "email"),
 		"FinalCoreProvisionMemberRequest": object(map[string]any{
-			"email": str(), "role": str(), "full_name": str(),
+			"email": str(), "role": str(), "full_name": str(), "create_only": map[string]any{"type": "boolean", "description": "Reject existing accounts without changing membership or setup tokens."},
 		}, "email"),
 		"FinalCoreAgentAvatarRequest": object(map[string]any{"svg": str()}, "svg"),
 	}

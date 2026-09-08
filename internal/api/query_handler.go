@@ -735,6 +735,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	limit, offset := parsePagination(r, 50, 100)
+	agentID := r.URL.Query().Get("agent_id")
 
 	type peerConvItem struct {
 		ID         string  `json:"id"`
@@ -759,9 +760,10 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 		JOIN agents from_a ON from_a.id = pc.from_agent_id
 		JOIN agents to_a ON to_a.id = pc.to_agent_id
 		WHERE pc.crew_id = ? AND pc.workspace_id = ?
-		ORDER BY pc.created_at DESC
+		  AND (? = '' OR pc.from_agent_id = ? OR pc.to_agent_id = ?)
+		ORDER BY pc.created_at DESC, pc.id DESC
 		LIMIT ? OFFSET ?
-	`, crewID, workspaceID, limit, offset)
+	`, crewID, workspaceID, agentID, agentID, agentID, limit, offset)
 	if err != nil {
 		replyInternalError(w, h.logger, "list peer conversations", err)
 		return

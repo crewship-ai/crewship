@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 
 // =============================================================================
 // The right rail is three 16px glyphs and nothing else.
@@ -83,4 +83,31 @@ describe("RightDrawer — the open panel is named", () => {
 
     expect(screen.getByRole("tabpanel", { name: DRAWER_TAB_LABELS.team })).toBeInTheDocument()
   })
+})
+
+it("lets keyboard users resize the drawer within its bounds", () => {
+  useDrawerStore.setState({ open: true, width: 380 })
+  render(<RightDrawer><div /></RightDrawer>)
+  const separator = screen.getByRole("separator", { name: "Resize chat side panel" })
+  expect(separator).toHaveAttribute("tabindex", "0")
+  fireEvent.keyDown(separator, { key: "ArrowLeft" })
+  expect(separator).toHaveAttribute("aria-valuenow", "400")
+  fireEvent.keyDown(separator, { key: "Home" })
+  fireEvent.keyDown(separator, { key: "ArrowRight" })
+  expect(separator).toHaveAttribute("aria-valuenow", "280")
+  fireEvent.keyDown(separator, { key: "End" })
+  fireEvent.keyDown(separator, { key: "ArrowLeft" })
+  expect(separator).toHaveAttribute("aria-valuenow", "720")
+})
+
+
+it("mounts the drawer lazily and retains an edited buffer when closed and reopened", () => {
+  render(<RightDrawer><textarea aria-label="Draft file" defaultValue="original" /></RightDrawer>)
+  expect(screen.queryByRole("textbox", { name: "Draft file", hidden: true })).not.toBeInTheDocument()
+  act(() => { useDrawerStore.getState().setOpen(true) })
+  fireEvent.change(screen.getByRole("textbox", { name: "Draft file" }), { target: { value: "unsaved" } })
+  act(() => { useDrawerStore.getState().setOpen(false) })
+  expect(screen.queryByRole("textbox", { name: "Draft file" })).not.toBeInTheDocument()
+  act(() => { useDrawerStore.getState().setOpen(true) })
+  expect(screen.getByRole("textbox", { name: "Draft file" })).toHaveValue("unsaved")
 })

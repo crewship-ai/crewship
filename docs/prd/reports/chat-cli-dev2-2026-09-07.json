@@ -1,0 +1,32 @@
+{
+  "server": "http://localhost:8082",
+  "run_id": "1eebcc9b9e35",
+  "checks": [
+    "Authenticated Dev2 profile and isolated workspace",
+    "Two real member accounts: setup and separate CLI login",
+    "Direct pair reopened from opposite participant has one identity",
+    "Private direct history/send denied to third user; fixed roster",
+    "Unicode delivery, stable retry deduplication and conflict rejection",
+    "Live outbox produces one recipient inbox item with canonical Chat link",
+    "Read cursor clears live inbox and unread count",
+    "Mute suppresses notification, preserves history; unmute restores delivery",
+    "Two-way human history and forward/backward message pagination",
+    "Private group membership grant and immediate revocation",
+    "Workspace channel access and ACL-filtered room pagination",
+    "Twelve concurrent CLI sends by two users: unique sequence and no lost messages",
+    "Test login sessions revoked and exact QA workspace deleted"
+  ],
+  "cleanup": true,
+  "workspace_id": "cmtr4bupg001a233ce1f4",
+  "workspace_slug": "chat-cli-qa-1eebcc9b9e35",
+  "test_user_ids": {
+    "bob": "5146cbb4-8be6-40e3-a647-4328555b705e",
+    "eve": "70cd6a8f-420d-4308-adc9-68420e393eae"
+  },
+  "room_ids": {
+    "direct": "cmtr4bwc63762f7392793b9dd896a6999",
+    "group": "cmtr4c1hr8a6f5e12e2ca154c3b740416",
+    "channel": "cmtr4c1zfb9c6b8be1ad8738626299ee6"
+  },
+  "status": "passed"
+}

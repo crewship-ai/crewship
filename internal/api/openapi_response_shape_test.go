@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 )
 
@@ -196,6 +197,18 @@ var responseShapeContracts = []struct {
 	{name: "AgentIntegrationBinding", pointer: "/components/schemas/AgentIntegrationBinding", value: agentMCPBindingResponse{}},
 	{name: "IntegrationTool", pointer: "/components/schemas/IntegrationTool", value: toolBindingResponse{}},
 	{name: "Profile", pointer: "/components/schemas/Profile", value: userProfileResponse{}},
+	// Workspace chat roots and their actual nested row encodings.
+	{name: "WorkspaceConversation", pointer: "/components/schemas/WorkspaceConversation", value: groupchat.Conversation{}},
+	{name: "WorkspaceConversationMessage", pointer: "/components/schemas/WorkspaceConversationMessage", value: groupchat.Message{}},
+	{name: "WorkspaceConversationActivity", pointer: "/components/schemas/WorkspaceConversationActivity", value: groupchat.ActivitySettings{}},
+	{name: "WorkspaceConversationList", pointer: "/components/schemas/WorkspaceConversationList", value: workspaceConversationListResponse{}},
+	{name: "WorkspaceConversationMessages", pointer: "/components/schemas/WorkspaceConversationMessages", value: workspaceConversationMessagesResponse{}},
+	{name: "WorkspaceConversationParticipants", pointer: "/components/schemas/WorkspaceConversationParticipants", value: workspaceConversationParticipantsResponse{}},
+	{name: "WorkspaceConversationAgents", pointer: "/components/schemas/WorkspaceConversationAgents", value: workspaceConversationAgentsResponse{}},
+	{name: "WorkspaceConversationAgentJobs", pointer: "/components/schemas/WorkspaceConversationAgentJobs", value: workspaceConversationAgentJobsResponse{}},
+	{name: "WorkspaceConversationParticipant", pointer: "/components/schemas/WorkspaceConversationParticipant", value: groupchat.Member{}},
+	{name: "WorkspaceConversationAgent", pointer: "/components/schemas/WorkspaceConversationAgent", value: groupchat.AgentMember{}},
+	{name: "WorkspaceConversationAgentJob", pointer: "/components/schemas/WorkspaceConversationAgentJob", value: groupchat.Job{}},
 	{name: "CredentialTestResponse", pointer: "/components/schemas/CredentialTestResponse", value: testConnectionResponse{}},
 }
 

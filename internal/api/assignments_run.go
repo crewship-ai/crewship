@@ -535,6 +535,14 @@ func (h *AssignmentHandler) runAssignment(
 	body createAssignmentBody,
 	target targetAgentInfo,
 ) {
+	// Channel work can wait in the general assignment queue. Revalidate its
+	// permission at the execution door as every queue pump can reach us.
+	if allowed, err := h.authorizeConversationAssignment(ctx, assignmentID); err != nil {
+		h.logger.Error("conversation assignment authorization failed", "assignment_id", assignmentID, "error", err)
+		return
+	} else if !allowed {
+		return
+	}
 	// Tier 1 cooperative stop, checked before ANYTHING is spent on this
 	// assignment — before the pre_task_delegation hook below, before
 	// container provisioning, before the exec that would actually run the

@@ -36,10 +36,30 @@ describe("useFileEditor", () => {
     toastError.mockReset()
     mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
+    vi.stubGlobal("confirm", vi.fn(() => true))
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it("keeps dirty edits when discarding on close or another file is cancelled", async () => {
+    mockFetch.mockResolvedValue(okText("original"))
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal("confirm", confirm)
+    const { result } = renderHook(() => useFileEditor({ agentId: "a1", workspaceId: "ws-1" }))
+    await act(async () => {
+      result.current.openFileEditor({ path: "a.ts", name: "a.ts" }, { kind: "agent" })
+      await flushAsync()
+    })
+    act(() => { result.current.setEditorDirty(true) })
+    act(() => { result.current.closeEditor() })
+    expect(result.current.editorFile?.path).toBe("a.ts")
+    expect(result.current.editorDirty).toBe(true)
+    act(() => { result.current.openFileEditor({ path: "b.ts", name: "b.ts" }, { kind: "agent" }) })
+    expect(result.current.editorFile?.path).toBe("a.ts")
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenCalledTimes(2)
   })
 
   it("starts with everything closed and empty", () => {
