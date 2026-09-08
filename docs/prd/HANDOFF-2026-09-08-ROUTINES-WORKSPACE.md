@@ -666,3 +666,56 @@ Evidence: `/tmp/routines-polish-live-final.log`,
 `/tmp/routines-polish-credentials-test.log`, `/tmp/routines-polish-final-build.log`.
 Peer tracked WIP was restored byte-for-byte after both service builds; only the
 session's temporary stashes were removed. PR #2460 remains unmerged.
+
+## Run workspace readability — Result, Workflow, Activity and Inputs
+
+Application commits: `b4f4d65d4`, final `1ba9e25a1`; dev1 only.
+Actual browser reference:
+https://crewship-dev1.unifylab.cz/routines?slug=summarize-text&run=run_cmtq4qqdq000b006fbe54
+
+- Run summary separates start time, duration, start method and executed version.
+  The outcome explanation and raw error are expandable. The original state,
+  failure verdict, stop confirmation, rerun/version choice and approval behavior
+  remain intact. Navigation uses the existing icon/color vocabulary.
+- Result prioritizes the recorded answer. Successfully loaded empty artifacts
+  use a compact row; a failed artifact lookup remains an error, never "no files".
+  Individual step responses are expandable, with direct navigation to that step.
+- Workflow retains TraceCanvas with the executed recipe and adds an initially
+  selected current/first step, a step selector, readable response and expandable
+  instructions/tool activity. Execution history retains real attempts.
+- Inputs use the executed schema and saved values, never current defaults.
+  Text preserves line breaks and remains plain text; lists/objects render as
+  fields/items, with bounded initial expansion. False, zero, null, empty strings,
+  omitted fields and unavailable input records stay distinct. JSON remains an
+  optional technical disclosure and string identifiers are never reparsed.
+- Activity preserves the shared journal rail and gains opt-in pagination/retry
+  controls and expanded events for the routine run view. Counts say events,
+  not recipe steps; pipeline completion says Execution completed and points to
+  the separate result verdict. A live run-id guard mirrors trace_id/actor_id/
+  payload.run_id matching so other runs cannot enter this view. Shared Issues
+  rendering retains its default rail behavior. Attempts load on disclosure.
+
+Frontend verification: 259 tests across 38 suites passed, followed by 24 focused
+passes covering the final changes and four additional cases (263 unique tests
+covered). TypeScript, full lint (zero errors, 32 existing warnings), final
+changed-file lint and both production exports passed.
+
+Authenticated dev1 browser verification covers the existing scheduled Summarize
+text run: readable retained result, saved text byte equality, optional JSON,
+initial historical step selection/map, Activity/attempts, navigation icons and
+390px layout. Additional intercepted browser fixtures cover false/zero/null/empty,
+nested values, no default substitution and a visible journal 503 rather than an
+empty-history claim. These fixtures are not real routine executions. No live
+routine was started, stopped or approved during verification.
+Evidence: `/tmp/routines-run-ux-live.log`, final browser log below,
+`/tmp/routines-run-ux-fixtures.log`, `/tmp/routines-run-ux-{result,inputs,workflow,activity,mobile}.png`,
+`/tmp/routines-run-ux-final-tests.log`, `/tmp/routines-run-ux-final-focused.log`,
+`/tmp/routines-run-ux-final-build.log`. No backend or database changes. Peer WIP
+was restored byte-for-byte after both service builds; only the session's own
+stashes were removed. PR #2460 remains unmerged.
+
+Final verification completed: all 135 Go test packages passed in one full run
+(API 947.104s, database 1038.032s), followed by go vet. Final deployed browser
+verification passed with zero page errors and additionally asserted the three
+journal events and Execution completed label:
+`/tmp/routines-run-ux-live-final.log`. Deployed app is `1ba9e25a1`.
