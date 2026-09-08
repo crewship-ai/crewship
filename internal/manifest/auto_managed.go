@@ -16,35 +16,21 @@ package manifest
 //      credential name, so the agent container also receives
 //      POSTGRES_PASSWORD at runtime.
 //
-// Threat model (justification for plaintext in services_json):
-//
-//   For the v1 release, the generated value lives in TWO places in
-//   the workspace DB:
-//
-//     - credentials.encrypted_value: AES-256-GCM encrypted with
-//       ENCRYPTION_KEY. Used by the UI / audit / future rotation.
-//
-//     - crews.services_json: plaintext, embedded in the sidecar
-//       env literal. Used by the docker provider at sidecar start
-//       — the runtime path currently has no env_refs resolution for
-//       sidecars (separate gap tracked as a bug; see PR description),
-//       so the value must travel literally to be reachable.
-//
-//   This duplicates the secret into a non-encrypted column. It is
-//   bounded to crew-private sidecars whose port is NOT published on
-//   the host — the validator refuses auto_credentials on services
-//   with `ports:` that escape the bridge — so an attacker who can
-//   read the workspace DB also already controls bridge isolation
-//   and the threat model is "host root", under which a separate
-//   encrypted column doesn't help. A future PR moves the literal
-//   value to an encrypted sibling column once the sidecar env-refs
-//   runtime path is wired.
+// Security limitation: generated values are duplicated in encrypted vault
+// rows and plaintext crews.services_json. A private container network does
+// NOT protect database readers or backups. Ordinary crew responses now
+// withhold literal-bearing configurations, and reapply refuses the private
+// marker rather than regenerating a password. Removing the plaintext copy
+// requires a server-resolved vault reference and an idempotent migration;
+// response redaction alone is not an at-rest encryption fix.
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // expandAutoCredentialsInCrewSpec mutates the CrewSpec in place to
@@ -72,6 +58,9 @@ import (
 // are purely "rand source failed," which on any modern platform
 // means the host has bigger problems than a manifest apply.
 func expandAutoCredentialsInCrewSpec(spec *CrewSpec, existingServicesJSON string) ([]plannedAutoCredential, error) {
+	if existingServicesJSON == serviceconfig.Redacted {
+		return nil, fmt.Errorf("service configuration is private; refusing to regenerate credentials from a redacted snapshot")
+	}
 	if spec == nil || len(spec.Services) == 0 {
 		return nil, nil
 	}

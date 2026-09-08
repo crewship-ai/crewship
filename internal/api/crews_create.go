@@ -363,7 +363,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		RuntimeImage:          req.RuntimeImage,
 		DevcontainerConfig:    req.DevcontainerConfig,
 		MiseConfig:            req.MiseConfig,
-		ServicesJSON:          req.ServicesJSON,
+		ServicesJSON:          (*publicServiceConfig)(req.ServicesJSON),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
