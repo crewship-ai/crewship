@@ -77,10 +77,10 @@ describe("New routine on CreateSurface", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("New routine")
   })
 
-  it("keeps the same width in the editor", () => {
+  it("gives the editor a wider working area", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    expect(shell()!.className).toContain("sm:max-w-[800px]")
+    expect(shell()!.className).toContain("sm:max-w-[1180px]")
     expect(screen.getByTestId("editor")).toBeInTheDocument()
   })
 
@@ -114,20 +114,18 @@ describe("New routine on CreateSurface", () => {
     )
   })
 
-  it("saves without a test run when an OWNER/ADMIN skips the gate", async () => {
+  it("opens on Overview with navigable recipe sections and no bypass", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.click(screen.getByLabelText(/skip test-run gate/i))
-    fireEvent.click(screen.getByRole("button", { name: /save \(skip test\)/i }))
-
-    await waitFor(() => {
-      expect(h.calls.some((c) => c.url.endsWith("/pipelines/save"))).toBe(true)
-    })
-    expect(h.calls.some((c) => c.url.includes("/test_run"))).toBe(false)
-    expect(h.calls.find((c) => c.url.endsWith("/pipelines/save"))!.body).toMatchObject({
-      skip_test_gate: true,
-    })
+    expect(screen.getByRole("navigation", { name: "Recipe sections" })).toBeVisible()
+    expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible()
+    expect(screen.queryByLabelText(/skip test-run gate/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Inputs", exact: true }))
+    expect(screen.getByText("No inputs declared in this definition.")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Validate", exact: true }))
+    expect(screen.getByText("Real execution")).toBeVisible()
   })
+
 })
 
 describe("Import routine bundle on CreateSurface", () => {

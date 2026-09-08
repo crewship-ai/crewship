@@ -300,3 +300,22 @@ timezone. Plan's Schedules section contains both one-time starts (including
 Calendar additions) and repeating schedules. An empty recurring list must never
 claim that no schedules exist. One-time rows lead, and technical concurrency
 settings are collapsed below the scheduling controls.
+
+## Guided recipe authoring — first implementation
+
+The manual creation surface opens on Overview and expands to a wider editor
+while retaining the shared gray CreateSurface and a left section navigator:
+Overview, Inputs, Steps, Outputs, Code, Schedule and Validate. Templates are an
+explicit expandable choice in Overview. Inputs/outputs and ordered step summaries
+read the same live definition; editing these structures remains in YAML/JSON for
+this slice. Steps also shows the definition graph. Section switches keep the
+editor mounted, and returning from its graph uses the current buffer.
+
+Validation is named accurately: test_run performs static validation and mints a
+save token, not a real execution. The creation UI no longer offers bypassing it.
+Saving retains the token contract and configured trigger; Schedule explicitly
+explains activation on save. Real execution remains Run after saving, with
+History/Activity. Drafts are explicitly unsaved in-memory buffers, not persisted
+server drafts. Forks identify their source and create a separate routine. Existing
+metadata and arbitrary DSL fields remain supported; this is not yet a visual
+step-construction engine.

@@ -6,17 +6,14 @@ import { useRouter } from "next/navigation"
 import {
   FlaskConical,
   Save,
-  AlertTriangle,
   Sparkles,
   GitFork,
   Braces,
-  Wrench,
   Search,
 } from "lucide-react"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import { slashFieldsFromRoutineInputs, routineInputsFromValues, isMissingRequired, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import {
@@ -29,14 +26,12 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceHeader,
   CreateSurfaceLoading,
-  CreateSurfaceNotice,
   CreateSurfaceRefusal,
   CreateSurfaceSecondaryAction,
   CreateSurfaceSection,
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
-import { useAbilities } from "@/hooks/use-abilities"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 // The shared picker, not a second copy of it. The local one was a verbatim
@@ -54,28 +49,9 @@ import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 /** Which reading of the definition the editor pane is showing. */
 type EditorPane = "code" | "graph"
 
-// RoutineCreateDialog — describe-first authoring entry for new routines.
-//
-// The dialog is a small router over four modes:
-//   • entry    — three cards: Describe it (★) / Fork an existing routine /
-//                write it yourself (advanced editor).
-//   • describe — pick crew → its Lead agent → a goal, then hand off into a
-//                chat with that Lead which auto-sends an authoring prompt.
-//                The backend Routine-Author skill drafts from there.
-//   • fork     — list the workspace's OWN routines; pick one to load its DSL
-//                into the advanced editor (not a curated template catalog).
-//   • advanced — the original JSON DSL editor + Test & Save gate, kept as the
-//                power-user fallback. Unchanged behaviour.
-//
-// The save endpoint (POST .../pipelines/save) requires a fresh passing
-// test_run; the advanced mode runs /test_run inline before /save so the
-// user sees explicit pass/fail. OWNER/ADMIN can toggle "skip test gate".
-//
-// The shell is CreateSurface (components/layout/create-surface.tsx), at a
-// single `lg` width for all four modes — it used to be 576px at the door,
-// 672px in the fork list and 768px × 90vh in the editor, so the footer moved
-// out from under the cursor every time you picked a mode. The four modes are
-// screens you go BACK from; the header's arrow is the shell's.
+// All three creation paths share the same recipe definition and save contract.
+// The server's test_run endpoint performs static validation and mints the save
+// token; it does not execute work. Code stays mounted while sections change.
 
 interface Props {
   workspaceId: string
@@ -211,10 +187,6 @@ interface RoutineListItem {
 
 export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: Props) {
   const router = useRouter()
-  const { role } = useAbilities()
-  // The server gates skip_test_gate on roleManage. Mirroring that here
-  // is the difference between an option and a trap.
-  const canSkipGate = role === "OWNER" || role === "ADMIN"
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
@@ -259,7 +231,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const [sourcesAndOutput, setSourcesAndOutput] = useState("")
   const [scheduledValues, setScheduledValues] = useState<Record<string,string>>({})
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
-  const [skipTestGate, setSkipTestGate] = useState(false)
+  const [section, setSection] = useState("Overview")
+  const [forkSource, setForkSource] = useState<string | null>(null)
   // saveToken captured from the most recent successful /test_run.
   // Used by the subsequent /save call so the server can verify via
   // HMAC instead of trusting body's last_test_run_at — closes the
@@ -448,7 +421,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const handleTestRun = async (): Promise<{ passed: boolean; token: string | null }> => {
     const parsed = parseDSLWithError()
     if (!parsed) {
-      toast.error("Definition is not valid JSON")
+      toast.error("Fix the definition before continuing")
       return { passed: false, token: null }
     }
     setBusy("testing")
@@ -509,7 +482,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
   const handleSave = async (tokenOverride?: string | null) => {
     const parsed = parseDSLWithError()
     if (!parsed) {
-      toast.error("Definition is not valid JSON")
+      toast.error("Fix the definition before continuing")
       return
     }
     if (!parsed["name"]) {
@@ -524,7 +497,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated }: P
         name: name || (parsed["name"] as string),
         description: description || (parsed["description"] as string | undefined) || "",
         definition: parsed,
-        skip_test_gate: skipTestGate,
+        skip_test_gate: false,
       }
       const values = Object.fromEntries(scheduledFields.map(f => [f.name, scheduledValues[f.name] ?? f.default ?? ""]))
       if (trigger.kind === "schedule" || trigger.kind === "once") {
@@ -612,6 +585,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       replaceBuffer(dslFormat === "yaml" ? toYaml(nextDef) : JSON.stringify(nextDef, null, 2), {
         baseline: false,
       })
+      setForkSource(item.name || item.slug)
+      setSection("Overview")
       setName("")
       setDescription(item.description ?? detail.description ?? "")
       setParseError(null)
@@ -638,7 +613,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "Start from an existing routine"
         : mode === "advanced"
-          ? "Write it yourself"
+          ? "Build your routine"
           : "New routine"
   const headerSub =
     mode === "describe"
@@ -646,7 +621,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "fork one of your own routines"
         : mode === "advanced"
-          ? "Editor — test-run, then save"
+          ? "Prepare your recipe, review its steps, then validate and save."
           // The entry screen had no subtitle, so three tiles appeared with
           // nothing saying they are three routes to the same place. People
           // read a picker as "which kind am I making", and the answer is that
@@ -685,20 +660,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     if (mode === "describe") {
       handleDescribe()
     } else if (mode === "advanced") {
-      if (skipTestGate) void handleSave()
-      else void handleTestAndSave()
+      void handleTestAndSave()
     }
   }
 
-  const advancedPrimaryLabel = skipTestGate
-    ? busy === "saving"
-      ? "Saving…"
-      : "Save (skip test)"
-    : busy === "testing"
-      ? "Testing…"
-      : busy === "saving"
-        ? "Saving…"
-        : "Validate & Save"
+  const advancedPrimaryLabel = busy === "testing" ? "Validating…" : busy === "saving" ? "Saving…" : "Validate & Save"
 
   return (
     <CreateSurface
@@ -710,12 +676,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       dirty={dirty}
       discardLabel="this routine"
       onSubmit={handleKeyboardSubmit}
-      // Width is fixed at lg for every mode; the EDITOR is the one mode that
-      // also needs a definite height, because a code pane and a step graph
-      // sized by their content give you a 400px dialog with a 200px editor in
-      // it. The shell fixes widths and leaves height to the content, so this
-      // is local — and it is the same cap the shell already applies.
-      className={mode === "advanced" ? "sm:h-[min(85vh,720px)]" : undefined}
+      className={mode === "advanced" ? "sm:h-[min(90vh,900px)] sm:max-h-[90vh] sm:max-w-[1180px]" : undefined}
     >
       <CreateSurfaceHeader
         concept="routines"
@@ -755,7 +716,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             icon={Braces}
             accent="teal"
             title="Write it yourself"
-            description="Author the DSL in the editor — YAML or JSON, with schema completion and the step graph beside it. Test-run and save without leaving the dialog."
+            description="Build a recipe with a clear overview of inputs, steps and outputs. Edit YAML or JSON, preview the graph, then validate and save."
             meta="full control"
             onClick={() => setMode("advanced")}
           />
@@ -862,7 +823,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 fork a routine
               </button>
               <button type="button" className="hover:text-foreground" onClick={() => setMode("advanced")}>
-                JSON editor
+                Build your routine
               </button>
             </div>
           </CreateSurfaceBody>
@@ -984,12 +945,23 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 `text-[10px] uppercase` labels over `h-7` inputs. Two of those
                 were 28px tall, which is not a tap target on a phone — and
                 every other surface says its field labels the same way. */}
-            <aside className="flex w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r border-hairline p-3">
-              <CreateSurfaceSection title="Identity" concept="routines">
+            <aside className="flex w-48 shrink-0 flex-col gap-2 overflow-y-auto border-r border-hairline bg-card p-3 max-sm:w-32 max-sm:p-2">
+              <p className="px-2 py-2 text-xs text-muted-foreground">Recipe · Unsaved</p>
+              <nav aria-label="Recipe sections" className="space-y-1">
+                {["Overview", "Inputs", "Steps", "Outputs", "Code", "Schedule", "Validate"].map(item => <button key={item} type="button" aria-current={section === item ? "page" : undefined} onClick={() => setSection(item)} className={cn("w-full rounded-xl px-3 py-2.5 text-left text-sm hover:bg-muted", section === item ? "bg-primary/10 text-primary" : "text-muted-foreground")}>{item}</button>)}
+              </nav>
+              <p className="mt-auto px-2 pt-6 text-xs leading-relaxed text-muted-foreground">Work is not executed while you edit or validate.</p>
+            </aside>
+            <div className={cn("min-w-0 flex-1 overflow-y-auto p-5 sm:p-7", section === "Code" && "hidden")}>
+              <h2 className="text-lg font-medium">{section === "Validate" ? "Review before saving" : section}</h2>
+              <p className="mb-6 mt-1 text-sm text-muted-foreground">{({ Overview: "Give your routine a clear purpose and choose the team responsible for it.", Inputs: "What this recipe needs before it can start.", Steps: "The recipe your agents and tools will follow.", Outputs: "What this recipe declares it will produce.", Schedule: "Choose when the saved routine should start.", Validate: "Check the definition without executing agents, scripts or external actions." } as Record<string, string>)[section]}</p>
+              <div hidden={section !== "Overview"} className="space-y-6">
+                {forkSource && <p className="rounded-xl border p-3 text-sm">Based on {forkSource}. Saving creates a separate routine.</p>}
+              <CreateSurfaceSection title="Routine details" concept="routines">
                 <CreateSurfaceField
                   label="Name"
                   htmlFor="routine-name"
-                  hint={<>Slug is derived from the DSL <code className="font-mono">name</code> field.</>}
+                  hint="Display name shown in Routines and Calendar."
                 >
                   <Input
                     id="routine-name"
@@ -1003,8 +975,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 <CreateSurfaceField label="Description" htmlFor="routine-description">
                   <CreateSurfaceDescriptionInput
                     id="routine-description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
+                    value={description || String(parsedDSL?.description ?? "")}
+                    onChange={(e) => { setDescription(e.target.value); if (parsedDSL) replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, description: e.target.value }) : JSON.stringify({ ...parsedDSL, description: e.target.value }, null, 2), { baseline: false }) }}
                     rows={3}
                     placeholder="One-line summary"
                     className="resize-none rounded-md border border-hairline bg-background p-1.5"
@@ -1026,11 +998,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     clearLabel="— choose at runtime —"
                   />
                 </CreateSurfaceField>
+                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint="Unique name used in links and code. Edit it in Code."><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField>
               </CreateSurfaceSection>
 
-              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
-              {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
-              <CreateSurfaceSection title="Starter templates" icon={Wrench} accent="slate">
+                <details className="rounded-2xl border border-hairline p-4"><summary className="cursor-pointer text-sm">Choose a starter template</summary><div className="mt-4 grid gap-3 sm:grid-cols-3">
+
                 {STARTER_TEMPLATES.map((t) => (
                   <CreateSurfaceTile
                     key={t.id}
@@ -1039,15 +1011,26 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     description={t.description}
                   />
                 ))}
-              </CreateSurfaceSection>
-            </aside>
-
-            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                </div></details>
+              </div>
+              {(section === "Inputs" || section === "Outputs") && <div className="space-y-3">
+                {definitionRows(parsedDSL?.[section.toLowerCase()]).map((field, i) => <div key={i} className="rounded-2xl border border-hairline bg-card p-4"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{String(field.label || field.name || `Field ${i + 1}`)}</span><span className="text-xs text-muted-foreground">{String(field.type || "value")}{field.required ? " · Required" : ""}</span></div>{field.description != null && <p className="mt-2 text-sm text-muted-foreground">{String(field.description)}</p>}</div>)}
+                {!Array.isArray(parsedDSL?.[section.toLowerCase()]) || !(parsedDSL?.[section.toLowerCase()] as unknown[])?.length ? <p className="rounded-2xl border border-dashed p-5 text-sm text-muted-foreground">No {section.toLowerCase()} declared in this definition.</p> : null}
+                <button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit {section.toLowerCase()} in Code →</button>
+              </div>}
+              {section === "Steps" && <div className="space-y-4">{definitionRows(parsedDSL?.steps).map((step, i) => <div key={i} className="rounded-2xl border border-hairline p-4"><h3 className="font-medium">{i + 1}. {String(step.name || step.id || "Step")}</h3><p className="mt-1 text-xs text-muted-foreground">{String(step.type || "Unspecified").replaceAll("_", " ")}{step.agent_slug ? ` · ${step.agent_slug}` : ""}</p>{(step.description || step.prompt) ? <p className="mt-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">{String(step.description || step.prompt)}</p> : null}</div>)}<div className="relative h-[380px] overflow-hidden rounded-2xl border border-hairline">{parsedDSL ? <RoutineDefinitionCanvas definition={parsedDSL} slug={slug} name={name || slug} /> : <p className="p-5 text-sm text-muted-foreground">Fix the definition in Code to display its steps.</p>}</div><button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit steps in Code →</button></div>}
+              {section === "Schedule" && <div className="space-y-5">              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
+              {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
+<p className="text-sm text-muted-foreground">Saving activates the selected schedule. Leave “When I start it” selected to save without an automatic start.</p></div>}
+              {section === "Validate" && <div className="space-y-4"><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Definition check</h3><p className="mt-2 text-sm text-muted-foreground">Checks the recipe and its configuration. A successful check does not mean a real run has succeeded.</p><button type="button" disabled={busy !== "none"} onClick={handleTestRun} className="mt-4 rounded-full border px-4 py-2 text-sm">{busy === "testing" ? "Validating…" : "Check definition"}</button></div><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Real execution</h3><p className="mt-2 text-sm text-muted-foreground">After saving, use Run to review inputs and start real work. Follow its steps and outputs in History and Activity.</p></div>{parseError && <button type="button" className="text-sm text-destructive" onClick={() => setSection("Code")}>{parseError} · Open Code →</button>}</div>}
+              {section !== "Validate" && <button type="button" className="mt-6 rounded-full border border-hairline px-4 py-2 text-sm" onClick={() => setSection(({ Overview: "Inputs", Inputs: "Steps", Steps: "Outputs", Outputs: "Code", Schedule: "Validate" } as Record<string, string>)[section] || "Validate")}>Continue →</button>}
+            </div>
+            <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", section !== "Code" && "hidden")}>
               {/* The bar the routine editor has, because this is the
                   same job: format toggle, the slug the DSL will save
                   under, and the parse error WITH its line — the old
                   strip said "invalid JSON" and left you to find it. */}
-              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-3 py-1.5">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-hairline px-3 py-1.5">
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   {/* The kit's segmented control. It was a pair of 10px
                       buttons in a hand-rolled group — the same choice the
@@ -1079,15 +1062,15 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   <CreateSurfaceChoice
                     ariaLabel="Editor pane"
                     value={editorPane}
-                    onChange={setEditorPane}
+                    onChange={(pane) => { if (pane === "code") setDslText(bufferRef.current); setEditorPane(pane) }}
                     options={[
                       { value: "code" as EditorPane, label: "Code" },
                       { value: "graph" as EditorPane, label: "Preview" },
                     ]}
                   />
-                  {parseError ? (
-                    <span className="truncate text-[10px] text-destructive" title={parseError}>
-                      {parseError}
+                  {!parsedDSL ? (
+                    <span className="truncate text-[10px] text-destructive" title={parseError ?? "Open Validate for details"}>
+                      Definition needs attention
                     </span>
                   ) : (
                     <span className="text-[10px] text-success">syntax ok</span>
@@ -1131,17 +1114,6 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             </div>
           </CreateSurfaceBody>
 
-          {/* Said before the click, not after. Skipping the gate is the one
-              choice on this surface that cannot be undone by looking at the
-              result — there is no result. */}
-          {skipTestGate && (
-            <div className="shrink-0 px-4 pb-2 sm:px-5">
-              <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
-                Saving without a dry run means the first real trigger is the first execution.
-              </CreateSurfaceNotice>
-            </div>
-          )}
-
           {/* Both verdicts sit outside the scrollport, next to the button that
               produced them. */}
           {testResult && (
@@ -1166,30 +1138,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
           />
 
           <CreateSurfaceFooter
-            /* Shown only to the roles the server will accept it from. It was
-               always visible, so a MANAGER could tick an escape hatch and get
-               a 403 for their trouble — an affordance that cannot work is
-               worse than an absent one, because it reads as a bug in the
-               product rather than a limit on the person. */
-            aside={
-              canSkipGate ? (
-                // A Switch, not an 11px checkbox with a 10px glyph beside it.
-                // `--spacing: 0.23rem` makes `h-3 w-3` about eleven pixels
-                // square, which is not a target anyone can hit on a phone —
-                // and this particular one turns off the dry run.
-                <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
-                  <Switch
-                    checked={skipTestGate}
-                    onCheckedChange={setSkipTestGate}
-                    aria-label="Skip the test-run gate"
-                  />
-                  <span className="inline-flex items-center gap-1">
-                    Skip test-run gate
-                    <AlertTriangle className="h-3 w-3 text-warn" />
-                  </span>
-                </label>
-              ) : undefined
-            }
+            hint="Unsaved recipe · Validation does not run work"
             onCancel={onClose}
             secondary={
               <CreateSurfaceSecondaryAction
@@ -1197,12 +1146,12 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 onClick={handleTestRun}
                 disabled={busy !== "none"}
               >
-                {busy === "testing" ? "Testing…" : "Test only"}
+                {busy === "testing" ? "Validating…" : "Validate definition"}
               </CreateSurfaceSecondaryAction>
             }
             primaryLabel={advancedPrimaryLabel}
             primaryIcon={Save}
-            onPrimary={skipTestGate ? () => handleSave() : handleTestAndSave}
+            onPrimary={handleTestAndSave}
             busy={busy !== "none"}
           />
         </>
@@ -1224,4 +1173,9 @@ function forkStatusDot(r: RoutineListItem): string {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s
   return s.slice(0, n - 1) + "…"
+}
+
+/** A partially authored definition must not crash its readable preview. */
+function definitionRows(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => row != null && typeof row === "object" && !Array.isArray(row)) : []
 }
