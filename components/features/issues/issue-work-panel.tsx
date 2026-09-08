@@ -22,9 +22,10 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
   const { people, error: peopleError } = useIssuePeople(issue.workspace_id, form === "handoff")
   const human = issue.work_mode === "human"
   const hasAgent = hasIssueAgentDelegate(issue)
-  const needsInput = !human && latestOutcome === "NEEDS_HUMAN"
+  const needsInput = !human && (latestOutcome === "NEEDS_HUMAN" || issue.execution?.stage === "needs_human")
+  const reviewing = issue.execution?.stage === "reviewing"
   const closed = ["DONE", "COMPLETED", "CANCELLED", "DUPLICATE"].includes(issue.status)
-  const worker = human ? issue.worker_name || "Human worker" : issue.delegate?.name || issue.assignee_name || "Unassigned"
+  const worker = reviewing ? issue.execution?.reviewer : human ? issue.worker_name || "Human worker" : issue.delegate?.name || issue.assignee_name || "Unassigned"
   async function act(action: string, targetId = "") {
     if (busy) return
     setBusy(true); setError(null)
@@ -64,8 +65,8 @@ export function IssueWorkPanel({ issue, agents, editable, onChanged, latestOutco
   return <DetailCard title="Current work" icon={human ? UserRound : Bot}>
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <p className="text-sm font-medium">{issue.work_stopping ? "Taking over · stopping agent runs" : human ? "With a person" : needsInput ? "Needs your input" : hasAgent ? "With an agent" : "Ready to assign"} · {worker}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{issue.work_stopping ? "Work can be handed back once the running agents have stopped." : human ? "Automatic agent work is paused. Submit a result or hand the issue back when ready." : needsInput ? "The agent is waiting for an answer. Open the request in Inbox, or take over this issue." : hasAgent ? "The agent handles execution. Use a handoff to change who works next." : "Choose a person or agent to move this issue forward."}</p>
+        <p className="text-sm font-medium">{issue.work_stopping ? "Taking over · stopping agent runs" : closed ? ["DONE", "COMPLETED"].includes(issue.status) ? "Completed" : "Closed" : reviewing ? "Lead review" : issue.status === "REVIEW" ? "Waiting for acceptance" : human ? "With a person" : needsInput ? "Needs your input" : hasAgent ? "With an agent" : "Ready to assign"} · {worker}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{issue.work_stopping ? "Work can be handed back once the running agents have stopped." : closed ? "The result, review and handoff history remain available below." : reviewing ? "The Lead is checking the result against the acceptance criteria." : issue.status === "REVIEW" ? "Review the result, then accept it or request changes." : human ? "Automatic agent work is paused. Submit a result or hand the issue back when ready." : needsInput ? "The agent is waiting for an answer. Open the request in Inbox, or take over this issue." : hasAgent ? "The agent handles execution. Use a handoff to change who works next." : "Choose a person or agent to move this issue forward."}</p>
         {issue.owner && <p className="mt-1 text-xs text-muted-foreground">Accountable owner: {issue.owner.name || "Workspace member"}</p>}
         <a href="#issue-conversation" className="mt-2 inline-block text-xs text-primary hover:underline">Conversation and handoffs</a>
       </div>

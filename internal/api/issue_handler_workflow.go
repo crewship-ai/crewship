@@ -562,6 +562,9 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	// consults when an already-in-flight run finishes late (finishAssignment)
 	// so it records CANCELLED instead of resurrecting the row as COMPLETED.
 	err = database.WithTx(r.Context(), h.db, func(tx *sql.Tx) error {
+		if err := cancelParkedIssueRoutinesTx(r.Context(), tx, missionID, now); err != nil {
+			return err
+		}
 		// Cancel running/pending tasks
 		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,

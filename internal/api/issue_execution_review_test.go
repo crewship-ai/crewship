@@ -92,3 +92,31 @@ func TestIssueExecutionDetailReadsTheRealRunProjection(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 }
+
+func TestIssueTakeoverCancelsParkedRoutineAndItsApproval(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-82", "IN_PROGRESS")
+	routine := seedTestPipeline(t, h, ws, "parked-work")
+	seedRunRow(t, h.db, ws, routine, "parked-work", "parked-run", "waiting")
+	if _, err := h.db.Exec(`INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,routine_run_id,created_at,updated_at) SELECT 'parked-execution',mission_id,revision,brief_revision,'working',?,'parked-run','2026-09-08','2026-09-08' FROM issue_work WHERE mission_id=?`, lead, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO pipeline_waitpoints(token,workspace_id,pipeline_run_id,step_id,kind,status,timeout_at) VALUES('parked-token',?,'parked-run','approve','approval','pending','2099-01-01T00:00:00Z')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO inbox_items(id,workspace_id,kind,source_id,title,state) VALUES('parked-inbox',?,'waitpoint','parked-token','Approve test','unread')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.Work(rec, covIWReq(user, ws, "OWNER", "POST", `{"action":"take_over","revision":0,"operation_id":"take-over-parked"}`, crew, "ENG-82"))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var run, point, item string
+	if err := h.db.QueryRow(`SELECT r.status,w.status,i.state FROM pipeline_runs r JOIN pipeline_waitpoints w ON w.pipeline_run_id=r.id JOIN inbox_items i ON i.source_id=w.token WHERE r.id='parked-run'`).Scan(&run, &point, &item); err != nil {
+		t.Fatal(err)
+	}
+	if run != "cancelled" || point != "cancelled" || item != "resolved" {
+		t.Fatalf("orphaned state: %s %s %s", run, point, item)
+	}
+}

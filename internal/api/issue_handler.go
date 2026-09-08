@@ -610,7 +610,7 @@ func issueSelectQuery() string {
  COALESCE(iw.mode,'agent'),COALESCE(iw.revision,0),iw.worker_user_id,
  (SELECT u.full_name FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.id=iw.worker_user_id AND wm.workspace_id=m.workspace_id),
  COALESCE(iw.note,''),
- CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) ELSE 0 END
+ CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) OR EXISTS(SELECT 1 FROM pipeline_runs pr JOIN issue_executions x ON x.routine_run_id=pr.id WHERE x.mission_id=m.id AND pr.status IN ('queued','running','waiting')) ELSE 0 END
 	FROM missions m
 	LEFT JOIN issue_work iw ON iw.mission_id=m.id
 	LEFT JOIN crews c ON m.crew_id = c.id

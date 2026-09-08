@@ -126,7 +126,12 @@ func (h *IssueHandler) workAs(w http.ResponseWriter, r *http.Request, actorType,
 		internalError(w, r, h.logger, "work: active runs", err)
 		return
 	}
-	if (req.Action == "handoff_agent" || req.Action == "submit") && active > 0 {
+	var routineActive int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_runs p JOIN issue_executions x ON x.routine_run_id=p.id WHERE x.mission_id=? AND p.status IN ('queued','running','waiting')`, id).Scan(&routineActive); err != nil {
+		internalError(w, r, h.logger, "work: active routine", err)
+		return
+	}
+	if (req.Action == "handoff_agent" || req.Action == "submit") && active+routineActive > 0 {
 		writeProblem(w, r, 409, "Wait for active runs to stop before handing back or submitting work")
 		return
 	}
@@ -265,6 +270,9 @@ func (h *IssueHandler) workAs(w http.ResponseWriter, r *http.Request, actorType,
 // holdIssueWorkTx is shared by issue handoffs and Inbox Take over.
 // Keep the worker fence, cancellation and revision in the caller's transaction.
 func holdIssueWorkTx(ctx context.Context, tx *sql.Tx, id, userID, note, now string) ([]cancelTarget, error) {
+	if err := cancelParkedIssueRoutinesTx(ctx, tx, id, now); err != nil {
+		return nil, err
+	}
 	targets, err := stampCancelRequested(ctx, tx, now, id)
 	if err == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE assignments SET status='CANCELLED',finished_at=?,outcome='CANCELLED' WHERE `+assignmentMatch+` AND status!='RUNNING'`, now, id, id, id)
