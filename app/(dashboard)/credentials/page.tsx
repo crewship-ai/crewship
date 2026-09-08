@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useSearchParams } from "next/navigation"
 import { toast } from "sonner"
-import { AlertTriangle, CreditCard, Key, LayoutDashboard, Plus, RefreshCw } from "lucide-react"
+import { AlertTriangle, CreditCard, Key, Layers, LayoutDashboard, Plus, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -23,6 +23,7 @@ import {
 import { RotationDialog } from "@/components/features/credentials/rotation-dialog"
 import { EditCredentialDialog, type CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { ProviderLoginsPanel } from "@/components/features/credentials/provider-logins-panel"
+import { ProviderPoolsDialog } from "@/components/features/credentials/provider-pools-dialog"
 import { ProviderLoginsSidebar } from "@/components/features/credentials/provider-logins-sidebar"
 import type { WizardInitial } from "@/components/features/credentials/add-credential-wizard"
 import {
@@ -121,6 +122,7 @@ export default function CredentialsPage() {
   const [loading, setLoading] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
+  const [poolsOpen, setPoolsOpen] = React.useState(false)
   // Where the wizard starts: the Providers tab opens it on its own shape, and
   // Re-login on one seat's sign-in step. Cleared on close so the next plain
   // "Add secret" starts at the shape grid.
@@ -490,8 +492,9 @@ export default function CredentialsPage() {
 
   const headerActions = canManage ? (
     <>
-      <SubBarSecondary icon={Plus} onClick={() => openAdd()}>
-        Add secret
+      {canBind && <SubBarSecondary icon={Layers} aria-label="Account groups" title="Account groups" onClick={() => setPoolsOpen(true)}><span className="hidden sm:inline">Account groups</span></SubBarSecondary>}
+      <SubBarSecondary icon={Plus} aria-label="Add secret" title="Add secret" onClick={() => openAdd()}>
+        <span className="hidden sm:inline">Add secret</span>
       </SubBarSecondary>
         {canBind && <SubBarPrimary icon={Plus} onClick={() => openAdd({ itemType: "PROVIDER_LOGIN" })}>
           Add provider
@@ -875,6 +878,7 @@ export default function CredentialsPage() {
           knownTags={tagsInUse}
         />
       )}
+      {canBind && workspaceId && poolsOpen && <ProviderPoolsDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setPoolsOpen(false)} />}
           </div>
         </div>
       </div>
