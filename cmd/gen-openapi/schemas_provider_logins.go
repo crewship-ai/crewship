@@ -88,5 +88,11 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"POST /api/v1/provider-logins/device":           {Request: ref("ProviderLoginDeviceStartRequest"), Response: ref("ProviderLoginDeviceStart")},
 		"GET /api/v1/provider-logins/device/{deviceId}": {Response: ref("ProviderLoginDeviceStatus")},
 	}
+	etag := map[string]any{"ETag": map[string]any{"description": "Committed definition revision. Send unchanged in If-Match for update/removal.", "schema": map[string]any{"type": "string", "pattern": `^"[1-9][0-9]*"$`}}}
+	for _, key := range []string{"POST /api/v1/provider-logins/pools", "GET /api/v1/provider-logins/pools/{poolId}", "PUT /api/v1/provider-logins/pools/{poolId}"} {
+		schema := routes[key]
+		schema.SuccessHeaders = etag
+		routes[key] = schema
+	}
 	return routes, components
 }

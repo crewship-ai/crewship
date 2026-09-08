@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProviderPoolSchemas(t *testing.T) {
 	routes, components := providerLoginSchemaCatalog()
@@ -75,5 +78,26 @@ func TestProviderPoolLifecycleContract(t *testing.T) {
 	}
 	if body := requestBodyForRoute(route{method: "PUT", path: "/api/v1/provider-logins/pools/{poolId}"}); body["required"] != true {
 		t.Fatal("update body optional")
+	}
+}
+
+func TestProviderPoolCommittedETag(t *testing.T) {
+	ops := loadSpecOperations(t)
+	for _, tc := range []struct{ method, path, status string }{
+		{"post", "/api/v1/provider-logins/pools", "201"},
+		{"get", "/api/v1/provider-logins/pools/{poolId}", "200"},
+		{"put", "/api/v1/provider-logins/pools/{poolId}", "204"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			var response struct {
+				Headers map[string]any `json:"headers"`
+			}
+			if err := json.Unmarshal(ops[tc.path][tc.method].Responses[tc.status], &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Headers["ETag"] == nil {
+				t.Fatal("committed revision header missing")
+			}
+		})
 	}
 }

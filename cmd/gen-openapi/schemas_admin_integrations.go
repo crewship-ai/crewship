@@ -11,6 +11,8 @@ type DomainSchema struct {
 	RequestRequired bool
 	// Parameters adds operation-specific headers not discoverable from URL use.
 	Parameters []map[string]any
+	// SuccessHeaders documents headers returned by successful operations.
+	SuccessHeaders map[string]any
 	// RequestMedia lists the media types accepted by the request body. When
 	// omitted, the generator uses application/json for backwards-compatible
 	// JSON endpoints.

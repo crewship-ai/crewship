@@ -30,7 +30,7 @@ func (s *Store) Update(ctx context.Context, pool Pool, revision int64) error {
 	// Identity is server-owned: callers cannot convert a bound pool to another
 	// provider or auth mode while changing its membership.
 	if err := tx.QueryRowContext(ctx, `SELECT provider,mode FROM provider_login_pools WHERE id=? AND workspace_id=?`, pool.ID, pool.WorkspaceID).Scan(&pool.Policy.Provider, &pool.Policy.Mode); err != nil {
-		return err
+		return fmt.Errorf("read provider pool identity: %w", err)
 	}
 	var duplicate bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM provider_login_pools WHERE workspace_id=? AND name=? AND id!=?)`, pool.WorkspaceID, strings.TrimSpace(pool.Name), pool.ID).Scan(&duplicate); err != nil {

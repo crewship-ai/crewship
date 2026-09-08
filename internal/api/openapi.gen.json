@@ -83788,7 +83788,16 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Committed definition revision. Send unchanged in If-Match for update/removal.",
+                "schema": {
+                  "pattern": "^\"[1-9][0-9]*\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "201": {
             "content": {
@@ -83798,7 +83807,16 @@
                 }
               }
             },
-            "description": "Created"
+            "description": "Created",
+            "headers": {
+              "ETag": {
+                "description": "Committed definition revision. Send unchanged in If-Match for update/removal.",
+                "schema": {
+                  "pattern": "^\"[1-9][0-9]*\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -84052,7 +84070,16 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "Committed definition revision. Send unchanged in If-Match for update/removal.",
+                "schema": {
+                  "pattern": "^\"[1-9][0-9]*\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -84158,7 +84185,16 @@
         },
         "responses": {
           "204": {
-            "description": "No Content"
+            "description": "No Content",
+            "headers": {
+              "ETag": {
+                "description": "Committed definition revision. Send unchanged in If-Match for update/removal.",
+                "schema": {
+                  "pattern": "^\"[1-9][0-9]*\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
