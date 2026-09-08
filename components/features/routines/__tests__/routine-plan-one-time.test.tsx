@@ -12,6 +12,6 @@ describe("routine Plan", () => {
     expect(schedules.getByText("Scheduled · One-time start")).toBeInTheDocument()
     expect(schedules.getByRole("button", { name: "Cancel scheduled start" })).toBeInTheDocument()
     expect(screen.queryByText("No schedules yet")).not.toBeInTheDocument()
-    expect(schedules.getByText(/No repeating schedules/)).toBeInTheDocument()
+    expect(schedules.getByRole("button", { name: "Add schedule" })).toBeEnabled()
   })
 })

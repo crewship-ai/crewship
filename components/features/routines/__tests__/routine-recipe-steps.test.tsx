@@ -7,6 +7,7 @@ const definition = { name: "demo", inputs: [{ name: "scenario", label: "Demo sce
 describe("readable recipe steps", () => {
   it("explains real actions and input conditions without exposing only identifiers", () => {
     expect(recipeStepSummary(definition.steps[0])).toBe("Review the result")
+    expect(recipeStepSummary({type: "transform", transform: { input: "{{ inputs.a }} {{ inputs.b }} {{ inputs.c }}" }})).toBe("Prepare data from 3 start-form answers")
     expect(recipeCondition(definition.steps[0], definition.inputs)).toBe("Demo scenario: Approval")
     expect(recipeCondition({ if: "size(inputs.items) > 1" }, [])).toBe("Conditional step")
     render(<RoutineRecipeSteps definition={definition} slug="demo" name="Demo" onChange={vi.fn()} onOpenCode={vi.fn()} />)

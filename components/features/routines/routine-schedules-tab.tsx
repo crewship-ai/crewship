@@ -136,7 +136,6 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
       )}
 
       <section aria-label="Schedules" className="space-y-4">
-        <h2 className="text-base font-medium">Schedules</h2>
 
 
       {/* List card */}
@@ -147,7 +146,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
             <Button size="sm" onClick={() => setFormOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Add schedule</Button>
           </div>
         </Card>
-      ) : (
+      ) : ours.length > 0 ? (
         <Card
           title="Repeating schedules"
           subtitle={`${ours.length} for this routine`}
@@ -291,7 +290,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
             })}
           </ol>
         </Card>
-      )}
+      ) : null}
 
       {/* Inline form */}
       {formOpen && (

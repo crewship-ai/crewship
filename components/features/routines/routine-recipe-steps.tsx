@@ -19,13 +19,21 @@ const kinds = {
   wait: { label: "Wait", icon: Clock, tone: "text-warn bg-warn/10" },
   foreach: { label: "For each item", icon: Repeat2, tone: "text-purple bg-purple/10" },
 } as const
-export function recipeStepSummary(step: Step) {
+export function recipeStepSummary(step: Step, inputs: Step[] = []) {
   const config = object(step[ String(step.type) ])
   if (step.type === "wait") return config.kind === "approval" ? String(config.approval_title || "Ask for approval") : config.kind === "event" ? `Wait for ${config.event_type || "an event"}` : "Wait until a date"
   if (step.type === "agent_run") return String(step.prompt || "Choose an agent and give it instructions")
   if (step.type === "script") return String(config.path || "Configure a script")
   if (step.type === "http") return `${config.method || "GET"} ${config.url || "Choose a service"}`
-  if (step.type === "transform") return String(config.input || config.expression || "Prepare the next step’s input")
+  if (step.type === "transform") {
+    const source = String(config.input || "")
+    const answers = [...new Set([...source.matchAll(/\{\{\s*inputs\.(\w+)/g)].map(m => m[1]))]
+    const prior = [...new Set([...source.matchAll(/\{\{\s*steps\.(\w+)\.output/g)].map(m => words(m[1])))]
+    if (answers.length > 2) return `Prepare data from ${answers.length} start-form answers`
+    if (answers.length) return `Uses ${answers.map(key => inputs.find(i => i.name === key)?.label || words(key)).join(" and ")}`
+    if (prior.length) return `Uses the result of ${prior.join(", ")}`
+    return String(config.input || config.expression || "Prepare the next step’s input").slice(0, 160)
+  }
   if (step.type === "code") return `${config.runtime || "Code"} · ${String(config.code || "").split("\n")[0]}`
   if (step.type === "call_pipeline") return `Run ${step.pipeline_slug || "another routine"}`
   return String(step.description || step.action || words(step.type))
@@ -49,20 +57,20 @@ export function RoutineRecipeSteps({ definition, slug, name, onChange, onOpenCod
     return <label className="block space-y-2 text-xs font-medium">{label}{multiline ? <textarea value={String(value ?? "")} onChange={e => change(e.target.value)} className="min-h-36 w-full resize-y rounded-xl border border-border/60 bg-background p-3 text-sm font-normal leading-relaxed" /> : <Input value={String(value ?? "")} onChange={e => change(e.target.value)} className="font-normal" />}</label>
   }
   return <section className="space-y-4" aria-label="Recipe workflow">
-    <div className="flex flex-wrap items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><Play className="h-3.5 w-3.5" />Recipe · {steps.length} steps</span><div className="flex rounded-full bg-muted/60 p-1">{[{ id: "steps", label: "List", icon: ListOrdered }, { id: "graph", label: "Graph", icon: Network }].map(v => <button key={v.id} type="button" aria-pressed={view === v.id} onClick={() => setView(v.id)} className={cn("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs", view === v.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}><v.icon className="h-3.5 w-3.5" />{v.label}</button>)}</div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><span className="inline-flex items-center gap-2 text-xs text-muted-foreground"><Play className="h-3.5 w-3.5" />Recipe · {steps.length} steps</span><div className="flex rounded-full bg-muted/60 p-1">{[{ id: "steps", label: "List", icon: ListOrdered }, { id: "graph", label: "Graph", icon: Network }].map(v => <button key={v.id} type="button" aria-pressed={view === v.id} onClick={() => { setView(v.id); setSelectedId(null) }} className={cn("flex items-center gap-2 rounded-full px-3 py-1.5 text-xs", view === v.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground")}><v.icon className="h-3.5 w-3.5" />{v.label}</button>)}</div></div>
     <div className={cn("grid items-start gap-4", selected && "lg:grid-cols-[minmax(240px,1fr)_minmax(280px,1fr)]")}>
       {view === "graph" ? <div className={cn("relative h-[480px] overflow-hidden rounded-2xl border border-hairline", selected && "hidden lg:block")}><RoutineDefinitionCanvas definition={definition} slug={slug} name={name} selectedStepId={selectedId} onStepSelect={setSelectedId} /></div> : <div className={cn("overflow-hidden rounded-2xl border border-hairline bg-muted/10", selected && "hidden lg:block")}>{steps.map((step, i) => {
         const kind = kinds[step.type as keyof typeof kinds] ?? { label: words(step.type), icon: Play, tone: "text-muted-foreground bg-muted" }
         const condition = recipeCondition(step, inputs)
         const active = selectedId === step.id
-        return <button type="button" key={String(step.id)} aria-expanded={active} onClick={() => setSelectedId(active ? null : String(step.id))} className={cn("group flex w-full items-start gap-3 border-b border-hairline p-4 text-left transition-colors last:border-b-0 hover:bg-muted/40", active && "bg-primary/5 ring-1 ring-inset ring-primary/30")}>
+        return <button type="button" key={String(step.id)} aria-expanded={active} onClick={() => setSelectedId(active ? null : String(step.id))} className={cn("group flex w-full items-start gap-3 border-b border-hairline px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/40", active && "bg-primary/5 ring-1 ring-inset ring-primary/30")}>
           <span className={cn("relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", kind.tone)}><kind.icon className="h-4 w-4" /><span className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-border bg-card text-[9px] text-muted-foreground">{i + 1}</span></span>
-          <span className="min-w-0 flex-1"><span className="block text-sm font-medium">{words(step.name || step.id)}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{kind.label}{step.agent_slug ? ` · ${step.agent_slug}` : ""}</span><span className="mt-2 line-clamp-2 break-words text-xs leading-relaxed text-foreground/75">{recipeStepSummary(step)}</span>{condition && <span className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md bg-warn/10 px-2 py-1 text-[11px] text-warn"><GitBranch className="h-3 w-3 shrink-0" /><span className="truncate">{condition}</span></span>}</span><ChevronRight className={cn("mt-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform", active && "rotate-90 text-primary")} />
+          <span className="min-w-0 flex-1"><span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1"><span className="text-sm font-medium">{words(step.name || step.id) || "Unnamed step"}</span><span className="text-[11px] text-muted-foreground">{kind.label}{step.agent_slug ? ` · ${step.agent_slug}` : ""}</span></span><span className="mt-2 line-clamp-2 break-words text-xs leading-relaxed text-foreground/75">{recipeStepSummary(step, inputs)}</span>{condition && <span className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md bg-warn/10 px-2 py-1 text-[11px] text-warn"><GitBranch className="h-3 w-3 shrink-0" /><span className="truncate">{condition}</span></span>}</span><ChevronRight className={cn("mt-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform", active && "rotate-90 text-primary")} />
         </button>
       })}{!steps.length && <div className="p-6 text-sm text-muted-foreground">No steps yet. Add your recipe in Code.</div>}</div>}
       <AnimatePresence initial={false}>{selected && <motion.aside key={String(selected.id)} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.16 }} className="min-w-0 space-y-5 rounded-2xl border border-hairline bg-card p-5" aria-label="Selected step">
         <div className="flex items-start justify-between gap-2"><div><h3 className="text-sm font-medium">{words(selected.name || selected.id)}</h3><p className="mt-1 text-xs text-muted-foreground">Edit this step</p></div><button type="button" onClick={() => setSelectedId(null)} className="text-xs text-primary">Back to steps</button></div>
-        {selected.if ? <div className="rounded-xl bg-warn/10 p-3 text-xs"><p className="font-medium">Runs only when</p><p className="mt-1 break-words">{recipeCondition(selected, inputs)}</p><code className="mt-2 block break-all text-[11px] text-muted-foreground">{String(selected.if)}</code></div> : null}
+        {selected.if ? <div className="rounded-xl bg-warn/10 p-3 text-xs"><p className="font-medium">Runs only when</p><p className="mt-1 break-words">{recipeCondition(selected, inputs)}</p><details className="mt-2 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Expression</summary><code className="mt-1 block break-all">{String(selected.if)}</code></details></div> : null}
         {selected.type === "agent_run" && field("Instructions", "prompt", undefined, true)}
         {selected.type === "wait" && object(selected.wait).kind === "approval" && <>{field("Approval title", "approval_title", "wait")}{field("What should the reviewer decide?", "approval_prompt", "wait", true)}</>}
         {selected.type === "wait" && object(selected.wait).kind === "event" && field("Event to wait for", "event_type", "wait")}
