@@ -435,3 +435,12 @@ Checks: 32 Routines frontend files / 217 tests; full Go suite, 135 tested packag
 (API 126.073s, database 458.178s); go vet; TypeScript; production export; ESLint
 zero errors / 32 existing warnings. Changed-file lint has no warnings. PR #2460
 remains unmerged and needs a review of its current application head.
+
+Final application deployment: `cded2ee4d`, dev1 only. Follow-up coverage verifies
+that reopening New routine after saving starts a clean recipe, while reopening
+Edit loads saved values. Final focused suite: 32 files / 218 tests. Public browser
+confirmed clean second creation, prefilled Edit and the version-save hint with
+zero page errors; the test fixture was deleted. Evidence:
+/tmp/routine-builder-final-live.log. Final TypeScript and changed-file lint passed,
+as did the actual dev1 production build. CodeRabbit remains rate-limited with no
+current-head review, so PR #2460 must not be merged on its green status.
