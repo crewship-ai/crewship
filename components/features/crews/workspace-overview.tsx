@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useState } from "react"
-import { Activity, CheckCircle2, CircleAlert, MessageSquare, Sparkles, Users, Inbox, Wallet } from "lucide-react"
+import { Activity, CheckCircle2, CircleAlert, MessageSquare, Sparkles, Users, Inbox, Wallet, Play } from "lucide-react"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { StatusDonut } from "@/components/features/dashboard/status-donut"
@@ -18,7 +18,7 @@ export function RunMetrics({ workspaceId, agentId, crewId, revision = 0, cost }:
   const query = new URLSearchParams({ workspace_id: workspaceId, window: "7d" })
   if (agentId) query.set("agent_id", agentId)
   if (crewId) query.set("crew_id", crewId)
-  const { data, error } = useWorkspaceResource<{ totals: { succeeded: number; failed: number; running: number }; truncated: boolean }>(`/api/v1/runs/insights?${query}`, revision + retry, true)
+  const { data, error } = useWorkspaceResource<{ totals: { succeeded: number; failed: number; running: number }; truncated: boolean; by_trigger?: { key: string; total: number }[] }>(`/api/v1/runs/insights?${query}`, revision + retry, true)
   const totals = data?.totals
   return <section aria-label="Runs in the last 7 days" className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Agent runs started in the last 7 days{data?.truncated ? " · most recent 20,000 runs only" : ""}</p>{typeof cost === "number" && <span className="inline-flex items-center gap-2 rounded-lg bg-success/5 px-3 py-1.5 text-xs text-muted-foreground" title="Recorded spending in the current calendar month (UTC)"><Wallet aria-hidden="true" className="h-3.5 w-3.5 text-success" /><span className="font-medium tabular-nums text-foreground">${cost.toFixed(2)}</span> this month · UTC</span>}</div>
@@ -27,12 +27,25 @@ export function RunMetrics({ workspaceId, agentId, crewId, revision = 0, cost }:
       <KpiCard label="Failed or timed out" value={totals?.failed ?? "—"} subtitle="Last 7 days" valueColor={totals?.failed ? "text-destructive" : undefined} />
       <KpiCard label="Still running" value={totals?.running ?? "—"} subtitle="Started in the last 7 days" valueColor={totals?.running ? "text-primary" : undefined} />
     </div>}
-    {totals && totals.succeeded + totals.failed + totals.running > 0 && <DashboardCard title="Run outcomes" icon={Activity} hint="Last 7 days · excludes cancelled runs"><StatusDonut centerLabel="runs" data={[
+    {!error && totals && totals.succeeded + totals.failed + totals.running > 0 && <div className="grid min-w-0 gap-4 xl:grid-cols-2"><DashboardCard title="Run outcomes" icon={Activity} hint="Last 7 days" className="min-w-0"><StatusDonut centerLabel="runs" data={[
       { key: "succeeded", label: "Completed", count: totals.succeeded, color: "var(--success)" },
       { key: "failed", label: "Failed or timed out", count: totals.failed, color: "var(--destructive)" },
       { key: "running", label: "Running", count: totals.running, color: "var(--primary)" },
-    ]} /></DashboardCard>}
+    ]} /><p className="mt-3 text-xs text-muted-foreground">Excludes cancelled runs</p></DashboardCard><RunStartBreakdown rows={data?.by_trigger} /></div>}
   </section>
+}
+
+function RunStartBreakdown({ rows }: { rows?: { key: string; total: number }[] }) {
+  const sorted = [...(rows ?? [])].filter(row => row.total > 0).sort((a, b) => b.total - a.total)
+  const total = sorted.reduce((sum, row) => sum + row.total, 0)
+  const visible = sorted.length > 5 ? [...sorted.slice(0, 4), { key: "__other", total: sorted.slice(4).reduce((sum, row) => sum + row.total, 0) }] : sorted
+  const labels: Record<string, string> = { CHAT: "Chat", MANUAL: "Manual", SCHEDULE: "Schedule", SCHEDULED: "Schedule", CRON: "Schedule", WEBHOOK: "Webhook", API: "API", ASSIGNMENT: "Assignment", UNKNOWN: "Not recorded", __OTHER: "Other" }
+  return <DashboardCard title="How runs start" icon={Play} hint="Last 7 days" className="min-w-0 flex flex-col">
+    {total ? <><ul className="flex-1 space-y-3 py-2">{visible.map(row => {
+      const label = labels[row.key.toUpperCase()] ?? row.key.replaceAll("_", " ").toLowerCase()
+      return <li key={row.key}><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="truncate capitalize">{label}</span><span className="font-mono tabular-nums text-muted-foreground">{row.total}</span></div><div role="meter" aria-label={label} aria-valuenow={row.total} aria-valuemin={0} aria-valuemax={total} className="h-2 overflow-hidden rounded-full bg-primary/10"><div className="h-full rounded-full bg-primary/70" style={{ width: `${row.total / total * 100}%` }} /></div></li>
+    })}</ul><p className="mt-3 text-xs text-muted-foreground">Includes cancelled runs</p></> : <WorkspaceEmpty icon={Play} title="Run sources are not available yet." />}
+  </DashboardCard>
 }
 
 export function AgentOverview({ workspaceId, agent, inbox, runs, chats, peerMessages, error, onRetry, onWork, revision }: {
