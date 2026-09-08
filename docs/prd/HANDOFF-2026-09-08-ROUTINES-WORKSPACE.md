@@ -1,6 +1,6 @@
 # Routines workspace — implementation and dev1 verification
 
-2026-09-08. Application commit `74506e55b`, feature branch
+2026-09-08. Application commit `189fa6d98`, feature branch
 `feat/routines-workspace-v2`, PR #2460, claim #2459. Dev1 preview remains on
 `dev1/issues-preview`. The branch includes the unmerged Issues contract from
 PR #2448. Neither PR is merged into main.
@@ -8,7 +8,9 @@ PR #2448. Neither PR is merged into main.
 ## Implemented
 
 The catalog appears once, with attention, in-progress work, calendar and recent
-runs. A routine has definition/history/settings views; the complete definition
+runs. Handoff results lead with their readable summary; raw protocol text is
+expandable, and the routine-level technical dock is hidden in run detail.
+A routine has definition/history/settings views; the complete definition
 graph is initially visible and selecting a step exposes its task and settings.
 Routines and Activity share a run detail with progress, actual invocations,
 outputs, activity, inputs, the existing approval and Stop/Run again controls.
@@ -109,10 +111,11 @@ regressions before the final live retry/Stop pass.
 - Worktree production export passed using `pnpm build --webpack` because its
   shared node_modules symlink lies outside Turbopack's root. Normal Turbopack
   builds, embedded Go/sidecar builds and service reloads passed in the actual
-  dev1 clone. Last application deployment is `74506e55b`.
+  dev1 clone. Last application deployment is `189fa6d98`.
 - Browser checks cover catalog, calendar, definition, run, outputs and mobile
   width, with no page errors or document-width overflow. Creation date/repeat
-  controls and final screenshots are included in the final smoke pass.
+  controls passed the final smoke pass. Live read-only checks confirmed QUA-12
+  remains REVIEW and QUA-13 remains TODO. Screenshots: `/tmp/routines-final-*.png`.
 - Fresh pre-migration SQLite backup (0600):
   `/tmp/crewship-dev1-before-routines-workspace-20260908/crewship.db`.
   Original AGENTS/CODEX/design/document WIP is preserved in the main clone.
