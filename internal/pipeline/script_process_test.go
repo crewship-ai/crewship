@@ -1,9 +1,11 @@
 package pipeline
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,5 +35,19 @@ func TestScriptProcessStop_KillsChildBeforeSideEffect(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("child survived cancellation: %v", err)
+	}
+}
+
+// Docker exec may start setsid as a process-group leader, making setsid fork.
+// Without --wait it then reports 0 even when the actual script fails.
+func TestScriptProcessWrapper_PreservesForkedChildExit(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Skip("setsid unavailable")
+	}
+	command := exec.Command("setsid", "--fork", "--wait", "sh", "-c", scriptProcessWrapper, "fixture", filepath.Join(t.TempDir(), "control"), "sh", "-c", "echo partial; exit 7")
+	output, err := command.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 7 || !strings.Contains(string(output), "partial") {
+		t.Fatalf("script failure was lost: %q %v", output, err)
 	}
 }

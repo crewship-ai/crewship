@@ -87,7 +87,11 @@ func (e *Executor) runStep(
 	if e.executionStore == nil || in.Mode == ModeDryRun || in.pipeline == nil {
 		return e.runStepBody(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit, parentRender, depth, priorCostUSD)
 	}
-	ctx, id, err := e.executionStore.start(ctx, runID, step.ID, string(step.Type), step.AgentSlug, primary.Model)
+	model := ""
+	if step.Type == StepAgentRun {
+		model = primary.Model
+	}
+	ctx, id, err := e.executionStore.start(ctx, runID, step.ID, string(step.Type), step.AgentSlug, model)
 	if err != nil {
 		return "", 0, 0, err
 	}

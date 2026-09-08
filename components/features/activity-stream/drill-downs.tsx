@@ -228,7 +228,7 @@ export function runRelatedLinks(runID: string, routineSlug: string | undefined, 
 }
 
 export function RunDrillDown({ workspaceId, runID }: RunDrillDownProps) {
-  return <RoutineRunDetail workspaceId={workspaceId} runId={runID} />
+  return <RoutineRunDetail key={`${workspaceId}:${runID}`} workspaceId={workspaceId} runId={runID} />
 }
 
 /* ------------------------------------------------------------------ *

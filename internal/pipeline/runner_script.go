@@ -382,7 +382,7 @@ func (r *OrchestratorRunner) RunScript(ctx context.Context, req ScriptRunRequest
 	}
 	controlDir := "/tmp/crewship-script-" + hex.EncodeToString(nonce[:])
 	stderrFile := controlDir + "/stderr"
-	cmd := append([]string{"setsid", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir}, argv...)
+	cmd := append([]string{"setsid", "--wait", "sh", "-c", scriptProcessWrapper, "crewship-script", controlDir}, argv...)
 
 	// #1473: a script step runs inside the agent container but used to build
 	// its environment from the step's own inputs alone, so it carried no
