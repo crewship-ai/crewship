@@ -413,6 +413,7 @@ func buildDocument(routes []route) map[string]any {
 				"description": "Workspace ID or slug.", "schema": map[string]any{"type": "string"},
 			})
 		}
+		params = append(params, routeSchemaCatalog()[rt.method+" "+rt.path].Parameters...)
 		if len(params) > 0 {
 			op["parameters"] = params
 		}
@@ -498,6 +499,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 			merged.Request = schema.Request
 		}
 		merged.RequestRequired = merged.RequestRequired || schema.RequestRequired
+		if schema.Parameters != nil {
+			merged.Parameters = schema.Parameters
+		}
 		if schema.RequestMedia != nil {
 			merged.RequestMedia = schema.RequestMedia
 		}
@@ -573,6 +577,9 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	if incoming.Parameters != nil {
+		existing.Parameters = incoming.Parameters
+	}
 	existing.RequestRequired = existing.RequestRequired || incoming.RequestRequired
 	if incoming.Request != nil {
 		existing.Request = incoming.Request

@@ -48,3 +48,32 @@ func TestProviderPoolRequestBodyRequired(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderPoolLifecycleContract(t *testing.T) {
+	ops := loadSpecOperations(t)
+	for _, method := range []string{"put", "delete"} {
+		t.Run(method, func(t *testing.T) {
+			op := ops["/api/v1/provider-logins/pools/{poolId}"][method]
+			found := false
+			for _, p := range op.Parameters {
+				if p.Name == "If-Match" && p.In == "header" && p.Required {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing required precondition header")
+			}
+			for _, code := range []string{"204", "400", "404", "412", "428"} {
+				if _, ok := op.Responses[code]; !ok {
+					t.Errorf("missing %s", code)
+				}
+			}
+			if _, ok := op.Responses["200"]; ok {
+				t.Fatal("documented success body for no-content operation")
+			}
+		})
+	}
+	if body := requestBodyForRoute(route{method: "PUT", path: "/api/v1/provider-logins/pools/{poolId}"}); body["required"] != true {
+		t.Fatal("update body optional")
+	}
+}

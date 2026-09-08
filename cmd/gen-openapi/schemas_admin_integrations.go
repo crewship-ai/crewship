@@ -9,6 +9,8 @@ type DomainSchema struct {
 	// RequestRequired opts an operation into a mandatory body without changing
 	// the legacy optional-body contract of other operations.
 	RequestRequired bool
+	// Parameters adds operation-specific headers not discoverable from URL use.
+	Parameters []map[string]any
 	// RequestMedia lists the media types accepted by the request body. When
 	// omitted, the generator uses application/json for backwards-compatible
 	// JSON endpoints.

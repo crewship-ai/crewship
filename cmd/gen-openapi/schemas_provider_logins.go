@@ -33,11 +33,12 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"credential_id": str(), "priority": integer(),
 		}, "credential_id"),
 		"ProviderPool": object(map[string]any{
-			"id": str(), "name": str(), "provider": str(), "mode": str(),
+			"revision": map[string]any{"type": "integer", "minimum": 1},
+			"id":       str(), "name": str(), "provider": str(), "mode": str(),
 			"allow_cross_owner": map[string]any{"type": "boolean"},
 			"created_by":        nullable(str()), "member_count": integer(),
 			"members": map[string]any{"type": "array", "items": ref("ProviderPoolMember")},
-		}, "id", "name", "provider", "mode", "allow_cross_owner", "created_by", "member_count"),
+		}, "id", "name", "provider", "mode", "allow_cross_owner", "created_by", "member_count", "revision"),
 		"ProviderPoolPage": object(map[string]any{
 			"items":       map[string]any{"type": "array", "items": ref("ProviderPool"), "maxItems": 100},
 			"next_cursor": nullable(str()),
@@ -48,6 +49,11 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"allow_cross_owner": map[string]any{"type": "boolean", "default": false},
 			"members":           map[string]any{"type": "array", "items": ref("ProviderPoolMember"), "minItems": 1, "maxItems": 100},
 		}, "name", "provider", "mode", "members"),
+		"ProviderPoolUpdateRequest": object(map[string]any{
+			"name":              map[string]any{"type": "string", "minLength": 1, "maxLength": 200},
+			"allow_cross_owner": map[string]any{"type": "boolean", "default": false},
+			"members":           map[string]any{"type": "array", "items": ref("ProviderPoolMember"), "minItems": 1, "maxItems": 100},
+		}, "name", "members"),
 		"ProviderLoginDeviceStartRequest": object(map[string]any{
 			"provider": map[string]any{"type": "string", "enum": []any{"OPENAI"}},
 			"mode":     map[string]any{"type": "string", "enum": []any{"subscription"}},
@@ -70,8 +76,12 @@ func providerLoginSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	}
 	components["ProviderPoolMember"].(map[string]any)["additionalProperties"] = false
 	components["ProviderPoolCreateRequest"].(map[string]any)["additionalProperties"] = false
+	components["ProviderPoolUpdateRequest"].(map[string]any)["additionalProperties"] = false
+	precondition := []map[string]any{{"name": "If-Match", "in": "header", "required": true, "description": "Strong ETag from pool get, e.g. \"1\". Missing: 428; stale: 412.", "schema": map[string]any{"type": "string", "pattern": `^"[1-9][0-9]*"$`}}}
 
 	routes := map[string]DomainSchema{
+		"PUT /api/v1/provider-logins/pools/{poolId}":    {Request: ref("ProviderPoolUpdateRequest"), RequestRequired: true, Parameters: precondition, SuccessStatuses: []string{"204"}},
+		"DELETE /api/v1/provider-logins/pools/{poolId}": {Parameters: precondition, SuccessStatuses: []string{"204"}},
 		"POST /api/v1/provider-logins/pools":            {Request: ref("ProviderPoolCreateRequest"), RequestRequired: true, Response: ref("ProviderPool")},
 		"GET /api/v1/provider-logins/pools":             {Response: ref("ProviderPoolPage")},
 		"GET /api/v1/provider-logins/pools/{poolId}":    {Response: ref("ProviderPool")},
