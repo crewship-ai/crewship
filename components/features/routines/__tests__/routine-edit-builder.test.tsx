@@ -26,6 +26,18 @@ const routine = { id: "r1", slug: "existing", name: "Existing recipe", descripti
 const props = { workspaceId: "ws1", open: true, routine, onCreated: vi.fn(), onClose: vi.fn() }
 beforeEach(() => { cleanup(); h.calls = []; h.appearanceFails = false; vi.clearAllMocks() })
 describe("shared routine editor", () => {
+  it("navigates the shared wizard without saving or losing edits", () => {
+    render(<RoutineCreateDialog {...props} />)
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue", exact: true }))
+    expect(screen.getByRole("button", { name: "Step 2: Steps" })).toHaveAttribute("aria-current", "step")
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
+    expect(screen.getByRole("button", { name: "Step 2: Steps" })).toHaveAttribute("aria-current", "step")
+    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Draft name")
+    expect(h.calls.some(c => c.url.endsWith("/save") || c.url.includes("/test_run"))).toBe(false)
+  })
   it("prefills identity and real agents, then saves the same recipe without creating a schedule", async () => {
     render(<RoutineCreateDialog {...props} />)
     expect(screen.getByLabelText("Name")).toHaveValue("Existing recipe")
@@ -33,8 +45,9 @@ describe("shared routine editor", () => {
     await screen.findByText("Worker")
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Edited recipe" } })
     fireEvent.click(screen.getByText("Icon: clock"))
-    fireEvent.click(screen.getByRole("button", { name: "Schedule", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 3: Schedule", exact: true }))
     expect(screen.getByText("Existing schedules")).toBeInTheDocument()
+    if (!screen.queryByRole("button", { name: "Validate & Save" })) fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate" }))
     fireEvent.click(screen.getByRole("button", { name: "Validate & Save" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith("existing"))
     const saved = h.calls.find(c => c.url.endsWith("/save"))!.body
@@ -46,10 +59,12 @@ describe("shared routine editor", () => {
   it("retries an appearance failure without saving the recipe or scheduling twice", async () => {
     h.appearanceFails = true
     render(<RoutineCreateDialog {...props} />)
+    if (!screen.queryByRole("button", { name: "Validate & Save" })) fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate" }))
     fireEvent.click(screen.getByRole("button", { name: "Validate & Save" }))
     await screen.findByText(/The recipe was saved, but its icon could not be saved/)
     expect(props.onCreated).not.toHaveBeenCalled()
     h.appearanceFails = false
+    if (!screen.queryByRole("button", { name: "Validate & Save" })) fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate" }))
     fireEvent.click(screen.getByRole("button", { name: "Validate & Save" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     expect(h.calls.filter(c => c.url.endsWith("/save"))).toHaveLength(1)
@@ -59,6 +74,7 @@ describe("shared routine editor", () => {
     const view = render(<RoutineCreateDialog {...creation} />)
     fireEvent.click(screen.getByText("Write it yourself", { exact: true }))
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "First recipe" } })
+    if (!screen.queryByRole("button", { name: "Validate & Save" })) fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate" }))
     fireEvent.click(screen.getByRole("button", { name: "Validate & Save" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     view.rerender(<RoutineCreateDialog {...creation} open={false} />)
@@ -69,7 +85,7 @@ describe("shared routine editor", () => {
   })
   it("opens a historical version as an unsaved draft", () => {
     render(<RoutineCreateDialog {...props} initialDraft={{ ...routine.definition, steps: [] }} />)
-    fireEvent.click(screen.getByRole("button", { name: "Steps", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Steps", exact: true }))
     expect(screen.queryByText("1. work")).not.toBeInTheDocument()
     expect(h.calls.some(c => c.url.endsWith("/save"))).toBe(false)
   })

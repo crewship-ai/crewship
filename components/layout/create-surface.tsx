@@ -579,12 +579,15 @@ export function CreateSurfaceSteps({
   current,
   onJump,
   ariaLabel = "Steps",
+  allowJumpAhead = false,
 }: {
   steps: CreateSurfaceStep[]
   /** Index into `steps`, 0-based. */
   current: number
-  /** Only ever called for a step already completed — you cannot skip forward. */
+  /** Called for completed steps, or any step when allowJumpAhead is enabled. */
   onJump?: (index: number) => void
+  /** Independent editor sections can opt into free navigation. Wizards stay gated. */
+  allowJumpAhead?: boolean
   /** Names the landmark. "Add credential steps", "Wizard progress". */
   ariaLabel?: string
 }) {
@@ -610,13 +613,13 @@ export function CreateSurfaceSteps({
                 type="button"
                 aria-label={`Step ${i + 1}: ${step.label}`}
                 aria-current={active ? "step" : undefined}
-                disabled={!done || !onJump}
-                onClick={() => done && onJump?.(i)}
+                disabled={(!done && !allowJumpAhead) || !onJump}
+                onClick={() => (done || allowJumpAhead) && onJump?.(i)}
                 className={cn(
                   "flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-xs transition-colors",
                   active && "bg-primary/15 font-medium text-primary-hover",
                   done && "cursor-pointer text-muted-foreground hover:text-foreground",
-                  !active && !done && "cursor-default text-muted-foreground-soft",
+                  !active && !done && (allowJumpAhead ? "cursor-pointer text-muted-foreground hover:text-foreground" : "cursor-default text-muted-foreground-soft"),
                 )}
               >
                 <span

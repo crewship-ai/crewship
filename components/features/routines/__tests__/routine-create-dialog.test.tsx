@@ -78,7 +78,7 @@ describe("<RoutineCreateDialog>", () => {
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     const typed = "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n";
     act(() => lastDocChange?.(typed))
-    fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
     fireEvent.click(screen.getByText("Results", { exact: true }))
     expect(screen.getByText("report")).toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
@@ -91,7 +91,7 @@ describe("<RoutineCreateDialog>", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     act(() => lastDocChange?.("dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n"))
-    fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
     expect(screen.getByLabelText("Name")).toBeVisible()
   })
 

@@ -77,16 +77,17 @@ describe("New routine on CreateSurface", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent("New routine")
   })
 
-  it("gives the editor a wider working area", () => {
+  it("keeps the editor in the shared compact shell", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    expect(shell()!.className).toContain("sm:max-w-[1180px]")
+    expect(shell()!.className).toContain("sm:max-w-[800px]")
     expect(screen.getByTestId("editor")).toBeInTheDocument()
   })
 
   it("still test-runs inline and spends the minted save_token on save", async () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
+    fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate" }))
     fireEvent.click(screen.getByRole("button", { name: /validate & save/i }))
 
     await waitFor(() => {
@@ -121,7 +122,7 @@ describe("New routine on CreateSurface", () => {
     expect(screen.getByLabelText("Name")).toBeVisible()
     expect(screen.queryByLabelText(/skip test-run gate/i)).not.toBeInTheDocument()
     expect(screen.getByText("No questions · Edit")).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Validate", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 4: Validate", exact: true }))
     expect(screen.getByText("Real execution")).toBeVisible()
   })
 

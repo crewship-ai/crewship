@@ -162,6 +162,14 @@ describe("CreateSurfaceSteps", () => {
     expect(onJump).not.toHaveBeenCalled()
   })
 
+  it("allows independent editor sections to opt into jumping forward", () => {
+    const onJump = vi.fn()
+    render(<CreateSurfaceSteps steps={STEPS} current={0} onJump={onJump} allowJumpAhead />)
+    expect(chip("Review")).toBeEnabled()
+    fireEvent.click(chip("Review"))
+    expect(onJump).toHaveBeenCalledWith(2)
+  })
+
   it("also renders the phone layout, as a labelled progress bar", () => {
     // Five chips do not fit at 390px, and a strip that scrolls sideways hides
     // exactly the information it exists to give.
