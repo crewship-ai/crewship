@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/scrubber"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // ExecutionStore records actual invocations, including failed outputs and nested items.
@@ -51,7 +52,7 @@ func (s *ExecutionStore) start(ctx context.Context, runID, stepID, kind, agent, 
       (id,run_id,parent_execution_id,step_id,execution_path,attempt,kind,status,agent_slug,model,started_at)
       SELECT ?,?,NULLIF(?,''),?,?,COALESCE(MAX(attempt),0)+1,?,'running',?,?,?
       FROM pipeline_step_executions WHERE run_id=? AND execution_path=?`,
-		id, runID, parent.id, stepID, executionPath, kind, agent, model, time.Now().UTC().Format(time.RFC3339Nano), runID, executionPath)
+		id, runID, parent.id, stepID, executionPath, kind, agent, model, tsformat.Format(time.Now()), runID, executionPath)
 	if err != nil {
 		return ctx, "", fmt.Errorf("record step start: %w", err)
 	}
@@ -76,7 +77,7 @@ func (s *ExecutionStore) finish(ctx context.Context, id, output string, runErr e
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	scrub := scrubber.New()
-	_, err := s.db.ExecContext(persistCtx, `UPDATE pipeline_step_executions SET status=?,ended_at=?,output=?,error=? WHERE id=? AND status='running'`, status, time.Now().UTC().Format(time.RFC3339Nano), scrub.Scrub(output), scrub.Scrub(reason), id)
+	_, err := s.db.ExecContext(persistCtx, `UPDATE pipeline_step_executions SET status=?,ended_at=?,output=?,error=? WHERE id=? AND status='running'`, status, tsformat.Format(time.Now()), scrub.Scrub(output), scrub.Scrub(reason), id)
 	return err
 }
 

@@ -57,6 +57,15 @@ func (h *IssueHandler) loadIssueExecution(ctx context.Context, issue *issueRespo
 	return nil
 }
 
+// issueReviewPolicyResponse is what PUT .../review-policy returns. It is a
+// named type rather than a map literal so the OpenAPI component describing it
+// can be paired against a real struct in responseShapeContracts — an ungraded
+// response component is one nothing checks the field names of.
+type issueReviewPolicyResponse struct {
+	Revision             int  `json:"revision"`
+	ClientReviewRequired bool `json:"client_review_required"`
+}
+
 // ReviewPolicy can change only between executions. The version CAS prevents a
 // stale browser from silently removing client acceptance on newer work.
 func (h *IssueHandler) ReviewPolicy(w http.ResponseWriter, r *http.Request) {
@@ -82,5 +91,5 @@ func (h *IssueHandler) ReviewPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.broadcastIssueEvent(WorkspaceIDFromContext(r.Context()), "issue.updated", map[string]string{"identifier": r.PathValue("identifier")})
-	writeJSON(w, 200, map[string]any{"revision": *req.Revision + 1, "client_review_required": *req.Required})
+	writeJSON(w, 200, issueReviewPolicyResponse{Revision: *req.Revision + 1, ClientReviewRequired: *req.Required})
 }

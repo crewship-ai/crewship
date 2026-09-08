@@ -17,6 +17,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type declaredRunArtifact struct {
@@ -102,7 +103,7 @@ func NewRoutineArtifactPublisher(db *sql.DB, storageRoot string) pipeline.Artifa
 				}
 			}
 			_, err := db.ExecContext(persistCtx, `INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,content_type,sha256,content,source,error,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(step_execution_id,kind,label,source) DO NOTHING`, "art_"+generateCUID(), runID, executionID, kind, label, artifactState, contentType, sha, content, source, reason, time.Now().UTC().Format(time.RFC3339Nano))
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(step_execution_id,kind,label,source) DO NOTHING`, "art_"+generateCUID(), runID, executionID, kind, label, artifactState, contentType, sha, content, source, reason, tsformat.Format(time.Now()))
 			unlock()
 			if err != nil {
 				return err
