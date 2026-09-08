@@ -20,7 +20,7 @@ import { RoutineApprovalBanner } from "./routine-approval-banner"
 import { Button } from "@/components/ui/button"
 import { formatDurationMs } from "@/lib/activity-stream"
 
-import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { RoutineResultContent } from "./routine-result-content"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Network, FileText, Activity, Square } from "lucide-react"
 import { DetailCard, Pill } from "@/components/ui/detail"
@@ -110,7 +110,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
   const resultPanel = run.output && <DetailCard title="Recorded result" icon={FileText}>
     {declaredResult && <p className="mb-3 text-sm font-medium">{declaredResult}</p>}
     {["true", "false"].includes(run.output.trim()) && !declaredResult && <p className="mb-3 text-xs text-muted-foreground">Boolean result from the recipe. A false value is not an execution failure.</p>}
-    {resultSummary ? <><p className="whitespace-pre-wrap break-words text-sm">{resultSummary}</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">Full recorded response</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words">{run.output}</pre></details></> : <div className="max-h-[65vh] overflow-auto break-words"><MarkdownContent>{run.output}</MarkdownContent></div>}
+    {resultSummary ? <><p className="whitespace-pre-wrap break-words text-sm">{resultSummary}</p><details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">Full recorded response</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words">{run.output}</pre></details></> : <div className="max-h-[65vh] overflow-auto break-words"><RoutineResultContent output={run.output} /></div>}
     <p className="mt-4 text-xs text-muted-foreground">Recorded for this run{run.pipeline_version != null ? ` · recipe v${run.pipeline_version}` : ""}. Availability of a response is separate from the run’s outcome.</p>
   </DetailCard>
   return <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4">

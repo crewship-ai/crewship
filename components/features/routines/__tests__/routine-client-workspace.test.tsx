@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { RoutineRunDetail } from "../routine-run-detail"
+import { RoutineResultContent } from "../routine-result-content"
 import { RoutineWorkOverview } from "../routine-work-overview"
 
 const h = vi.hoisted(() => ({
@@ -62,5 +63,20 @@ describe("client routine workspace", () => {
     expect(screen.getByText("Conditional")).toBeInTheDocument()
     expect(screen.getAllByText("After: fetch").length).toBeGreaterThan(0)
     expect(screen.queryByText(/Ready to run/)).not.toBeInTheDocument()
+  })
+})
+
+
+describe("recorded result rendering", () => {
+  it("renders Markdown tables and strips executable HTML", () => {
+    const { container } = render(<RoutineResultContent output={"| Service | State |\n| --- | --- |\n| API | Available |\n\n<script>alert('x')</script>"} />)
+    expect(screen.getByRole("table")).toBeInTheDocument()
+    expect(screen.getByRole("cell", { name: "Available" })).toBeInTheDocument()
+    expect(container.querySelector("script")).toBeNull()
+  })
+  it("preserves structured output as readable JSON", () => {
+    const { container } = render(<RoutineResultContent output={'{"available":false,"count":0}'} />)
+    expect(container.querySelector("pre")?.textContent).toContain('"available": false')
+    expect(container.querySelector("pre")?.textContent).toContain('"count": 0')
   })
 })
