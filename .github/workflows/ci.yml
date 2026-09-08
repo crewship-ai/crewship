@@ -771,6 +771,9 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Verify account group UI and role gating
+        timeout-minutes: 3
+        run: pnpm exec playwright test --config=playwright.pool-ui.config.ts --output=pool-ui-test-results
       - name: Upload Playwright PR evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -779,6 +782,7 @@ jobs:
           path: |
             playwright-pr-report.json
             test-results/
+            pool-ui-test-results/
           if-no-files-found: warn
       - name: Dump browser server log on failure
         if: failure()
