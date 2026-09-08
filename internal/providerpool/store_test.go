@@ -44,6 +44,72 @@ func fixturePool() Pool {
 		Policy: Policy{Provider: "OPENAI", Mode: "subscription"}, Members: []Member{{CredentialID: "a"}, {CredentialID: "b"}}}
 }
 
+func TestStoreConcurrentCreateNameConflict(t *testing.T) {
+	s, db, path := poolFixture(t)
+	other, err := database.Open("file:" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	stores := []*Store{s, NewStore(other.DB)}
+	start := make(chan struct{})
+	results := make(chan error, 20)
+	for i := range 20 {
+		go func() {
+			<-start
+			pool := fixturePool()
+			pool.ID = fmt.Sprintf("pool-%02d", i)
+			results <- stores[i%2].Create(t.Context(), pool)
+		}()
+	}
+	close(start)
+	created, conflicts := 0, 0
+	for range 20 {
+		err := <-results
+		switch {
+		case err == nil:
+			created++
+		case errors.Is(err, ErrConflict):
+			conflicts++
+		default:
+			t.Errorf("create: %v", err)
+		}
+	}
+	if created != 1 || conflicts != 19 {
+		t.Fatalf("created=%d conflicts=%d", created, conflicts)
+	}
+	var pools, members int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM provider_login_pools`).Scan(&pools); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM provider_login_pool_members`).Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if pools != 1 || members != 2 {
+		t.Fatalf("pools=%d members=%d", pools, members)
+	}
+}
+
+func TestStoreCreateInsertNameConflict(t *testing.T) {
+	s, db, _ := poolFixture(t)
+	// Normal writers are already serialized by BEGIN IMMEDIATE. Force the
+	// insert-time path independently of the pre-check, using a test-only trigger.
+	execPoolSQL(t, db, `CREATE TRIGGER inject_pool_conflict BEFORE INSERT ON provider_login_pools
+		WHEN NEW.id='pool' BEGIN
+		INSERT INTO provider_login_pools(id,workspace_id,name,provider,mode,created_by)
+		VALUES ('injected',NEW.workspace_id,NEW.name,NEW.provider,NEW.mode,NEW.created_by); END;`)
+	if err := s.Create(t.Context(), fixturePool()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("insert conflict=%v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM provider_login_pools`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("conflicting creation did not roll back")
+	}
+}
+
 func TestStoreSelectionDurableAndReadOnly(t *testing.T) {
 	s, db, path := poolFixture(t)
 	ctx := context.Background()
