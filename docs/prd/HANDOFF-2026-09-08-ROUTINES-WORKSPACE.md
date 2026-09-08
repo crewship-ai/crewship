@@ -444,3 +444,39 @@ zero page errors; the test fixture was deleted. Evidence:
 /tmp/routine-builder-final-live.log. Final TypeScript and changed-file lint passed,
 as did the actual dev1 production build. CodeRabbit remains rate-limited with no
 current-head review, so PR #2460 must not be merged on its green status.
+
+## Readable authoring refinement
+
+Application `0ea198e2c` deployed only on dev1. Identity now follows New Project:
+icon/name together, brief/team, counted disclosures for start-form questions and
+results. Steps uses List/Graph switching with compact action summaries, explicit
+conditional badges and an editable selected-step inspector. Source templates are
+summarized as input/result references; raw condition expressions are expandable.
+Mobile shows one pane at a time; changing view clears selection and reduced
+motion is respected. Unsupported/nested configuration remains available in Code.
+
+Recurrence offers daily/weekday/weekend/weekly/monthly presets and multiple week
+days. Nonrepresentable cron expressions remain intact in Advanced. An English
+calendar plus time picker replaces manual date entry for one-time starts.
+Repeating schedules lead; empty list cards and default-open technical inputs are
+removed. Existing schedule APIs, versioning and Issue contracts are unchanged.
+
+Live dev1 verification saved an approval title while preserving its condition,
+created a Monday/Wednesday 09:30 schedule with exact cron 30 9 * * 1,3, selected
+15 September 2026 at 10:45 through the calendar and confirmed its persisted UTC
+pending start. Both plans were cancelled/deleted and the fixture was deleted;
+no agent work ran. Original Routine playground remained unchanged. Mobile had
+no horizontal overflow. Final browser check confirms the compact summary and
+Graph clearing the inspector without page errors. Evidence: /tmp/routines-readable-
+calendar-live.log, /tmp/routines-readable-final-check.log and
+/tmp/routines-readable-final-steps.png (plus overview/detail/calendar/mobile images).
+
+Verification: 34 Routines files / 230 tests, final step tests, TypeScript and
+changed-file ESLint passed. Full lint retains 32 pre-existing warnings; the raw
+palette findings introduced during implementation were corrected to shared tokens.
+Go vet passed. Full Go run: 133 packages passed; devcontainer/server failed when
+shared /dev/shm filled and both complete packages passed on disk rerun (55.602s /
+47.165s), covering all 135 packages. The worktree webpack build was killed twice
+under shared memory pressure; actual dev1 Turbopack production builds passed,
+followed by embed sync and Go/sidecar builds. Peer WIP was restored after deployment.
+PR #2460 remains unmerged and requires a current-head review.
