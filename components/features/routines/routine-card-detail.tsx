@@ -24,6 +24,7 @@ import {
   Zap,
 } from "lucide-react"
 
+import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { routineRunLabel } from "./routines-workspace"
 import { cn } from "@/lib/utils"
 import { relTime, formatDurationDecimal } from "@/lib/time"
@@ -41,6 +42,7 @@ import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineStepDefinition } from "./routine-step-definition"
+import { RoutineWorkOverview } from "./routine-work-overview"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineBudgetCard } from "./routine-budget-card"
 import { RoutineCreateDialog } from "./routine-create-dialog"
@@ -133,6 +135,7 @@ export function RoutineCardDetail({
   React.useEffect(() => {
     if ((selectedView === "edit" || selectedView === "settings") && canEdit) { setEditing(true); setView("definition") }
   }, [selectedView, canEdit, setView])
+  const [showMap, setShowMap] = React.useState(false)
   const [selected, setSelected] = React.useState<string | null>(null)
   // Separate from `selected`: selection is a persistent choice, focus a
   // one-shot "bring this into view". Merged, a re-render could yank the
@@ -206,7 +209,7 @@ export function RoutineCardDetail({
         <Pill tone="default">{steps.length} {steps.length === 1 ? "step" : "steps"}</Pill>
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
       </RoutineIdentityHeader>
-      <RoutineNavigation slug={routine.slug} view={view} onChange={setView} />
+      <RoutineNavigation slug={routine.slug} view={view} onChange={setView} runId={lastRun?.id} />
       {view === "versions" && <RoutineVersionsTab workspaceId={workspaceId} slug={routine.slug} onRolledBack={onChanged} onPrepareDraft={(definition, version) => { setDraft({ definition, version }); setEditing(true); setView("definition") }} />}
       {view === "plan" && <div className="space-y-4"><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} concurrencyKey={concurrencyKey} maxConcurrent={maxConcurrent} /><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div>}
       {editing && <RoutineCreateDialog workspaceId={workspaceId} routine={routine} initialDraft={draft?.definition} open={editing} onClose={() => { setEditing(false); setDraft(null) }} onCreated={() => { setDraft(null); onChanged() }} advancedDetails={<><DetailCard title="Connected workspace"><div className="flex flex-wrap gap-4 text-xs"><Link className="text-primary" href="/credentials">Credentials ↗</Link><Link className="text-primary" href="/integrations">Integrations ↗</Link><Link className="text-primary" href={`/activity?pipeline=${encodeURIComponent(routine.slug)}`}>Activity ↗</Link></div><p className="mt-3 text-xs text-muted-foreground">The access checks are applied when a run starts. Editing these connections does not rewrite historical runs.</p></DetailCard><AccessCard routine={routine} crewshipActions={crewshipActions} /><RoutineReachCard workspaceId={workspaceId} agentSlugs={routine.manifest?.agents ?? []} /><RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} /><DetailCard title="Technical metadata"><Metadata routine={routine} steps={steps.length} /></DetailCard></>} />}
@@ -215,8 +218,10 @@ export function RoutineCardDetail({
       {view === "definition" &&
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
         <Appear order={2} className="xl:col-span-2 2xl:col-span-3">
-          <DetailCard
-            title="Definition"
+          <div className="space-y-4">
+          <RoutineWorkOverview definition={routine.definition} onMap={() => setShowMap(v => !v)} onEdit={canEdit ? () => setEditing(true) : undefined} />
+          {showMap && <DetailCard
+            title="Workflow map"
             subtitle={`${steps.length} ${steps.length === 1 ? "step" : "steps"}`}
             bare
           >
@@ -242,13 +247,15 @@ export function RoutineCardDetail({
               {selected && !editing && <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0"><button onClick={() => setSelected(null)} className="mb-3 text-xs text-muted-foreground">Close step detail</button><RoutineStepDefinition step={(routine.definition.steps as Record<string, unknown>[] | undefined)?.find(s => s.id === selected)} /></aside>}
 
             </div>
-          </DetailCard>
+          </DetailCard>}
+          </div>
         </Appear>
 
         <div className="flex flex-col gap-4">
           <Appear order={3}>
             <LastRunCard
-              status={lastRun?.outcome === "FAILED" ? "failed" : lastRun?.outcome === "NEEDS_HUMAN" ? "needs attention" : lastRun?.status ?? routine.last_invocation_status}
+              status={lastRun?.status ?? routine.last_invocation_status}
+              outcome={lastRun?.outcome}
               at={lastRun?.started_at ?? routine.last_invoked_at}
               runId={lastRun?.id}
               durationMs={lastRun?.duration_ms}
@@ -387,18 +394,21 @@ function toneOf(status?: string): "success" | "destructive" | "default" {
  */
 function LastRunCard({
   status,
+  outcome,
   at,
   runId,
   durationMs,
   slug,
 }: {
   status?: string
+  outcome?: string
   at?: string
   runId?: string
   durationMs?: number
   slug: string
 }) {
-  const tone = toneOf(status)
+  const presentation = routineRunPresentation({ status, outcome })
+  const tone = presentation.tone
   const ok = tone === "success"
   const bad = tone === "destructive"
   const Icon = ok ? CheckCircle2 : bad ? XCircle : Clock
@@ -434,7 +444,7 @@ function LastRunCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium capitalize">
-            Last run · {status ?? "unknown"}
+            Last run · {presentation.label}
           </div>
           {runId && (
             <div className="truncate font-mono text-[10px] text-muted-foreground">{runId}</div>

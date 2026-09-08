@@ -72,6 +72,7 @@ export function RoutineRunInputsDialog({
             {submitLabel === "Schedule" ? "The routine will start at the selected date and time." : "Starting creates a new run in this routine’s history."}
           </DialogDescription>
         </DialogHeader>
+        {versionChoices && <p className="text-xs text-muted-foreground">A new run repeats work using the selected version. It does not resume the previous attempt or undo its actions.</p>}
         {versionChoices && <div className="space-y-1"><label htmlFor="routine-run-version" className="text-sm font-medium">Recipe version</label><select id="routine-run-version" className="w-full rounded-md border bg-card p-2 text-sm" value={selectedVersion} onChange={e => onVersionChange?.(e.target.value)} disabled={submitting}>{versionChoices.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select><p className="text-xs text-muted-foreground">Inputs are copied from the selected historical run where names match. Review them before repeating external actions.</p></div>}
         {/* Keyed on the routine so switching selection in the list
             rebuilds the form at the new routine's defaults rather than
