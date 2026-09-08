@@ -56,6 +56,6 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {pending.map(p => <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 p-3 text-sm"><div><span className="block font-medium">{new Date(p.fire_at).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span><span className="text-xs text-muted-foreground">Scheduled · One-time start</span></div><Button size="sm" variant="ghost" disabled={busy} onClick={() => cancel(p.id)}>Cancel scheduled start</Button></div>)}
     <details open={pending.length === 0}><summary className="cursor-pointer text-xs text-primary">Schedule a one-time start</summary><div className="mt-3 flex flex-wrap gap-2"><Input aria-label="One-time date and time" lang="en-GB" className="max-w-xs" type="datetime-local" value={at} onChange={e => setAt(e.target.value)} /><Button disabled={busy || !at || !(Date.parse(at) > Date.now())} onClick={prepare}>Schedule once</Button></div></details>
-    <RoutineRunInputsDialog inputs={specs} routineName={slug} submitting={busy} onCancel={() => setSpecs(null)} onRun={schedule} />
+    <RoutineRunInputsDialog submitLabel="Schedule" inputs={specs} routineName={slug} submitting={busy} onCancel={() => setSpecs(null)} onRun={schedule} />
   </section>
 }

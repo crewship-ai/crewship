@@ -38,6 +38,7 @@ import {
  * single-click behaviour everywhere it always had it.
  */
 export interface RoutineRunInputsDialogProps {
+  submitLabel?: "Run" | "Schedule"
   /** Open when non-null; the specs are the routine's declared inputs. */
   versionChoices?: { value: string; label: string }[]
   selectedVersion?: string
@@ -54,6 +55,7 @@ export interface RoutineRunInputsDialogProps {
 export function RoutineRunInputsDialog({
   inputs,
   versionChoices, selectedVersion, onVersionChange,
+  submitLabel = "Run",
   routineName,
   submitting,
   onCancel,
@@ -62,12 +64,12 @@ export function RoutineRunInputsDialog({
   if (inputs === null || (!inputs.length && !versionChoices?.length)) return null
   return (
     <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
-      <DialogContent className="border-border bg-card sm:max-w-lg">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Run {routineName}</DialogTitle>
+          <DialogTitle>{submitLabel} {routineName}</DialogTitle>
           <DialogDescription>
             Review the inputs for this run. Saved defaults are filled in below.
-            Starting creates a new run in this routine’s history.
+            {submitLabel === "Schedule" ? "The routine will start at the selected date and time." : "Starting creates a new run in this routine’s history."}
           </DialogDescription>
         </DialogHeader>
         {versionChoices && <div className="space-y-1"><label htmlFor="routine-run-version" className="text-sm font-medium">Recipe version</label><select id="routine-run-version" className="w-full rounded-md border bg-card p-2 text-sm" value={selectedVersion} onChange={e => onVersionChange?.(e.target.value)} disabled={submitting}>{versionChoices.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select><p className="text-xs text-muted-foreground">Inputs are copied from the selected historical run where names match. Review them before repeating external actions.</p></div>}
@@ -77,6 +79,7 @@ export function RoutineRunInputsDialog({
         <InputsForm
           key={`${routineName}:${selectedVersion ?? "current"}`}
           inputs={inputs}
+          submitLabel={submitLabel}
           submitting={submitting}
           onCancel={onCancel}
           onRun={onRun}
