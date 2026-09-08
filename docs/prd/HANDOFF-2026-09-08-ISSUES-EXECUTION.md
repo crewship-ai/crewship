@@ -64,3 +64,55 @@ The default migration lint compares to a newer origin/main and flags the pre-exi
 absence of `20260907085608_provider_login_pools.sql` on this preview branch;
 comparison to the actual preview base 46627c215 is the relevant append-only check.
 No existing migration is edited by this change.
+
+## Verified on dev1
+
+Deployed through `systemctl reload crewship-ws@1`; final application commit
+`6705549d6`. Main dev1 preview was fast-forwarded; pre-existing AGENTS/CODEX/design
+WIP remains untouched. Fresh SQLite backup is in
+`/tmp/crewship-dev1-before-issue-execution-20260908/crewship.db` (0600).
+
+| Issue | Actual observed path | Final state |
+| --- | --- | --- |
+| [QUA-10](https://crewship-dev1.unifylab.cz/issues/QUA-10) | Jordan delegated to Casey, returned WORK_CREATED; Casey produced the deliberately incomplete test artifact; Jordan independently read it and requested changes; Casey corrected it; a second Jordan review read the exact bytes and approved | Done, automatically; two execution attempts, five completed assignments |
+| [QUA-11](https://crewship-dev1.unifylab.cz/issues/QUA-11) | Human takeover, submit, brief edited, approval rejected with HTTP 409, resubmit against new brief, human approve | Done; no agent needed |
+| [QUA-12](https://crewship-dev1.unifylab.cz/issues/QUA-12) | Missing routine input rejected with HTTP 422; stored JSON supplied; exact linked routine run produced `{"status":"ready","sum":4}` with SUCCEEDED; Jordan review approved | Review, intentionally left for client acceptance |
+| [QUA-13](https://crewship-dev1.unifylab.cz/issues/QUA-13) | Routine parked on approval; survived a server restart; human took over | Todo, with Demo User; routine and waitpoint cancelled, Inbox resolved, downstream transform never executed |
+
+The routine test uses a manual-only transform recipe; the parked test uses a
+manual-only approval recipe. Neither has a schedule or external side effect.
+QUA-1's existing substantive docs audit was not rerun or accepted as part of these
+tests. QUA-10 has both declared artifact versions attached for review history.
+The routine reviewer evaluated the platform-provided persisted output and checked
+the routine registry; it explicitly noted that it could not independently re-fetch
+the literal run payload through its tools. The operator also checked the stored
+run output directly. This is not evidence of every possible routine/adapter working.
+
+A live `chat stream` connection reported active, received 171 frames with Jordan
+and Casey identities, and 163 sequence-bearing events were strictly increasing.
+It continued across worker completion and the corrective handoff. Browser checks
+verified the final detail and review controls after the deployment/restart.
+
+Final verification:
+
+- `TMPDIR=/dev/shm go test -p=3 ./... -count=1 -timeout=40m`: passed, 134 tested packages.
+- After the final parked-cancellation patch, full `internal/api` suite passed again
+  (123.655s), including the actual-schema detail projection and parked approval/Inbox tests.
+- `go vet ./...`: passed on final code.
+- Frontend Issues + run activity suites: 266 passing tests; the final work-panel
+  wording change also passed its four tests.
+- `pnpm lint`: zero errors, 32 pre-existing warnings. Production Next.js export
+  and Go/sidecar build passed in the final dev1 reload.
+- Migration append-only check against the actual preview base and agents invariants passed.
+- Backup round-trip now explicitly verifies execution review and assignment linkage.
+
+One live-only defect was caught and fixed during this pass: assignments do not
+store a run_id column. Detail now resolves that ID through the same journal
+projection used by issue runs, with a real-schema regression test.
+
+The prior Quality crew memory permission failure was also repaired on dev1:
+a named POSIX ACL grants only the service UID 1000 access to that crew's `.memory`
+directory, preserving agent/sidecar ownership. A matching default ACL was added
+where none existed. A write probe passed and the real QUA-11 completion lesson
+appeared in lessons.md. Other instances and unrelated crew directories were not
+changed; this is a deployment repair, not a claim about every host's permissions.
