@@ -1025,7 +1025,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               allowJumpAhead
               onJump={i => setSection(recipeSections[i])}
             />
-            <button type="button" aria-pressed={section === "Code"} onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")} className={cn("absolute right-4 top-2 inline-flex h-7 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted", section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground")}><Braces className="h-3 w-3" />Code</button>
+            <button type="button" aria-pressed={section === "Code"} onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")} className={cn("absolute right-4 top-2 inline-flex h-7 max-sm:top-1 max-sm:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted", section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground")}><Braces className="h-3 w-3" />Code</button>
           </div>
           {/* Keep the code buffer and overview mounted while navigating. */}
           <CreateSurfaceBody inert={savedRecipe.current !== null} className={cn("flex overflow-y-hidden p-0 sm:p-0", savedRecipe.current && "opacity-60")}>
@@ -1205,8 +1205,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
           <CreateSurfaceFooter
             hint={routine ? `Editing v${routine.head_version ?? 1} · Save creates a new version` : "Draft · Work starts only when you run it"}
             onCancel={onClose}
-            secondary={(sectionIndex > 0 || section === "Code") && !savedRecipe.current ? (
-              <CreateSurfaceSecondaryAction icon={ArrowLeft} disabled={busy !== "none"} onClick={() => setSection(section === "Code" ? lastRecipeSection.current : recipeSections[sectionIndex - 1])}>Back</CreateSurfaceSecondaryAction>
+            secondary={sectionIndex > 0 && section !== "Code" && !savedRecipe.current ? (
+              <CreateSurfaceSecondaryAction icon={ArrowLeft} disabled={busy !== "none"} onClick={() => setSection(recipeSections[sectionIndex - 1])}>Back</CreateSurfaceSecondaryAction>
             ) : undefined}
             primaryLabel={saveSection ? advancedPrimaryLabel : section === "Code" ? "Back to recipe" : "Continue"}
             primaryIcon={saveSection ? Save : undefined}
