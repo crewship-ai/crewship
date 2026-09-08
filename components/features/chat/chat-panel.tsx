@@ -22,6 +22,7 @@ import {
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation"
 import { renderAskTemplate } from "@/lib/ask-template"
+import { playSoundOnce } from "@/lib/notification-sound-coordinator"
 import { useChat, type HistoryPart } from "@/hooks/use-chat"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -123,9 +124,9 @@ interface ChatPanelProps {
    *  session being viewed — lets the parent re-fire mark-read so the reply
    *  the user just watched doesn't linger as a server-side unread. */
   onReplySettled?: (sessionId: string) => void
+  onNewConversation?: () => void
+  onMobilePanelChange?: (panel: "chat" | "files" | "more") => void
 }
-
-const noopFileClick = () => {}
 
 /** How the chat palette's key is written for a human. The binding itself is
  *  `mod+slash` on the palette's own useHotkeys call; this is the label, and it
@@ -139,7 +140,7 @@ const CHAT_PALETTE_SHORTCUT = "⌘/"
 const EMPTY_STATE_CHIP_LIMIT = 6
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -195,6 +196,25 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   }, [sessionId])
 
   const [files, setFiles] = useState<FileEntry[]>([])
+  const [filesLoading, setFilesLoading] = useState(false)
+  const [filesError, setFilesError] = useState<string | null>(null)
+  const [filesRevision, setFilesRevision] = useState(0)
+  const [previewFile, setPreviewFile] = useState<{ path: string } | null>(null)
+  const consumePreview = useCallback((request: { path: string }) => {
+    setPreviewFile((current) => current === request ? null : current)
+  }, [])
+  const retryFiles = useCallback(() => setFilesRevision((n) => n + 1), [])
+  const openFilePreview = useCallback((path: string) => {
+    setPreviewFile({ path })
+    useDrawerStore.getState().setActiveTab("files")
+    if (mobilePanel) onMobilePanelChange?.("files")
+  }, [mobilePanel, onMobilePanelChange])
+
+  useEffect(() => {
+    setFiles([])
+    setFilesError(null)
+    setPreviewFile(null)
+  }, [agentId, workspaceId, sessionId])
   // Narrow selectors — the panel only reads these three fields; a
   // whole-store subscription re-rendered the entire chat (message list
   // included) on every drawer width drag or unrelated store write.
@@ -232,12 +252,29 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [historyReloadNonce, setHistoryReloadNonce] = useState(0)
   const requestHistoryReload = useCallback(() => setHistoryReloadNonce((n) => n + 1), [])
 
+  const soundScopeRef = useRef<string | null>(null)
+  const soundScope = currentUserId && workspaceId ? JSON.stringify([currentUserId, workspaceId]) : null
+  const soundIdentity = JSON.stringify([soundScope, sessionId])
+  soundScopeRef.current = soundIdentity
+  useEffect(() => {
+    soundScopeRef.current = soundIdentity
+    return () => { soundScopeRef.current = null }
+  }, [soundIdentity])
+  const onAgentReplyCompleted = useCallback((reply: { sessionId: string; repliedAt: string }) => {
+    if (!soundScope || reply.sessionId !== sessionId || sessionKind !== "direct") return
+    void playSoundOnce(soundScope, {
+      key: `agent-reply:${reply.sessionId}:${Date.parse(reply.repliedAt)}`,
+      category: "chat",
+    }, () => soundScopeRef.current === soundIdentity)
+  }, [soundScope, soundIdentity, sessionId, sessionKind])
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
     currentUserId: currentUserId ?? undefined,
     onStreamReset: requestHistoryReload,
+    onReplyCompleted: onAgentReplyCompleted,
   })
 
   // Reply-settled hook: when a stream the user watched in THIS session
@@ -382,10 +419,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // (mentioning it is what makes it respond in a group chat); teammates are
   // offered too as a courtesy. The picker itself lives in ChatComposer.
   const mentionMembers = useMemo<CrewMember[]>(() => {
-    const list: CrewMember[] = [{ id: agentId, slug: agentSlug, name: agentName ?? agentSlug, role_title: agentRole ?? undefined }]
+    const list: CrewMember[] = [{ id: agentId, slug: agentSlug, name: agentName ?? agentSlug, role_title: agentRole ?? undefined, kind: "agent" }]
     for (const [uid, name] of Object.entries(participantNames)) {
       if (uid !== currentUserId) {
-        list.push({ id: uid, slug: name.replace(/\s+/g, "").toLowerCase(), name })
+        list.push({ id: uid, slug: name.replace(/\s+/g, "").toLowerCase(), name, kind: "human" })
       }
     }
     return list
@@ -486,15 +523,32 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return ok
   }, [ensureSession])
 
-  // Fetch files only when the Files tab might be visible (drawer open + active)
-  const filesVisible = drawerOpen && drawerActiveTab === "files"
+  // Mobile panels do not open the desktop drawer. Both layouts own visibility.
+  const filesVisible = mobilePanel === "files" || mobilePanel === "files-only"
+    || (mobilePanel === undefined && drawerOpen && drawerActiveTab === "files")
   useEffect(() => {
     if (!workspaceId || !filesVisible || !sessionId) return
-    apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
-      .then((r) => r.ok ? r.json() : [])
-      .then((data: FileEntry[] | null) => setFiles(data ?? []))
-      .catch(() => {})
-  }, [agentId, workspaceId, filesVisible, sessionId])
+    const controller = new AbortController()
+    setFilesLoading(true)
+    setFilesError(null)
+    apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error("Couldn't load agent files.")
+        return r.json()
+      })
+      .then((data: FileEntry[] | null) => {
+        if (!controller.signal.aborted) setFiles(data ?? [])
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFilesError("Couldn't load agent files.")
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setFilesLoading(false)
+      })
+    return () => controller.abort()
+  }, [agentId, workspaceId, filesVisible, sessionId, filesRevision, isStreaming])
+
+  const filePanelProps = { filesLoading, filesError, onRetryFiles: retryFiles, previewFile, onPreviewHandled: consumePreview }
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
@@ -725,7 +779,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       isStreaming={isStreaming}
       animateAfter={animateAfter}
       onCopy={handleCopy}
-      onFileClick={noopFileClick}
+      onFileClick={openFilePreview}
       onRegenerate={!isStreaming ? regenerateWithPin : undefined}
       onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
@@ -768,7 +822,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               key={turn.id}
               turn={turn}
               onCopy={handleCopy}
-              onFileClick={noopFileClick}
+              onFileClick={openFilePreview}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
               onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
               onEditUserMessage={!isStreaming ? editAndResendWithPin : undefined}
@@ -791,9 +845,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   if (mobilePanel === "files-only") {
     return (
       <RightPanel
+        key={`${workspaceId}:${agentId}:${sessionId}`}
         agentId={agentId}
         workspaceId={workspaceId}
         files={files}
+        {...filePanelProps}
         initialTab="files"
         hideTabs
         style={{ width: "100%" }}
@@ -801,14 +857,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     )
   }
 
-  // Mobile: show full RightPanel with all tabs (files + triggers + team + context)
+  // The page owns mobile navigation; avoid a second competing tab strip.
   if (mobilePanel === "files") {
     return (
       <RightPanel
+        key={`${workspaceId}:${agentId}:${sessionId}`}
         agentId={agentId}
         workspaceId={workspaceId}
         files={files}
+        {...filePanelProps}
         initialTab="files"
+        hideTabs
         style={{ width: "100%" }}
       />
     )
@@ -817,10 +876,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   if (mobilePanel === "more") {
     return (
       <RightPanel
+        key={`${workspaceId}:${agentId}:${sessionId}`}
         agentId={agentId}
         workspaceId={workspaceId}
         files={files}
-        initialTab="triggers"
+        {...filePanelProps}
+        initialTab="team"
+        hideTabs
         style={{ width: "100%" }}
       />
     )
@@ -829,6 +891,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   if (mobilePanel === "chat") {
     return (
       <div className="flex flex-col h-full">
+        <ReconnectBanner status={connectionStatus} />
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
           {isGroupChat && (
@@ -859,6 +922,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           sessionId={sessionId}
           agentName={agentName}
           variant="mobile"
+          mentionMembers={mentionMembers}
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
@@ -880,6 +944,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   return (
     <div className="relative flex h-full">
       <div className="flex flex-col overflow-hidden flex-1 min-w-0">
+        <ReconnectBanner status={connectionStatus} />
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
             connection badge still appears when the socket is not connected,
@@ -895,6 +960,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
                 <>
                   <ConnectionBadge status={connectionStatus} />
                   <OriginChip origin={sessionOrigin} />
+                  {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                   <CopyLinkButton />
                 </>
@@ -905,6 +971,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               <ConnectionBadge status={connectionStatus} />
               <OriginChip origin={sessionOrigin} />
               <div className="ml-auto flex items-center gap-2">
+                {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                 <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                 <CopyLinkButton />
               </div>
@@ -971,10 +1038,11 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
       <RightDrawer>
         <RightPanel
-          key={drawerActiveTab}
+          key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
           files={files}
+          {...filePanelProps}
           initialTab={drawerActiveTab}
           hideTabs
           style={{ width: "100%", height: "100%" }}
@@ -989,6 +1057,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         agentSlug={agentSlug}
         workspaceId={workspaceId ?? undefined}
         onCommand={handleSlashCommand}
+        onNewConversation={onNewConversation}
         onAction={setSlashAction}
         disabledCommands={slashDisabledCommands}
         open={slashPaletteOpen}
@@ -1005,7 +1074,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       <ArtifactPane agentId={agentId} />
       <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
       <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
-      <ReconnectBanner status={connectionStatus} />
     </div>
   )
 }

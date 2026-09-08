@@ -36,6 +36,17 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	// Durable human collaboration: restore preserves history/ACL but suspends work.
+	"workspace_conversations":              IntentInclude,
+	"workspace_conversation_direct_pairs":  IntentInclude,
+	"workspace_conversation_members":       IntentInclude,
+	"workspace_conversation_messages":      IntentInclude,
+	"workspace_conversation_agents":        IntentInclude,
+	"workspace_conversation_agent_jobs":    IntentInclude,
+	"workspace_conversation_continuations": IntentInclude,
+	"workspace_conversation_activity":      IntentInclude,
+	"workspace_conversation_outbox":        IntentInclude,
+
 	// === Core entities (round-trip) =========================
 	"crews":              IntentInclude,
 	"agents":             IntentInclude,

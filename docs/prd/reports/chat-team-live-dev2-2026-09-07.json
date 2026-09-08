@@ -1,0 +1,18 @@
+{
+  "workspace_id": "cmtplws8h000276fa560f",
+  "channel_id": "cmtr5ax63f55c237429b3098e46bb7b9e",
+  "checks": [
+    "Channel creator enables activity; ordinary member reads but cannot reconfigure",
+    "Real issue status update projects a named, linked, trusted activity card",
+    "Real token-free transform routine completes and posts its linked channel result",
+    "Issue/routine system activity does not launch agents",
+    "Real Mařena answers the exact stored issue status with a link and changes no work",
+    "Retried structured mention does not duplicate the job or reply"
+  ],
+  "issue_id": "cmtr5u5uv0002f64cb58a",
+  "issue_identifier": "COP-1",
+  "routine_result": "Run run_cmtr5zuyy0007c917a832: COMPLETED (0ms, $0.0000)\n\nFinal output:\n  CREWSHIP_TEAM_ROUTINE_OK\n\nStep outputs:\n  [result]\n    CREWSHIP_TEAM_ROUTINE_OK\n",
+  "agent_job_id": "cmtr5zw0fc043a7703776ce6d7bca0462",
+  "agent_reply_id": "cmtr6068s9f10a58ccf3baa0270988eae",
+  "status": "passed"
+}

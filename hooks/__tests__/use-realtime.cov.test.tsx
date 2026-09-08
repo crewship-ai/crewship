@@ -21,6 +21,11 @@ vi.mock("@/hooks/use-websocket", () => ({
   },
 }))
 
+let mockUserId: string | null = null
+vi.mock("@/hooks/use-auth", () => ({
+  useSessionSafe: () => ({ data: mockUserId ? { user: { id: mockUserId } } : null }),
+}))
+
 let mockWorkspaceId: string | null = "ws1"
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: mockWorkspaceId }),
@@ -58,6 +63,7 @@ beforeEach(() => {
   wsStatus = "disconnected"
   capturedOpts = null
   mockWorkspaceId = "ws1"
+  mockUserId = null
 })
 
 describe("RealtimeProvider — getToken", () => {
@@ -363,5 +369,34 @@ describe("useRealtimeChannel", () => {
     mockWorkspaceId = null // suppress the workspace subscribe noise
     renderHook(() => useRealtimeChannel(null), { wrapper })
     expect(sendMock).not.toHaveBeenCalled()
+  })
+})
+
+
+describe("RealtimeProvider — private conversation delivery", () => {
+  it("subscribes only the authenticated user and replaces the subscription on account changes and reconnect", () => {
+    wsStatus = "connected"
+    mockUserId = "alice"
+    const { rerender, unmount } = renderHook(() => useRealtime(), { wrapper })
+    expect(sendMock).toHaveBeenCalledWith({ type: "subscribe", channel: "user:alice" })
+    mockUserId = "bob"
+    rerender()
+    expect(sendMock).toHaveBeenCalledWith({ type: "unsubscribe", channel: "user:alice" })
+    expect(sendMock).toHaveBeenCalledWith({ type: "subscribe", channel: "user:bob" })
+    wsStatus = "disconnected"
+    rerender()
+    sendMock.mockClear()
+    wsStatus = "connected"
+    rerender()
+    expect(sendMock).toHaveBeenCalledWith({ type: "subscribe", channel: "user:bob" })
+    unmount()
+    expect(sendMock).toHaveBeenCalledWith({ type: "unsubscribe", channel: "user:bob" })
+  })
+  it("delivers a real conversation.updated frame through the allowlist", () => {
+    const { result } = renderHook(() => useRealtime(), { wrapper })
+    const callback = vi.fn()
+    act(() => { result.current.subscribe("conversation.updated", callback) })
+    act(() => { capturedOpts!.onMessage({ type: "conversation.updated", payload: { conversation_id: "room" } }) })
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({ type: "conversation.updated", payload: { conversation_id: "room" } }))
   })
 })

@@ -60,7 +60,7 @@ var responseShapeExclusions = map[string]string{
 func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 	// Measured, not chosen. Lower it in the same commit that adds pairs; a rise
 	// means a route shipped a response shape nothing can check.
-	const budget = 203
+	const budget = 199
 
 	raw, err := os.ReadFile("openapi.gen.json")
 	if err != nil {

@@ -118,7 +118,7 @@ export const ChatTreeRow = React.memo(function ChatTreeRow({ node, depth, expand
         style={{ paddingLeft: `${depth * 14 + 8}px` }}
         onClick={() => {
           if (node.is_dir) onToggle(node.path)
-          else if (canPreview) onFileClick(node)
+          else onFileClick(node)
         }}
       >
         {node.is_dir ? (

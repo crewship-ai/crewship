@@ -1093,6 +1093,9 @@ jobs:
       - name: Test
         run: pnpm test:coverage
 
+      - name: E2E private artifact security tests
+        run: node --test e2e/helpers/private-artifacts.test.mjs
+
       - name: Upload coverage (lcov)
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

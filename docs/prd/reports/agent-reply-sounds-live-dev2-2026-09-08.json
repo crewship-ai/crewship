@@ -1,0 +1,18 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "user_id": "b4c27e82-6218-4470-9a38-9a2fdddeba02",
+  "checks": [
+    "Two normal Emma agent-chat tabs open an empty dedicated session without audio",
+    "Both tabs activate saved Chat sounds via profile menu without any preview or automatic cue",
+    "A real completed Ma\u0159ena reply plays one Chat cue even while its DM is focused, once across two tabs",
+    "Away-from-chat real Ma\u0159ena completion plays exactly one Chat cue through Inbox, not a second Inbox chime",
+    "Returning to completed agent history does not replay either reply",
+    "Profile-menu sound shortcut is accessible on mobile and no browser runtime errors occurred"
+  ],
+  "page_errors": [],
+  "audio_evidence": "Native oscillator starts in running AudioContexts; physical output not measured.",
+  "chat_id": "cmtsftvcj0002380b7512",
+  "agent_id": "cmtpmjabx002425d82ae7",
+  "status": "passed",
+  "artifacts": "assets/agent-reply-sounds-dev2"
+}

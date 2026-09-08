@@ -1,0 +1,15 @@
+{
+  "server": "https://crewship-dev2.unifylab.cz",
+  "fixture": "browser-only-authorized-inbox",
+  "checks": [
+    "Real authenticated inbox glue leaves old, read, ordinary routine and chat-projection rows silent",
+    "Fresh high-priority unread waitpoint starts exactly three native Chime nodes",
+    "Duplicate simulated invalidations do not replay the same inbox item",
+    "A distinct important item plays another Chime after the shared cooldown",
+    "Do not disturb suppresses fresh important Inbox alerts",
+    "Leaving DND does not replay its historical alert"
+  ],
+  "page_errors": [],
+  "audio_evidence": "Original native OscillatorNode.start calls, not physical speaker output. Inbox rows and invalidation frames are simulated only in this browser.",
+  "status": "passed"
+}
