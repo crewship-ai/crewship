@@ -3,7 +3,9 @@
 import Link from "next/link"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { CircleDot, KeyRound, Plug, Workflow } from "lucide-react"
+import { RefreshCw } from "lucide-react"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
+const { issues: CircleDot, credentials: KeyRound, integrations: Plug, routines: Workflow } = CONCEPT_ICON
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { useWorkspaceResource } from "./memory-workspace"
 import { WorkspaceEmpty, WorkspaceGlyph } from "./workspace-visuals"
@@ -20,7 +22,7 @@ export function AssignedConnected(props: Props) {
   const revision = (props.revision ?? 0) + retry
   const q = new URLSearchParams({ workspace_id: workspaceId, limit: "3", sort: "updated_at", ...(agentId ? { assignee_id: agentId } : { crew_id: crewId ?? "" }) })
   const issues = useWorkspaceResource<Issue[]>(`/api/v1/issues?${q}`, revision, true)
-  return <section className="space-y-3"><div className="flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Assigned &amp; connected</h2><Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Refresh assignments</Button></div><div className="grid gap-4 xl:grid-cols-3">
+  return <section className="space-y-3"><div className="flex items-center justify-between gap-3"><h2 className="text-lg font-medium">Assigned &amp; connected</h2><Button variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}><RefreshCw aria-hidden="true" />Refresh assignments</Button></div><div className="grid gap-4 xl:grid-cols-3">
     <DashboardCard title="Issues & missions" icon={CircleDot} action={<Link className="text-primary" href={`/issues?${agentId ? `assignee_id=${encodeURIComponent(agentId)}` : `crew_id=${encodeURIComponent(crewId ?? "")}`}`}>View all ↗</Link>}>
       {issues.error ? <p role="alert" className="text-sm text-muted-foreground">Assigned work could not be loaded.</p> : !issues.data ? <p role="status" className="text-sm text-muted-foreground">Loading work…</p> : !issues.data.length ? <WorkspaceEmpty icon={CircleDot} title="No work assigned yet" /> : <ul className="divide-y divide-border/60">{issues.data.slice(0, 3).map(issue => <li key={issue.id} className="flex gap-3 py-3"><WorkspaceGlyph icon={CircleDot} /><div className="min-w-0"><Link className="text-sm line-clamp-2 hover:text-primary" href={`/issues/${encodeURIComponent(issue.identifier || issue.id)}`}>{issue.title}</Link><p className="text-xs text-muted-foreground mt-1">{issue.status.toLowerCase().replaceAll('_', ' ')}</p></div></li>)}</ul>}
     </DashboardCard>
@@ -29,9 +31,9 @@ export function AssignedConnected(props: Props) {
   </div></section>
 }
 
-function CrewRoutines({ workspaceId, crewId, revision }: { workspaceId: string; crewId: string; revision: number }) {
+export function CrewRoutines({ workspaceId, crewId, revision, title = "Crew routines" }: { workspaceId: string; crewId: string; revision: number; title?: string }) {
   const { data, error } = useWorkspaceResource<Routine[]>(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines?author_crew_id=${encodeURIComponent(crewId)}&order=recent`, revision, true)
-  return <DashboardCard title="Crew routines" icon={Workflow} action={<Link className="text-primary" href="/routines">Routines ↗</Link>}>
+  return <DashboardCard title={title} icon={Workflow} action={<Link className="text-primary" href="/routines">Routines ↗</Link>}>
     <p className="text-xs text-muted-foreground mb-2">Owned by this crew; execution agents depend on each routine.</p>
     {error ? <p role="alert" className="text-sm text-muted-foreground">Routines could not be loaded.</p> : !data ? <p role="status" className="text-sm text-muted-foreground">Loading routines…</p> : !data.length ? <WorkspaceEmpty icon={Workflow} title="No crew routines yet" /> : <ul className="divide-y divide-border/60">{data.slice(0, 3).map(routine => <li key={routine.id} className="flex gap-3 py-3"><WorkspaceGlyph icon={Workflow} tone="purple" /><div className="min-w-0"><Link className="text-sm line-clamp-2 hover:text-primary" href={`/routines?routine=${encodeURIComponent(routine.slug)}`}>{routine.name || routine.slug}</Link><p className="mt-1 text-xs text-muted-foreground">{routine.status?.toLowerCase().replaceAll('_', ' ')}</p></div></li>)}</ul>}
   </DashboardCard>

@@ -510,7 +510,7 @@ export function AgentCanvas({
 
       <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
       {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} revision={revision} />}
-      {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} slug={agent.slug} name={agent.name} />}
+      {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} crewId={agent.crew_id ?? undefined} slug={agent.slug} name={agent.name} />}
       {tab === "work" && (
         <details ref={accessRef} className="scroll-mt-4 rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab
           accessOnly
