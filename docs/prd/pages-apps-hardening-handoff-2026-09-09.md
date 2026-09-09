@@ -93,3 +93,61 @@ not proven by the MCP transport tests. Release issue claim when finished/stoppin
 User question remains pending: separately registrable runtime domain outside
 unifylab.cz and DNS/TLS management. Existing dev3 same-origin mode is explicitly
 an internal development exception; it does not establish production isolation.
+
+
+## Verified live progress at 15:59 UTC
+
+Dev3 now runs `a4aaecb3`, process SHA256
+`717f400d199e64733dc325bd9bf5fd1af49e1a92e48127019d255613010f3f23`.
+A stopped-service snapshot of database, Pages storage and old release exists at
+`/srv/crewship/dev3-pages-release/rollback-2472-20260909`; it excludes crew volumes.
+Matching compiler: `sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b`.
+
+The complete real Docker/API/MCP/seed/collector/Chromium script passed after its
+HTTP test fixtures were updated for the stricter HTTPS contract. A deterministic
+Docker test streams every input byte separately and preserves Czech text/emoji.
+Compiled SDK action/status/history browser testing passed and is now required by
+the final CI script. The example's own action-key generator was corrected too.
+Live Chromium loading/responsiveness passed; WebKit correctly offers panels and
+creates no application iframe. WebKit used the already-installed Playwright Docker
+image because host system libraries were missing.
+
+Live browser action generated pending `pnd_cmtua33x1001c0fbdec96`, run
+`run_cmtua364y000ac5f80683`, completed. Read-only verification finds BOTH panel
+writes at sequence 342, produced 15:53:48Z by that exact run. This proves the
+actual UI → confirmation → queue → routine → Page-data loop.
+
+Actual chat authoring did NOT complete. Alex invoked init/save_page correctly,
+but Engineering is guided. `page_create` returned 403 with `pending_review: true`;
+no actionable approval-queue item exists. No Page/source/build was created.
+The user was asked for explicit authorization for a separate trusted test crew;
+no policy was loosened. Do not call transport tests or this blocked attempt a
+successful LLM authoring demonstration.
+
+Documentation PR is #2481. API/env documentation moved into the server layer so
+its strict docs-inventory now passes without depending on later CLI flags.
+Remote CI found an HTTP same-origin fixture incompatible with the new HTTPS
+policy; it now uses literal loopback. Repeated focused publication/concurrency
+checks passed. Signal-interrupted Unix locks also retry within their deadline.
+These latest fixture/lock changes are being propagated; no merge is claimed.
+Machine-readable evidence: `reports/pages-apps-hardening-2026-09-09.json`.
+
+
+## Final code deployment at 16:06 UTC
+
+Dev3 was updated to `529a3298` (clean build), verified live process SHA256
+`d020592a333345028f9c03a2cd569b4cc2829ac432179e9f56707bc2aded1c7d`.
+The compiler profile is unchanged from the successful real browser/action run.
+The complete final script now includes required UTF-8 chunk coverage and the
+compiled SDK action/status/history browser branch; it passed in
+`/tmp/pages-2472-verified-final.log`. Focused final source/publication/concurrency
+checks passed ten repetitions; vet of the changed Go packages passed.
+
+Live fsck reports healthy: 3 sources, 3 checkpoints, 3 artifacts, 26 Git objects,
+zero failures. One commit-hook lint was blocked by a full shared disk, then
+passed after deleting only our completed Next intermediates and obsolete test
+executables. No shared caches or unrelated worktrees were pruned.
+
+Final dependency updates are being pushed. All API/environment contracts are
+with the server layer; CLI maintenance flags are with CLI. Final CI and external
+review remain open, as do the two explicit user inputs above. No merge yet.
