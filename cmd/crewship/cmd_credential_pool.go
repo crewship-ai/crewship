@@ -18,6 +18,7 @@ type poolMemberOut struct {
 }
 
 type poolDefinitionOut struct {
+	Revision        int64           `json:"revision"`
 	ID              string          `json:"id"`
 	Name            string          `json:"name"`
 	Provider        string          `json:"provider"`
@@ -29,10 +30,12 @@ type poolDefinitionOut struct {
 }
 
 func poolDefinitionDetail(out poolDefinitionOut) error {
+	// Revisions are shown to support explicit optimistic updates from the CLI.
 	pairs := [][]string{{"ID", out.ID}, {"Name", out.Name}, {"Provider", out.Provider}, {"Mode", out.Mode}, {"Cross-owner consent", strconv.FormatBool(out.AllowCrossOwner)}, {"Accounts", strconv.Itoa(out.MemberCount)}, {"Delivery", "Not assigned: pool definitions do not grant access"}}
 	for _, member := range out.Members {
 		pairs = append(pairs, []string{"Account", fmt.Sprintf("%s (priority %d)", member.CredentialID, member.Priority)})
 	}
+	pairs = append(pairs, []string{"Revision", strconv.FormatInt(out.Revision, 10)})
 	return newFormatter().AutoDetail(out, pairs)
 }
 
@@ -144,6 +147,7 @@ func newCredentialPoolCmd() *cobra.Command {
 	create.Flags().StringArray("member", nil, "Credential ID, optionally =priority; repeat for each account (lowest priority first)")
 	create.Flags().Bool("allow-cross-owner", false, "Explicitly consent to pooling accounts owned by different people; provider terms still apply")
 	root.AddCommand(list, get, create)
+	addPoolLifecycleCommands(root, check)
 	return root
 }
 

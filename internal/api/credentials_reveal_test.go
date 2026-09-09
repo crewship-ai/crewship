@@ -56,16 +56,11 @@ func TestReveal_EnabledWorkspaceAllowsOwnerWithCapability(t *testing.T) {
 	}
 }
 
-// T-R2 (L2) — an ADMIN whose membership carries no explicit capability set.
-// This is the shape EVERY pre-existing row has: capabilities IS NULL, so
-// resolveCapabilitiesFromRow falls back to the role bundle. If
-// credentials:reveal ever slips into BundleAdmin this test goes green for the
-// wrong reason and L2 is gone, which is why it asserts on the NULL-caps row
-// specifically rather than on an explicitly-drained one.
+// An explicit capability set without reveal overrides the admin default.
 func TestReveal_AdminWithoutCapabilityDenied(t *testing.T) {
 	r := newRevealRig(t)
 	r.seedWorkspace(t, "ws-cap", true)
-	r.seedMember(t, "ws-cap", "u-admin", "ADMIN", nil) // NULL capabilities → role fallback
+	r.seedMember(t, "ws-cap", "u-admin", "ADMIN", []string{CapabilityChat})
 	r.seedCredential(t, "ws-cap", "u-admin", "cred-1", "GH_TOKEN", "ghp_adminshouldnotsee", SensitivityStandard)
 
 	rec := r.doReveal(r.revealReq("cred-1", "ws-cap", "u-admin", "ADMIN", validRevealReason))

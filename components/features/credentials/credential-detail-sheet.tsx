@@ -898,7 +898,7 @@ export function CredentialDetailSheet({
                       canUpdate && (
                         <p className="mt-2 flex items-start gap-1.5 text-[10px] text-muted-foreground">
                           <EyeOff className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
-                          <span>{revealBlockedReason}</span>
+                          <span>{revealBlockedReason}{effectiveSensitivity !== "SEALED" && <a className="ml-1 text-primary underline" href="/settings?tab=access-secrets">Review access &amp; secrets settings</a>}</span>
                         </p>
                       )
                     )}

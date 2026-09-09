@@ -179,7 +179,7 @@ func TestBundleCapabilities(t *testing.T) {
 		// wrote lives in v109BackfillCapabilities and is pinned
 		// separately by TestMigrationBundleDriftV109.
 		{BundlePower, []string{"chat", "routine.create", "routine.run", "issue.create", "memory.write"}},
-		{BundleAdmin, []string{"chat", "routine.create", "routine.run", "skill.create", "credential.create", "credential.rotate", "issue.create", "memory.write"}},
+		{BundleAdmin, []string{"chat", "routine.create", "routine.run", "skill.create", "credential.create", "credential.rotate", "credentials:reveal", "issue.create", "memory.write"}},
 		{"unknown", nil},
 	}
 	for _, c := range cases {

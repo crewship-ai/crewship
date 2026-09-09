@@ -37,6 +37,7 @@ import { cn } from "@/lib/utils"
 
 /** Mirrors minRevealReasonLen in internal/api/credentials_reveal.go. */
 export const MIN_REVEAL_REASON_LENGTH = 20
+export const REVEAL_VISIBLE_MS = 30_000
 
 export interface RevealDialogProps {
   workspaceId: string
@@ -50,7 +51,13 @@ export interface RevealDialogProps {
   onRotateInstead: () => void
 }
 
-export function RevealDialog({
+export function RevealDialog(props: RevealDialogProps) {
+  // Unmount the secret-bearing session on close or target change. No value
+  // or pending response can follow the user to another credential/workspace.
+  return props.open ? <RevealDialogSession key={JSON.stringify([props.workspaceId, props.credentialId])} {...props} /> : null
+}
+
+function RevealDialogSession({
   workspaceId,
   credentialId,
   credentialName,
@@ -64,6 +71,17 @@ export function RevealDialog({
   const [error, setError] = React.useState<string | null>(null)
   const [value, setValue] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
+  const request = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => request.current?.abort(), [])
+
+  React.useEffect(() => {
+    if (value === null) return
+    const hide = () => { setValue(null); setReason(""); setCopied(false) }
+    const timer = window.setTimeout(hide, REVEAL_VISIBLE_MS)
+    const visibility = () => { if (document.hidden) hide() }
+    document.addEventListener("visibilitychange", visibility)
+    return () => { window.clearTimeout(timer); document.removeEventListener("visibilitychange", visibility) }
+  }, [value])
 
   // Nothing about a completed reveal survives the dialog closing — not the
   // value, not the reason that justified it.
@@ -79,6 +97,9 @@ export function RevealDialog({
   const reasonTooShort = reason.trim().length < MIN_REVEAL_REASON_LENGTH
 
   async function submit() {
+    request.current?.abort()
+    const controller = new AbortController()
+    request.current = controller
     setSubmitting(true)
     setError(null)
     try {
@@ -87,11 +108,18 @@ export function RevealDialog({
           `?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reason: reason.trim() }),
         },
       )
       const data = (await res.json().catch(() => ({}))) as { value?: string; error?: string }
+      if (controller.signal.aborted) return
+      if (document.hidden) {
+        setReason("")
+        setError("The tab was hidden. Request a new reveal to display the value.")
+        return
+      }
       if (!res.ok) {
         // The server's refusal messages name the layer that refused and what
         // to do about it ("an OWNER must enable it in Settings…"). Replacing
@@ -99,11 +127,15 @@ export function RevealDialog({
         setError(typeof data.error === "string" ? data.error : `Reveal refused (HTTP ${res.status}).`)
         return
       }
-      setValue(typeof data.value === "string" ? data.value : "")
+      if (typeof data.value !== "string") {
+        setError("Invalid reveal response — no value was displayed.")
+        return
+      }
+      setValue(data.value)
     } catch {
-      setError("Network error — nothing was revealed.")
+      if (!controller.signal.aborted) setError("Network error — nothing was revealed.")
     } finally {
-      setSubmitting(false)
+      if (!controller.signal.aborted) setSubmitting(false)
     }
   }
 
@@ -195,7 +227,7 @@ export function RevealDialog({
         ) : (
           <div className="space-y-3">
             <div className="rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2 text-[11px]">
-              Shown once. Close this dialog and it is gone — a second look needs a second reveal,
+              Hidden automatically after 30 seconds, when you leave this tab, or when you close this dialog. A second look needs a second reveal,
               with its own reason and its own audit entry.
             </div>
             <div className="rounded-md border border-white/10 bg-background px-3 py-2">
