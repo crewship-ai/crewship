@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -326,5 +327,45 @@ func TestUserModelPrivacy_NeverTouchesAnotherOperator(t *testing.T) {
 	}
 	if body := r.userModelOnDisk(t, "u2"); !strings.Contains(body, "runs billing") {
 		t.Errorf("another operator's model was destroyed: %q", body)
+	}
+}
+
+func TestIndexedUserModel_UsesWorkspaceSubjectAndConsent(t *testing.T) {
+	r := peerTestSetup(t)
+	r.seedUserModel(t, "u1", "- language: Czech")
+	ctx := context.Background()
+	body, err := memory.ReadIndexedUserModel(ctx, r.db, r.output, r.wsID, "u1")
+	if err != nil || body != "- language: Czech" {
+		t.Fatalf("indexed model: %q %v", body, err)
+	}
+	if body, err := memory.ReadIndexedUserModel(ctx, r.db, r.output, "another-workspace", "u1"); body != "" || err != nil {
+		t.Fatal("cross-workspace read")
+	}
+	if body, err := memory.ReadIndexedUserModel(ctx, r.db, r.output, r.wsID, "u2"); body != "" || err != nil {
+		t.Fatal("cross-user read")
+	}
+	if _, err := r.db.Exec("INSERT INTO user_peer_consent(workspace_id,user_id,opted_out) VALUES(?,?,1)", r.wsID, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := memory.ReadIndexedUserModel(ctx, r.db, r.output, r.wsID, "u1"); body != "" || err != nil {
+		t.Fatal("opted-out read")
+	}
+}
+func TestIndexedUserModel_RejectsSymlink(t *testing.T) {
+	r := peerTestSetup(t)
+	r.seedUserModel(t, "u1", "- language: Czech")
+	path := memory.UserModelPaths{SharedDir: filepath.Join(r.output, "crews", r.crewID, "shared", ".memory")}.ModelPath(memory.UserSlug("u1", r.wsID))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "private.md")
+	if err := os.WriteFile(target, []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := memory.ReadIndexedUserModel(context.Background(), r.db, r.output, r.wsID, "u1"); body != "" || err == nil {
+		t.Fatal("symlink accepted")
 	}
 }

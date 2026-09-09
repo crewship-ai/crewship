@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { apiFetch } from "@/lib/api-fetch"
 import { useIssuesList } from "@/hooks/use-issues-list"
 import type { Mission } from "@/lib/types/mission"
@@ -41,6 +41,21 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 describe("useIssuesList", () => {
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset()
+  })
+
+  it("preserves the crew, assignee and mission scope across paging", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(jsonResponse(200, [issue("i1")], { "X-Total-Count": "2", "X-Has-More": "true" }))
+    const { result } = renderHook(() => useIssuesList("ws-1", { crewId: "crew-2", assigneeId: "agent-2", missionType: "mission" }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.loadMore() })
+    expect(vi.mocked(apiFetch).mock.calls.length).toBeGreaterThanOrEqual(2)
+    for (const [url] of vi.mocked(apiFetch).mock.calls) {
+      const params = new URL(String(url), "http://localhost").searchParams
+      expect(params.get("workspace_id")).toBe("ws-1")
+      expect(params.get("crew_id")).toBe("crew-2")
+      expect(params.get("assignee_id")).toBe("agent-2")
+      expect(params.get("mission_type")).toBe("mission")
+    }
   })
 
   it("loads issues and reports the total from X-Total-Count", async () => {

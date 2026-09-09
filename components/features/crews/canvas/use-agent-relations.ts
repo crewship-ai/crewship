@@ -3,7 +3,7 @@
 import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
-import { readThrough } from "@/lib/stale-cache"
+import { invalidate, readThrough } from "@/lib/stale-cache"
 
 import type { AgentRecord, AgentCredRow, AgentSkillRow } from "../agent-canvas-tabs/types"
 
@@ -48,12 +48,13 @@ export interface AgentRelations {
   skills: AgentSkillRow[]
   pipelines: AgentPipelineRow[]
   loading: boolean
+  error: string | null
   refresh: () => void
 }
 
 async function fetchList<T>(url: string, signal?: AbortSignal): Promise<T[]> {
   const r = await apiFetch(url, { signal })
-  if (!r.ok) return []
+  if (!r.ok) throw new Error(`Could not load relations (${r.status})`)
   const data = await r.json()
   return Array.isArray(data) ? (data as T[]) : []
 }
@@ -64,25 +65,27 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
   const [skills, setSkills] = useState<AgentSkillRow[]>([])
   const [pipelines, setPipelines] = useState<AgentPipelineRow[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
 
-  const refresh = useCallback(() => setNonce((n) => n + 1), [])
+  const refresh = useCallback(() => { invalidate(`workspace:${workspaceId}:agent:${agentId}:`); invalidate(`workspace:${workspaceId}:pipelines`); setNonce((n) => n + 1) }, [workspaceId, agentId])
 
   useEffect(() => {
     if (!agentId) {
       setIssues([]); setCredentials([]); setSkills([]); setPipelines([])
       return
     }
+    setIssues([]); setCredentials([]); setSkills([]); setPipelines([]); setError(null)
     const controller = new AbortController()
     const ws = encodeURIComponent(workspaceId)
     const id = encodeURIComponent(agentId)
 
     const cached = {
-      issues: readThrough(`agent:${agentId}:issues`,
+      issues: readThrough(`workspace:${workspaceId}:agent:${agentId}:issues`,
         () => fetchList<AgentIssueRow>(`/api/v1/issues?workspace_id=${ws}&assignee_id=${id}`, controller.signal), TTL_MS),
-      credentials: readThrough(`agent:${agentId}:credentials`,
+      credentials: readThrough(`workspace:${workspaceId}:agent:${agentId}:credentials`,
         () => fetchList<AgentCredRow>(`/api/v1/agents/${id}/credentials?workspace_id=${ws}`, controller.signal), TTL_MS),
-      skills: readThrough(`agent:${agentId}:skills`,
+      skills: readThrough(`workspace:${workspaceId}:agent:${agentId}:skills`,
         () => fetchList<AgentSkillRow>(`/api/v1/agents/${id}/skills?workspace_id=${ws}`, controller.signal), TTL_MS),
       // Workspace-scoped, so the key deliberately omits the agent — walking a
       // roster must not re-fetch the same list once per agent.
@@ -101,17 +104,18 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
       cached.issues.fresh, cached.credentials.fresh, cached.skills.fresh, cached.pipelines.fresh,
     ]).then(([i, c, s, p]) => {
       if (controller.signal.aborted) return
-      setIssues(i.status === "fulfilled" ? i.value : [])
-      setCredentials(c.status === "fulfilled" ? c.value : [])
-      setSkills(s.status === "fulfilled" ? s.value : [])
-      setPipelines(p.status === "fulfilled" ? p.value : [])
+      setIssues(i.status === "fulfilled" ? i.value : cached.issues.value ?? [])
+      setCredentials(c.status === "fulfilled" ? c.value : cached.credentials.value ?? [])
+      setSkills(s.status === "fulfilled" ? s.value : cached.skills.value ?? [])
+      setPipelines(p.status === "fulfilled" ? p.value : cached.pipelines.value ?? [])
+      setError([i, c, s, p].some((result) => result.status === "rejected") ? "Some work and access data could not be loaded." : null)
       setLoading(false)
     })
 
     return () => controller.abort()
   }, [workspaceId, agentId, nonce])
 
-  return { issues, credentials, skills, pipelines, loading, refresh }
+  return { issues, credentials, skills, pipelines, loading, error, refresh }
 }
 
 // =============================================================================
@@ -132,7 +136,7 @@ export interface AgentTrigger {
   automatic: boolean
 }
 
-export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): AgentTrigger[] {
+export function deriveTriggers(agent: AgentRecord, _peerMessageCount: number): AgentTrigger[] {
   const triggers: AgentTrigger[] = []
 
   if (agent.schedule_cron) {
@@ -160,15 +164,6 @@ export function deriveTriggers(agent: AgentRecord, peerMessageCount: number): Ag
     })
   }
 
-  if (agent.agent_role === "LEAD" || peerMessageCount > 0) {
-    triggers.push({
-      kind: "delegation",
-      title: "Delegated by a peer",
-      subtitle: peerMessageCount > 0 ? `${peerMessageCount} waiting messages` : "no waiting message",
-      meta: "allowed",
-      automatic: true,
-    })
-  }
 
   triggers.push({
     kind: "manual",

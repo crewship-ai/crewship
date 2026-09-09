@@ -205,6 +205,7 @@ type Router struct {
 	// versioning on approve (the approve still succeeds; the
 	// canonical merge just doesn't record an audit row).
 	memoryVersionsBlobRoot string
+	memoryInventoryRoot    string
 	// hybridSearchEmbedder + hybridSearchProvider feed the
 	// MemoryHybridSearchHandler. Either may be nil; the underlying
 	// memory.HybridSearch degrades gracefully (FTS-only when

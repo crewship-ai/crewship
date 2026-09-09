@@ -342,7 +342,7 @@ func (h *RunHandler) Insights(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agg, err := journal.RunInsights(r.Context(), h.db, workspaceID, window)
+	agg, err := journal.RunInsightsScoped(r.Context(), h.db, workspaceID, window, r.URL.Query().Get("agent_id"), r.URL.Query().Get("crew_id"))
 	if err != nil {
 		replyInternalError(w, h.logger, "run insights", err)
 		return

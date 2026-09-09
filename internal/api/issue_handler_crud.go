@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -94,6 +95,34 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		"SELECT COUNT(*) FROM missions m"+where, args...).Scan(&total); err != nil {
 		internalError(w, r, h.logger, "count issues", err)
 		return
+	}
+
+	// Optional status totals share the exact scope/filter with the page.
+	if r.URL.Query().Get("counts") == "1" {
+		rows, err := h.db.QueryContext(r.Context(), "SELECT m.status, COUNT(*) FROM missions m"+where+" GROUP BY m.status", args...)
+		if err != nil {
+			internalError(w, r, h.logger, "count issue statuses", err)
+			return
+		}
+		counts := map[string]int{}
+		for rows.Next() {
+			var status string
+			var count int
+			if err := rows.Scan(&status, &count); err != nil {
+				rows.Close()
+				internalError(w, r, h.logger, "read issue counts", err)
+				return
+			}
+			counts[status] = count
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			internalError(w, r, h.logger, "read issue counts", err)
+			return
+		}
+		encoded, _ := json.Marshal(counts)
+		w.Header().Set("X-Status-Counts", string(encoded))
 	}
 
 	// Sort

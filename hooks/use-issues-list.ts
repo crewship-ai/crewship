@@ -105,6 +105,9 @@ export interface UseIssuesListResult {
 }
 
 export interface UseIssuesListOptions {
+  crewId?: string | null
+  assigneeId?: string | null
+  missionType?: string
   /** Server-side search (`?q=`, title and identifier). A change re-fetches
    *  page 1 — the board's search box used to filter only the rows it had. */
   search?: string
@@ -112,7 +115,7 @@ export interface UseIssuesListOptions {
 
 export function useIssuesList(
   workspaceId: string | null | undefined,
-  { search = "" }: UseIssuesListOptions = {},
+  { search = "", crewId, assigneeId, missionType = "issue" }: UseIssuesListOptions = {},
 ): UseIssuesListResult {
   const [issues, setIssues] = useState<Mission[]>([])
   const [loading, setLoading] = useState(false)
@@ -145,7 +148,7 @@ export function useIssuesList(
       try {
         const res = await apiFetch(
           `/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=${ISSUES_PAGE_LIMIT}&offset=${nextOffset}${
-            search ? `&q=${encodeURIComponent(search)}` : ""
+            (search ? `&q=${encodeURIComponent(search)}` : "") + (crewId ? `&crew_id=${encodeURIComponent(crewId)}` : "") + (assigneeId ? `&assignee_id=${encodeURIComponent(assigneeId)}` : "") + (missionType === "mission" ? "&mission_type=mission" : "")
           }`,
         )
         if (seq !== requestSeq.current) return false
@@ -184,7 +187,7 @@ export function useIssuesList(
         }
       }
     },
-    [workspaceId, search],
+    [workspaceId, search, crewId, assigneeId, missionType],
   )
 
   const refetch = useCallback(async () => {
@@ -218,7 +221,7 @@ export function useIssuesList(
     // changes exactly when workspaceId or search does) — those two are the
     // real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, search])
+  }, [workspaceId, search, crewId, assigneeId, missionType])
 
   const hasMore = total !== null && issues.length < total
 

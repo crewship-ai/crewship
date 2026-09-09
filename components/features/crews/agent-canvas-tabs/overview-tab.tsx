@@ -38,6 +38,7 @@ import type { AgentRecord, ChatRow, InboxSummary, PeerMessageRow, RunRow } from 
 // =============================================================================
 
 export interface OverviewTabProps {
+  accessOnly?: boolean
   workspaceId: string
   agent: AgentRecord
   crews: { id: string; name: string; slug: string }[]
@@ -77,14 +78,14 @@ function runTone(status?: string | null): DetailCellTone {
 }
 
 export function OverviewTab({
-  workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, onOpenConfig, onAgentChanged,
+  accessOnly = false, workspaceId, agent, inbox, chats, runs, peerMessages, onStop, onOpenInbox, onOpenConfig, onAgentChanged,
 }: OverviewTabProps) {
   // Which manager dialog is open, if any. A centred dialog rather than the old
   // right-hand drawer: the drawer had to be 420px for a list and 760px for an
   // editor, which is how one pattern ended up with two widths.
   const [manager, setManager] = useState<"skills" | "tools" | "channels" | null>(null)
-  const { issues, credentials, skills, pipelines } = useAgentRelations(workspaceId, agent.id)
-  const { toolkits, channels } = useAgentReach(workspaceId, agent.id)
+  const { issues, credentials, skills, pipelines, loading, error, refresh } = useAgentRelations(workspaceId, agent.id)
+  const { toolkits, channels, error: reachError, refresh: refreshReach } = useAgentReach(workspaceId, agent.id)
 
   const agentPipelines = useMemo(
     () => pipelines.filter((p) => p.author_agent_id === agent.id),
@@ -148,9 +149,9 @@ export function OverviewTab({
     ? [{
         id: "no-credential",
         icon: CONCEPT_ICON.credentials,
-        tone: "warn",
+        tone: "muted",
         title: "No credential assigned",
-        subtitle: "This agent has no workspace or crew credential — its first run will fail.",
+        subtitle: "No explicit credential grant. Check the chosen model and inherited access in Vault.",
         tag: "wait",
       }]
     : credentials.map((c): DetailCellItem => ({
@@ -198,17 +199,20 @@ export function OverviewTab({
 
   return (
     <div className="space-y-5">
+      {loading && <p role="status" className="text-sm text-muted-foreground">Loading work and access…</p>}
+      {reachError && <p role="alert" className="text-sm text-destructive">{reachError} <button className="underline" onClick={() => void refreshReach()}>Retry</button></p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error} <button className="underline" onClick={refresh}>Retry</button></p>}
       <AppearStack>
-      {inbox.count > 0 && (
+      {!accessOnly && inbox.count > 0 && (
         <BlockingNotice
-          title="Waiting on your decision."
+          title="Pending approvals"
           body={inbox.summary ?? `${inbox.count} items in this agent\u2019s inbox.`}
-          detail="Until you decide, the agent is stopped on that step."
+          detail="Review the requested approvals in Inbox."
           actions={onOpenInbox ? [{ label: "Open inbox", onClick: onOpenInbox, primary: true }] : []}
         />
       )}
 
-      {runningRun && (
+      {!accessOnly && runningRun && (
         <NowRunning
           icon={Workflow}
           label={runningRun.trigger_type ? `${runningRun.trigger_type} run` : "Running run"}
@@ -225,6 +229,7 @@ export function OverviewTab({
           Files button, Activity the header's Journal link, and Memory opens
           persona/crew settings, which is Configuration. So the lists moved
           here and the rest went to where they already existed. */}
+      {!accessOnly && (
       <RowGroup title="What it holds" note="the work it is carrying">
       <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-4">
         <DetailCell
@@ -271,7 +276,7 @@ export function OverviewTab({
           title="Credentials"
           icon={CONCEPT_ICON.credentials}
           count={credentials.length}
-          warn={credentials.length === 0 || credentials.some((c) => c.credential_status !== "ACTIVE")}
+          warn={credentials.some((c) => c.credential_status !== "ACTIVE")}
           filters={[
             { id: "all", label: "All" },
             { id: "on", label: "Active" },
@@ -283,11 +288,13 @@ export function OverviewTab({
         />
       </div>
       </RowGroup>
+      )}
 
       {/* What it can do. Each card's footer opens ONLY its own manager, in a
           centred dialog. They used to be one "Manage skills" drawer containing
           all four managers at once, which is why nothing in it was findable. */}
-      <RowGroup title="What it can do" note="its abilities and where it reports">
+      <RowGroup title="Capabilities" note="skills, tools and delivery channels">
+      <a className="text-sm text-primary inline-block mb-3" href="/credentials">Manage credentials in Vault ↗</a>
       <div className="grid gap-3.5 @xl:grid-cols-2 @6xl:grid-cols-3">
         <DetailCell
           order={4}
@@ -326,6 +333,7 @@ export function OverviewTab({
       </div>
       </RowGroup>
 
+      {!accessOnly && (
       <RowGroup title="What it has been up to" note="on its own, and with you">
       <div className="grid gap-3.5 @xl:grid-cols-2">
         <DetailCell
@@ -377,8 +385,8 @@ export function OverviewTab({
               id: m.id ?? String(idx),
               icon: AtSign,
               tone: "purple",
-              title: m.from_agent_name ?? m.from_agent_slug ?? "peer",
-              subtitle: m.preview ?? "",
+              title: m.direction === "outgoing" ? `To ${m.to_agent_name ?? m.to_agent_slug ?? "peer"}` : `From ${m.from_agent_name ?? m.from_agent_slug ?? "peer"}`,
+              subtitle: m.response ?? m.question ?? "",
               meta: m.created_at ? new Date(m.created_at).toLocaleDateString() : "",
               tag: "all",
             }))}
@@ -388,11 +396,12 @@ export function OverviewTab({
         )}
       </div>
       </RowGroup>
+      )}
 
-      {issues.length === 0 && agentPipelines.length === 0 && (runs?.length ?? 0) === 0 && (
+      {!accessOnly && !loading && !error && issues.length === 0 && agentPipelines.length === 0 && (runs?.length ?? 0) === 0 && (
         <p className="type-row flex items-center gap-2 px-1 text-muted-foreground-soft">
           <Bot className="h-3.5 w-3.5" />
-          This agent has done nothing yet. Assign it an issue or start it from chat.
+          Assign an issue or start a conversation to give this agent work.
         </p>
       )}
 
@@ -415,7 +424,7 @@ export function OverviewTab({
             agentId={agent.id}
             agentSlug={agent.slug}
             workspaceId={workspaceId}
-            onChange={onAgentChanged}
+            onChange={() => { refresh(); onAgentChanged() }}
           />
         )}
         {manager === "tools" && (

@@ -387,6 +387,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// surfaces use so the suggest endpoint stays consistent with
 	// other agent-initiated actions.
 	persona := NewPersonaHandler(r.db, r.logger, r.outputBasePath, r.PolicyResolver())
+	persona.workspaceMemoryRoot = r.memoryInventoryRoot
+	r.mux.Handle("GET /api/v1/agents/{agentId}/memory", authed(wsCtx(http.HandlerFunc(persona.AgentMemoryInventory))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/memory", authed(wsCtx(http.HandlerFunc(persona.CrewMemoryInventory))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersona))))
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/persona", roleCreate, persona.PutAgentPersona)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/persona", roleCreate, persona.DeleteAgentPersona)
@@ -564,6 +567,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// And the other direction: an agent created on, or moved to, an adapter
 	// the crew's image was not verified for rebuilds the crew.
 	agents.SetProvisioner(provisioning)
+	crewTmpl.SetProvisioner(provisioning)
 	// ContainerStart is the one EnsureCrewRuntime caller with no agent run
 	// behind it to report the activity, so it reports its own. Guarded on
 	// non-nil: assigning a nil *Orchestrator to the interface would make a

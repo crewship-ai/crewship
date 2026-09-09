@@ -104,6 +104,11 @@ func (h *PeerCardHandler) resolveAgent(r *http.Request, agentID string) (crewID,
 // GET /api/v1/agents/{agentId}/peers
 func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
+	u := UserFromContext(r.Context())
+	if u == nil || u.ID == "" {
+		replyError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 	if wsID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace context missing")
@@ -127,9 +132,9 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, user_id, user_slug, bytes, created_at, updated_at
 		FROM peer_cards
-		WHERE agent_id = ? AND workspace_id = ?
+		WHERE agent_id = ? AND workspace_id = ? AND user_id = ?
 		ORDER BY updated_at DESC
-	`, agentID, wsID)
+	`, agentID, wsID, u.ID)
 	if err != nil {
 		h.logger.Warn("list peer_cards", "err", err)
 		replyError(w, http.StatusInternalServerError, "list peers")
@@ -161,6 +166,10 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 //
 // GET /api/v1/agents/{agentId}/peers/{userId}
 func (h *PeerCardHandler) GetAgentPeer(w http.ResponseWriter, r *http.Request) {
+	if u := UserFromContext(r.Context()); u == nil || u.ID == "" || u.ID != r.PathValue("userId") {
+		replyError(w, http.StatusForbidden, "personal cards are available only to their subject")
+		return
+	}
 	if !h.requireStorage(w) {
 		return
 	}
@@ -225,6 +234,10 @@ func (h *PeerCardHandler) GetAgentPeer(w http.ResponseWriter, r *http.Request) {
 //
 // DELETE /api/v1/agents/{agentId}/peers/{userId}
 func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request) {
+	if u := UserFromContext(r.Context()); u == nil || u.ID == "" || u.ID != r.PathValue("userId") {
+		replyError(w, http.StatusForbidden, "personal cards are available only to their subject")
+		return
+	}
 	if !h.requireStorage(w) {
 		return
 	}

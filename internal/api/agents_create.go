@@ -14,16 +14,18 @@ import (
 )
 
 type createAgentRequest struct {
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	CrewID      *string `json:"crew_id"`
-	Description *string `json:"description"`
-	RoleTitle   *string `json:"role_title"`
-	AgentRole   string  `json:"agent_role"`
-	LeadMode    *string `json:"lead_mode"`
-	CLIAdapter  string  `json:"cli_adapter"`
-	LLMProvider *string `json:"llm_provider"`
-	LLMModel    *string `json:"llm_model"`
+	SuggestedPrompts *string `json:"suggested_prompts"`
+	AskForms         *string `json:"ask_forms"`
+	Name             string  `json:"name"`
+	Slug             string  `json:"slug"`
+	CrewID           *string `json:"crew_id"`
+	Description      *string `json:"description"`
+	RoleTitle        *string `json:"role_title"`
+	AgentRole        string  `json:"agent_role"`
+	LeadMode         *string `json:"lead_mode"`
+	CLIAdapter       string  `json:"cli_adapter"`
+	LLMProvider      *string `json:"llm_provider"`
+	LLMModel         *string `json:"llm_model"`
 	// Deprecated: see agentResponse.SystemPrompt in agents.go — PR-Z
 	// Z.3 / PR-E migrate this to the PERSONA.md memory tier. Accepted
 	// in create requests for now; new clients should set PERSONA via
@@ -52,6 +54,24 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
+	}
+
+	var suggested, forms any
+	if req.SuggestedPrompts != nil {
+		var err error
+		suggested, _, err = suggestedPromptsPatch(*req.SuggestedPrompts)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if req.AskForms != nil {
+		var err error
+		forms, _, err = askFormsPatch(*req.AskForms)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	// Patch M5: per-crew role elevation gate. The pre-M5 check was just
@@ -244,12 +264,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
 			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt_legacy,
 			avatar_seed, avatar_style, timeout_seconds, tool_profile, memory_enabled,
-			created_by_user_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_by_user_id, created_at, updated_at, suggested_prompts, ask_forms)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, req.CrewID, workspaceID, req.Name, req.Slug, req.Description, req.RoleTitle,
 		req.AgentRole, leadMode, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
 		req.AvatarSeed, req.AvatarStyle, req.TimeoutSeconds, req.ToolProfile, memEnabled,
-		createdByUserID, now, now)
+		createdByUserID, now, now, suggested, forms)
 	if err != nil {
 		// A UNIQUE violation here is one of two concurrency races that
 		// slipped past the check-then-act SELECTs above:

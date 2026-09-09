@@ -53,6 +53,7 @@ const WS = "ws_123"
 function fullState(overrides: Partial<WizardState> = {}): WizardState {
   return {
     ...INITIAL_STATE,
+    provider: "OPENAI",
     name: "Engineering",
     slug: "engineering",
     description: "Backend services",
@@ -210,6 +211,7 @@ describe("submitCrew — browse (template) mode", () => {
     expect(fetcher.calls[0].body).toEqual({
       crew_name: "Engineering",
       crew_slug: "engineering",
+      llm_provider: "OPENAI", cli_adapter: "CODEX_CLI", llm_model: expect.any(String),
     })
 
     // Call 2: PATCH /api/v1/crews/{id} with identity + runtime overrides
@@ -239,6 +241,11 @@ describe("submitCrew — browse (template) mode", () => {
     }))
 
     expect(fetcher.calls[0].url).toContain("ops%2Fteam/deploy")
+  })
+
+  it("refuses a template deployment before a provider has been chosen", async () => {
+    await expect(submitCrew(WS, fullState({ mode: "browse", pickedTemplateSlug: "software-development", provider: null }))).rejects.toThrow("Choose a provider")
+    expect(fetcher.calls).toHaveLength(0)
   })
 
   it("rejects with helpful error when no template was picked", async () => {

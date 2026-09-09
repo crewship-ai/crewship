@@ -1030,6 +1030,12 @@ const insightUnknownKey = "unknown"
 // testable. Crew rollups and agent display names are added by the API layer;
 // here ByAgent is keyed on the raw agent_id.
 func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window RunInsightsWindow) (RunInsightsResult, error) {
+	return RunInsightsScoped(ctx, db, workspaceID, window, "", "")
+}
+
+// RunInsightsScoped filters before aggregation and before the row cap. Crew
+// scope uses recorded run ownership, so moving an agent does not move history.
+func RunInsightsScoped(ctx context.Context, db *sql.DB, workspaceID string, window RunInsightsWindow, agentID, crewID string) (RunInsightsResult, error) {
 	if workspaceID == "" {
 		return RunInsightsResult{}, fmt.Errorf("journal: RunInsights requires workspace_id")
 	}
@@ -1052,10 +1058,17 @@ func RunInsights(ctx context.Context, db *sql.DB, workspaceID string, window Run
 	// predicate non-sargable and forced a full scan. Formatting both sides
 	// identically removes the need for the function wrap entirely.
 	cutoff := formatSinceBound(time.Now().UTC().Add(-window.duration()))
-	cte, cteArgs := runAggregatesCTE(
-		[]string{"started_at", "finished_at", "terminal_type", "agent_id",
-			"started_payload", "terminal_payload"},
-		"workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND ts >= ?")
+	where := "workspace_id = ? AND trace_id IS NOT NULL AND entry_type LIKE 'run.%' AND ts >= ?"
+	scopeArgs := []any{}
+	if agentID != "" {
+		where += " AND trace_id IN (SELECT trace_id FROM journal_entries WHERE workspace_id = ? AND entry_type = 'run.started' AND agent_id = ?)"
+		scopeArgs = append(scopeArgs, workspaceID, agentID)
+	}
+	if crewID != "" {
+		where += " AND trace_id IN (SELECT trace_id FROM journal_entries WHERE workspace_id = ? AND entry_type = 'run.started' AND crew_id = ?)"
+		scopeArgs = append(scopeArgs, workspaceID, crewID)
+	}
+	cte, cteArgs := runAggregatesCTE([]string{"started_at", "finished_at", "terminal_type", "agent_id", "started_payload", "terminal_payload"}, where)
 	q := cte + `
 SELECT started_at, finished_at, terminal_type, agent_id, started_payload, terminal_payload
 FROM run_aggregates
@@ -1069,6 +1082,7 @@ LIMIT ?`
 	args = append(args, cteArgs...)
 	args = append(args, workspaceID)
 	args = append(args, cutoff)
+	args = append(args, scopeArgs...)
 	args = append(args, maxInsightRows+1)
 
 	rows, err := db.QueryContext(ctx, q, args...)

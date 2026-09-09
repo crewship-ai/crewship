@@ -39,6 +39,7 @@ type ProvisionJob struct {
 	Error       string
 	CachedImage string
 	ConfigHash  string
+	adapters    []string // adapter snapshot used by this build; guarded by mu
 
 	Step      int       // 1-based current milestone
 	Total     int       // total milestones; 0 until the first progress event
@@ -514,6 +515,7 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 	go func() {
 		defer finish()
 		h.runProvisioning(crewID, workspaceID, effectiveCfg, miseCfg.String, runtimeImage.String, job)
+		h.prepareLatestCrew(crewID, workspaceID, effectiveCfg, miseCfg.String, runtimeImage.String, job)
 	}()
 	h.logger.Info("provisioning triggered", "crew_id", crewID)
 	return EnqueueResult{Started: true}, nil
@@ -989,6 +991,9 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 		h.markJobFailed(job, workspaceID, fmt.Errorf("read crew agents: %w", err))
 		return
 	}
+	h.mu.Lock()
+	job.adapters = append([]string(nil), adapters...)
+	h.mu.Unlock()
 	cliPlan, err := devcontainer.EnsureAdapterCLIs(cfg, miseJSON, adapters)
 	if err != nil {
 		h.markJobFailed(job, workspaceID, err)
@@ -1297,3 +1302,45 @@ func isEmptyRequirements(r devcontainer.AggregatedRequirements) bool {
 // the restart endpoint always targets that exact runtime. If we ever support
 // multiple container providers per workspace, this needs to round-trip
 // through the orchestrator.
+
+// prepareLatestCrew closes the window where an agent or environment changes
+// while a build is running. EnqueueForCrew coalesces those requests, so after
+// success check the live configuration and adapter coverage before stopping.
+// runProvisioning has released its rate-limit slot when this is called.
+func (h *ProvisioningHandler) prepareLatestCrew(crewID, workspaceID, builtConfig, builtMise, builtImage string, job *ProvisionJob) {
+	h.mu.RLock()
+	completed := job.Status == "completed"
+	builtAdapters := append([]string(nil), job.adapters...)
+	h.mu.RUnlock()
+	if !completed {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	changed, err := crewPreparationChanged(ctx, h.db, crewID, workspaceID, builtConfig, builtMise, builtImage, builtAdapters)
+	if err != nil {
+		h.logger.Warn("check latest crew preparation", "crew_id", crewID, "error", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	if _, err := h.EnqueueForCrew(ctx, crewID, workspaceID); err != nil {
+		h.logger.Warn("prepare updated crew after build", "crew_id", crewID, "error", err)
+	}
+}
+
+func crewPreparationChanged(ctx context.Context, db *sql.DB, crewID, workspaceID, builtConfig, builtMise, builtImage string, builtAdapters []string) (bool, error) {
+	var cfg, mise, image sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT devcontainer_config, mise_config, runtime_image FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, crewID, workspaceID).Scan(&cfg, &mise, &image); err != nil {
+		return false, err
+	}
+	if database.EffectiveCrewDevcontainerConfig(cfg.String, cfg.Valid) != builtConfig || mise.String != builtMise || image.String != builtImage {
+		return true, nil
+	}
+	adapters, err := crewAgentAdapters(ctx, db, crewID)
+	if err != nil {
+		return false, err
+	}
+	return strings.Join(adapters, ",") != strings.Join(builtAdapters, ","), nil
+}

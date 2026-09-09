@@ -162,8 +162,16 @@ func (h *UserPeerPrivacyHandler) GetMyUserModel(w http.ResponseWriter, r *http.R
 		payload["bytes"] = row.bytes
 		payload["created_at"] = row.created
 		payload["updated_at"] = row.updated
+		if h.outputBasePath == "" {
+			replyError(w, http.StatusServiceUnavailable, "personal memory storage unavailable")
+			return
+		}
 		if h.outputBasePath != "" {
-			body, _ := memory.LoadUserModelBySlug(userModelPathsFor(h.outputBasePath, row.crewID), row.userSlug)
+			body, err := memory.LoadUserModelBySlug(userModelPathsFor(h.outputBasePath, row.crewID), row.userSlug)
+			if err != nil || (body == "" && row.bytes > 0) {
+				replyError(w, http.StatusServiceUnavailable, "saved preferences could not be read")
+				return
+			}
 			payload["content"] = body
 			payload["facts"] = parseUserModelFacts(body)
 		}

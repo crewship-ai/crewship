@@ -74,14 +74,14 @@ function renderTab() {
 }
 
 describe("overview Credentials cell — empty-state warning (#2169)", () => {
-  it("warns when the agent has no credential at all", () => {
+  it("does not infer a runtime failure from no explicit credentials", () => {
     credentials = []
     renderTab()
     const badges = screen.getAllByTestId("cell-badge")
     // One badge per DetailCell on the page; the Credentials one is the only
     // one expected to warn in this fixture (no issues/skills/etc. to trip
     // any other cell's own warn logic).
-    expect(badges.some((b) => b.getAttribute("data-warn") === "true")).toBe(true)
+    expect(badges.some((b) => b.getAttribute("data-warn") === "true")).toBe(false)
     expect(screen.getByText(/no credential/i)).toBeInTheDocument()
   })
 

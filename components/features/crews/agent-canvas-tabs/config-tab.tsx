@@ -19,6 +19,7 @@ import {
   ConfigCards, ConfigPresets, ConfigReadOnly, ConfigRow, ConfigSelect, ConfigSwitch, ConfigText,
 } from "../canvas/config-field"
 import { ConfigModel } from "../canvas/config-model"
+import { AskFormsBuilder } from "../ask-forms-builder"
 import { PaysWithRow } from "./pays-with-row"
 import type { AgentRecord } from "./types"
 
@@ -103,7 +104,8 @@ const textareaBase =
  * refusal is rarely how anyone finds out. Nothing is blocked client-side —
  * a field that silently won't submit is worse than a specific error.
  */
-function SuggestedPromptsField({ value, onSave }: {
+export function SuggestedPromptsField({ value, onSave, draftMode = false }: {
+  draftMode?: boolean
   value: string
   onSave: (next: string) => Promise<void> | void
 }) {
@@ -125,11 +127,11 @@ function SuggestedPromptsField({ value, onSave }: {
   const tooMany = prompts.length > MAX_SUGGESTED_PROMPTS
 
   async function commit() {
-    if (local === server.current) return
+    if (draftMode || local === server.current) return
     try {
       await onSave(local)
       server.current = local
-      toast.success("Suggested questions saved")
+      if (!draftMode) toast.success("Suggested questions saved")
     } catch (err) {
       setLocal(server.current)
       toast.error(err instanceof Error ? err.message : "Could not save")
@@ -149,7 +151,7 @@ function SuggestedPromptsField({ value, onSave }: {
           value={local}
           rows={5}
           placeholder={"What shipped this week?\nWhich invoices are overdue?\nDraft a reply to the last email"}
-          onChange={(e) => setLocal(e.target.value)}
+          onChange={(e) => { setLocal(e.target.value); if (draftMode) void onSave(e.target.value) }}
           onBlur={() => void commit()}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
@@ -197,7 +199,7 @@ function SuggestedPromptsField({ value, onSave }: {
  * a {{placeholder}} that names no field, which is caught here at SAVE time so
  * the person talking to the agent never meets a broken template.
  */
-function AskFormsField({ value, onSave }: {
+export function AskFormsField({ value, onSave }: {
   value: string
   onSave: (next: string) => Promise<void> | void
 }) {
@@ -301,7 +303,7 @@ export interface ConfigTabProps {
   onSelectCrew: (slug: string | null) => void
 }
 
-export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps) {
+export function ConfigTab({ agent, crews, patch, onSelectCrew, supplementalOnly = false, omitBilling = false }: ConfigTabProps & { supplementalOnly?: boolean; omitBilling?: boolean }) {
   const isLead = agent.agent_role === "LEAD"
   const webhookSet = (agent as AgentRecord & { webhook_secret_set?: boolean }).webhook_secret_set ?? false
   const tools = agent.cli_tools ?? []
@@ -317,6 +319,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
     // the label drifts one way, the control the other, and the pair stops
     // reading as one thing. That was the gap Pavel spotted in Identity.
     <div className="[columns:3_24rem] gap-4 max-w-[105rem] [&>*]:mb-4 [&>*]:break-inside-avoid">
+      {!supplementalOnly && (
       <Appear order={0}>
         <DetailCard bare icon={Bot} title="Identity">
           <ConfigText label="Name" value={agent.name} onSave={(v) => patch({ name: v })} />
@@ -370,7 +373,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           />
         </DetailCard>
       </Appear>
+      )}
 
+      {!supplementalOnly && (
       <Appear order={1}>
         <DetailCard bare icon={Settings2} title="Model and run">
           <ConfigSelect
@@ -414,7 +419,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           />
         </DetailCard>
       </Appear>
+      )}
 
+      {!supplementalOnly && (
       <Appear order={2}>
         <DetailCard
           bare icon={Wrench} title="What it may do" subtitle="tool_profile"
@@ -447,6 +454,9 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           )}
         </DetailCard>
       </Appear>
+      )}
+
+      {supplementalOnly && !omitBilling && <section className="space-y-2"><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p><PaysWithRow workspaceId={agent.workspace_id} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} /></section>}
 
       {/* Scheduling an agent directly is a second cron alongside routines —
           internal/scheduler/scheduler.go registers one entry per agent with
@@ -515,6 +525,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           footer="Shown only on an empty conversation. Write the questions this agent is actually good at — the ones you would otherwise type every morning."
         >
           <SuggestedPromptsField
+            draftMode={supplementalOnly}
             value={(agent as AgentRecord & { suggested_prompts?: string | null }).suggested_prompts ?? ""}
             onSave={(v) => patch({ suggested_prompts: v })}
           />
@@ -537,10 +548,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
             <code className="font-mono text-foreground/80">crewship agent ask-preview {agent.slug} &lt;form-id&gt; --var k=v</code>.
           </>}
         >
-          <AskFormsField
-            value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""}
-            onSave={(v) => patch({ ask_forms: v })}
-          />
+          {supplementalOnly ? <AskFormsBuilder value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""} onChange={(value) => { void patch({ ask_forms: value }) }} /> : <AskFormsField value={(agent as AgentRecord & { ask_forms?: string | null }).ask_forms ?? ""} onSave={(v) => patch({ ask_forms: v })} />}
         </DetailCard>
       </Appear>
 
@@ -548,6 +556,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           people actually read, so it takes a column of its own instead of
           being squeezed beside a switch. It stays inside the same bounded
           block — 800 characters of mono set 2000px wide is unreadable. */}
+      {!supplementalOnly && (
       <Appear order={7}>
         <SystemPromptEditor
           value={agent.system_prompt}
@@ -555,6 +564,7 @@ export function ConfigTab({ agent, crews, patch, onSelectCrew }: ConfigTabProps)
           updatedHint={`updated ${new Date(agent.updated_at).toLocaleDateString()}`}
         />
       </Appear>
+      )}
 
       {AGENT_SELF_LEARNING && (
         <Appear order={8}>

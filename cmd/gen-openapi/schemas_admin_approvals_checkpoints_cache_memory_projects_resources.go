@@ -165,6 +165,15 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	_ = skill
 	_ = skillDetail
 
+	memoryInventory := object(map[string]any{
+		"source": str(), "peer_generation": str(),
+		"scopes": map[string]any{"type": "object", "additionalProperties": str()},
+		"documents": array(object(map[string]any{
+			"id": str(), "name": str(), "scope": str(), "state": str(), "content": str(),
+			"bytes":    map[string]any{"type": "integer", "nullable": true},
+			"revision": str(), "updated_at": str(), "history_path": str(),
+		}, "id", "name", "scope", "state", "bytes")),
+	}, "source", "peer_generation", "scopes", "documents")
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/stats":      {Response: stats},
 		"GET /api/v1/admin/users":      {Response: array(adminUser)},
@@ -203,6 +212,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"PATCH /api/v1/admin/memory/config":                        {Request: object(map[string]any{"versions_retention_days": integer()}), Response: memoryConfig},
 		"GET /api/v1/admin/memory/versions/{id}/content":           {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"text/markdown", "application/octet-stream"}},
 		"GET /api/v1/memory/health":                                {Response: memoryHealth},
+		"GET /api/v1/agents/{agentId}/memory":                      {Response: memoryInventory},
+		"GET /api/v1/crews/{crewId}/memory":                        {Response: memoryInventory},
 		"GET /api/v1/memory/versions":                              {Response: memoryVersionList},
 		"GET /api/v1/memory/versions/{sha}":                        {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"application/octet-stream"}},
 		"POST /api/v1/memory/versions/{sha}/restore":               {Request: object(map[string]any{"path": str(), "canonical_path": str(), "tier": str()})},

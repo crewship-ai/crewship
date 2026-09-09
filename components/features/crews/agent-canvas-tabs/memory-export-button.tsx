@@ -37,13 +37,14 @@ export function MemoryExportButton({ crewId, agentSlug, workspaceId }: MemoryExp
       const q = new URLSearchParams({ format: "zip", crew_id: crewId })
       if (agentSlug) q.set("agent_slug", agentSlug)
       const headers: Record<string, string> = {}
-      if (workspaceId) headers["X-Workspace-Id"] = workspaceId
+      if (workspaceId) { headers["X-Workspace-Id"] = workspaceId; q.set("workspace_id", workspaceId) }
 
       const res = await apiFetch(`/api/v1/memory/export?${q.toString()}`, { headers })
       if (!res.ok) {
         // An empty scope is not a failure — it is an agent that has not
         // written anything yet, and saying so beats a red error.
-        setError(res.status === 404 ? "No memory to export yet." : `Export failed (${res.status}).`)
+        const body = await res.json().catch(() => null) as { error?: string } | null
+        setError(res.status === 404 && body?.error === "this scope holds no memory yet" ? "No saved notes in this scope yet. Export becomes available after notes are saved." : res.status === 403 ? "You do not have permission to export this memory." : `Export failed (${res.status}). Try again or contact your workspace administrator.`)
         return
       }
       const blob = await res.blob()
@@ -54,7 +55,8 @@ export function MemoryExportButton({ crewId, agentSlug, workspaceId }: MemoryExp
       document.body.appendChild(a)
       a.click()
       a.remove()
-      URL.revokeObjectURL(url)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      setError("Download started.")
     } catch {
       setError("Export failed — the server could not be reached.")
     } finally {
@@ -74,7 +76,7 @@ export function MemoryExportButton({ crewId, agentSlug, workspaceId }: MemoryExp
         title="Download this memory as a portable OKF bundle"
       >
         <Download className="h-3.5 w-3.5" />
-        {busy ? "Exporting…" : "Export"}
+        {busy ? "Exporting…" : agentSlug ? "Export agent notes" : "Export crew notes"}
       </Button>
       {/* role=status + aria-live: the outcome of a download is otherwise
           invisible to a screen reader, which sees only a button that

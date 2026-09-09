@@ -67,7 +67,9 @@ export function useEntityFetch<T>({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const wsParam = `workspace_id=${workspaceId}`
+  const generation = useRef(0)
+  const cancelPending = useCallback(() => { generation.current++ }, [])
+  const wsParam = `workspace_id=${encodeURIComponent(workspaceId)}`
   // Resolve the slug through the server's search rather than scanning the
   // list's first page: the list is windowed (100 rows by default), so an
   // agent or crew past the window used to be "not found" on its own deep
@@ -77,6 +79,7 @@ export function useEntityFetch<T>({
   const listFull = listUrl.includes("?") ? `${listUrl}&${listParams}` : `${listUrl}?${listParams}`
 
   const refetch = useCallback(async (signal?: AbortSignal) => {
+    const request = ++generation.current
     try {
       const listRes = await fetchWithRetry(listFull, { signal })
       if (!listRes.ok) throw new Error(`${listErrorMessage} (${listRes.status})`)
@@ -88,15 +91,15 @@ export function useEntityFetch<T>({
       const detailRes = await fetchWithRetry(detailFull, { signal })
       if (!detailRes.ok) throw new Error(`${detailErrorMessage} (${detailRes.status})`)
       const detail: T = await detailRes.json()
-      if (!signal?.aborted) {
+      if (!signal?.aborted && request === generation.current) {
         setEntity(detail)
         setError(null)
       }
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return
-      setError(err instanceof Error ? err.message : detailErrorMessage)
+      if (!signal?.aborted && request === generation.current) setError(err instanceof Error ? err.message : detailErrorMessage)
     } finally {
-      if (!signal?.aborted) setLoading(false)
+      if (!signal?.aborted && request === generation.current) setLoading(false)
     }
   // listFull / detailUrl are derived from the inputs already in deps.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -104,10 +107,12 @@ export function useEntityFetch<T>({
 
   useEffect(() => {
     setLoading(true)
+    setEntity(null)
+    setError(null)
     const controller = new AbortController()
     void refetch(controller.signal)
-    return () => controller.abort()
-  }, [slug, refetch])
+    return () => { controller.abort(); cancelPending() }
+  }, [slug, refetch, cancelPending])
 
   return { entity, setEntity, loading, error, refetch }
 }

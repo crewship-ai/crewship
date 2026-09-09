@@ -1073,6 +1073,7 @@ required path parameter and workspace context scopes the lookup.
 | `approvals_pending` | `int` | Inbox waitpoint items awaiting this agent's decision. |
 | `assignments_open` | `int` | Tasks routed to this agent that have not reached a terminal state. |
 | `escalations_open` | `int` | Peer conversations escalated up the lead chain that still target this agent. |
+| `unavailable` | `string[]`, optional | Component reads that failed (`approvals`, `assignments`, `escalations`, `peers`, `cost`). Do not present their default values as measured zero. |
 | `peer_messages` | `array` | Last N peer messages (both directions). `direction` is `"incoming"` or `"outgoing"`; `response` and `duration_ms` are populated only for resolved exchanges. |
 | `cost_usd_this_month` | `float` | Sum of `cost_ledger.cost_usd` for this agent in the current calendar month. `0` when the `cost_ledger` table is absent (older workspaces). |
 | `llm_calls_this_month` | `int` | Count of `cost_ledger` rows for this agent in the current month. |
@@ -1087,18 +1088,19 @@ required path parameter and workspace context scopes the lookup.
 
 ## Agent Peer Cards
 
-Per-`(agent, user)` markdown notes produced by the `PeerCardSync`
-routine — the agent's own "what I know about this person" file.
-These endpoints are **operator-facing**: the cards live on disk
+Per-`(agent, user)` markdown notes — the agent's own "what I know about this person" file.
+Automatic `PeerCardSync` generation is currently unavailable; existing notes
+remain readable. These endpoints are **self-only**: the cards live on disk
 under `{outputBase}/crews/{crewID}/agents/{slug}/.memory/peers/`,
 and every read/write/delete writes a `peer_card_audit` row for GDPR
 SAR coverage.
 
 The user-facing surface (view-mine / opt-out / delete-mine) lives
 under `/api/v1/users/me/peer-cards` and shares the same disk + DB
-primitives — these agent-flavor endpoints exist so an operator can
-clean up cards on behalf of a user (compliance ticket, leaver
-workflow) or inspect what an agent has been writing about people.
+primitives. The agent-specific list returns only the signed-in user's row.
+Read and delete require `{userId}` to equal that user's ID, including for
+workspace owners and administrators; another subject returns `403`.
+Administrator compliance operations use their explicit admin endpoints.
 
 The `{userId}` path parameter is the raw `user_id`; the server
 derives the `user_slug` via `memory.UserSlug` so the URL stays

@@ -54,7 +54,7 @@ func crewAgentAdapters(ctx context.Context, db *sql.DB, crewID string) ([]string
 
 // crewImageCoversAdapter reports whether the crew's cached image was verified
 // to run the adapter's CLI. built is false when the crew has no cached image
-// yet — the first build reads the agents itself, so there is nothing to do.
+// yet — creation must enqueue that first build too.
 // An image built before adapter verification existed records no binaries and
 // therefore never covers anything: one rebuild brings it under the guarantee.
 func crewImageCoversAdapter(ctx context.Context, db *sql.DB, crewID, workspaceID, adapter string) (built, covered bool, err error) {
@@ -137,12 +137,12 @@ func (h *AgentHandler) ensureCrewImageHasAdapter(ctx context.Context, crewID, wo
 	if h.provisioner == nil || crewID == "" || adapter == "" {
 		return
 	}
-	built, covered, err := crewImageCoversAdapter(ctx, h.db, crewID, workspaceID, adapter)
+	_, covered, err := crewImageCoversAdapter(ctx, h.db, crewID, workspaceID, adapter)
 	if err != nil {
 		h.logger.Warn("adapter coverage check failed; not rebuilding", "crew_id", crewID, "adapter", adapter, "error", err)
 		return
 	}
-	if !built || covered {
+	if covered {
 		return
 	}
 	cli, _ := devcontainer.AdapterCLIFor(adapter)

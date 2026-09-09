@@ -1,0 +1,97 @@
+# Crews & Agents — vizuální sjednocení a provozní opravy
+
+Navazuje na [schválený vizuální návrh](crews-vivid-design-2026-09-08.md) a první implementaci Crews workspace. Práce pouze v instanci Dev2, issue #2463, PR #2464.
+
+## Výsledné chování
+
+- Agent a crew používají DashboardCard, KpiCard a StatusDonut ze stejného základu jako Routines. Ikonové hlavičky, barevné akcenty, větší původní avatar agenta, avatarové členství týmu, graf rozdělení skutečných výsledků běhů. Graf se nezobrazuje bez dat; zrušené běhy jsou výslovně vyjmuté. Nevznikly umělé časové řady ani procenta průběhu obecného agenta.
+- Katalog má původní CrewIcon, původní avatary agentů, účel, karty/seznam, serverové hledání názvu/slugu/účelu, řazení nově vytvořené nebo A–Z a stránky po 24. Stav práce se odvozuje jen ze známých agentů; neúplný vzorek nemůže prohlásit celou crew za nečinnou.
+- Souhrn Assigned & connected ukazuje poslední přiřazené issues/missions, rutiny vlastněné crew, dostupné credentialy a efektivní integrace agenta nebo integrace crew. Rutiny nejsou nepravdivě vydávány za přímé přiřazení agentovi. Metadata credentialů neobsahují jejich hodnoty. Úplné seznamy zůstávají v původních modulech. Samostatné opakování načtení při výpadku, cache 30 s omezuje počet požadavků při procházení agentů.
+- Memory obsahuje vizuální rozcestí znalostí agenta, crew a workspace, automaticky otevřený první dokument vybraného scope a oddělené About me. Prázdný stav nabízí chat a výslovně označenou ukázku, která se nikam nezapisuje. Osobnost a instrukce zůstávají v Edit.
+- Refresh obnovuje aktuální soubory, historii i všechny tři osobní zdroje a hlásí dokončení/selhání. Export jmenuje vybraný scope (agent/crew), předává workspace v query i hlavičce, rozlišuje prázdný scope, odmítnutí a skutečnou chybu; po předání souboru potvrdí zahájení stahování.
+- Společné Create/Edit formuláře mají ikonové navigační zkratky, oddělené skupiny polí a viditelnou identitu. Zkratky posouvají stávající formulář, jeho draft zůstává zachovaný; pokročilé nastavení lze rozbalit přímo. Crew používá stejný vizuální rytmus a ikonový vstup do prostředí.
+- Neimplementovaný restart zmizel z agenta. Crew administration obsahuje skutečný POST restart-agents, potvrzení sdíleného dopadu, průběh a výsledek. API recykluje kontejner a nový vzniká až při dalším agentovém běhu; UI netvrdí, že jej okamžitě spustilo.
+
+## Opravy ověřené proti skutečnému API
+
+Před nasazením backendové opravy vracel Kodi inbox `unavailable:["cost"]`. Dotaz používal neexistující `cost_ledger.created_at`; používá nyní `ts` a přesný měsíční začátek ve formátu ledgeru. Regresní test zahrnuje první okamžik měsíce a vyloučení starých záznamů.
+
+Živé inventory Kodiho a Copy site vracelo prázdnou agent/crew paměť a nedostupný workspace scope. Export odpověděl 404 s `this scope holds no memory yet`. Nešlo o ztracený stažený soubor, ale o chybějící obsah. Ukázka v UI řeší prohlédnutí designu bez vytváření smyšlených osobních profilů.
+
+Reálné kliknutí na kartu crew odhalilo neaktualizovaný výběr při Next Link navigaci: existující výběr používá shallow history a vlastní lokální stav. Karty a týmové odkazy nyní volají stejné výběrové callbacky jako sidebar a zachovávají odkaz pro otevření v novém panelu.
+
+## Review první fáze
+
+Opraveny platné připomínky: cache po invalidaci nepřepisuje novější data starším požadavkem, relations zachovávají známou cache při chybě, historická peer komunikace už netvoří automatický delegation trigger, osobní seznamy tolerují chybějící pole, původní PersonaPanel má klíč identity bránící přenosu pozdní odpovědi, /issues má explicitní Suspense.
+
+Status counts nové API čte EntityWork pro plné počty příslušných seznamů; změna celého obecného Issues dashboardu není součástí tohoto vizuálního kroku. Refaktor všech stávajících přístupů na filesystem za provider a přesun filesystem fixture setupu z API testů jsou architektonické připomínky, nikoliv nové funkce této dodávky; nejsou zde vydávány za dokončené.
+
+## Ověření
+
+Samostatný browser běží s reálnými API odpověďmi Dev2 přes již přihlášený CLI účet. Jediný adaptovaný endpoint je NextAuth session wrapper pro browserové přihlášení CLI identity; produktová data nejsou nahrazena fixture daty. Zápisy jsou při browserovém průchodu blokované. Ověřen agent, Memory, prázdný export, osobní refresh, editor, katalog, hledání, kompaktní seznam, crew a šířka 390 px; bez JS chyb. Skutečný restart živého kontejneru není součástí read-only průchodu; vazba na API a úspěch/selhání jsou testovány automaticky.
+
+Ověřeno:
+
+- `go test ./... -count=1 -timeout=30m`: všechny balíčky prošly kromě jednoho 15s timeoutu existujícího `TestRunMissionLoop_DispatchesLeadPlanningWhenNoTasks` při souběžném zatížení. Celý `go test ./internal/orchestrator -count=1` následně prošel (22.8 s); plný původní příkaz měl exit 1, opakování balíčku exit 0. API 954.2 s a databáze 1067.5 s prošly již v plné sadě.
+- Samostatný test nového stránkovaného hledání crew a ledger timestampu: prošel.
+- `go vet ./...`: prošel.
+- Crews a cache: 68 souborů, 709 testů prošlo. Dodatečný průchod Memory/editor/katalog/Settings privacy: 43 testů prošlo, včetně osmi testů sdílené osobní paměti. Tím je opraven předchozí CI pád šesti zastaralých Settings testů.
+- `pnpm lint`: 0 chyb, 32 existujících varování. `pnpm build`: statický export prošel.
+- `agents-invariants` a `docs-inventory -strict`: prošly.
+- Živý browser: všechny uvedené pohledy prošly. Jediná odpověď 404 byla očekávaný prázdný export; UI ji správně vysvětlilo. Po nasazení `65219cc4` na Dev2 v 16:33 UTC vrací agent inbox 200 bez `unavailable` a API health je `ok`. Veřejné `/crews` vrací 200. Kompletní živý browserový průchod po reloadu prošel znovu bez JS chyb. Naplněný izolovaný průchod navíc ověřil graf, aktuální poznámku bez historie, Create/Edit, vytvoření crew a mobilní dialog bez přetečení.
+
+## Dotažení přehledu a nabídky agenta
+
+Na další zpětnou vazbu odstraněn spodní široký pruh opakující roli, model a Edit. Identita a editace zůstávají v hlavičce, skutečné měsíční náklady jsou kompaktní ikonový štítek vedle metrik s vlastním označením období UTC. Nabídka „…“ neopakuje jméno ani Memory/on/off (paměť má vlastní viditelnou záložku). Obsahuje Change avatar, Skills and access s krátkým vysvětlením a oddělené Delete agent se zachovaným potvrzením. Přímá zkratka přístupů přepne Work, rozbalí příslušnou sekci a přesune do ní fokus.
+
+Limity náhledů se nemění: outcomes a konverzace po 5, aktivní běhy a spolupráce po 3, přiřazené issues/missions a crew rutiny po 3, přístupy agenta 3 credentialy + 2 efektivní integrace; integrace crew po 3. Přístupy nejsou prezentovány jako chronologický seznam „latest 5“. Kompletní seznamy zůstávají v příslušných modulech.
+
+Ověření tohoto dotažení: 67 frontendových souborů / 699 testů prošlo; lint bez chyb (32 existujících warnings), produkční export a Go vet prošly. Nasazeno na Dev2; živá kontrola prohlížečem ověřila odstranění duplicitního Edit, nové položky nabídky, otevření a fokus přístupů, avatar + Cancel, potvrzení Delete + Cancel, stávající Memory/export prázdného scope a desktop/mobile bez JS chyb. Žádná změna dat při kontrole.
+
+Dodatečný celý běh `go test ./... -count=1` této čistě frontendové změny skončil timeoutem výchozích 10 minut v balících `internal/api` a `internal/database`; ostatní balíky prošly. Samostatné `go vet ./...` prošlo. Tento běh není vydáván za zelený; Go zdroje se oproti výše ověřené předchozí implementaci nezměnily. Log: `/tmp/crews-footer-go.log`, frontend `/tmp/crews-footer-tests.log`, živý prohlížeč `/tmp/crews-footer-browser3.log`. Commit aplikace `f0f9d268`, PR #2464 zůstává otevřený pro CI a aktualizované review.
+
+## Work — společné ikony a skutečné rutiny
+
+Work u agenta i crew používá DashboardCard a stejné CONCEPT_ICON jako hlavní navigace. Issues = CircleDot, Routines = ScrollText; Missions přidáno do registru jako ClipboardList podle existující ikony vytvoření mise v Journal. Ikony i prázdné stavy a řádky jsou konzistentní. Také Assigned & connected čte společný registr pro Issues, Routines, Credentials a Integrations. Refresh má ikonu.
+
+Obecný pruh Automations nahradil stejný skutečný náhled rutin vlastněných crew jako Overview (3 položky), včetně odkazu na konkrétní rutinu; bez crew je zřetelný prázdný stav s odkazem na katalog. Zobrazení crew rutin u agenta nesmí přidat crew filtr k jeho issues — dva nové testy ověřují oddělení těchto scope a platné cíle Issues/Missions/Routines. Náhledy issues a missions zůstávají po 5 a počet ze serveru je úplný.
+
+Ověřeno: 713 frontendových testů Crews + issues hook a 2 nové testy Work; lint bez chyb (32 původních warnings), produkční build, cílené API kontraktní testy a Go vet prošly. Živý prohlížeč Dev2: Work crew i agenta, navigace do Missions se scope, detail rutiny, mobil 390 px bez přetečení; bez selhaných API požadavků a JS chyb. Celý Go běh byl proveden v bezprostředně předchozím kroku a jeho timeout API/databáze zůstává zaznamenán výše; Go zdroje tento krok nemění. Paměť na přání uživatele zatím nebyla naplněna, toto je pouze UI/UX krok.
+
+## Compact run statistics
+
+Run outcomes now shares a two-column row with How runs start, using the existing scoped insights `by_trigger` counts. Both cards stack on mobile. The source breakdown shows at most five rows, combining overflow as Other without losing counts; unavailable source data gets an explicit empty state. Outcome counts exclude cancellations while trigger counts include them, labelled separately. Two focused tests, ESLint, production build and a real Dev2 browser check passed (populated ma-ena agent; desktop and mobile, no console/API errors). No backend or aggregation changes.
+
+## Memory note browser
+
+Replaced the wrapping filename chips with a searchable two-column note browser shared by agents and crews. Pinned notes, knowledge and daily journals have separate labelled groups; journals sort newest first. Human-readable labels lead, with exact filenames retained as secondary metadata. Search covers titles, paths and current note content, with a distinct no-results state and clear action. Changing scope resets the search so an agent query cannot hide the crew's notes. The detail uses the existing sanitized Markdown renderer for headings, lists, tables and links; download and version history remain available. On narrow screens the bounded note list sits above the detail. Crew scope cards now fill their two-column row.
+
+Validation: 35 Crews frontend test files / 305 tests passed, including Markdown headings, chronological ordering, content search, empty results and scope reset. ESLint has no errors (32 pre-existing warnings), production export and Go vet passed. Backend regression and live deployment checks recorded below after completion. No memory data or retrieval changes in this UI patch.
+
+Live Dev2 browser verification passed after reload: crew Markdown headings, content search, no-results + clear, pinned notes, workspace switching, mobile without horizontal overflow and agent archive search. No browser console errors or failed API reads. Screenshots: `/tmp/memory-notes-desktop.png`, `/tmp/memory-notes-mobile.png`. Go web, scripts and tools tests passed; internal/cmd suite is still running in `/tmp/memory-ui-go-tests.log`.
+
+Additional live checks passed: keyboard note selection, downloading the selected original Markdown (correct filename and exact expected content), and scrolling the mobile list and reader. Internal/API and database regression tests were still running at handoff; their result is not claimed green. Unified exec session: 71448, log `/tmp/memory-ui-go-tests.log`.
+
+## About me — readable personal memory
+
+Personal preferences use responsive two-column cards with icons, readable labels and individually labelled forget actions. Known keys receive presentation labels only; deletion still targets the exact original key. The account-wide personalization status is a compact header badge. Agent notes are expandable cards with sanitized Markdown, and each remains attributed to its returned agent slug. Bulk delete actions keep their confirmation dialogs; the detailed forgetting explanation is available below the preferences.
+
+Validation: seven focused memory tests passed, including rendered peer Markdown and confirmation-before-delete with the original fact key. ESLint: zero errors, 32 existing warnings. Production build and Go vet passed. Deployed Dev2; browser verified cards, Markdown, canceling individual deletion and personalization changes, collapse/reopen, mobile without overflow and Refresh. No personal data was changed in live verification. Screenshots: `/tmp/memory-about-desktop.png`, `/tmp/memory-about-mobile.png`.
+
+Earlier broad Go regression completed: all internal packages passed, including API (686s) and database (699s). The sole failure was cmd/crewship compilation racing the new web export (embedded asset filenames replaced during build); a CLI + web rerun was started after deployment completed, log `/tmp/memory-about-go-retry.log`.
+
+Post-deploy retry completed successfully: `go test ./cmd/crewship ./web -count=1 -timeout 10m` passed. Together with the completed internal suite and prior scripts/tools tests, every tested Go package has a passing result; the original combined invocation remains recorded as failed due to the build/export race, not described as one green run.
+
+## Stable preference categories — 2026-09-09
+
+About me now groups preferences under Communication, Language, Work, Appearance and Other. Icons belong to this fixed category registry, not individual fact titles. All nine current stated-technical extractor fields are mapped, alongside legacy imported keys. Namespaced imported keys such as `communication.meeting_notes` support arbitrary titles without extending the registry. Unknown keys/namespaces retain their title and content in Other with its stable icon; no inference is made from personal text. Human-readable labels affect presentation only, never the stored fact key or delete endpoint. The UI does not expand the extractor's existing closed set of admissible fields.
+
+Eleven focused tests cover new titles within a category, unknown/prototype-like keys, current extractor fields, visible grouping, Markdown and confirmed deletion using the original key. Backend sources and stored memory are unchanged.
+
+Deployed and verified on Dev2. Live categories, browser-only new-name fixtures, equal icons within a category, Other fallback, cancel-forget and mobile overflow checks passed with no console/API errors. All 11 focused tests, production build, lint (0 errors, 32 pre-existing warnings), Go memory/usermodel/web tests and full Go vet passed. Existing broad Go baseline is documented above; backend code did not change. No live personal data was mutated for this validation.
+
+## Provider and runner icon colours — 2026-09-09
+
+The shared create/edit AgentModelSettings and ProviderPicker now apply brand accents to the existing marks: Anthropic/Claude clay (#D97757), Google/Gemini blue (#4285F4), and Factory orange (#EF6F2E, used by factory.ai). Monochrome OpenAI, Cursor, Ollama and OpenCode marks retain the theme foreground, consistent with monochrome identity rather than invented hues. Selected-state borders remain the application accent; selection does not replace the mark's colour. No runtime, credential or selection behavior changed. Existing model settings tests (3), targeted ESLint, production build and Go vet passed.
+
+Live Dev2 browser checks passed for Edit and + Agent: provider/runner computed colours, selecting a provider in create, and canceling without saving. No browser/API errors. Web Go test passed after reload. Screenshots: `/tmp/agent-brand-edit.png`, `/tmp/agent-brand-create.png`.

@@ -292,7 +292,11 @@ func (h *UserPeerPrivacyHandler) GetMyCards(w http.ResponseWriter, r *http.Reque
 			paths := memory.PeerPaths{
 				AgentDir: filepath.Join(h.outputBasePath, "crews", crewID.String, "agents", e.AgentSlug, ".memory"),
 			}
-			body, _ := memory.LoadPeerCardBySlug(paths, e.UserSlug)
+			body, err := memory.LoadPeerCardBySlug(paths, e.UserSlug)
+			if err != nil || (body == "" && e.Bytes > 0) {
+				replyError(w, http.StatusServiceUnavailable, "personal notes could not be read")
+				return
+			}
 			e.Content = body
 		}
 		// Audit the read keyed on the actor (the user reading

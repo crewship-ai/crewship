@@ -91,6 +91,11 @@ export const CONCEPT_ACCENT = {
   inbox: "sky",
   sessions: "teal",
   issues: "blue",
+  // A mission is issue work in flight, and the two appear side by side in the
+  // work cards — same family, same accent. concept-icons.ts gained the icon in
+  // f85d1d41 without this entry, which is what the icon/accent parity test in
+  // lib/__tests__/concept-accents.test.ts exists to catch.
+  missions: "blue",
   routines: "purple",
   pages: "green",
 

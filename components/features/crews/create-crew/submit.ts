@@ -1,6 +1,8 @@
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { devWarn } from "@/lib/client-log"
+import { DEFAULT_RUNNER } from "../create-agent/provider-options"
+import { defaultModelForProvider } from "../create-agent/llm-models"
 import type { WizardState } from "./types"
 
 export interface SubmitResult {
@@ -98,12 +100,13 @@ async function submitFromTemplate(workspaceId: string, state: WizardState): Prom
   if (!state.pickedTemplateSlug) {
     throw new Error("No template selected")
   }
+  if (!state.provider) throw new Error("Choose a provider for the agents")
   const deployRes = await apiFetch(
     `/api/v1/crew-templates/${encodeURIComponent(state.pickedTemplateSlug)}/deploy?workspace_id=${encodeURIComponent(workspaceId)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ crew_name: state.name.trim(), crew_slug: state.slug.trim() }),
+      body: JSON.stringify({ crew_name: state.name.trim(), crew_slug: state.slug.trim(), llm_provider: state.provider, cli_adapter: DEFAULT_RUNNER[state.provider], llm_model: defaultModelForProvider(state.provider) }),
     },
   )
   if (!deployRes.ok) throw new Error(await deployRes.text() || `HTTP ${deployRes.status}`)

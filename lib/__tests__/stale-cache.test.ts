@@ -120,3 +120,13 @@ describe("invalidate", () => {
     expect(readThrough("composio:ws2:inventory", fetcher).value).toBe("a")
   })
 })
+
+it('does not let an invalidated pending request overwrite the new entry', async () => {
+  let settle!: (value: string) => void
+  const first = readThrough('generation-test', () => new Promise<string>(resolve => { settle = resolve }))
+  invalidate('generation-test')
+  await readThrough('generation-test', async () => 'new').fresh
+  settle('old')
+  await first.fresh
+  expect(await readThrough('generation-test', async () => 'unexpected').fresh).toBe('new')
+})

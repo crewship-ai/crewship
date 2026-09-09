@@ -33,6 +33,7 @@ interface CrewActivityFeedProps {
   /** Optional entity scope. The journal query narrows server-side when set. */
   agentId?: string
   crewId?: string
+  limit?: number
 }
 
 // The journal entry types that make up the "activity" view: peer queries,
@@ -162,7 +163,7 @@ export function journalEntriesToFeedRows(
   return rows
 }
 
-export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityFeedProps) {
+export function CrewActivityFeed({ workspaceId, agentId, crewId, limit = 30 }: CrewActivityFeedProps) {
   useTick(60_000) // re-render every 60s to keep relative times fresh
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
@@ -174,7 +175,7 @@ export function CrewActivityFeed({ workspaceId, agentId, crewId }: CrewActivityF
   const { entries, loading, error, refresh } = useJournalList({
     workspaceId,
     params,
-    limit: 30,
+    limit,
   })
 
   const { crews, agents } = useJournalLookup()

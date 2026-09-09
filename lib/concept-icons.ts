@@ -1,5 +1,5 @@
 import {
-  Activity, AtSign, Bell, BookOpen, Brain, CircleDot, FolderTree, Inbox, Key,
+  Activity, AtSign, Bell, BookOpen, Brain, CircleDot, ClipboardList, FolderTree, Inbox, Key,
   LayoutDashboard, LayoutTemplate, MessageSquare, Play, Plug,
   ScrollText, Settings, ShieldCheck, Store, Users, Zap,
 } from "lucide-react"
@@ -27,6 +27,8 @@ export const CONCEPT_ICON = {
   dashboard: LayoutDashboard,
   inbox: Inbox,
   issues: CircleDot,
+  /** Missions are multi-step work; matches the mission-created journal icon. */
+  missions: ClipboardList,
   routines: ScrollText,
   /**
    * A page: panels laid out on a grid. LayoutTemplate rather than

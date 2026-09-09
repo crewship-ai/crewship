@@ -330,3 +330,35 @@ func contains(haystack, needle string) bool {
 
 // Compile-time pin: silence "imported and not used" if time becomes unused.
 var _ = time.Now
+
+func TestAgentInbox_CostUsesLedgerTimestamp(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedCrewRow(t, db, "cost-crew", wsID, "Cost", "cost")
+	seedAgentRow(t, db, "cost-agent", wsID, "cost-crew", "Cost", "cost-agent", "AGENT")
+	for _, row := range []struct {
+		id, ts string
+		cost   float64
+	}{
+		{"current-cost", time.Now().UTC().Format("2006-01") + "-01T00:00:00.000Z", .42},
+		{"old-cost", "2000-01-01T00:00:00.000Z", 99},
+	} {
+		_, err := db.Exec(`INSERT INTO cost_ledger (id, workspace_id, crew_id, agent_id, ts, provider, model, input_tokens, output_tokens, cost_usd) VALUES (?, ?, 'cost-crew', 'cost-agent', ?, 'test', 'test', 100, 20, ?)`, row.id, wsID, row.ts, row.cost)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest("GET", "/inbox", nil)
+	r.SetPathValue("agentId", "cost-agent")
+	r = withWorkspaceUser(r, userID, wsID, "OWNER")
+	w := httptest.NewRecorder()
+	NewAgentInboxHandler(db, newTestLogger()).Handle(w, r)
+	var result agentInboxResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || result.CostUSDThisMonth != .42 || result.LLMCallsThisMonth != 1 || result.TokensUsedThisMonth != 120 || len(result.Unavailable) != 0 {
+		t.Fatalf("inbox = %d %s", w.Code, w.Body.String())
+	}
+}

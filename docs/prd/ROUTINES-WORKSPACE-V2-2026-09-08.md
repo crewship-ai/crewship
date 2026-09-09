@@ -277,7 +277,7 @@ direct date navigation and routine identities on calendar entries. Monday starts
 a week. Day/3-day/week use hour rows with independently clickable slots; month
 and year dates open Schedule a routine. Year month headings drill into a month.
 All views retain the existing explorer and gray card design. Calendar position
-is linkable with tab=calendar, calendar=<view>, date=YYYY-MM-DD.
+is linkable with `tab=calendar`, `calendar=<view>`, `date=YYYY-MM-DD`.
 
 The scheduling dialog chooses an active existing recipe, date, local time and
 typed declared inputs. It creates an actual fire_at pending run through the
@@ -345,7 +345,7 @@ New form declarations opt into static/default/choice/type/required/bounds checks
 The run API rejects invalid answers before enqueue; executor entry and nested
 execution also enforce the checks, including defaults. Legacy unannotated
 inputs retain their existing runtime contract. Strings entered as answers remain
-data; {{ inputs.name }} is how authors reference variables in recipe steps, not
+data; `{{ inputs.name }}` is how authors reference variables in recipe steps, not
 an invitation to recursively evaluate user answers. No credential values are
 introduced as a new form field type.
 

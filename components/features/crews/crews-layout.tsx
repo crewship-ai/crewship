@@ -1,13 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import { toast } from "sonner"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsSubbar } from "@/components/features/crews/crews-subbar"
+import type { AgentRecord } from "./agent-canvas-tabs/types"
+import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { AgentCanvas } from "@/components/features/crews/agent-canvas"
 import { CrewCanvas } from "@/components/features/crews/crew-canvas"
-import { EmptyRoster } from "@/components/features/crews/empty-roster"
+import { CrewCatalog } from "@/components/features/crews/crew-catalog"
 import { BottomPanel, type BottomTab } from "@/components/features/crews/bottom-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useCrewsSelection } from "@/hooks/use-crews-selection"
@@ -118,7 +119,7 @@ export function CrewsLayout({
   agents,
   missions,
   workspaceId,
-  loaded = false,
+  loaded: _loaded = false,
   crewsTotal = null,
   agentsTotal = null,
   hasMore = false,
@@ -162,41 +163,18 @@ export function CrewsLayout({
     if (isMobile) setExplorerCollapsed(true)
   }, [isMobile])
 
-  // Stale-slug watcher: clear ?agent= / ?crew= if they don't exist.
-  // Only fires when the lists are non-empty — a transient empty state
-  // during route transitions (e.g. back-nav from /chat/<slug>) used to
-  // toast "Agent not found" before the fetch caught up, then drop the
-  // ?agent= param and dump the user on the empty roster. Treat empty
-  // lists as still-loading; the user-perception cost of NOT clearing a
-  // stale slug for a beat is much lower than the cost of clearing a
-  // valid one.
-  const staleSlugNotified = useRef<string | null>(null)
-  useEffect(() => {
-    if (!loaded) return
-    if (selectedAgentSlug && agents.length > 0 && !agents.find((a) => a.slug === selectedAgentSlug)) {
-      if (staleSlugNotified.current !== selectedAgentSlug) {
-        staleSlugNotified.current = selectedAgentSlug
-        toast.warning(`Agent "${selectedAgentSlug}" not found`)
-        update({ agent: null })
-      }
-    } else if (selectedCrewSlug && crews.length > 0 && !crews.find((c) => c.slug === selectedCrewSlug)) {
-      if (staleSlugNotified.current !== selectedCrewSlug) {
-        staleSlugNotified.current = selectedCrewSlug
-        toast.warning(`Crew "${selectedCrewSlug}" not found`)
-        update({ crew: null })
-      }
-    } else {
-      staleSlugNotified.current = null
-    }
-  }, [loaded, selectedAgentSlug, selectedCrewSlug, agents, crews, update])
+  // Detail loaders resolve deep links on the server. A paginated sidebar
+  // cannot decide whether a selected entity exists.
 
+  const [resolvedCrew, setResolvedCrew] = useState<CrewRecord | null>(null)
+  const [resolvedAgent, setResolvedAgent] = useState<AgentRecord | null>(null)
   const selectedCrew = useMemo(
-    () => (selectedCrewSlug ? crews.find((c) => c.slug === selectedCrewSlug) || null : null),
-    [crews, selectedCrewSlug],
+    () => (selectedCrewSlug ? (resolvedCrew?.slug === selectedCrewSlug ? resolvedCrew : crews.find((c) => c.slug === selectedCrewSlug)) || null : null),
+    [crews, selectedCrewSlug, resolvedCrew],
   )
   const selectedAgent = useMemo(
-    () => (selectedAgentSlug ? agents.find((a) => a.slug === selectedAgentSlug) || null : null),
-    [agents, selectedAgentSlug],
+    () => (selectedAgentSlug ? (resolvedAgent?.slug === selectedAgentSlug ? resolvedAgent : agents.find((a) => a.slug === selectedAgentSlug)) || null : null),
+    [agents, selectedAgentSlug, resolvedAgent],
   )
 
   const crewAgents = useMemo(
@@ -228,7 +206,8 @@ export function CrewsLayout({
   const handleAgentSelectBySlug = useCallback((slug: string) => {
     const agent = agents.find((a) => a.slug === slug)
     if (agent) handleAgentSelect(agent.id)
-  }, [agents, handleAgentSelect])
+    else selectAgent(slug)
+  }, [agents, handleAgentSelect, selectAgent])
 
   const handleOpenFiles = useCallback(() => {
     setBottomTab("files")
@@ -249,7 +228,7 @@ export function CrewsLayout({
         agentSlug: selectedAgent.slug,
         agentName: selectedAgent.name,
         crewId: selectedAgent.crew_id,
-        crewSlug: parentCrew?.slug ?? null,
+        crewSlug: parentCrew?.slug ?? selectedAgent.crew?.slug ?? null,
       }
     }
     if (selectedCrew) {
@@ -306,6 +285,9 @@ export function CrewsLayout({
                   transition={{ type: "spring", damping: 25, stiffness: 300 }}
                 >
                   <CrewsExplorer
+              workspaceId={workspaceId}
+              onAgentSlugSelect={(slug) => selectAgent(slug)}
+              onCrewSlugSelect={(slug) => selectCrew(slug)}
                     crews={crews}
                     agents={agents}
                     selectedCrewId={selectedCrew?.id ?? null}
@@ -329,6 +311,9 @@ export function CrewsLayout({
         ) : (
           <div className="min-h-0 overflow-hidden">
             <CrewsExplorer
+              workspaceId={workspaceId}
+              onAgentSlugSelect={(slug) => selectAgent(slug)}
+              onCrewSlugSelect={(slug) => selectCrew(slug)}
               crews={crews}
               agents={agents}
               selectedCrewId={selectedCrew?.id ?? null}
@@ -358,10 +343,11 @@ export function CrewsLayout({
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.16, ease: [0.32, 0.72, 0, 1] }}
             >
-              {selectedAgent ? (
+              {selectedAgentSlug ? (
                 <AgentCanvas
                   workspaceId={workspaceId}
-                  agentSlug={selectedAgent.slug}
+                  agentSlug={selectedAgentSlug}
+                  onLoaded={setResolvedAgent}
                   crews={crews}
                   onAgentChanged={(nextSlug) => {
                     if (nextSlug && nextSlug !== selectedAgentSlug) selectAgent(nextSlug)
@@ -370,10 +356,11 @@ export function CrewsLayout({
                   onSelectCrew={(slug) => selectCrew(slug)}
                   onOpenFiles={handleOpenFiles}
                 />
-              ) : selectedCrew ? (
+              ) : selectedCrewSlug ? (
                 <CrewCanvas
+                  onLoaded={setResolvedCrew}
                   workspaceId={workspaceId}
-                  crewSlug={selectedCrew.slug}
+                  crewSlug={selectedCrewSlug}
                   agentsForCrew={crewAgents}
                   missions={missions}
                   onCrewChanged={onRefresh}
@@ -382,9 +369,10 @@ export function CrewsLayout({
                   provisioning={provisioning}
                 />
               ) : (
-                <EmptyRoster
+                <CrewCatalog
+                  onCrewSelect={selectCrew}
+                  workspaceId={workspaceId}
                   agents={agents}
-                  crews={crews}
                   onAgentSelect={handleAgentSelectBySlug}
                 />
               )}

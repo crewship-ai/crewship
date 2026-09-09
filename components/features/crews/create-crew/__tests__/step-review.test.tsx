@@ -149,6 +149,6 @@ describe("<StepReview>", () => {
       lineupSummary={{ count: 4, source: "Software Development" }}
     />)
     expect(screen.getByText(/crewship-team-engineering/)).toBeInTheDocument()
-    expect(screen.getByText(/4 agents auto-assigned/)).toBeInTheDocument()
+    expect(screen.getByText(/4 agents\. Matching credentials/)).toBeInTheDocument()
   })
 })

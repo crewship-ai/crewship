@@ -85,6 +85,10 @@ func (h *MemoryVersionsHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
+	if strings.Contains(path, "/peers/") || strings.Contains(path, "/users/") {
+		replyError(w, http.StatusForbidden, "personal profiles are available through your own privacy settings")
+		return
+	}
 	if path == "" {
 		replyError(w, http.StatusBadRequest, "path query param required")
 		return
@@ -153,6 +157,10 @@ func (h *MemoryVersionsHandler) Show(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
+	if strings.Contains(path, "/peers/") || strings.Contains(path, "/users/") {
+		replyError(w, http.StatusForbidden, "personal profiles are available through your own privacy settings")
+		return
+	}
 	if path == "" {
 		replyError(w, http.StatusBadRequest, "path query param required")
 		return

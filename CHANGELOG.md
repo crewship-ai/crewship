@@ -9,6 +9,20 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Changed
+- Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
+- Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.
+- Crew and agent Work tabs use shared concept icons and dashboard cards. Routines replaces the generic Automations link with crew-owned routine previews; issue and mission links preserve the selected team or agent.
+- Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.
+- Crews and agents share the Routines dashboard visual language, with avatar-based team browsing, server-side purpose search and name sorting, compact crew lists, real run outcome charts, and scoped work/access previews. Create/Edit forms and Memory now expose clearer icon-based navigation and actionable empty states.
+### Fixed
+- Agent inbox cost summaries query the actual ledger timestamp, including the beginning of the current month. Memory refresh also reloads personal data; exports identify their scope and report empty scopes and download outcomes. Crew navigation updates the selected canvas reliably. The placeholder agent container restart is replaced by a working, confirmed crew-level action with accurate next-run recreation feedback.
+- Invalidated cache requests cannot overwrite newer results, and failed relation refreshes preserve known cached data. Historical collaboration no longer implies an automatic delegation trigger.
+### Changed
+- **Crews & Agents now separates Overview, Work, Team and Memory.** Create and Edit share the same agent and crew forms; advanced runtime settings remain available. Overview shows scoped run metrics, recent outcomes and conversations. Memory reads current knowledge independently of version history and exposes the signed-in user's preferences.
+### Security
+- ⚠️ **Behaviour change:** agent peer-profile endpoints now allow only the signed-in user's own profile, including for workspace administrators; administrator-wide exports retain their explicit administration gate. Personal profiles are excluded from general memory history and group-chat prompts. Personalization opt-out is checked before prompt assembly, and cross-crew user-model reads follow the authoritative workspace index.
+
 - **Guided credentials and provider setup** (#2465) — direct type selection, consistent branded forms, text-file imports, colored tags and compact assignment previews. Save for later creates no delivery bindings; explicit assignment checks occupied slots. Partial saves retry incomplete writes, and provider re-login updates the existing account atomically while retaining assignments.
 - **Credential and private-service protection** (#2465) — private service configuration is encrypted at rest and omitted from public/exported views; re-encryption supports the stored format. Credential disclosure refreshes authorization before returning values, and restricted approval details are scoped to eligible viewers.
 

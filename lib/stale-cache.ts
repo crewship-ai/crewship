@@ -72,22 +72,26 @@ export function readThrough<T>(
     return { value: cached?.value, fresh: hit.inflight, fromCache: cached !== undefined }
   }
 
+  const entry: Entry<T> = { value: cached?.value, at: cached?.at ?? 0 }
   const inflight = fetcher().then(
     (value) => {
-      store.set(key, { value, at: Date.now() })
+      if (store.get(key) === entry) store.set(key, { value, at: Date.now() })
       return value
     },
     (err) => {
       // A failed refresh must not poison the cache: keep serving the last good
       // value, and let the next read try again. A failed FIRST fetch leaves
       // nothing behind, so the retry is a clean miss.
-      if (cached) store.set(key, { value: cached.value, at: cached.at })
-      else store.delete(key)
+      if (store.get(key) === entry) {
+        if (cached) store.set(key, { value: cached.value, at: cached.at })
+        else store.delete(key)
+      }
       throw err
     },
   )
 
-  store.set(key, { value: cached?.value, at: cached?.at ?? 0, inflight })
+  entry.inflight = inflight
+  store.set(key, entry)
 
   return { value: cached?.value, fresh: inflight, fromCache: cached !== undefined }
 }

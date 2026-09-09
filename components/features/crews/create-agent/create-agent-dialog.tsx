@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
@@ -8,7 +8,11 @@ import {
   Brain,
   ChevronDown,
   Cpu,
-  Image as ImageIcon,
+  Bot,
+  CreditCard,
+  FileText,
+  ShieldCheck,
+  MessageSquare,
   Layers,
   Sparkles,
   TriangleAlert,
@@ -24,7 +28,6 @@ import {
   CreateSurface,
   CreateSurfaceBody,
   CreateSurfaceChoice,
-  CreateSurfaceDisclosure,
   CreateSurfaceField,
   CreateSurfaceFooter,
   CreateSurfaceGrid,
@@ -48,7 +51,6 @@ import {
   useAgentAccessCatalog,
   type AgentAccessSelection,
 } from "./agent-access"
-import { MODELS_BY_PROVIDER, defaultModelForProvider, isKnownModel } from "./llm-models"
 import {
   applyPersonaDefaults,
   initialAgentDraft,
@@ -57,7 +59,14 @@ import {
   resolveFinalPrompt,
   type CrewLite,
 } from "./types"
-import type { LLMProvider } from "@/lib/entities"
+import { AskFormsBuilder } from "../ask-forms-builder"
+import { EditorLayout, EditorPanel } from "../editor-layout"
+import { AgentModelSettings } from "./agent-model-settings"
+import { PaysWithRow } from "../agent-canvas-tabs/pays-with-row"
+import { PersonaDraft } from "../persona-draft"
+import { ConfigTab, SuggestedPromptsField } from "../agent-canvas-tabs/config-tab"
+import type { AgentRecord } from "../agent-canvas-tabs/types"
+import type { AgentDraft } from "./types"
 
 export interface CreateAgentDialogProps {
   workspaceId: string
@@ -66,6 +75,7 @@ export interface CreateAgentDialogProps {
   defaultCrewSlug: string | null
   crews: CrewLite[]
   onCreated: (slug: string) => void
+  agent?: AgentRecord
 }
 
 /** Shared input/select styling. Centralised so the form looks consistent
@@ -81,41 +91,27 @@ const INPUT_CLASS =
   "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 max-sm:min-h-12 max-sm:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
-const CLI_ADAPTERS = ["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"] as const
-const LLM_PROVIDERS = ["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"] as const
-
-/** Single-screen Create Agent dialog. Replaces the 3-step wizard with one
- *  surface that mirrors the field set of POST /api/v1/agents 1:1.
- *
- *  Mounts the shared shell (components/layout/create-surface.tsx) at size
- *  `lg`, so the overlay, the focus trap, Esc, ⌘↵, the discard guard, the
- *  bottom-sheet phone layout and the never-scrolling footer are one
- *  implementation rather than this file's own. What is left here is the
- *  form and the submit.
- *
- *  Layout (top → bottom):
- *    - Template: one row stating the current pick, opening the catalogue
- *    - Identity: avatar (picker) | name | crew | slug | role | role title |
- *      description
- *    - Persona textarea (always visible, pre-filled from chosen template)
- *    - Runtime: model select + memory toggle (90% of users stop here)
- *    - Advanced disclosure: tool_profile + cli_adapter + llm_provider +
- *      timeout + lead_mode (visible only for LEAD role)
- *
- *  Submit body matches the fields in internal/api/agents_create.go's
- *  createAgentRequest struct — there's a unit test guarding the shape. */
+/** Shared create/edit form with persistent drafts and focused settings sections. */
 export function CreateAgentDialog({
   workspaceId,
   open,
   onOpenChange,
   defaultCrewSlug,
-  crews,
+  crews: listedCrews,
   onCreated,
+  agent,
 }: CreateAgentDialogProps) {
+  const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
+    ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
   const router = useRouter()
+  const [section, setSection] = useState("identity")
+  const [providerConfirmed, setProviderConfirmed] = useState(!!agent)
   const [draft, setDraft] = useState(() => initialAgentDraft(defaultCrewSlug))
+  const [persona, setPersona] = useState<string | null | undefined>(undefined)
+  const [baseline, setBaseline] = useState<AgentDraft | null>(null)
+  const [extra, setExtra] = useState<Record<string, unknown>>({})
   const [submitting, setSubmitting] = useState(false)
   // Ref for the in-flight check inside submit() — using `submitting` state
   // there would close over a stale value and let a fast double-fire through
@@ -144,7 +140,13 @@ export function CreateAgentDialog({
   const wasOpenRef = useRef(false)
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      setDraft(initialAgentDraft(defaultCrewSlugRef.current))
+      const next = agent ? draftFromAgent(agent, crews) : initialAgentDraft(defaultCrewSlugRef.current)
+      setSection("identity")
+      setProviderConfirmed(!!agent)
+      setDraft(next)
+      setBaseline(next)
+      setExtra({})
+      setPersona(undefined)
       setBaselineCrewSlug(defaultCrewSlugRef.current)
       setSubmitting(false)
       setBrowserOpen(false)
@@ -152,7 +154,7 @@ export function CreateAgentDialog({
       setRefusal(null)
     }
     wasOpenRef.current = open
-  }, [open])
+  }, [open, agent, crews])
 
   // Auto-derive slug from name unless user has manually edited it.
   useEffect(() => {
@@ -172,12 +174,13 @@ export function CreateAgentDialog({
     draft.selectedPersona !== null &&
     draft.editedPersonaPrompt === null &&
     !draft.customPrompt.trim()
-  const valid = isIdentityValid(draft)
+  const valid = isIdentityValid(draft) && (!!agent || !providerConfirmed || !!draft.llmModel.trim())
   // What's blocking submit? Shown to the user as an inline hint so they
   // don't have to guess why Create is disabled. Mirrors isIdentityValid
   // — keep the order matching so the hint reflects the first failing rule.
   const validationHint: string | null = (() => {
     if (valid) return null
+    if (!agent && providerConfirmed && !draft.llmModel.trim()) return "Choose a model in Model and execution"
     const trimmedName = draft.name.trim()
     if (trimmedName.length < 2) return "Name must be at least 2 characters"
     if (trimmedName.length > 100) return "Name is too long (max 100 characters)"
@@ -193,6 +196,7 @@ export function CreateAgentDialog({
 
   const handlePickPersona = useCallback((persona: AgentPersona) => {
     setDraft((d) => applyPersonaDefaults(d, persona))
+    setProviderConfirmed(false)
     setBrowserOpen(false)
   }, [])
 
@@ -222,6 +226,7 @@ export function CreateAgentDialog({
 
   const submit = useCallback(async () => {
     if (submittingRef.current) return
+    if (!agent && !providerConfirmed) { setSection("model"); return }
     submittingRef.current = true
     setSubmitting(true)
     setRefusal(null)
@@ -258,12 +263,15 @@ export function CreateAgentDialog({
         tool_profile: draft.toolProfile,
         memory_enabled: draft.memoryEnabled,
       }
+      const payload: Record<string, unknown> = agent && baseline
+        ? { ...Object.fromEntries(Object.entries(body).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(agentBody(baseline, crews)[key]))), ...extra }
+        : { ...body, ...extra }
       const res = await apiFetch(
-        `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/agents${agent ? `/${agent.id}` : ""}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
-          method: "POST",
+          method: agent ? "PATCH" : "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         },
       )
       if (!res.ok) {
@@ -271,13 +279,17 @@ export function CreateAgentDialog({
         throw new Error(text || `HTTP ${res.status}`)
       }
       const created = await res.json()
+      if (agent && persona !== undefined) {
+        const response = await apiFetch(`/api/v1/agents/${agent.id}/persona?workspace_id=${encodeURIComponent(workspaceId)}`, { method: persona === null ? "DELETE" : "PUT", headers: { "Content-Type": "application/json" }, body: persona === null ? undefined : JSON.stringify({ content: persona }) })
+        if (!response.ok) throw new Error(`Agent settings saved, but persona could not be saved (${response.status}). Your persona draft is retained; retry Save changes.`)
+      }
 
       // Bindings are keyed on an agent that exists, so they are spent here
       // rather than in the body above. Failures are reported, not thrown: the
       // agent is created either way, and an agent quietly missing the tool it
       // was created for is worse than being told where to add it.
       const failed =
-        access.integrationIds.length || access.channelIds.length
+        !agent && (access.integrationIds.length || access.channelIds.length)
           ? await applyAgentAccess(workspaceId, created.id, access, accessCatalog)
           : []
 
@@ -286,20 +298,20 @@ export function CreateAgentDialog({
           description: `${failed.join(", ")} — add them from the agent's canvas.`,
         })
       } else {
-        toast.success(`Agent "${created.name}" created`)
+        toast.success(`Agent "${created.name}" ${agent ? "updated" : "created"}`)
       }
       onOpenChange(false)
       onCreated(created.slug)
       router.replace(`/crews?agent=${encodeURIComponent(created.slug)}`)
     } catch (err) {
-      const message = `Could not create agent: ${err instanceof Error ? err.message : String(err)}`
+      const message = `Could not ${agent ? "save" : "create"} agent: ${err instanceof Error ? err.message : String(err)}`
       toast.error(message)
       setRefusal(message)
     } finally {
       submittingRef.current = false
       setSubmitting(false)
     }
-  }, [draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
+  }, [agent, providerConfirmed, persona, baseline, extra, draft, crews, requiresCrew, workspaceId, finalPrompt, access, accessCatalog, onOpenChange, onCreated, router])
 
   // ⌘↵ / Ctrl↵ is wired by the shell — this is only the "is it submittable"
   // guard the shell asks callers to keep inside their own handler.
@@ -312,8 +324,9 @@ export function CreateAgentDialog({
       <CreateSurface
         open={open}
         onOpenChange={onOpenChange}
-        size="lg"
-        dirty={isDraftDirty(draft, baselineCrewSlug)}
+        size="xl"
+        className="h-[92dvh] sm:h-[min(85dvh,720px)]"
+        dirty={agent ? persona !== undefined || JSON.stringify(draft) !== JSON.stringify(baseline) || Object.keys(extra).length > 0 : isDraftDirty(draft, baselineCrewSlug) || Object.keys(extra).length > 0 || access.integrationIds.length > 0 || access.channelIds.length > 0}
         discardLabel="this agent"
         onSubmit={() => {
           // ⌘↵ inside the picker closes the picker; it must not also create
@@ -327,17 +340,24 @@ export function CreateAgentDialog({
           concept="crews"
           accent="purple"
           context={crewName}
-          title={pickerOpen ? "Avatar — new agent" : "New agent"}
+          title={pickerOpen ? (agent ? `Avatar — ${agent.name}` : "Avatar — new agent") : agent ? `Edit ${agent.name}` : "New agent"}
           description={
             pickerOpen
               ? "Pick a style and a seed. The same seed always produces the same face."
-              : "Pick a template to start fast, or fill in the basics."
+              : agent ? "Changes are saved together when you choose Save changes." : "Pick a template to start fast, or fill in the basics."
           }
           onBack={pickerOpen ? () => setPickerOpen(false) : undefined}
           onClose={() => onOpenChange(false)}
         />
 
-        <CreateSurfaceBody className="flex flex-col gap-5">
+        <EditorLayout label="Agent editor sections" active={section} onChange={setSection} hidden={pickerOpen} sections={[
+          { id: "identity", label: "Identity", icon: Bot },
+          { id: "model", label: "Model and execution", icon: Cpu },
+          { id: "instructions", label: "Instructions and persona", icon: FileText },
+          { id: "access", label: "Permissions", icon: ShieldCheck },
+          { id: "chat", label: "Chat", icon: MessageSquare },
+        ]}>
+        <CreateSurfaceBody className="min-w-0 space-y-5">
           {/* The avatar picker is a PANEL: the surface swaps its body for it
               and the back arrow returns. It used to be a second Radix dialog
               stacked on this one — two focus traps, two Escape handlers, and
@@ -377,6 +397,7 @@ export function CreateAgentDialog({
               is up: the panel replaces the body, it does not sit beside it. */}
           {!pickerOpen && (
             <>
+          <EditorPanel active={section === "identity"}>
           {/* ─── Template ───
               One line, not a wall of pills.
               
@@ -468,7 +489,7 @@ export function CreateAgentDialog({
           </CreateSurfaceSection>
 
           {/* ─── Identity ─── */}
-          <CreateSurfaceSection title="Identity" icon={ImageIcon} accent="purple">
+          <CreateSurfaceSection title="Identity" icon={Bot} accent="purple">
             {/* `items-end` keeps the 56px tile bottom-aligned with the input
                 next to it, the way the old grid did. */}
             <div className="flex items-start gap-3">
@@ -608,16 +629,19 @@ export function CreateAgentDialog({
             </CreateSurfaceField>
           </CreateSurfaceSection>
 
+          {agent && draft.crewSlug !== baseline?.crewSlug && <CreateSurfaceNotice tone="warn">Moving this agent changes its inherited access, shared knowledge, and runtime environment.</CreateSurfaceNotice>}
+          </EditorPanel>
+          <EditorPanel active={section === "instructions"}>
           {/* ─── Persona ─── */}
           <CreateSurfaceSection
-            title="Persona"
-            icon={Brain}
+            title="Instructions"
+            icon={FileText}
             accent="purple"
             hint="how should this agent behave"
           >
             <textarea
               id="agent-persona"
-              aria-label="Persona system prompt"
+              aria-label="Agent system prompt"
               value={
                 draft.editedPersonaPrompt !== null
                   ? draft.editedPersonaPrompt
@@ -673,34 +697,15 @@ WORK STYLE: …`}
             </div>
           </CreateSurfaceSection>
 
-          {/* ─── Runtime (model + memory only — most common) ─── */}
-          <CreateSurfaceSection title="Runtime" icon={Cpu} accent="teal">
-            <CreateSurfaceField
-              label="Model"
-              htmlFor="agent-model"
-              hint={`from ${draft.llmProvider.toLowerCase()}`}
-            >
-              <ModelInput
-                id="agent-model"
-                provider={draft.llmProvider}
-                value={draft.llmModel}
-                onChange={(model) => setDraft({ ...draft, llmModel: model })}
-              />
-            </CreateSurfaceField>
-
-            {/* "on" / "off" restated the switch beside it and said nothing
-                about what is being switched. The agent canvas already words
-                this properly ("Memory between sessions — without it every
-                session starts from nothing", config-tab.tsx); the create form
-                was the one place that only had the state. Same sentence, so
-                the two surfaces cannot drift into describing it differently. */}
+          {agent && <PersonaDraft workspaceId={workspaceId} agentId={agent.id} value={persona} onChange={setPersona} />}
+          <CreateSurfaceSection title="Memory" icon={Brain} accent="purple">
             <CreateSurfaceToggleRow
               concept="memory"
               label="Memory between sessions"
               hint={
                 draft.memoryEnabled
                   ? "Notes it keeps and can search later — AGENT.md, a daily journal, lessons."
-                  : "Without it every session starts from nothing."
+                  : "Saved knowledge is not injected into runs. Conversation history and episodic recall are separate."
               }
               control={
                 <Switch
@@ -711,111 +716,9 @@ WORK STYLE: …`}
               }
             />
           </CreateSurfaceSection>
-
-          {/* ─── Tools & notifications ───
-              Between Runtime and Advanced on purpose. It is not advanced —
-              "which tools may this one call" is a question people have while
-              filling the form, and the answer differs from its crew's more
-              often than not: a Security Analyst and a Copywriter in the same
-              container should not hold the same integrations. The crew's
-              Container step decides what is INSTALLED; this decides what this
-              agent may CALL and where it may post. */}
-          <AgentAccessSection
-            catalog={accessCatalog}
-            selection={access}
-            onChange={setAccess}
-          />
-
-
-          {/* ─── Advanced ───
-              The lid carries the CURRENT values, not the field names: the
-              point of a disclosure is that you can decide not to open it.
-              Wrapped in its own `shrink-0`: the body is a flex column that is
-              shorter than its content on any viewport (twenty fields do not
-              fit in 92dvh), so every child is a shrinkable flex item — and
-              `CreateSurfaceDisclosure`'s own root carries `overflow-hidden`.
-              Per the flex sizing spec, a flex item's automatic minimum size
-              collapses to 0 the moment its overflow is not `visible`, so this
-              was the one section with nothing stopping flex-shrink from
-              eating it down to ~2px while its siblings (no overflow-hidden of
-              their own, so a real min-content floor) kept their full size —
-              measured: the whole "Advanced" row rendered under 2px tall,
-              button included, on a phone viewport. `shrink-0` on a plain
-              wrapper div moves the flex item one level up, off the
-              overflow-hidden element, so IT keeps its content-based min size
-              and the disclosure inside renders at its real height again. */}
-          <div className="shrink-0">
-          <CreateSurfaceDisclosure
-            icon={Wrench}
-            accent="amber"
-            label="Advanced"
-            summary={`${draft.toolProfile.toLowerCase()} tools · ${draft.cliAdapter
-              .toLowerCase()
-              .replace(/_/g, " ")} · ${draft.llmProvider.toLowerCase()} · ${Math.round(
-              draft.timeoutSeconds / 60,
-            )} min${draft.agentRole === "LEAD" ? ` · ${draft.leadMode}` : ""}`}
-          >
-            <CreateSurfaceField label="Tool profile" hint="what tools the agent can call">
-              <CreateSurfaceChoice
-                ariaLabel="Tool profile"
-                value={draft.toolProfile}
-                options={TOOL_PROFILES.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => setDraft({ ...draft, toolProfile: v })}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceField label="CLI adapter" hint="which CLI runs in the container">
-              <CreateSurfaceChoice
-                ariaLabel="CLI adapter"
-                value={draft.cliAdapter}
-                options={CLI_ADAPTERS.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => setDraft({ ...draft, cliAdapter: v })}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceField label="LLM provider" hint="changing this swaps the model list">
-              <CreateSurfaceChoice
-                ariaLabel="LLM provider"
-                value={draft.llmProvider}
-                options={LLM_PROVIDERS.map((v) => ({ value: v, label: v }))}
-                onChange={(v) => {
-                  // Auto-reset model to the provider's default when
-                  // the user toggles. The previous model string is
-                  // (almost certainly) wrong for the new provider —
-                  // claude-opus on OPENAI would be a runtime error
-                  // hours later.
-                  const newProvider: LLMProvider = v
-                  const keepModel = isKnownModel(newProvider, draft.llmModel)
-                  setDraft({
-                    ...draft,
-                    llmProvider: newProvider,
-                    llmModel: keepModel ? draft.llmModel : defaultModelForProvider(newProvider),
-                  })
-                }}
-              />
-            </CreateSurfaceField>
-
-            <CreateSurfaceGrid>
-              <CreateSurfaceField label="Timeout" htmlFor="agent-timeout" hint="seconds">
-                <input
-                  id="agent-timeout"
-                  type="number"
-                  step="60"
-                  min="60"
-                  max="7200"
-                  value={draft.timeoutSeconds}
-                  onChange={(e) => {
-                    // Guard against NaN ('' / non-numeric) and clamp to a
-                    // sane range. Without this, an empty field would set
-                    // timeout=NaN which the API would reject as 400 with
-                    // a confusing 'invalid integer' message.
-                    const raw = Number(e.target.value)
-                    const safe = Number.isFinite(raw) ? Math.min(7200, Math.max(60, raw)) : 1800
-                    setDraft({ ...draft, timeoutSeconds: safe })
-                  }}
-                  className={cn(INPUT_CLASS, "font-mono")}
-                />
-              </CreateSurfaceField>
+          </EditorPanel>
+          <EditorPanel active={section === "model"}>
+            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} />
               {draft.agentRole === "LEAD" && (
                 <CreateSurfaceField label="Lead mode" htmlFor="agent-lead-mode">
                   <select
@@ -826,50 +729,39 @@ WORK STYLE: …`}
                     }
                     className={INPUT_CLASS}
                   >
-                    <option value="active">active</option>
-                    <option value="passive">passive</option>
+                    <option value="active">Active — plans work for the crew</option>
+                    <option value="passive">Passive — responds when invoked</option>
                   </select>
                 </CreateSurfaceField>
               )}
-            </CreateSurfaceGrid>
-
-            {/* These three are columns in the v01 migration with no read and
-                no write site anywhere in the product — see #1781. This note
-                used to end "set on the agent canvas after create", which sent
-                the user to a tab that deliberately does not carry them
-                (agent-canvas-tabs/config-tab.tsx). Whether the columns get
-                enforced or dropped is still open; until it is decided, the
-                only honest thing this door can say is that nothing sets them.
-                Do not name another screen here again. */}
-            <p className="text-[10.5px] text-muted-foreground">
-              Not editable here:{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                temperature
-              </code>
-              ,{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                max_tokens
-              </code>
-              ,{" "}
-              <code className="font-mono text-[10px] px-1 py-0.5 rounded bg-white/[0.04]">
-                delegation caps
-              </code>{" "}
-              — no API exposes these, so they cannot be set anywhere.
-            </p>
-          </CreateSurfaceDisclosure>
-          </div>
+          </EditorPanel>
+          <EditorPanel active={section === "access"}>
+            <CreateSurfaceSection title="Tool access" icon={Wrench} accent="amber" hint="The runner's built-in tools. Credentials and integrations have separate permissions.">
+              <CreateSurfaceChoice ariaLabel="Tool access" value={draft.toolProfile} onChange={toolProfile => setDraft({ ...draft, toolProfile })} options={TOOL_PROFILES.map(value => ({ value, label: { MINIMAL: "Read and plan", CODING: "Workspace work", FULL: "Full tool access" }[value] }))} />
+              <p className="text-sm text-muted-foreground">{{ MINIMAL: "Requests a restricted tool set or read-only planning mode, depending on the runner.", CODING: "Read and edit workspace files, and run commands inside the crew container.", FULL: "All tools exposed by the runner. Crew permissions and network rules still apply." }[draft.toolProfile]}</p>
+              <p className="text-xs text-muted-foreground">Enforcement depends on the selected runner. This setting does not change the crew's network access.</p>
+            </CreateSurfaceSection>
+            {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
+            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">Billing access is managed separately and applies immediately.</p>{draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} paysWith={agent.pays_with ?? null} />}</CreateSurfaceSection>}
+            {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Work → Skills and access.</p>}
+          </EditorPanel>
+          <EditorPanel active={section === "chat"}>
+            {!agent && <CreateSurfaceSection title="Chat suggestions and forms" icon={MessageSquare}><SuggestedPromptsField draftMode value={String(extra.suggested_prompts ?? "")} onSave={async value => { setExtra(current => ({ ...current, suggested_prompts: value })) }} /><AskFormsBuilder value={String(extra.ask_forms ?? "")} onChange={value => { setExtra(current => ({ ...current, ask_forms: value })) }} /></CreateSurfaceSection>}
+            {agent && <ConfigTab supplementalOnly omitBilling agent={{ ...agent, ...extra }} crews={crews} patch={async body => { setExtra(current => ({ ...current, ...body })) }} onSelectCrew={() => {}} />}
+          </EditorPanel>
             </>
           )}
         </CreateSurfaceBody>
+        </EditorLayout>
 
         <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
         <CreateSurfaceFooter
           hint={validationHint ? <span className="text-warn">{validationHint}</span> : undefined}
           onCancel={() => onOpenChange(false)}
-          primaryLabel={submitting ? "Creating…" : "Create agent"}
+          primaryLabel={submitting ? "Saving…" : agent ? "Save changes" : !providerConfirmed ? "Choose provider" : "Create agent"}
           primaryIcon={ArrowRight}
-          primaryDisabled={!valid}
+          primaryDisabled={!valid || (!agent && !providerConfirmed && section === "model")}
           busy={submitting}
           onPrimary={() => void submit()}
         />
@@ -877,70 +769,23 @@ WORK STYLE: …`}
   )
 }
 
-/** Model picker that adapts to the current provider:
- *    - dropdown listing the curated models for that provider
- *    - "(custom…)" option flips the input into a free-text field, useful for
- *      Ollama where model names are whatever the user has pulled locally,
- *      and for early-access provider models not yet in our list. */
-function ModelInput({
-  id,
-  provider,
-  value,
-  onChange,
-}: {
-  id: string
-  provider: LLMProvider
-  value: string
-  onChange: (model: string) => void
-}) {
-  const known = MODELS_BY_PROVIDER[provider]
-  const isCustom = !known.includes(value)
-
-  if (isCustom) {
-    return (
-      <div className="flex gap-1.5 items-stretch">
-        <input
-          id={id}
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="model-name-tag"
-          className={cn(INPUT_CLASS, "font-mono text-[12px] flex-1")}
-          spellCheck={false}
-        />
-        <button
-          type="button"
-          onClick={() => onChange(defaultModelForProvider(provider))}
-          title="Switch back to the curated list"
-          className="px-2.5 py-1.5 rounded-md text-[11.5px] border border-white/[0.15] hover:bg-white/[0.03] text-foreground/80 whitespace-nowrap"
-        >
-          ← list
-        </button>
-      </div>
-    )
+function draftFromAgent(agent: AgentRecord, crews: CrewLite[]): AgentDraft {
+  return { ...initialAgentDraft(null), name: agent.name, slug: agent.slug, slugTouched: true,
+    crewSlug: crews.find((crew) => crew.id === agent.crew_id)?.slug ?? agent.crew?.slug ?? "",
+    agentRole: agent.agent_role as AgentDraft["agentRole"], roleTitle: agent.role_title ?? "", description: agent.description ?? "",
+    avatarSeed: agent.avatar_seed ?? "", avatarStyle: agent.avatar_style ?? DEFAULT_AVATAR_STYLE,
+    customPrompt: agent.system_prompt ?? "", llmProvider: (agent.llm_provider ?? "ANTHROPIC") as AgentDraft["llmProvider"],
+    llmModel: agent.llm_model ?? "", cliAdapter: agent.cli_adapter as AgentDraft["cliAdapter"],
+    toolProfile: agent.tool_profile as AgentDraft["toolProfile"], timeoutSeconds: agent.timeout_seconds,
+    memoryEnabled: agent.memory_enabled, leadMode: (agent.lead_mode ?? "active") as AgentDraft["leadMode"],
   }
-  return (
-    <select
-      id={id}
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === "__custom__") {
-          // Empty seed so the user knows it's their turn to type.
-          onChange("")
-          return
-        }
-        onChange(e.target.value)
-      }}
-      className={INPUT_CLASS}
-    >
-      {known.map((m) => (
-        <option key={m} value={m}>
-          {m}
-        </option>
-      ))}
-      <option value="__custom__" className="italic">
-        — custom…
-      </option>
-    </select>
-  )
+}
+function agentBody(draft: AgentDraft, crews: CrewLite[]): Record<string, unknown> {
+  return { name: draft.name.trim(), slug: draft.slug.trim(), agent_role: draft.agentRole,
+    crew_id: crews.find((crew) => crew.slug === draft.crewSlug)?.id ?? null,
+    description: draft.description.trim() || null, role_title: draft.roleTitle.trim() || null,
+    lead_mode: draft.agentRole === "LEAD" ? draft.leadMode : null, cli_adapter: draft.cliAdapter,
+    llm_provider: draft.llmProvider, llm_model: draft.llmModel, system_prompt: resolveFinalPrompt(draft) || null,
+    avatar_seed: draft.avatarSeed.trim() || null, avatar_style: draft.avatarStyle,
+    timeout_seconds: draft.timeoutSeconds, tool_profile: draft.toolProfile, memory_enabled: draft.memoryEnabled }
 }

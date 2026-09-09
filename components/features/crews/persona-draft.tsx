@@ -1,0 +1,7 @@
+"use client"
+import { useWorkspaceResource } from "./memory-workspace"
+
+export function PersonaDraft({ workspaceId, agentId, value, onChange }: { workspaceId: string; agentId: string; value: string | null | undefined; onChange: (value: string | null) => void }) {
+  const { data, error } = useWorkspaceResource<{ content: string; layer: string; from_default: boolean }>(`/api/v1/agents/${agentId}/persona?workspace_id=${encodeURIComponent(workspaceId)}`)
+  return <section className="space-y-3"><div><h3 className="text-sm font-medium">Persona</h3><p className="text-xs text-muted-foreground mt-1">Tone and working style, layered over the agent&apos;s instructions. {data && `Current source: ${data.from_default ? 'default' : data.layer}.`}</p></div>{error ? <p role="alert" className="text-sm text-destructive">Persona could not be loaded.</p> : !data ? <p className="text-sm text-muted-foreground">Loading persona…</p> : <><textarea aria-label="Persona override" value={value === undefined ? data.content : value ?? ""} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-border bg-background p-3 min-h-32 text-sm" /><div className="flex items-center gap-3"><button type="button" className="text-sm text-primary" onClick={() => onChange(null)}>Use inherited persona</button>{value !== undefined && <span className="text-xs text-muted-foreground">{value === null ? 'The agent override will be removed on Save.' : 'Draft · saved with the agent'}</span>}</div></>}</section>
+}

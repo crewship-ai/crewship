@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   AlertCircle, Boxes, Check, Copy, FileJson, HardDrive, Info as InfoIcon,
-  Package, Pencil, Search, Wrench, X,
+  Package, Pencil, Search, X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -91,6 +91,7 @@ interface RuntimeConfigProps {
    * `value.devcontainerConfig`, which this component syncs from — so the
    * caller owning the control does not mean the caller owning the state.
    */
+  focusedSection?: "tools" | "versions"
   hideBaseImage?: boolean
 }
 
@@ -253,7 +254,7 @@ function FileCard({ name, hint, body, copied, onCopy, onEdit }: {
 }
 
 
-export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs", hideBaseImage = false }: RuntimeConfigProps) {
+export function RuntimeConfig({ value, onChange, canEditPrivileged = false, browserHeight = "420px", layout = "tabs", hideBaseImage = false, focusedSection }: RuntimeConfigProps) {
   // Parse initial state from value
   const initialDC = useMemo(() => parseDevcontainerConfig(value.devcontainerConfig), [value.devcontainerConfig])
   const initialFull = useMemo(() => parseDevcontainerFull(value.devcontainerConfig), [value.devcontainerConfig])
@@ -1401,14 +1402,14 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
          *  person making a crew. So the hints name the only two situations
          *  where it actually decides something: "a specific version" and
          *  "anything else". */}
-        <CreateSurfaceSection
+        <div hidden={focusedSection === "versions"}><CreateSurfaceSection
           title="Preinstalled tooling"
-          icon={Wrench}
+          icon={Package}
           accent="amber"
           hint="things the container comes with — whatever version ships"
         >
           {toolingPaneSections}
-        </CreateSurfaceSection>
+        </CreateSurfaceSection></div>
 
         {/* Folded, not dropped. The specimen for this step (§6.3) shows base
             image and tooling only — but language runtimes and the privileged
@@ -1416,7 +1417,8 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
             create path would be a capability change wearing a redesign's
             clothes. They fold away instead, with the summary saying whether
             there is anything inside. */}
-        <CreateSurfaceDisclosure
+        <div hidden={focusedSection === "tools"}><CreateSurfaceDisclosure
+          defaultOpen={!!focusedSection}
           icon={Boxes}
           accent="blue"
           label="Language runtimes"
@@ -1454,7 +1456,7 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
             gets. Capped at 20.
           </p>
           {runtimesPaneSections}
-        </CreateSurfaceDisclosure>
+        </CreateSurfaceDisclosure></div>
 
         {/* Security and the generated files are NOT here, and that is the
             point.
@@ -1470,13 +1472,13 @@ export function RuntimeConfig({ value, onChange, canEditPrivileged = false, brow
          * component with all four panels and saves by PATCH
          * (crew-canvas-tabs/settings-tab.tsx). The note below says so, so
          * that someone who came looking for it is not left guessing. */}
-        {insideSummary}
+        {!focusedSection && insideSummary}
 
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
+        {!focusedSection && <p className="text-[11px] leading-relaxed text-muted-foreground">
           Privileged mode, Linux capabilities, extra mounts, container environment and the start
           hook live in the crew&apos;s settings once it exists — they are answers to problems a
           running crew has, not questions to answer now.
-        </p>
+        </p>}
       </div>
     )
   }

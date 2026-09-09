@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, ChevronRight, Clock, SearchX } from "lucide-react"
+import { usePagedList } from "@/hooks/use-paged-list"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -37,6 +38,9 @@ interface AgentData extends ExplorerAgent {
 }
 
 export interface CrewsExplorerProps {
+  workspaceId?: string
+  onAgentSlugSelect?: (slug: string) => void
+  onCrewSlugSelect?: (slug: string) => void
   crews: CrewData[]
   agents: AgentData[]
   selectedCrewId: string | null
@@ -63,6 +67,7 @@ export interface CrewsExplorerProps {
  * (explorer-groups.ts); this only draws it.
  */
 export function CrewsExplorer({
+  workspaceId, onAgentSlugSelect, onCrewSlugSelect,
   crews,
   agents,
   selectedCrewId,
@@ -80,6 +85,13 @@ export function CrewsExplorer({
   gapsByCrew,
 }: CrewsExplorerProps) {
   const [search, setSearch] = useState("")
+  const [query, setQuery] = useState("")
+  useEffect(() => { const timer = setTimeout(() => setQuery(search.trim()), 200); return () => clearTimeout(timer) }, [search])
+  const remote = Boolean(workspaceId && search.trim())
+  const searchQuery = workspaceId && query ? `workspace_id=${encodeURIComponent(workspaceId)}&q=${encodeURIComponent(query)}` : null
+  const foundAgents = usePagedList<AgentData>({ url: searchQuery ? `/api/v1/agents?${searchQuery}` : null })
+  const foundCrews = usePagedList<CrewData>({ url: searchQuery ? `/api/v1/crews?${searchQuery}` : null })
+
   // Every group folds after six (README §4: priority, cap, fold). On a host
   // without a container runtime every crew "needs a rebuild", and an
   // unfolded attention group of a hundred is the wall the fold exists for.
@@ -159,7 +171,7 @@ export function CrewsExplorer({
           {agent.ephemeral && !ghost && (
             <Clock className="h-2.5 w-2.5 text-notice/80" aria-label="Ephemeral hire" />
           )}
-          <StatusPill status={effectiveStatus(agent)} live={agent.status === "RUNNING" && !ghost} />
+          {(agent.status !== "IDLE" || ghost) && <StatusPill status={effectiveStatus(agent)} live={agent.status === "RUNNING" && !ghost} />}
         </div>
       </SidebarRow>
     )
@@ -230,7 +242,7 @@ export function CrewsExplorer({
           {/* The count is the server's total, not the page: "100 crews" on a
               workspace with 103 was the audit's first finding. */}
           <div className="flex items-center justify-between gap-2 px-3 pb-1 type-nav-sub text-muted-foreground" aria-live="polite">
-            <span className="truncate" data-testid="explorer-count">{countLine}</span>
+            <span className="truncate" data-testid="explorer-count">{remote ? `${foundCrews.total ?? "—"} crews · ${foundAgents.total ?? "—"} agents match` : countLine}</span>
             {search.trim() !== "" && (
               <button type="button" className="shrink-0 text-primary-hover hover:underline kit-tap" onClick={() => setSearch("")}>
                 Clear
@@ -239,7 +251,14 @@ export function CrewsExplorer({
           </div>
 
           <div className="flex-1 overflow-y-auto px-1">
-            {nothingMatches ? (
+            {remote ? <div className="space-y-2 p-2">
+              {foundAgents.error || foundCrews.error ? <p role="alert" className="type-nav">Search could not be loaded. <button onClick={() => { void foundAgents.refresh(); void foundCrews.refresh() }} className="text-primary">Retry</button></p> : query !== search.trim() || foundAgents.loading || foundCrews.loading ? <p role="status" className="type-nav text-muted-foreground">Searching…</p> : <>
+                {foundCrews.items.map((crew) => <button key={crew.id} className="block w-full rounded-lg p-2 text-left type-nav hover:bg-muted" onClick={() => onCrewSlugSelect?.(crew.slug)}>{crew.name}<span className="block type-nav-sub text-muted-foreground">Crew</span></button>)}
+                {foundAgents.items.map((agent) => <button key={agent.id} className="block w-full rounded-lg p-2 text-left type-nav hover:bg-muted" onClick={() => onAgentSlugSelect?.(agent.slug)}>{agent.name}<span className="block type-nav-sub text-muted-foreground">{agent.role_title || "Agent"}</span></button>)}
+                {!foundAgents.items.length && !foundCrews.items.length && <p className="type-nav text-muted-foreground">No matching crews or agents.</p>}
+                {(foundAgents.hasMore || foundCrews.hasMore) && <button className="type-nav text-primary" disabled={foundAgents.loadingMore || foundCrews.loadingMore} onClick={() => { void foundAgents.loadMore(); void foundCrews.loadMore() }}>Load more results</button>}
+              </>}
+            </div> : nothingMatches ? (
               <InlineEmpty
                 icon={SearchX}
                 className="mx-1 my-1"
@@ -277,13 +296,13 @@ export function CrewsExplorer({
               })
             )}
 
-            {grouped.unassigned.length > 0 && (
+            {!remote && grouped.unassigned.length > 0 && (
               <SidebarSection label="Unassigned" count={grouped.unassigned.length} className="mt-2 border-t border-border pt-1">
                 {grouped.unassigned.map((a) => renderAgent(a as AgentData))}
               </SidebarSection>
             )}
 
-            {hasMore && onLoadMore && (
+            {!remote && hasMore && onLoadMore && (
               // Shown under a no-match too: the search covers only what is
               // loaded, and the rest is one click away.
               <button

@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
-import { Files } from "lucide-react"
+import { Files, Pencil, Settings2 } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { EditableField } from "@/components/shared/editable-field"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { CreateCrewDialog } from "./create-crew-dialog"
+import { CrewRestartButton } from "./crew-restart-button"
+import { MemoryWorkspace } from "./memory-workspace"
 import { CrewIconPickerDialog } from "@/components/features/crews/crew-icon-picker-dialog"
+import { usePagedList } from "@/hooks/use-paged-list"
 import { apiFetch } from "@/lib/api-fetch"
 
 import { ProvisioningBanner } from "./crew-canvas-banner"
@@ -25,29 +30,24 @@ import {
 } from "./canvas-base"
 import { OverviewTab } from "./crew-canvas-tabs/overview-tab"
 import { RosterTab } from "./crew-canvas-tabs/roster-tab"
-import { MissionsTab } from "./crew-canvas-tabs/missions-tab"
-import { FilesTab } from "./crew-canvas-tabs/files-tab"
+import { EntityWork } from "./entity-work"
 import { SettingsTab } from "./crew-canvas-tabs/settings-tab"
 import type {
   AgentSummary,
   CrewIntegration,
   CrewMemberRow,
   CrewRecord,
-  IssueRow,
-  IssuesSnapshot,
   MissionData,
 } from "./crew-canvas-tabs/types"
-import { formatMemory } from "./crew-canvas-tabs/types"
 
 
-type CrewTab = "overview" | "roster" | "missions" | "files" | "settings"
+type CrewTab = "overview" | "roster" | "missions" | "memory"
 
 const TABS: Array<{ id: CrewTab; label: string }> = [
   { id: "overview", label: "Overview" },
-  { id: "roster", label: "Roster" },
-  { id: "missions", label: "Missions" },
-  { id: "files", label: "Files" },
-  { id: "settings", label: "Settings" },
+  { id: "roster", label: "Team" },
+  { id: "missions", label: "Work" },
+  { id: "memory", label: "Memory" },
 ]
 
 
@@ -57,6 +57,7 @@ export interface CrewCanvasProps {
   agentsForCrew: AgentSummary[]
   missions: MissionData[]
   onCrewChanged: () => void
+  onLoaded?: (crew: CrewRecord) => void
   onSelectAgent: (slug: string) => void
   onOpenFiles: () => void
   /** The layout's one provisioning poller; the canvas does not start its own. */
@@ -75,9 +76,10 @@ export interface CrewCanvasProps {
 export function CrewCanvas({
   workspaceId,
   crewSlug,
-  agentsForCrew,
-  missions,
+  agentsForCrew: agentsSnapshot,
+  missions: _missions,
   onCrewChanged,
+  onLoaded,
   onSelectAgent,
   onOpenFiles,
   provisioning: provisioningProp,
@@ -87,6 +89,7 @@ export function CrewCanvas({
     setEntity: setCrew,
     loading,
     error,
+    refetch: fetchCrew,
   } = useEntityFetch<CrewRecord>({
     workspaceId,
     slug: crewSlug,
@@ -98,9 +101,13 @@ export function CrewCanvas({
     detailErrorMessage: "crew detail fetch failed",
   })
 
+  useEffect(() => { if (crew) onLoaded?.(crew) }, [crew, onLoaded])
+
+  const roster = usePagedList<AgentSummary>({ url: crew ? `/api/v1/agents?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crew.id)}` : null, reloadKey: agentsSnapshot })
+  const agentsForCrew = roster.items
+  const [editOpen, setEditOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
   const [tab, setTab] = useState<CrewTab>("overview")
-  const [issues, setIssues] = useState<IssuesSnapshot | null>(null)
-  const [recentIssues, setRecentIssues] = useState<IssueRow[]>([])
   const [integrations, setIntegrations] = useState<CrewIntegration[] | null>(null)
   const [gaps, setGaps] = useState<NeedGap[]>([])
   const [needBusy, setNeedBusy] = useState<string | null>(null)
@@ -118,34 +125,6 @@ export function CrewCanvas({
   const resetActivityFilter = useCallback(() => setActivityFilter("all"), [])
   useResetTabOnSlugChange<CrewTab>(crewSlug, setTab, "overview", resetActivityFilter)
 
-  useEffect(() => {
-    if (!crew) return
-    let cancelled = false
-    // The crew-scoped path only has POST registered; GET lives at the
-    // workspace-scoped /issues endpoint with crew_id as filter.
-    apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&crew_id=${encodeURIComponent(crew.id)}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: IssueRow[]) => {
-        if (cancelled || !Array.isArray(data)) return
-        const buckets: IssuesSnapshot = { Backlog: 0, Todo: 0, InProgress: 0, InReview: 0, Done: 0 }
-        for (const i of data) {
-          const s = i.status?.toLowerCase() ?? ""
-          if (s.includes("backlog")) buckets.Backlog++
-          else if (s.includes("todo")) buckets.Todo++
-          else if (s.includes("progress")) buckets.InProgress++
-          else if (s.includes("review")) buckets.InReview++
-          else if (s.includes("done") || s.includes("closed")) buckets.Done++
-        }
-        setIssues(buckets)
-        const sorted = [...data].sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
-        setRecentIssues(sorted.slice(0, 10))
-      })
-      .catch(() => {
-        setIssues({ Backlog: 0, Todo: 0, InProgress: 0, InReview: 0, Done: 0 })
-        setRecentIssues([])
-      })
-    return () => { cancelled = true }
-  }, [crew, workspaceId])
 
   useEffect(() => {
     if (!crew) return
@@ -269,25 +248,6 @@ export function CrewCanvas({
     }
   }, [crew, onCrewChanged, workspaceId])
 
-  const recentMissions = useMemo(() => {
-    if (!crew) return []
-    return [...missions]
-      .filter((m) => m.crew_id === crew.id)
-      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))
-      .slice(0, 10)
-  }, [missions, crew])
-
-  // Health snapshot — derived from data we already have, no extra fetches.
-  const health = useMemo(() => {
-    const running = agentsForCrew.filter((a) => a.status === "RUNNING").length
-    const errored = agentsForCrew.filter((a) => a.status === "ERROR").length
-    const openIssues = issues
-      ? issues.Backlog + issues.Todo + issues.InProgress + issues.InReview
-      : null
-    const activeMissions = missions.filter((m) => m.crew_id === crew?.id && (m.status === "RUNNING" || m.status === "PENDING")).length
-    return { running, errored, openIssues, activeMissions }
-  }, [agentsForCrew, issues, missions, crew])
-
   if (loading || error || !crew) {
     return (
       <CanvasShell
@@ -300,7 +260,6 @@ export function CrewCanvas({
     )
   }
 
-  const containerSummary = `${crew.runtime_image ?? "debian:trixie-slim"} · ${formatMemory(crew.container_memory_mb)} · ${crew.container_cpus} CPU · TTL ${crew.container_ttl_hours ?? "—"}h · network: ${crew.network_mode}`
 
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
@@ -331,7 +290,7 @@ export function CrewCanvas({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h1 className="text-2xl font-semibold">
-              <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Crew name" />
+              {crew.name}
             </h1>
             <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-foreground/80 border border-white/10">
               Crew
@@ -353,15 +312,11 @@ export function CrewCanvas({
             <span className="text-muted-foreground-soft">·</span>
             <span className="text-xs">Created {new Date(crew.created_at).toLocaleDateString()}</span>
           </div>
-          <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-3 flex-wrap">
-            <span><span className="text-foreground/80">{crew._count?.agents ?? agentsForCrew.length}</span> agents</span>
-            <span><span className="text-foreground/80">{crew._count?.members ?? 0}</span> member{crew._count?.members === 1 ? "" : "s"}</span>
-            <span><span className="text-foreground/80">{recentMissions.length}</span> missions</span>
-            <span className="text-muted-foreground-soft">·</span>
-            <span className="truncate">container: <span className="text-foreground/80">{containerSummary}</span></span>
-          </div>
+          {crew.description && <p className="text-sm text-muted-foreground mt-2 max-w-prose">{crew.description}</p>}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>
+          <Button variant="outline" size="icon-sm" aria-label="Crew administration" onClick={() => setAdminOpen(true)}><Settings2 /></Button>
           <button
             type="button"
             onClick={onOpenFiles}
@@ -391,10 +346,14 @@ export function CrewCanvas({
         <OverviewTab
           workspaceId={workspaceId}
           crewId={crew.id}
+          crewSlug={crew.slug}
+          crewName={crew.name}
+          avatarStyle={crew.avatar_style}
           agentsForCrew={agentsForCrew}
-          missions={missions}
-          issues={issues}
-          health={health}
+          onSelectAgent={onSelectAgent}
+          onOpenTeam={() => setTab("roster")}
+          teamLoading={roster.loading}
+          teamError={roster.error}
           activityFilter={activityFilter}
           setActivityFilter={setActivityFilter}
           onOpenFiles={onOpenFiles}
@@ -402,38 +361,27 @@ export function CrewCanvas({
         />
       )}
 
-      {tab === "roster" && (
+      {tab === "roster" && (<>
+        {roster.error && <p role="alert">Team could not be loaded. <button onClick={() => void roster.refresh()}>Retry</button></p>}
+        {roster.loading && <p role="status">Loading team…</p>}
         <RosterTab
           crew={crew}
           agentsForCrew={agentsForCrew}
           members={members}
           onSelectAgent={onSelectAgent}
         />
-      )}
+        {roster.hasMore && <Button variant="outline" disabled={roster.loadingMore} onClick={() => void roster.loadMore()}>Load more agents</Button>}
+      </>)}
 
-      {tab === "missions" && (
-        <MissionsTab
-          crew={crew}
-          recentMissions={recentMissions}
-          issues={issues}
-          recentIssues={recentIssues}
-        />
-      )}
+      {tab === "missions" && <EntityWork workspaceId={workspaceId} crewId={crew.id} slug={crew.slug} name={crew.name} />}
 
-      {tab === "files" && <FilesTab onOpenFiles={onOpenFiles} />}
-
-      {tab === "settings" && (
-        <SettingsTab
-          workspaceId={workspaceId}
-          crew={crew}
-          agentsForCrew={agentsForCrew}
-          integrations={integrations}
-          patch={patch}
-          applyAvatarStyle={applyAvatarStyle}
-          onDelete={() => setConfirmDelete(true)}
-        />
-      )}
+      {tab === "memory" && <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />}
       </CanvasTabPanel>
+      <CreateCrewDialog workspaceId={workspaceId} crew={crew} open={editOpen} onOpenChange={setEditOpen} onCreated={() => { onCrewChanged(); void fetchCrew() }} />
+      <Dialog open={adminOpen} onOpenChange={setAdminOpen}><DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>Crew administration</DialogTitle><DialogDescription>Access policies, integrations and container operations. Each control applies its own change.</DialogDescription></DialogHeader>
+        <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onCrewChanged} />
+        <SettingsTab workspaceId={workspaceId} crew={crew} agentsForCrew={agentsForCrew} integrations={integrations} patch={patch} applyAvatarStyle={applyAvatarStyle} onDelete={() => setConfirmDelete(true)} />
+      </DialogContent></Dialog>
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

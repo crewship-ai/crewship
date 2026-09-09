@@ -57,10 +57,11 @@ import (
 // for the agent path, which is also slug-based on disk; renaming
 // an agent is a non-goal (slugs are immutable in practice).
 type PersonaHandler struct {
-	db             *sql.DB
-	logger         *slog.Logger
-	outputBasePath string
-	policyResolver *policy.Resolver
+	workspaceMemoryRoot string
+	db                  *sql.DB
+	logger              *slog.Logger
+	outputBasePath      string
+	policyResolver      *policy.Resolver
 }
 
 // NewPersonaHandler builds the handler. outputBasePath should be

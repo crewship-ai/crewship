@@ -8,7 +8,7 @@
 | Supersedes | `docs/prd/PRD-AGENT-FIRST-ISSUE-COORDINATION-2026.md` (issues-only, and wrong in five places — see §3) |
 | Scope | Issues, comments, mentions, agent sessions, runs, context, Routines, triggers, outcomes, Inbox, realtime, human oversight |
 | Implementer | A coding agent, working one claimed issue per PR |
-| Revision | **3 (2026-09-01).** Adds F51 (the exclusivity guard the assignment path bypasses), §2.8 (implementation hazards), and a rewritten §9 that cuts six new tables to three. Rev 2 note follows.<br>**2 (2026-09-01).** Rev 1 was reviewed by three further audits — an adversarial pass over its own proposals, a release-scope audit, and a neighbouring-subsystem audit. Rev 2 corrects four errors of its own (§3) and adds §2.7, §17's two-track split, and §26. |
+| Revision | **3 (2026-09-01).** Adds F51 (the exclusivity guard the assignment path bypasses), §2.8 (implementation hazards), and a rewritten §9 that cuts six new tables to three. Rev 2 note follows.<br />**2 (2026-09-01).** Rev 1 was reviewed by three further audits — an adversarial pass over its own proposals, a release-scope audit, and a neighbouring-subsystem audit. Rev 2 corrects four errors of its own (§3) and adds §2.7, §17's two-track split, and §26. |
 | One-line thesis | **The issue is where work is judged. The routine is how work recurs. A run is one attempt at either. Today none of those three are linked to each other in the schema.** |
 | Release position | **This document is mostly not 1.0 scope, and says so.** 1.0 in this project means the surface is proven true, not that new features exist (§17 Track A/B, §24). |
 

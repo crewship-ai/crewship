@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
-import { readThrough } from "@/lib/stale-cache"
+import { invalidate, readThrough } from "@/lib/stale-cache"
 import type { AgentBinding } from "@/components/features/integrations/composio/types"
 
 /** A notification channel this agent may post to. Destination deliberately absent. */
@@ -21,16 +21,22 @@ export interface AgentChannel {
  * touch?" — that a reviewer asks in one go. Two calls behind it, cached, so
  * opening several agents in a row does not re-fetch what was just shown.
  *
- * Both degrade to empty rather than throwing: Composio may not be configured
- * at all, and an agent with no channels is the DEFAULT state in a default-deny
- * system, not a failure worth an error banner.
+ * Failed requests are reported separately from an empty set of permissions.
  */
 export function useAgentReach(workspaceId: string | null | undefined, agentId: string | null) {
   const [toolkits, setToolkits] = useState<AgentBinding[]>([])
   const [channels, setChannels] = useState<AgentChannel[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const generation = useRef(0)
+  const cancelPending = useCallback(() => { generation.current++ }, [])
 
-  const refresh = useCallback(async () => {
+  const load = useCallback(async () => {
+    const request = ++generation.current
+    setError(null)
+    setLoading(true)
+    setToolkits([])
+    setChannels([])
     if (!workspaceId || !agentId) {
       setToolkits([])
       setChannels([])
@@ -58,6 +64,8 @@ export function useAgentReach(workspaceId: string | null | undefined, agentId: s
     if (bind.value && chans.value) setLoading(false)
 
     const [t, c] = await Promise.allSettled([bind.fresh, chans.fresh])
+    if (generation.current !== request) return
+    if (t.status === "rejected" || c.status === "rejected") setError("Some tools or channels could not be loaded.")
     if (t.status === "fulfilled") setToolkits(t.value)
     else if (!bind.value) setToolkits([])
     if (c.status === "fulfilled") setChannels(c.value)
@@ -65,9 +73,15 @@ export function useAgentReach(workspaceId: string | null | undefined, agentId: s
     setLoading(false)
   }, [workspaceId, agentId])
 
+  const refresh = useCallback(() => {
+    invalidate(`composio:${workspaceId}:bind:${agentId}`)
+    invalidate(`notify:${workspaceId}:agent-channels:${agentId}`)
+    return load()
+  }, [workspaceId, agentId, load])
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void load()
+    return cancelPending
+  }, [load, cancelPending])
 
-  return { toolkits, channels, loading, refresh }
+  return { toolkits, channels, loading, error, refresh }
 }

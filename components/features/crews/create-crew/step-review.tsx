@@ -1,5 +1,7 @@
 "use client"
 
+import { PROVIDERS, DEFAULT_RUNNER } from "../create-agent/provider-options"
+import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { cn } from "@/lib/utils"
 import type { WizardState } from "./types"
@@ -59,6 +61,8 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
         )}
       </Row>
 
+      {state.mode === "browse" && state.provider && <Row label="AI provider"><Pill>{PROVIDERS[state.provider]}</Pill><Pill>{CLI_ADAPTERS[DEFAULT_RUNNER[state.provider]].label}</Pill></Row>}
+
       <Row label="Size" onEdit={onEdit && (() => onEdit(3))}>
         <Pill>{prettyMemory(state.memoryMB)}</Pill>
         <Pill>{state.cpus} CPU</Pill>
@@ -100,7 +104,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
       <Row label="After create">
         <span className="text-muted-foreground text-[12px] leading-relaxed">
           Container <code className="text-[11px] font-mono bg-black/30 px-1 py-0.5 rounded">crewship-team-{state.slug}</code> built in background.
-          {lineupSummary.count > 0 && ` ${lineupSummary.count} agents auto-assigned credentials, ready in ~2 min.`}
+          {lineupSummary.count > 0 && ` ${lineupSummary.count} agents. Matching credentials are assigned when available; connect a provider account before running.`}
         </span>
       </Row>
     </div>

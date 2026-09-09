@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, GitBranch,
@@ -197,16 +198,7 @@ export function OrchestrationLayout({
   // The search box commits to the server (`?q=`, title and identifier), so a
   // match outside the loaded page is found — S1 on docs/ux/audit-work.md.
   const [committedSearch, setCommittedSearch] = useState("")
-  const {
-    issues,
-    loading: issuesLoading,
-    error: issuesError,
-    total: issuesTotal,
-    hasMore: issuesHasMore,
-    loadingMore: issuesLoadingMore,
-    refetch: fetchIssues,
-    loadMore: loadMoreIssues,
-  } = useIssuesList(workspaceId, { search: committedSearch })
+
   const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
   // Persisted per-user — most teams stick with one of board/list and a
   // refresh shouldn't bounce them back to board if they prefer list.
@@ -234,12 +226,27 @@ export function OrchestrationLayout({
   // /issues?project=<id> — the ⌘K palette's Projects rows, a bookmark, or a
   // project opened in this page — is read AND written by useProjectDetail.
   const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
-  const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
-  const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
+  const workParams = useSearchParams()
+  const [filterCrewId, setFilterCrewId] = useState<string | null>(workParams.get("crew_id"))
+  const [filterAgentId, setFilterAgentId] = useState<string | null>(workParams.get("assignee_id"))
+  const scopedCrew = workParams.get("crew_id")
+  const scopedAgent = workParams.get("assignee_id")
+  useEffect(() => { setFilterCrewId(scopedCrew); setFilterAgentId(scopedAgent) }, [scopedCrew, scopedAgent])
   // Multi-select status filter (empty = show all). Priority filter is
   // single-select because issues only have one priority value.
   const [filterStatuses, setFilterStatuses] = useState<MissionStatus[]>([])
   const [filterPriority, setFilterPriority] = useState<IssuePriority | null>(null)
+
+  const {
+    issues,
+    loading: issuesLoading,
+    error: issuesError,
+    total: issuesTotal,
+    hasMore: issuesHasMore,
+    loadingMore: issuesLoadingMore,
+    refetch: fetchIssues,
+    loadMore: loadMoreIssues,
+  } = useIssuesList(workspaceId, { search: committedSearch, crewId: filterCrewId, assigneeId: filterAgentId, missionType: workParams.get("mission_type") ?? "issue" })
 
   // Realtime: agents create and advance issues live. #2257 (PR #2310)
   // registered the issue.* subscriptions for the first time, but its client
@@ -600,13 +607,13 @@ export function OrchestrationLayout({
       {showToolbar && (
         <SubBar
           icon={mode === "issues" ? CircleDot : undefined}
-          title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
+          title={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : workParams.get("mission_type") === "mission" ? "Missions" : "Issues"}
           description={
             mode === "issues"
               ? `${(issuesTotal ?? issues.length).toLocaleString()} ${(issuesTotal ?? issues.length) === 1 ? "issue" : "issues"}`
               : `${missions.length} ${missions.length === 1 ? "issue" : "issues"}`
           }
-          ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : "Issues"}
+          ariaLabel={mode === "activity" ? "Activity" : mode === "default" ? "Orchestration" : workParams.get("mission_type") === "mission" ? "Missions" : "Issues"}
           tabs={visibleTabs.map(({ id, label, icon }) => ({ id, label, icon }))}
           activeTab={activeTab}
           onTabChange={(id) => setActiveTab(id)}

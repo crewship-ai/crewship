@@ -37,6 +37,7 @@ interface ModelInfo {
 }
 
 export interface ConfigModelProps {
+  draftMode?: boolean
   label: string
   hint?: string
   workspaceId: string
@@ -46,7 +47,8 @@ export interface ConfigModelProps {
   onSave: (next: string) => Promise<void> | void
 }
 
-export function ConfigModel({ label, hint, workspaceId, provider, value, onSave }: ConfigModelProps) {
+export function ConfigModel({ label, hint, workspaceId, provider, value, onSave, draftMode = false }: ConfigModelProps) {
+  const [custom, setCustom] = useState("")
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [source, setSource] = useState<string>("")
@@ -90,7 +92,7 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave 
     if (id === value) return
     try {
       await onSave(id)
-      toast.success(`${label} saved`)
+      if (!draftMode) toast.success(`${label} saved`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save")
     }
@@ -120,7 +122,7 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave 
 
       {stale && (
         <p className="type-meta border-b border-border px-3 pb-2 text-warn">
-          {value} is not offered by {provider.toLowerCase()} — pick one that is.
+          {value} is not in this catalog. It is preserved until you choose a different model.
         </p>
       )}
 
@@ -174,6 +176,7 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave 
             </CommandGroup>
           )}
         </CommandList>
+        <div className="border-t border-border p-3 flex items-end gap-2"><label className="text-xs text-muted-foreground flex-1">Custom model ID<input value={custom} onChange={(event) => setCustom(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); if (custom.trim()) void pick(custom.trim()) } }} className="mt-1 w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground" /></label><button type="button" className="text-sm text-primary px-2 py-2 disabled:opacity-40" disabled={!custom.trim()} onClick={() => void pick(custom.trim())}>Use model</button></div>
       </CommandDialog>
     </>
   )

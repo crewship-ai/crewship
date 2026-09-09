@@ -82,9 +82,9 @@ describe("<CreateCrewDialog> — importing a manifest", () => {
     await openImport()
 
     // Same rule the base-image and icon panels follow: a panel is not a step,
-    // and "step 2 of 4" over a file picker is a lie about where you are.
+    // and "step 2 of 3" over a file picker is a lie about where you are.
     expect(screen.getByText(/Import — new crew/)).toBeInTheDocument()
-    expect(screen.queryByText(/step 2 of 4/)).toBeNull()
+    expect(screen.queryByText(/step 2 of 3/)).toBeNull()
   })
 
   it("says what it will fill in before anything is applied", async () => {
@@ -125,7 +125,7 @@ describe("<CreateCrewDialog> — importing a manifest", () => {
       expect(screen.getByPlaceholderText("Engineering")).toHaveValue("Data Engineering")
     })
     expect(screen.getByPlaceholderText("engineering")).toHaveValue("data-eng")
-    expect(screen.getByText(/step 1 of 4/)).toBeInTheDocument()
+    expect(screen.getByText(/step 1 of 3/)).toBeInTheDocument()
   })
 
   it("refuses a file that is not a crew manifest, by name", async () => {

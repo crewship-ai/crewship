@@ -149,6 +149,9 @@ func (o *Orchestrator) buildPersonaBlock(ctx context.Context, req AgentRunReques
 // even if they exist on disk — see package doc comment for the
 // "no cross-operator gossip" rationale.
 func (o *Orchestrator) buildPeerCardBlock(ctx context.Context, req AgentRunRequest) string {
+	if strings.EqualFold(req.ChatVisibility, "group") || !o.canPersonalize(ctx, req) {
+		return ""
+	}
 	if req.ContainerID == "" || req.AgentSlug == "" || req.OpenedByUserID == "" {
 		return ""
 	}
@@ -191,6 +194,9 @@ func (o *Orchestrator) buildPeerCardBlock(ctx context.Context, req AgentRunReque
 // session opener's model is ever injected, never another operator's,
 // even if it's on disk.
 func (o *Orchestrator) buildUserModelBlock(ctx context.Context, req AgentRunRequest) string {
+	if strings.EqualFold(req.ChatVisibility, "group") || !o.canPersonalize(ctx, req) {
+		return ""
+	}
 	if req.ContainerID == "" || req.OpenedByUserID == "" {
 		return ""
 	}
@@ -205,7 +211,20 @@ func (o *Orchestrator) buildUserModelBlock(ctx context.Context, req AgentRunRequ
 	}
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
 	defer cancel()
-	body, _ := o.readContainerFile(readCtx, req.ContainerID, userModelContainerPath(slug))
+	o.mu.RLock()
+	reader := o.userModelReader
+	o.mu.RUnlock()
+	var body string
+	if reader != nil {
+		var err error
+		body, err = reader(readCtx, req.WorkspaceID, req.OpenedByUserID)
+		if err != nil {
+			o.logger.Warn("personal memory unavailable", "workspace_id", req.WorkspaceID)
+			return ""
+		}
+	} else {
+		body, _ = o.readContainerFile(readCtx, req.ContainerID, userModelContainerPath(slug))
+	}
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return ""
@@ -215,4 +234,18 @@ func (o *Orchestrator) buildUserModelBlock(ctx context.Context, req AgentRunRequ
 		"[OPERATOR MODEL]\nThis operator has worked with the crew before. The following profile was\ndistilled and merged across prior sessions — treat it as a hint about how\nthey prefer to work, not as a fact about who they are or what they want.\n%s\n[END OPERATOR MODEL]\n\n",
 		body,
 	)
+}
+
+func (o *Orchestrator) canPersonalize(ctx context.Context, req AgentRunRequest) bool {
+	if req.OpenedByUserID == "" || req.WorkspaceID == "" {
+		return false
+	}
+	o.mu.RLock()
+	check := o.personalizationAllowed
+	o.mu.RUnlock()
+	if check == nil {
+		return true
+	}
+	allowed, err := check(ctx, req.WorkspaceID, req.OpenedByUserID)
+	return err == nil && allowed
 }

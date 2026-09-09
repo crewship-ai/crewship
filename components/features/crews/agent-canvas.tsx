@@ -1,13 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { motion } from "motion/react"
 import { toast } from "sonner"
 import {
-  ArrowUpRight, Bot, Brain, CheckCircle2, Clock, FolderTree, MessageSquare,
-  MoreHorizontal, RotateCcw, Square, Trash2,
+  ArrowUpRight, Bot, Palette, ShieldCheck, CheckCircle2, Clock, FolderTree, MessageSquare,
+  MoreHorizontal, Pencil, RotateCcw, Square, Trash2,
 } from "lucide-react"
 import { AnthropicIcon, GeminiIcon, OpenAIIcon } from "@/components/icons/provider-icons"
 import { AvatarPickerDialog } from "@/components/features/crews/avatar-picker-dialog"
@@ -15,13 +15,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -42,8 +38,10 @@ import {
   useResetTabOnSlugChange,
 } from "./canvas-base"
 import { OverviewTab } from "./agent-canvas-tabs/overview-tab"
-import { ConfigTab } from "./agent-canvas-tabs/config-tab"
-import { MemoryTab } from "./agent-canvas-tabs/memory-tab"
+import { CreateAgentDialog } from "./create-agent/create-agent-dialog"
+import { EntityWork } from "./entity-work"
+import { AgentOverview } from "./workspace-overview"
+import { MemoryWorkspace } from "./memory-workspace"
 import type {
   AgentRecord,
   ChatRow as ChatRowType,
@@ -54,14 +52,12 @@ import type {
 
 export type { ChatRow, RunRow, AgentSkillRow, AgentCredRow, PeerMessageRow } from "./agent-canvas-tabs/types"
 
-// Two entries, not six. Four of the old tabs were relations the agent merely
-// points at; they hang off the overview's reach strip now, so a reader picks
-// between "what is going on" and "how is it set up" instead of six nouns.
-type AgentTab = "overview" | "config"
+type AgentTab = "overview" | "work" | "memory"
 
 const TABS: Array<{ id: AgentTab; label: string }> = [
   { id: "overview", label: "Overview" },
-  { id: "config", label: "Configuration" },
+  { id: "work", label: "Work" },
+  { id: "memory", label: "Memory" },
 ]
 
 /** Brand mark for the model in the identity line. */
@@ -79,24 +75,19 @@ export interface AgentCanvasProps {
   /** Crews list passed for the Crew dropdown in Profile section. */
   crews: { id: string; name: string; slug: string }[]
   onAgentChanged: (nextSlug?: string) => void
+  onLoaded?: (agent: AgentRecord) => void
   onSelectCrew: (slug: string | null) => void
   /** Open the bottom panel pre-targeted to the Files tab. Wired by CrewsLayout. */
   onOpenFiles?: () => void
 }
 
-/**
- * Agent canvas — drives the right pane when ?agent=<slug> is selected.
- * Tabbed layout: Overview / Workspace / Skills & Tools / Activity / Settings.
- *
- * Header always visible (avatar, name, slug, role, crew, status, Chat/Stop).
- * 6-stat strip below header (Sessions / Runs / Cost-30d / Skills / Creds / Last).
- * Tabs below let users focus on one concern at a time without scrolling 600+ lines.
- */
+/** Agent workspace: activity, assigned work and memory; editing shares the creation form. */
 export function AgentCanvas({
   workspaceId,
   agentSlug,
   crews,
   onAgentChanged,
+  onLoaded,
   onSelectCrew,
   onOpenFiles,
 }: AgentCanvasProps) {
@@ -118,9 +109,23 @@ export function AgentCanvas({
     detailErrorMessage: "agent detail failed",
   })
 
+  useEffect(() => { if (agent) onLoaded?.(agent) }, [agent, onLoaded])
+
   const [tab, setTab] = useState<AgentTab>("overview")
+  const accessRef = useRef<HTMLDetailsElement>(null)
+  const redirectMenuFocus = useRef(false)
+  const [accessRequested, setAccessRequested] = useState(false)
+  useEffect(() => {
+    if (tab !== "work" || !accessRequested || !accessRef.current) return
+    accessRef.current.open = true
+    accessRef.current.scrollIntoView({ block: "start" })
+    setAccessRequested(false)
+  }, [tab, accessRequested])
   const [avatarPickerOpen, setAvatarPickerOpen] = useState(false)
-  const [memoryOpen, setMemoryOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [revision, setRevision] = useState(0)
+  const [inboxError, setInboxError] = useState<string | null>(null)
+  const [activityError, setActivityError] = useState<string | null>(null)
 
   // Reset to Overview when switching agents.
   useResetTabOnSlugChange<AgentTab>(agentSlug, setTab, "overview")
@@ -128,6 +133,7 @@ export function AgentCanvas({
   useRealtimeEvent("agent.status", useCallback((event) => {
     if (agent && event.payload?.agent_id === agent.id) {
       void fetchAgent()
+      setRevision((n) => n + 1)
     }
   }, [agent, fetchAgent]))
 
@@ -141,27 +147,25 @@ export function AgentCanvas({
     // Clear previous agent's data immediately so a stale inbox / peer list
     // never leaks into the next selection while the request is in flight.
     setInbox({ count: 0 })
+    setInboxError(null)
     setPeerMessages([])
     apiFetch(`/api/v1/agents/${agentId}/inbox?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data) => {
         if (cancelled || !data) return
-        const escalations = Number(data.escalations_open ?? 0)
-        const assignments = Number(data.assignments_open ?? 0)
-        const approvals = Number(data.approvals_pending ?? 0)
+        const unavailable: string[] = data.unavailable ?? []
+        if (unavailable.length) setInboxError(`Some summary data is unavailable: ${unavailable.map(value => ({ cost: "costs", peers: "agent collaboration", approvals: "approvals", assignments: "assignments", escalations: "escalations" }[value] ?? "activity")).join(", ")}.`)
+        const approvals = unavailable.includes("approvals") ? 0 : Number(data.approvals_pending ?? 0)
         const peers: PeerMessageRowType[] = Array.isArray(data.peer_messages) ? data.peer_messages : []
-        const total = escalations + assignments + approvals + peers.length
+        const total = approvals
         const parts: string[] = []
-        if (escalations) parts.push(`${escalations} escalation${escalations === 1 ? "" : "s"}`)
-        if (assignments) parts.push(`${assignments} assignment${assignments === 1 ? "" : "s"}`)
         if (approvals) parts.push(`${approvals} approval${approvals === 1 ? "" : "s"} pending`)
-        if (peers.length) parts.push(`${peers.length} peer message${peers.length === 1 ? "" : "s"}`)
-        setInbox({ count: total, summary: parts.join(" · "), cost: Number(data.cost_usd_this_month ?? 0) })
+        setInbox({ count: total, summary: parts.join(" · "), cost: !unavailable.includes("cost") && typeof data.cost_usd_this_month === "number" ? data.cost_usd_this_month : undefined })
         setPeerMessages(peers)
       })
-      .catch(() => { /* tolerate */ })
+      .catch(() => { if (!cancelled) setInboxError("Approvals and activity summary could not be loaded.") })
     return () => { cancelled = true }
-  }, [agentId, workspaceId])
+  }, [agentId, workspaceId, revision])
 
   // Runs + chats are fetched once at canvas-level and shared with the
   // overview tab's Recent cards (avoids three separate hits to the
@@ -173,22 +177,25 @@ export function AgentCanvas({
     let cancelled = false
     // Reset before fetch so the previous agent's runs/chats don't leak into
     // this canvas while the new request is pending.
+    setActivityError(null)
     setRuns(null)
     setChats(null)
     apiFetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data: RunRowType[] | null) => {
-        if (!cancelled && Array.isArray(data)) setRuns(data)
+        if (!Array.isArray(data)) throw new Error("Invalid runs response")
+        if (!cancelled) setRuns(data)
       })
-      .catch(() => { /* tolerate */ })
-    apiFetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
-      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => { if (!cancelled) setActivityError("Some activity could not be loaded.") })
+    apiFetch(`/api/v1/agents/${agentId}/chats?kind=direct&workspace_id=${workspaceId}`)
+      .then((r) => { if (!r.ok) throw new Error(`Activity could not be loaded (${r.status}).`); return r.json() })
       .then((data: ChatRowType[] | null) => {
-        if (!cancelled && Array.isArray(data)) setChats(data)
+        if (!Array.isArray(data)) throw new Error("Invalid chats response")
+        if (!cancelled) setChats(data)
       })
-      .catch(() => { /* tolerate */ })
+      .catch(() => { if (!cancelled) setActivityError("Some activity could not be loaded.") })
     return () => { cancelled = true }
-  }, [agentId, workspaceId])
+  }, [agentId, workspaceId, revision])
 
   const patch = usePatchEntity<AgentRecord>({
     workspaceId,
@@ -334,7 +341,7 @@ export function AgentCanvas({
             agentId={agent.id}
             avatarUrl={agent.avatar_url}
             className={cn(
-              "h-12 w-12 rounded-xl transition-transform group-hover:scale-[1.06]",
+              "h-16 w-16 rounded-xl ring-4 ring-purple/10 transition-transform group-hover:scale-[1.06]",
               isRunning && "ring-2 ring-success/40",
             )}
           />
@@ -386,39 +393,33 @@ export function AgentCanvas({
                 Files
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil /> Edit</Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon-sm" title="More actions" aria-label="Agent actions">
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[220px]">
-                <DropdownMenuLabel className="type-meta text-muted-foreground">{agent.name}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                {/* Memory lives here rather than on a tab. It is four markdown
-                    files — AGENT.md, CREW.md, PERSONA.md, peer cards — that
-                    almost nobody edits, and it spent a spell bolted to the
-                    bottom of Configuration where it dwarfed every actual
-                    setting. Reachable, not resident. */}
-                <DropdownMenuItem onClick={() => setMemoryOpen(true)} className="flex items-center gap-2">
-                  <Brain className="h-4 w-4" />
-                  <span>Memory</span>
-                  <span className="type-meta ml-auto text-muted-foreground-soft">
-                    {agent.memory_enabled ? "on" : "off"}
-                  </span>
+              <DropdownMenuContent align="end" className="w-64 rounded-xl p-1.5" onCloseAutoFocus={(event) => {
+                if (redirectMenuFocus.current) {
+                  event.preventDefault()
+                  redirectMenuFocus.current = false
+                  accessRef.current?.querySelector("summary")?.focus()
+                  accessRef.current?.scrollIntoView({ block: "start" })
+                }
+              }}>
+                <DropdownMenuItem onSelect={() => setAvatarPickerOpen(true)} className="gap-3 rounded-lg p-2.5">
+                  <Palette className="h-4 w-4 text-purple" />
+                  <span>Change avatar<span className="block text-xs text-muted-foreground">Give this agent its own look</span></span>
                 </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() => toast.info("Container restart will land in a follow-up")}
-                  className="flex items-center gap-2"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  <span>Restart container</span>
+                <DropdownMenuItem onSelect={() => { redirectMenuFocus.current = true; setTab("work"); setAccessRequested(true) }} className="gap-3 rounded-lg p-2.5">
+                  <ShieldCheck className="h-4 w-4 text-primary" />
+                  <span>Skills and access<span className="block text-xs text-muted-foreground">Capabilities and permissions</span></span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setConfirmDelete(true)}
-                  className="flex items-center gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+                  className="flex items-center gap-3 rounded-lg p-2.5 text-destructive focus:bg-destructive/10 focus:text-destructive"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span>Delete agent</span>
@@ -428,6 +429,7 @@ export function AgentCanvas({
           </div>
         </div>
 
+        {agent.description && <p className="mt-2 max-w-prose text-sm text-muted-foreground">{agent.description}</p>}
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <StatusPill status={statusKey} live={isRunning} size="md" />
           {agent.agent_role === "LEAD" && <Pill tone="purple">Lead</Pill>}
@@ -507,8 +509,11 @@ export function AgentCanvas({
       </div>
 
       <CanvasTabPanel idPrefix="agent-canvas" active={tab} className="space-y-6">
-      {tab === "overview" && (
-        <OverviewTab
+      {tab === "overview" && <AgentOverview workspaceId={workspaceId} agent={agent} inbox={inbox} runs={runs} chats={chats} peerMessages={peerMessages} error={[activityError, inboxError].filter(Boolean).join(" ") || null} onRetry={() => setRevision((n) => n + 1)} onWork={() => setTab("work")} revision={revision} />}
+      {tab === "work" && <EntityWork workspaceId={workspaceId} agentId={agent.id} crewId={agent.crew_id ?? undefined} slug={agent.slug} name={agent.name} />}
+      {tab === "work" && (
+        <details ref={accessRef} className="scroll-mt-4 rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">Skills and access</summary><div className="mt-4"><OverviewTab
+          accessOnly
           workspaceId={workspaceId}
           agent={agent}
           crews={crews}
@@ -523,37 +528,14 @@ export function AgentCanvas({
           // stopped and offered nothing. The inbox filtered to this agent is
           // where the decision is taken.
           onOpenInbox={() => router.push(entityHref({ kind: "inbox", agentSlug: agent.slug }))}
-          onOpenConfig={() => setTab("config")}
+          onOpenConfig={() => setEditOpen(true)}
           onAgentChanged={onAgentChanged}
-        />
+        /></div></details>
       )}
 
-      {/* The old settings panel is gone. Everything it carried is a card in
-          ConfigTab now, and the three controls it duplicated — timeout, tool
-          profile, memory — are back to one each. Deletion stays in the ··· menu
-          beside Chat, which is where a destructive action belongs. */}
-      {tab === "config" && (
-        <ConfigTab agent={agent} crews={crews} patch={patch} onSelectCrew={onSelectCrew} />
-      )}
+      {tab === "memory" && <MemoryWorkspace key={agent.id} workspaceId={workspaceId} agentId={agent.id} agentSlug={agent.slug} crewId={agent.crew_id ?? undefined} memoryEnabled={agent.memory_enabled} />}
       </CanvasTabPanel>
-
-      <Dialog open={memoryOpen} onOpenChange={setMemoryOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[820px]">
-          <DialogHeader>
-            <DialogTitle>Memory</DialogTitle>
-            <DialogDescription>
-              What {agent.name} carries between sessions. The switch that turns it on is in
-              Configuration, under Model and run.
-            </DialogDescription>
-          </DialogHeader>
-          <MemoryTab
-            agentId={agent.id}
-            agentSlug={agent.slug}
-            crewId={agent.crew_id ?? undefined}
-            workspaceId={workspaceId}
-          />
-        </DialogContent>
-      </Dialog>
+      <CreateAgentDialog agent={agent} workspaceId={workspaceId} open={editOpen} onOpenChange={setEditOpen} defaultCrewSlug={agent.crew?.slug ?? null} crews={crews} onCreated={(slug) => { onAgentChanged(slug); void fetchAgent(); setRevision((n) => n + 1) }} />
 
       <ConfirmDialog
         open={confirmDelete}

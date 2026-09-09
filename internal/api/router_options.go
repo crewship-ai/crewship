@@ -432,3 +432,8 @@ func WithKeeperPhase2Evaluators(
 // ServeHTTP dispatches incoming requests to the registered route handlers.
 // It applies security headers to all responses and per-IP rate limiting:
 // stricter limits on auth endpoints, general limits on public API,
+
+// WithMemoryInventoryRoot enables read-only workspace knowledge discovery.
+func WithMemoryInventoryRoot(path string) RouterOption {
+	return func(r *Router) { r.memoryInventoryRoot = path }
+}

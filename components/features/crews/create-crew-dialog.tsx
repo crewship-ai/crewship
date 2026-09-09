@@ -3,27 +3,32 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { Check, FastForward } from "lucide-react"
+import { Check, Cpu, Users, HardDrive, Package, Boxes, Network } from "lucide-react"
 
 import {
   CreateSurface,
   CreateSurfaceBody,
+  CreateSurfaceDisclosure,
   CreateSurfaceFooter,
+  CreateSurfaceSection,
   CreateSurfaceHeader,
   CreateSurfacePicker,
   CreateSurfaceRefusal,
-  CreateSurfaceSecondaryAction,
   CreateSurfaceSteps,
   type CreateSurfaceStep,
 } from "@/components/layout/create-surface"
+import { apiFetch } from "@/lib/api-fetch"
+import type { CrewRecord } from "./crew-canvas-tabs/types"
 import { StepIdentity } from "./create-crew/step-identity"
 import { StepLineup } from "./create-crew/step-lineup"
-import { StepContainer } from "./create-crew/step-container"
+import { EditorLayout, EditorPanel } from "./editor-layout"
+import { StepContainer, type EnvironmentSection } from "./create-crew/step-container"
 import { BaseImagePanel, effectiveBaseImage, patchImage } from "./create-crew/base-image"
 import { ImportCrewPanel } from "./create-crew/import-panel"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { CREW_ICON_CATEGORIES, GRADIENT_PALETTES, getCrewIconDef, searchCrewIcons } from "@/lib/entities"
 import { asCrewColor } from "./create-crew/types"
+import { ProviderPicker } from "./create-agent/agent-model-settings"
 import { StepReview } from "./create-crew/step-review"
 import { submitCrew } from "./create-crew/submit"
 import { INITIAL_STATE, type WizardState, type WizardStep } from "./create-crew/types"
@@ -33,26 +38,13 @@ export interface CreateCrewDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: () => void
+  crew?: CrewRecord
 }
 
-/**
- * Four steps, and everything that counts them says four.
- *
- * There were five, and the counter beside the title said "step N of 4"
- * because Review was read as the confirmation rather than a question — a
- * wording that survived from an older strip and left the header claiming
- * "step 3 of 4" above a row of five chips.
- *
- * Runtime is gone as a step of its own. Resource limits are an
- * administrator's question and now sit folded inside Container; the egress
- * control went with them, next to the image it applies to. What is left is
- * four questions, counted honestly, and a phone progress bar whose
- * `aria-valuenow` matches its max.
- */
+/** Creation keeps the guided lineup flow; editing uses focused settings sections. */
 const CREW_STEPS: CreateSurfaceStep[] = [
   { id: "identity", label: "Identity" },
   { id: "lineup", label: "Lineup" },
-  { id: "container", label: "Container" },
   { id: "review", label: "Review" },
 ]
 
@@ -63,25 +55,33 @@ const STEP_DESCRIPTION: Record<WizardStep, string> = {
   4: "Last look before commit. Click any section to jump back.",
 }
 
-export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }: CreateCrewDialogProps) {
+export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated, crew }: CreateCrewDialogProps) {
   const router = useRouter()
+  const [section, setSection] = useState("identity")
+  const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [step, setStep] = useState<WizardStep>(1)
   const [state, setStateFull] = useState<WizardState>(INITIAL_STATE)
+  const baseline = useRef<WizardState>(INITIAL_STATE)
+  const wasOpen = useRef(false)
   const [busy, setBusy] = useState(false)
   // What the server said when it said no. The toast stays (a wizard that
   // closes on success wants one), but the band is the copy you can still read
   // ten seconds later, and it sits outside the scrollport.
   const [refusal, setRefusal] = useState<string | null>(null)
 
-  // Reset to fresh state every time the dialog re-opens.
   useEffect(() => {
-    if (!open) {
-      setStep(1)
-      setStateFull(INITIAL_STATE)
-      setBusy(false)
-      setRefusal(null)
+    if (open && !wasOpen.current) {
+      const next: WizardState = crew ? { ...INITIAL_STATE, mode: "empty", name: crew.name, slug: crew.slug, slugTouched: true,
+        description: crew.description ?? "", icon: crew.icon ?? "code", color: asCrewColor(crew.color),
+        memoryMB: crew.container_memory_mb, cpus: crew.container_cpus, ttlHours: crew.container_ttl_hours,
+        networkMode: crew.network_mode as WizardState["networkMode"],
+        allowedDomains: Array.isArray(crew.allowed_domains) ? crew.allowed_domains : parseDomains(crew.allowed_domains),
+        mcpConfig: crew.mcp_config_json ?? "", runtimeImage: crew.runtime_image ?? "", devcontainerConfig: crew.devcontainer_config ?? "", miseConfig: crew.mise_config ?? "",
+      } : INITIAL_STATE
+      baseline.current = next; setStateFull(next); setSection("identity"); setEnvironmentOpen(false); setStep(1); setBusy(false); setRefusal(null)
     }
-  }, [open])
+    wasOpen.current = open
+  }, [open, crew])
 
   const setState = useMemo(() => (patch: Partial<WizardState>) => {
     setStateFull((prev) => ({ ...prev, ...patch }))
@@ -96,8 +96,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // (the lineup step auto-picks a template on mount, so state alone would say
   // "dirty" a beat later anyway); on Step 1 it is whatever has been typed.
   const dirty = useMemo(
-    () => step > 1 || JSON.stringify(state) !== JSON.stringify(INITIAL_STATE),
-    [step, state],
+    () => (!crew && step > 1) || JSON.stringify(state) !== JSON.stringify(baseline.current),
+    [step, state, crew],
   )
 
   // submittingRef is a synchronous latch — `busy` is only updated on the next
@@ -107,25 +107,25 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   const submittingRef = useRef(false)
 
   const submit = async () => {
-    if (submittingRef.current || busy) return
+    if (submittingRef.current || busy || (!crew && state.mode === "browse" && !state.provider)) return
     submittingRef.current = true
     setBusy(true)
     setRefusal(null)
     try {
-      const result = await submitCrew(workspaceId, state)
+      const result = crew ? await saveCrew(workspaceId, crew.id, state, baseline.current) : await submitCrew(workspaceId, state)
       // applyOverrides() inside submit fires toast.warning when partial=true.
       // Suppress the success toast in that case so the user doesn't see a
       // contradictory pair ("Created" + "Some customizations didn't apply").
       if (!result.partial) {
-        toast.success(`Crew "${result.name}" created`)
+        toast.success(`Crew "${result.name}" ${crew ? "updated" : "created"}`)
       }
       onOpenChange(false)
       onCreated()
       router.replace(`/crews?crew=${encodeURIComponent(result.slug)}`)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      setRefusal(`Could not create crew: ${message}`)
-      toast.error(`Could not create crew: ${message}`)
+      setRefusal(`Could not save crew: ${message}`)
+      toast.error(`Could not save crew: ${message}`)
     } finally {
       setBusy(false)
       submittingRef.current = false
@@ -133,11 +133,11 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   }
 
   const advance = () => {
-    if (step === 4) {
+    if (crew || step === 4) {
       submit()
       return
     }
-    setStep((step + 1) as WizardStep)
+    setStep(step === 2 ? 4 : 2)
   }
 
   // Inert rather than absent while a create is in flight: the header's back
@@ -145,21 +145,7 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
   // and making it vanish for the length of a POST shifts the title sideways.
   const back = () => {
     if (busy) return
-    if (step > 1) setStep((step - 1) as WizardStep)
-  }
-
-  // Skip-to-defaults must clear Step 4 overrides — otherwise a user who typed
-  // a custom image / devcontainer / mise / MCP and then clicks "Skip to
-  // defaults" still has those values land on Review and submit, which
-  // contradicts the CTA's promise.
-  const skipToReview = () => {
-    setState({
-      runtimeImage: INITIAL_STATE.runtimeImage,
-      devcontainerConfig: INITIAL_STATE.devcontainerConfig,
-      miseConfig: INITIAL_STATE.miseConfig,
-      mcpConfig: INITIAL_STATE.mcpConfig,
-    })
-    setStep(4)
+    if (step > 1) setStep(step === 4 ? 2 : 1)
   }
 
   // Auto-focus the primary action when the user lands on Review (Step 5) so
@@ -193,7 +179,8 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
     <CreateSurface
       open={open}
       onOpenChange={onOpenChange}
-      size="lg"
+      size={crew ? "xl" : "lg"}
+      className={crew ? "h-[92dvh] sm:h-[min(85dvh,720px)]" : undefined}
       dirty={dirty}
       discardLabel="this crew"
       onSubmit={() => {
@@ -213,12 +200,12 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
         context="Crews"
         title={
           panel === "image"
-            ? "Base image — new crew"
+            ? `Base image — ${crew ? crew.name : "new crew"}`
             : panel === "icon"
-              ? "Icon — new crew"
+              ? `Icon — ${crew ? crew.name : "new crew"}`
               : panel === "import"
                 ? "Import — new crew"
-                : "New crew"
+                : crew ? `Edit ${crew.name}` : "New crew"
         }
         description={
           panel === "image"
@@ -227,14 +214,14 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
               ? "Pick a colour, then an icon. Browse by category, or search."
               : panel === "import"
                 ? "Read a crew manifest into this form. It fills in what the wizard asks about and tells you what it leaves behind."
-                : STEP_DESCRIPTION[step]
+                : crew ? "Changes are saved together. Existing agents remain in the crew." : STEP_DESCRIPTION[step]
         }
         onBack={panel ? () => setPanel(null) : step > 1 ? back : undefined}
         onClose={() => onOpenChange(false)}
         meta={
-          panel ? undefined : (
+          panel || crew ? undefined : (
             <span className="max-sm:hidden">
-              {step === 4 ? "ready to create" : `step ${step} of 4`}
+              {step === 4 ? "ready to create" : `step ${step} of 3`}
             </span>
           )
         }
@@ -244,16 +231,24 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           wrap it in a second <nav>. Hidden inside a panel: the panel is not a
           step, and a strip saying "3 of 4" over a picker is a lie about where
           you are. */}
-      {!panel && (
+      {!panel && !crew && (
         <CreateSurfaceSteps
           ariaLabel="Wizard progress"
           steps={CREW_STEPS}
-          current={step - 1}
-          onJump={(i) => setStep((i + 1) as WizardStep)}
+          current={step === 4 ? 2 : step - 1}
+          onJump={(i) => setStep(i === 2 ? 4 : (i + 1) as WizardStep)}
         />
       )}
 
-      <CreateSurfaceBody>
+      <EditorLayout label="Crew editor sections" active={section} onChange={setSection} hidden={!crew || !!panel} sections={[
+        { id: "identity", label: "Identity", icon: Users },
+        { id: "environment", label: "Environment", icon: HardDrive },
+        { id: "tools", label: "Tools", icon: Package },
+        { id: "versions", label: "Tool versions", icon: Boxes },
+        { id: "network", label: "Network", icon: Network },
+        { id: "limits", label: "Resource limits", icon: Cpu },
+      ]}>
+      <CreateSurfaceBody className="min-w-0 space-y-5 [&>section]:rounded-xl [&>section]:border [&>section]:border-border/60 [&>section]:bg-card [&>section]:p-4">
         {panel === "image" && (
           <BaseImagePanel
             value={effectiveBaseImage(state)}
@@ -303,9 +298,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           />
         )}
         {!panel && step === 1 && (
-          <StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} />
+          <EditorPanel active={!crew || section === "identity"}><StepIdentity state={state} setState={setState} onPickIcon={() => setPanel("icon")} /></EditorPanel>
         )}
-        {!panel && step === 2 && (
+        {!panel && !crew && step === 2 && (
           <StepLineup
             state={state}
             setState={setState}
@@ -313,17 +308,24 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
             onImport={() => setPanel("import")}
           />
         )}
-        {!panel && step === 3 && (
-          <StepContainer state={state} setState={setState} onPickImage={() => setPanel("image")} />
+        {!panel && crew && <div hidden={section === "identity"}><StepContainer state={state} setState={setState} activeSection={(section === "identity" ? "environment" : section) as EnvironmentSection} onPickImage={() => setPanel("image")} /></div>}
+        {!panel && !crew && step === 4 && state.mode === "browse" && <CreateSurfaceSection title="Model provider" icon={Cpu} accent="teal" hint="Choose the provider for this team's agents. Its matching runner is installed automatically; connect an account before the first run.">
+          <ProviderPicker value={state.provider} onChange={provider => setState({ provider })} />
+        </CreateSurfaceSection>}
+        {!panel && !crew && (step === 4 || step === 3) && (
+          <CreateSurfaceDisclosure key={String(environmentOpen)} label="Environment and runtime" icon={Cpu} accent="teal" defaultOpen={environmentOpen || step === 3}>
+            <StepContainer state={state} setState={setState} onPickImage={() => { setEnvironmentOpen(true); setPanel("image") }} />
+          </CreateSurfaceDisclosure>
         )}
         {!panel && step === 4 && (
           <StepReview
             state={state}
-            onEdit={(s) => setStep(s)}
+            onEdit={(s) => { if (s >= 3) setEnvironmentOpen(true); setStep(s >= 3 ? 4 : s) }}
             lineupSummary={lineupSummary}
           />
         )}
       </CreateSurfaceBody>
+      </EditorLayout>
 
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
 
@@ -336,8 +338,9 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           hint={
             panel
               ? undefined
+              : crew ? "⌘+Enter to save · Esc cancel"
               : step === 4
-                ? "⌘+Enter to confirm · Esc cancel"
+                ? state.mode === "browse" && !state.provider ? "Choose a provider for the agents" : "⌘+Enter to confirm · Esc cancel"
                 : "⌘+Enter to continue"
           }
           // Inside the panel, Cancel means "back out of the panel" — the same
@@ -346,24 +349,12 @@ export function CreateCrewDialog({ workspaceId, open, onOpenChange, onCreated }:
           onCancel={panel ? () => setPanel(null) : () => onOpenChange(false)}
           guardCancel={!panel}
           cancelLabel={panel ? "Back" : "Cancel"}
-          secondary={
-            !panel && step === 3 ? (
-              <CreateSurfaceSecondaryAction
-                icon={FastForward}
-                onClick={skipToReview}
-                disabled={busy}
-                title="Skip to Review with default container settings"
-              >
-                Skip to defaults
-              </CreateSurfaceSecondaryAction>
-            ) : undefined
-          }
           primaryLabel={
             panel === "image"
               ? "Use this image"
               : panel === "icon"
                 ? "Use this icon"
-                : step === 4
+                : crew ? (busy ? "Saving…" : "Save changes") : step === 4
                   ? (busy ? "Creating…" : "Create crew")
                   : "Continue"
           }
@@ -391,8 +382,9 @@ function stepIsValid(step: WizardStep, s: WizardState): boolean {
     if (s.mode === "browse") return !!s.pickedTemplateSlug
     return true // empty
   }
+  if (step === 4 && s.mode === "browse") return !!s.provider
   // step === 3 (Container) is always valid: image and tooling are optional,
-  // an empty allowlist is an explicit choice that locks all egress, and the
+  // an empty allowlist still permits provider APIs and platform connections, and the
   // sizing chips cannot produce a zero — CustomNumberChip refuses anything
   // outside [MIN, MAX] and keeps the previous value.
   return true
@@ -407,4 +399,21 @@ function deriveLineupSummary(s: WizardState): { count: number; source: string; a
     }
   }
   return { count: 0, source: "empty" }
+}
+
+function parseDomains(value: string | null): string[] {
+  try { const parsed: unknown = JSON.parse(value || "[]"); return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [] } catch { return [] }
+}
+function crewBody(state: WizardState): Record<string, unknown> {
+  return { name: state.name.trim(), slug: state.slug.trim(), description: state.description.trim(), icon: state.icon, color: state.color,
+    container_memory_mb: state.memoryMB, container_cpus: state.cpus, container_ttl_hours: state.ttlHours ?? 0,
+    network_mode: state.networkMode, allowed_domains: state.allowedDomains, runtime_image: state.runtimeImage,
+    devcontainer_config: state.devcontainerConfig, mise_config: state.miseConfig, mcp_config_json: state.mcpConfig }
+}
+async function saveCrew(workspaceId: string, id: string, state: WizardState, baseline: WizardState) {
+  const old = crewBody(baseline)
+  const body = Object.fromEntries(Object.entries(crewBody(state)).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(old[key])))
+  const response = await apiFetch(`/api/v1/crews/${id}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+  if (!response.ok) throw new Error(`Crew could not be saved (${response.status}).`)
+  return response.json() as Promise<{ id: string; name: string; slug: string; partial?: boolean }>
 }

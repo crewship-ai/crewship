@@ -8,7 +8,7 @@ test("PR browser contract subset", async ({ page }) => {
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
-    await expect(page.getByRole("heading", { name: "Your fleet" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible()
   })
 
   await test.step("agent create dialog is reachable", async () => {
@@ -28,10 +28,8 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByPlaceholder("engineering", { exact: true }).fill(slug)
     await page.getByRole("button", { name: /Continue/ }).click()
     await page.getByRole("button", { name: /Start empty/ }).click()
-    // Two Continues, not three. Lineup lands on Container now — the Runtime
-    // step it used to pass through folded into it.
+    // Purpose → team → review. Environment settings are optional in review.
     await page.getByRole("button", { name: /Continue/ }).click()
-    await page.getByRole("button", { name: /Skip to defaults/ }).click()
     await page.getByRole("button", { name: /Create crew/ }).click()
     await expect(page.getByRole("dialog")).not.toBeVisible()
 
