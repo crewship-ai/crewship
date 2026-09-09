@@ -604,8 +604,8 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// credential request their own agent raised. Deliberately independent of
 	// role — canRole above already gated MANAGER+, and this is a strict
 	// approver-must-differ-from-initiator rule with NO OWNER bypass. If the
-	// agent has no recorded owner (legacy pre-v99 rows), the rule cannot be
-	// enforced and resolution proceeds as before.
+	// agent has no recorded owner, strict requests fail closed because the
+	// independence of the approver cannot be established.
 	//
 	// KNOWN SCOPE LIMIT: "initiator" is proxied by agent *ownership*
 	// (created_by_user_id), not the human who actually drove the agent to raise
@@ -1004,15 +1004,14 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	//
 	//   - CREDENTIAL escalations only.
 	//   - The rule compares the approver against the agent's recorded owner, so
-	//     an agent with no owner (legacy pre-v99 row) cannot have it enforced —
-	//     and a row that claimed otherwise would be worse than saying nothing.
+	//     an agent with no owner fails closed when the rule is required.
 	//   - The workspace toggle opts every tier in; the credential's own tier
 	//     forces it on the top tier regardless. Either is sufficient.
 	//
 	// The governance row is read once for the whole page, not once per item.
 	needsGovernance := false
 	for i := range items {
-		if items[i].Type == "CREDENTIAL" && items[i].initiatorUserID.Valid && items[i].initiatorUserID.String != "" {
+		if items[i].Type == "CREDENTIAL" {
 			needsGovernance = true
 			break
 		}
@@ -1021,7 +1020,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, workspaceID)
 		for i := range items {
 			it := &items[i]
-			if it.Type != "CREDENTIAL" || !it.initiatorUserID.Valid || it.initiatorUserID.String == "" {
+			if it.Type != "CREDENTIAL" {
 				continue
 			}
 			it.SecondApproverByWorkspace = gov.RequireSecondApprover
@@ -1092,7 +1091,7 @@ type secondApproverInput struct {
 // site in ResolveEscalation for the known scope limit (ownership as a proxy
 // for the initiating human).
 func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *http.Request, in secondApproverInput) bool {
-	if in.escalationType == "CREDENTIAL" && in.initiatorUserID.Valid && in.initiatorUserID.String != "" {
+	if in.escalationType == "CREDENTIAL" {
 		gov := governance.Resolve(r.Context(), h.db, h.logger, in.workspaceID)
 		// The workspace toggle is the opt-in. The credential's tier can also demand
 		// it: an L4 credential is one an operator marked as production-critical, and
@@ -1130,6 +1129,11 @@ func (h *QueryHandler) refuseCredentialSelfApproval(w http.ResponseWriter, r *ht
 			}
 		}
 		if gov.RequireSecondApprover || tierForces {
+			if !in.initiatorUserID.Valid || in.initiatorUserID.String == "" {
+				h.logger.Warn("credential approval denied: requester identity unavailable", "escalation_id", in.escalationID)
+				replyError(w, http.StatusForbidden, "A second approver is required, but the initiating identity is unknown. This request cannot be safely approved.")
+				return true
+			}
 			forcedBy := "workspace policy"
 			if tierForces {
 				// The tier is the more specific reason, so it is the one named.

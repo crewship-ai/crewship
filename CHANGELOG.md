@@ -9,11 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Guided credentials and provider setup** (#2465) — direct type selection, consistent branded forms, text-file imports, colored tags and compact assignment previews. Save for later creates no delivery bindings; explicit assignment checks occupied slots. Partial saves retry incomplete writes, and provider re-login updates the existing account atomically while retaining assignments.
+- **Credential and private-service protection** (#2465) — private service configuration is encrypted at rest and omitted from public/exported views; re-encryption supports the stored format. Credential disclosure refreshes authorization before returning values, and restricted approval details are scoped to eligible viewers.
+
 - ⚠️ **Behaviour change: default administrator reveal permission** (#2461) — OWNER/ADMIN memberships without explicit capability overrides now receive `credentials:reveal`, as does the admin preset. Existing explicit sets (including revocations) remain authoritative. Workspace opt-in, human-session checks, scope, SEALED denial and audit remain required.
 
 - **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
 
 ### Added
+
+- **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
 
 - **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
 

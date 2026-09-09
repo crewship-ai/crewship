@@ -1,5 +1,6 @@
 "use client"
 
+import { credentialTagClassName } from "@/lib/credentials/tag-accent"
 import * as React from "react"
 import { motion } from "motion/react"
 import {
@@ -139,17 +140,6 @@ interface AuditEvent {
   actor_name?: string
 }
 
-interface RotationRow {
-  id: string
-  credential_id: string
-  grace_seconds: number
-  rotated_at: string
-  expires_at: string
-  rotated_by: string
-  status: "ACTIVE" | "EXPIRED" | "CANCELLED"
-  old_value_gone: boolean
-}
-
 /** GET /api/v1/credentials/{id}/fields. `value` is non-null ONLY for a
  *  non-secret field — the server never returns a secret's bytes, in any form. */
 interface CredentialFieldRow {
@@ -242,7 +232,6 @@ export function CredentialDetailSheet({
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
   const [auditExpanded, setAuditExpanded] = React.useState(false)
-  const [rotations, setRotations] = React.useState<RotationRow[]>([])
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
@@ -319,7 +308,7 @@ export function CredentialDetailSheet({
    */
   const revealBlockedReason =
     effectiveSensitivity === "SEALED"
-      ? "SEALED can never be revealed, by any role. The break-glass is rotation, not disclosure."
+      ? "SEALED values cannot be revealed. Obtain a replacement from the provider to change this secret."
       : !revealEnabled
         ? "Reveal is switched off for this workspace. An owner can turn it on under Settings → Access & secrets."
         : "Revealing a value needs the credentials:reveal capability, which no role grants on its own."
@@ -328,7 +317,6 @@ export function CredentialDetailSheet({
     if (!open || !credential) {
       setAudit([])
       setAuditExpanded(false)
-      setRotations([])
       setTestResult(null)
       setFields([])
       setBindings([])
@@ -411,13 +399,6 @@ export function CredentialDetailSheet({
       .catch(() => { if (!cancelled) setAccessError(true) })
       .finally(() => { if (!cancelled) setAccessLoading(false) })
 
-    if (canRotate) {
-      apiFetch(`/api/v1/credentials/${cid}/rotations?workspace_id=${ws}`)
-        .then((r) => (r.ok ? r.json() : []))
-        .then((data: RotationRow[]) => !cancelled && setRotations(Array.isArray(data) ? data : []))
-        .catch(() => !cancelled && setRotations([]))
-    }
-
     return () => {
       cancelled = true
     }
@@ -449,21 +430,12 @@ export function CredentialDetailSheet({
   const missingTools = Array.from(new Set(toolGaps.map((g) => g.tool).filter(Boolean)))
   const readinessTone: DetailTone =
     toolGaps.length > 0 ? "warn" : readinessKnown ? "success" : "default"
-  const readinessLabel =
-    toolGaps.length > 0
-      ? missingTools.length > 0
-        ? `Needs ${missingTools.join(", ")}`
-        : "Tool missing"
-      : readinessKnown
-        ? "Tools available"
-        : "Tools not checked"
-
   // Keep the summary aligned with the provider's refreshed login metadata.
   const expiryDays = daysUntilExpiry(seat ? { ...credential, token_expires_at: seat.login.expires_at } : credential)
   const facts: StatItem[] = [
     {
-      label: "Last used",
-      value: credential.last_used_at ? formatRelativeTime(credential.last_used_at) : "never",
+      label: "Last recorded use",
+      value: credential.last_used_at ? formatRelativeTime(credential.last_used_at) : "No recorded use",
     },
     {
       label: "Expires",
@@ -478,12 +450,8 @@ export function CredentialDetailSheet({
               ? "warn"
               : "default",
     },
-    { label: "Used by", value: credential._count_agent_credentials || "—" },
-    {
-      label: "Tools",
-      value: readinessLabel,
-      tone: toolGaps.length > 0 ? "warn" : readinessKnown ? "success" : "default",
-    },
+    { label: "Scope", value: credential.scope === "CREW" ? "Selected crews" : "Workspace" },
+    { label: "Created", value: formatDate(credential.created_at) },
   ]
 
   const handleTest = async () => {
@@ -600,14 +568,14 @@ export function CredentialDetailSheet({
             history and protection stay accessible through disclosures, using
             the same detail kit as the rest of the product. */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-4 p-4">
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 sm:p-6">
             {/* ── Identity ─────────────────────────────────────────────── */}
             <Appear order={0}>
               <DetailCard>
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex min-w-0 items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
+                    <div className="flex min-w-0 items-center gap-4">
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-surface-raised">
                         <BrandIcon
                           className="h-5 w-5"
                           style={{ color: brandColor(brand) }}
@@ -615,7 +583,7 @@ export function CredentialDetailSheet({
                         />
                       </div>
                       <div className="min-w-0">
-                        <h1 className="truncate font-mono text-lg font-semibold tracking-tight">
+                        <h1 className="truncate text-2xl font-semibold tracking-tight">
                           {credential.name}
                         </h1>
                         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -642,12 +610,12 @@ export function CredentialDetailSheet({
                     {onEdit && canUpdate && (
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant="default"
                         onClick={() => onEdit(credential)}
-                        className="shrink-0"
+                        className="shrink-0 gap-2 px-4"
                       >
                         <Pencil className="mr-1.5 h-3 w-3" />
-                        Edit
+                        {seat ? "Edit provider" : "Edit credential"}
                       </Button>
                     )}
                   </div>
@@ -658,49 +626,7 @@ export function CredentialDetailSheet({
                     </p>
                   )}
 
-                  {/* The chips answer, in one line, the three questions asked
-                      about a secret before any other: how hard is it guarded,
-                      who may see the value, and does it work. */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {tierLevel !== null ? (
-                      <Pill tone={tierTone}>
-                        <ShieldCheck className="h-3 w-3" />
-                        {credential.security_level_label || tierMeta(tierLevel).label}
-                      </Pill>
-                    ) : (
-                      <Pill tone="default">
-                        <ShieldCheck className="h-3 w-3" />
-                        Tier not reported
-                      </Pill>
-                    )}
-                    {effectiveSensitivity && (
-                      <Pill
-                        tone={
-                          effectiveSensitivity === "SEALED"
-                            ? "destructive"
-                            : effectiveSensitivity === "RESTRICTED"
-                              ? "warn"
-                              : "default"
-                        }
-                      >
-                        {effectiveSensitivity === "SEALED" ? (
-                          <EyeOff className="h-3 w-3" />
-                        ) : (
-                          <Eye className="h-3 w-3" />
-                        )}
-                        {effectiveSensitivity}
-                      </Pill>
-                    )}
-                    <Pill tone={readinessTone}>
-                      {toolGaps.length > 0 ? (
-                        <PackageX className="h-3 w-3" />
-                      ) : readinessKnown ? (
-                        <CheckCircle2 className="h-3 w-3" />
-                      ) : (
-                        <PackageX className="h-3 w-3" />
-                      )}
-                      {readinessLabel}
-                    </Pill>
                     {brand.cli && (
                       <Pill tone="blue">
                         <TerminalSquare className="h-3 w-3" />
@@ -714,7 +640,7 @@ export function CredentialDetailSheet({
                       </Pill>
                     )}
                     {(credential.tags ?? []).map((t) => (
-                      <Pill key={t} tone="default">
+                      <Pill key={t} tone="default" className={cn("border px-2 py-0.5", credentialTagClassName(t))}>
                         <Hash className="h-3 w-3" />
                         {t}
                       </Pill>
@@ -731,7 +657,7 @@ export function CredentialDetailSheet({
                       ? testResult.valid ? "Connection check passed just now." : "Connection check did not pass. See the test result."
                       : credential.testable && (!seat || seat.login.mode !== "subscription") && credential.last_checked_at && credential.status === "ACTIVE" && !credential.last_error
                         ? `Last connection check passed ${formatRelativeTime(credential.last_checked_at)}. This does not guarantee the next request will succeed.`
-                        : "Connection not verified. Tool availability and token expiry do not confirm that a login works."}
+                        : "Connection not verified."}
                   </p>
                   {seat && (
                     <ProviderLoginActions
@@ -798,19 +724,11 @@ export function CredentialDetailSheet({
                   />
                 )}
 
-                {/*
-                  The value block. §2.6 L8 — and this ordering is a security
-                  decision, not a layout preference: ROTATE is the primary
-                  action and reveal is the secondary one, because most
-                  legitimate reasons to want a value are really reasons to
-                  replace it. A control that is used rarely is a control that
-                  keeps working; making rotation the path of least resistance
-                  is what keeps the reveal count low enough that each one is
-                  worth investigating.
-                */}
+                {/* Replacement and reveal have independent permission gates.
+                    Neither action issues or revokes a value at the provider. */}
                 {!seat && <Appear order={3}>
                   <DetailCard
-                    title="Value"
+                    title="Secret value"
                     icon={KeyRound}
                     subtitle="encrypted at rest"
                     action={
@@ -861,11 +779,10 @@ export function CredentialDetailSheet({
                       <div className="mt-2.5 space-y-1.5">
                         <Button size="sm" variant="outline" onClick={() => onRotate(credential)}>
                           <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                          Replace with grace period
+                          Replace value…
                         </Button>
                         <p className="text-[10px] text-muted-foreground">
-                          Paste a replacement you obtained from the issuing service. The grace period
-                          applies in Crewship only; it does not extend validity at the provider.
+                          Paste a new value from your provider. This only updates the value stored in Crewship.
                         </p>
                       </div>
                     )}
@@ -903,27 +820,10 @@ export function CredentialDetailSheet({
                       )
                     )}
 
-                    {/* Replacing the value lives in Edit, not here.
-                     *
-                     * There were three ways to change one secret on one screen:
-                     * rotate, an inline "replace the value" input, and the Value
-                     * field in the Edit dialog. Two of those did the same PATCH.
-                     * Rotate is a different operation — it keeps the old value
-                     * alive through a grace window — so it stays; the plain swap
-                     * belongs where every other property of this credential is
-                     * changed. */}
-                    {canUpdate && onEdit && (
-                      <p className="mt-3 border-t border-hairline pt-3 text-[10px] text-muted-foreground">
-                        To paste a new value without a grace window, use{" "}
-                        <button
-                          type="button"
-                          onClick={() => onEdit(credential)}
-                          className="font-medium text-primary hover:underline"
-                        >
-                          Edit
-                        </button>
-                        {" "}— leave the field empty there to keep the existing one.
-                      </p>
+                    {!canRotate && canUpdate && onEdit && (
+                      <Button size="sm" variant="outline" className="mt-3" onClick={() => onEdit(credential)}>
+                        <Pencil className="mr-1.5 h-3.5 w-3.5" /> Replace value in Edit…
+                      </Button>
                     )}
                   </DetailCard>
                 </Appear>}
@@ -1008,7 +908,21 @@ export function CredentialDetailSheet({
                         answer to "which env var will the container actually
                         see", which before P3 had no answer short of booting
                         the agent. */}
-                    <div className="mb-4 space-y-2 text-xs" data-testid="credential-access-summary">
+                    <div className="mb-4 flex flex-wrap gap-2" aria-label="Assigned agents">
+                      {Array.from(new Set([...credential.agent_names, ...assignments.map((a) => a.agentName)])).map((name) => (
+                        <span key={name} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border/60 bg-background/50 px-3 py-2 text-sm">
+                          <AgentAvatar seed={credential.agent_ids?.[credential.agent_names.indexOf(name)] ?? name} className="h-6 w-6 shrink-0" alt="" />
+                          <span className="truncate">{name}</span>
+                          {assignments.some((a) => a.agentName === name && a.expired) && <Badge variant="outline" className="text-warn">lease expired</Badge>}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mb-3 text-xs text-muted-foreground">Configured assignments. Runtime access also follows workspace policy.</p>
+                    {accessLoading && <p role="status" className="mb-3 text-xs text-muted-foreground">Checking visible assignments…</p>}
+                    {(accessError || accessCoverage.unavailable > 0) && <p role="alert" className="mb-3 text-xs text-warn">Some assignments could not be loaded. This list may be incomplete.</p>}
+                    <details className="rounded-lg border border-border/60 p-3">
+                      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Delivery bindings & access details</summary>
+                    <div className="my-4 space-y-2 text-xs" data-testid="credential-access-summary">
                       <p><span className="font-medium">Management:</span> {seat ? "only workspace owners and admins can view and manage provider accounts." : "owners and admins manage credentials; managers can edit them. Reading a secret requires separate reveal permission and workspace policy."}</p>
                       <p><span className="font-medium">Your access:</span> {canUpdate ? "Edit details" : "Read visible metadata"}{canBind ? " · Manage assignments" : ""}{canReveal ? " · Reveal permitted" : " · Secret hidden"}.</p>
                       <p><span className="font-medium">Credential scope:</span> {credential.scope === "CREW" ? "Selected crews" : "Workspace"}. Scope is not a successful connection check; runtime access also depends on assignments, Keeper and policy.</p>
@@ -1129,6 +1043,7 @@ export function CredentialDetailSheet({
                       </p>
                     ) : null}
 
+                    </details>
                     {credential.mcp_used && (
                       <p className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
                         Also referenced by one or more MCP server integrations.
@@ -1209,7 +1124,7 @@ export function CredentialDetailSheet({
 
               {/* ── Properties ────────────────────────────────────────── */}
               <div className="flex flex-col gap-4">
-                <DetailDisclosure title="Properties & protection" icon={ShieldCheck}>
+                <DetailDisclosure title="Access & security" icon={ShieldCheck}>
                 <Appear order={7}>
                   <DetailCard title="Properties">
                     <dl className="space-y-0.5">
@@ -1307,7 +1222,7 @@ export function CredentialDetailSheet({
                     opposite things — a green tick we did not earn is exactly
                     the false reassurance the readiness endpoint exists to
                     remove. */}
-                <Appear order={9}>
+                {toolGaps.length > 0 && <Appear order={9}>
                   <DetailCard
                     title="Tool availability"
                     icon={toolGaps.length > 0 ? PackageX : CheckCircle2}
@@ -1357,7 +1272,7 @@ export function CredentialDetailSheet({
                       </p>
                     )}
                   </DetailCard>
-                </Appear>
+                </Appear>}
 
                 {/* Classification. Raising is MANAGER+ and unaudited (it only
                     ever removes reach); lowering is OWNER/ADMIN and journaled
@@ -1372,7 +1287,7 @@ export function CredentialDetailSheet({
                         effectiveSensitivity === null
                           ? "The current classification is not reported by the credentials API — picking one sets it."
                           : effectiveSensitivity === "SEALED"
-                            ? "SEALED can never be revealed, by any role. Break-glass is rotation, not disclosure."
+                            ? "SEALED values cannot be revealed. Obtain a replacement from the provider to change this secret."
                             : "Raise it at any time; lowering it is an audited, admin-only action."
                       }
                     >
@@ -1418,59 +1333,6 @@ export function CredentialDetailSheet({
                   </Appear>
                 )}
 
-                {/* Rotation is gated on canRotate ALONE, deliberately not
-                    nested under canUpdate: PATCH is MANAGER+, while rotate
-                    additionally accepts any member holding credential.rotate
-                    (requireRoleOrCapabilityOrForbid, #1028) — the grant that
-                    lets an oncall MEMBER replace a leaked token without blanket
-                    vault reach. Nesting it hid the action from precisely that
-                    tier. */}
-                {canRotate && !seat && (
-                  <Appear order={11}>
-                    <DetailCard
-                      title="Rotation"
-                      icon={RefreshCw}
-                      subtitle={rotations.length > 0 ? String(rotations.length) : undefined}
-                      footer="Issues a new value and keeps the old one working for the grace window, so agents mid-run don't break."
-                    >
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onRotate(credential)}
-                        className="w-full justify-start"
-                      >
-                        <RefreshCw className="mr-1.5 h-3 w-3" />
-                        Rotate with grace overlap…
-                      </Button>
-                      {rotations.length > 0 && (
-                        <ul className="mt-2.5 space-y-1">
-                          {rotations.slice(0, 5).map((r) => (
-                            <li key={r.id} className="flex items-center gap-2 text-xs">
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "px-1.5 text-[10px]",
-                                  r.status === "ACTIVE" && "border-primary/40 text-primary",
-                                  r.status === "EXPIRED" && "border-success/30 text-success",
-                                  r.status === "CANCELLED" && "border-warn/30 text-warn",
-                                )}
-                              >
-                                {r.status}
-                              </Badge>
-                              <span className="text-muted-foreground">
-                                {formatRelativeTime(r.rotated_at)}
-                              </span>
-                              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                                {Math.round(r.grace_seconds / 3600)}h grace
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </DetailCard>
-                  </Appear>
-                )}
-
                 {/* Say which of the three write gates the reader is behind,
                     rather than one blanket refusal. They are genuinely
                     different: a MEMBER holding credential.rotate can replace a
@@ -1488,10 +1350,8 @@ export function CredentialDetailSheet({
                         {!canUpdate && !canRotate
                           ? "You don't have permission to modify this credential."
                           : !canUpdate
-                            ? "You can rotate this credential. Replacing its value outright requires a workspace manager."
-                            : canRotate
-                              ? "Deleting this credential requires a workspace admin."
-                              : "Rotation with grace overlap and deletion require a workspace admin."}
+                            ? "You can replace this secret value. Editing its details requires a workspace manager."
+                            : "Deleting this credential requires a workspace admin."}
                       </p>
                     </DetailCard>
                   </Appear>
@@ -1544,10 +1404,10 @@ export function CredentialDetailSheet({
         sensitivity={effectiveSensitivity}
         open={revealOpen}
         onOpenChange={setRevealOpen}
-        onRotateInstead={() => {
+        onRotateInstead={canRotate ? () => {
           setRevealOpen(false)
           onRotate(credential)
-        }}
+        } : undefined}
       />
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>

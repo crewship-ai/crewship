@@ -521,10 +521,8 @@ func (h *InboxHandler) enrichAgentAvatars(ctx context.Context, rows []inboxItemR
 // mirroring ResolveEscalation's own reasoning exactly (issue #1574):
 //
 //   - CREDENTIAL escalations only.
-//   - The rule compares the approver against the agent's recorded owner, so an
-//     agent with no owner (legacy pre-v99 row) cannot have it enforced — and a
-//     row claiming otherwise would threaten a 403 that will not happen, which
-//     is worse than saying nothing.
+//   - Missing initiating ownership does not waive the strict policy; those
+//     credential escalations fail closed at resolution.
 //   - The workspace toggle opts every tier in; the credential's own tier forces
 //     it on the top tier regardless. Either is sufficient.
 //
@@ -585,9 +583,9 @@ func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID
 	//
 	// So the filter is `access`/`execute` — the two types that name a credential —
 	// and the reported type is a literal because for those two it is always
-	// CREDENTIAL. The agents JOIN stays inner for the same reason as above: no
-	// recorded owner means nothing to compare an approver against, so the row drops
-	// out and claims nothing.
+	// CREDENTIAL. The agents JOIN stays inner because a
+	// matching agent is needed to establish the keeper request's workspace.
+	// An existing agent without an owner still reports the strict policy.
 	args := append([]interface{}{workspaceID}, ids...)
 	args = append(args, workspaceID)
 	args = append(args, ids...)
@@ -634,7 +632,7 @@ func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID
 	// on it could be subject to the rule at all.
 	needsGovernance := false
 	for _, f := range bySource {
-		if f.escType == "CREDENTIAL" && f.initiatorUser != "" {
+		if f.escType == "CREDENTIAL" {
 			needsGovernance = true
 			break
 		}
@@ -657,7 +655,7 @@ func (h *InboxHandler) enrichEscalationFourEyes(ctx context.Context, workspaceID
 		if f.securityLevel.Valid {
 			rows[i].SecurityLevelLabel = keeper.SecurityLevel(f.securityLevel.Int64).Label()
 		}
-		if f.escType != "CREDENTIAL" || f.initiatorUser == "" {
+		if f.escType != "CREDENTIAL" {
 			continue
 		}
 		rows[i].SecondApproverByWorkspace = gov.RequireSecondApprover

@@ -93,9 +93,9 @@ func TestListEscalations_ReportsWhyFourEyesApplies(t *testing.T) {
 			// The rule compares the approver against the agent's recorded owner.
 			// With no owner there is nothing to compare, and ResolveEscalation
 			// lets the resolve through — so the row must not claim otherwise.
-			name:    "no recorded owner: the rule cannot be enforced, so it is not claimed",
+			name:    "no recorded owner: strict policy still applies and approval fails closed",
 			escType: "CREDENTIAL", level: tierFloor, toggleOn: true, ownedAgent: false,
-			wantLabel: tierFloor.Label(),
+			wantLabel: tierFloor.Label(), wantRequired: true, wantWorkspace: true, wantTier: true,
 		},
 		{
 			name:    "TEXT escalation: out of scope even with the toggle on",
@@ -280,13 +280,11 @@ func TestListEscalations_FourEyesMatchesResolve(t *testing.T) {
 		},
 		{
 			// The rule compares the approver against the agent's recorded owner.
-			// With no owner there is nothing to compare and resolve proceeds, so
-			// a row that warned about a refusal would be warning about a refusal
-			// that cannot happen — the toggle AND the top tier are both on here
-			// precisely to make that the only thing under test.
-			name:    "no recorded owner: the rule cannot be enforced, so it is not claimed",
+			// With no owner, independence cannot be established. Both list and
+			// resolver must report/enforce the strict policy, failing closed.
+			name:    "no recorded owner: strict policy fails closed",
 			escType: "CREDENTIAL", level: tierFloor, toggleOn: true, ownedAgent: false,
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:    "TEXT escalation: out of scope even with the toggle on",

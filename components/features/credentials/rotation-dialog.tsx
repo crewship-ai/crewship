@@ -1,66 +1,58 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, AlertTriangle } from "lucide-react"
-import { Spinner } from "@/components/ui/spinner"
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
+import { Eye, EyeOff, KeyRound } from "lucide-react"
+import { CreateSurface, CreateSurfaceHeader, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceSection } from "@/components/layout/create-surface"
+import { Textarea } from "@/components/ui/textarea"
+import { credentialEditPresentation } from "@/lib/credentials/edit-presentation"
+import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
-
-type GraceMode = "immediate" | "24h" | "custom"
 
 export interface RotationDialogProps {
   workspaceId: string
   credentialId: string
   credentialName: string
+  credentialType?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onRotated: () => void
 }
 
+// The rotate endpoint preserves the separate credential.rotate capability.
+// The customer surface only replaces a supplied value, with no grace overlap.
+// Provider-side issuance/revocation and advanced overlap remain backend concerns.
 export function RotationDialog({
-  workspaceId, credentialId, credentialName, open, onOpenChange, onRotated,
+  workspaceId, credentialId, credentialName, credentialType = "SECRET", open, onOpenChange, onRotated,
 }: RotationDialogProps) {
+  const presentation = credentialEditPresentation(credentialType)
   const [value, setValue] = React.useState("")
   const [showValue, setShowValue] = React.useState(false)
-  const [grace, setGrace] = React.useState<GraceMode>("24h")
-  const [customHours, setCustomHours] = React.useState(12)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    if (!open) {
-      setValue("")
-      setGrace("24h")
-      setCustomHours(12)
-      setSubmitting(false)
-      setError(null)
-    }
-  }, [open])
+    setValue("")
+    setShowValue(false)
+    setError(null)
+  }, [open, credentialId])
 
-  // /{id}/test probes the STORED value and ignores a replacement in the body.
-  // Do not label a new value "Valid" based on the old credential's result.
-
-  const graceSeconds = grace === "immediate" ? 0 : grace === "24h" ? 86400 : Math.max(0, customHours * 3600)
-
-  const handleRotate = async () => {
-    if (!value.trim()) return
+  const replace = async () => {
+    if (!value.trim() || submitting) return
     setSubmitting(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/credentials/${credentialId}/rotate?workspace_id=${workspaceId}`, {
+      const res = await apiFetch(`/api/v1/credentials/${encodeURIComponent(credentialId)}/rotate?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: value.trim(), grace_seconds: graceSeconds }),
+        body: JSON.stringify({ value, grace_seconds: 0 }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(typeof data.error === "string" ? data.error : "Failed to rotate")
+        setError(typeof data.error === "string" ? data.error : "Could not replace the value")
         return
       }
+      setValue("")
       onRotated()
       onOpenChange(false)
     } catch {
@@ -70,113 +62,34 @@ export function RotationDialog({
     }
   }
 
+  const close = (next: boolean) => { if (!submitting) onOpenChange(next) }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Rotate <span className="font-mono">{credentialName}</span></DialogTitle>
-          <DialogDescription>
-            Paste a replacement issued by your service. The grace period is managed in Crewship;
-            it does not keep a revoked key valid at the external service.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-              New value
-            </label>
-            <div className="relative">
-              <input
-                autoFocus
-                type={showValue ? "text" : "password"}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder="Paste the new token..."
-                className="w-full bg-background border border-white/15 rounded-md px-3 py-2 pr-10 text-sm font-mono outline-none focus:border-primary"
-              />
-              <button
-                type="button"
-                onClick={() => setShowValue((s) => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                {showValue ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground">The replacement has not been tested. Existing secret values are never shown here.</p>
+    <CreateSurface open={open} onOpenChange={close} dirty={Boolean(value)} discardLabel="this replacement" size="md" onSubmit={replace}>
+      <CreateSurfaceHeader concept="credentials" context={credentialName} title="Replace secret value"
+        description="Create or change the value at your provider first, then paste it here. Crewship does not change or revoke it at the provider."
+        onClose={() => close(false)} />
+      <CreateSurfaceBody>
+        <CreateSurfaceSection title="New value" icon={KeyRound} accent="amber">
+          <label htmlFor="replacement-value" className="sr-only">New value</label>
+          <div className="relative">
+            {presentation.multiline ? <Textarea id="replacement-value" autoFocus rows={6}
+              value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off" spellCheck={false}
+              placeholder="Paste the new value…" disabled={submitting}
+              className={`pr-12 font-mono ${showValue ? "" : "[-webkit-text-security:disc]"}`} /> : <Input id="replacement-value" autoFocus type={showValue ? "text" : "password"}
+              value={value} onChange={(e) => setValue(e.target.value)} autoComplete="off"
+              placeholder="Paste the new value…" className="pr-12 font-mono" disabled={submitting} />}
+            <Button type="button" size="icon" variant="ghost" className="absolute right-0 top-0 h-full"
+              aria-label={showValue ? "Hide new value" : "Show new value"} onClick={() => setShowValue((v) => !v)}>
+              {showValue ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </Button>
           </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium">
-              Grace overlap
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["immediate", "24h", "custom"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setGrace(m)}
-                  className={cn(
-                    "rounded-md border bg-background p-2.5 text-left text-xs transition-all",
-                    grace === m
-                      ? "border-primary ring-2 ring-primary/20"
-                      : "border-white/10 hover:border-white/25",
-                  )}
-                >
-                  <div className="font-medium">
-                    {m === "immediate" && "Immediate"}
-                    {m === "24h" && "24 hours"}
-                    {m === "custom" && "Custom"}
-                  </div>
-                  <div className="text-[11px] text-muted-foreground mt-0.5">
-                    {m === "immediate" && "Old value dies now"}
-                    {m === "24h" && "Recommended"}
-                    {m === "custom" && "Set hours"}
-                  </div>
-                </button>
-              ))}
-            </div>
-            {grace === "custom" && (
-              <div className="flex items-center gap-2 mt-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={168}
-                  aria-label="Grace period in hours"
-                  value={customHours}
-                  onChange={(e) => setCustomHours(Number(e.target.value))}
-                  className="w-24 bg-background border border-white/15 rounded-md px-2 py-1 text-sm outline-none focus:border-primary"
-                />
-                <span className="text-xs text-muted-foreground">hours (max 168 = 7 days)</span>
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-md border border-info/25 bg-info/[0.05] px-3 py-2.5 text-xs space-y-1">
-            <p className="font-medium">After grace expires:</p>
-            <ul className="list-disc list-inside text-foreground/80 space-y-0.5">
-              <li>Old value is permanently scrubbed from the rotation row</li>
-              <li>Sidecar fallback path stops retrying with old key</li>
-              <li>Audit log records the ROTATE event for compliance</li>
-            </ul>
-          </div>
-
-          {error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/[0.05] p-2 text-xs text-destructive flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {error}
-            </div>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={handleRotate} disabled={!value.trim() || submitting}>
-            {submitting && <Spinner className="mr-2 h-4 w-4" />}
-            Rotate
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <p className="mt-2 text-xs text-muted-foreground">{presentation.hint}</p>
+          <p className="mt-2 text-xs text-muted-foreground">The replacement has not been tested. Saving replaces the stored value immediately.</p>
+        </CreateSurfaceSection>
+        {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}
+      </CreateSurfaceBody>
+      <CreateSurfaceFooter onCancel={() => close(false)} primaryLabel="Replace value" onPrimary={replace}
+        primaryDisabled={!value.trim()} busy={submitting} hint="Only the value stored in Crewship changes." />
+    </CreateSurface>
   )
 }

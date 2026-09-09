@@ -24,11 +24,9 @@
  * single-select, and its three rows are bounded — which Category and Scope,
  * both of which grow with the workspace, are not.
  *
- * TIER earns the same place on the same test: four rows, single-select, bounded
- * forever by the Keeper tier table. It is here rather than behind the Filter
- * button because it is the second question asked about a vault ("what is
- * dangerous?") and, until it was added, the answer was nowhere on this page at
- * all. It is also the one section that prints zeroes — see below.
+ * Tier belongs in the Filter popover so the rail has room for credentials.
+ * Its selected value contributes to the filter count and clears with the
+ * other popover filters. Empty tiers remain available for inventory checks.
  *
  * Every count comes from the same functions the list filters with
  * (`lib/credentials/facets.ts`), so a count can never disagree with what
@@ -193,20 +191,13 @@ export function CredentialsSidebar({
 
   const set = (patch: Partial<CredentialFilters>) => onFiltersChange({ ...filters, ...patch })
 
-  // Status and tier are excluded on purpose: both have their own always-visible
-  // sections, so counting them here would badge the Filter button for a choice
-  // already on screen. The badge exists to explain a short list; a selection the
-  // rail is still showing as pressed explains itself.
-  //
-  // It sums LENGTHS now that a facet holds several values, so "two brands and a
-  // scope" badges 3. It could only ever read 0–5 before, and in practice 0 or 1,
-  // because the panel shut after the first pick.
+  // Count each selected popover facet; status remains visible in the rail.
   const activeFilterCount =
     filters.brand.length +
     filters.shape.length +
     filters.scope.length +
     filters.tag.length +
-    filters.agentId.length
+    filters.agentId.length + (filters.tier === null ? 0 : 1)
 
   /** Add or drop one value. Never touches another facet — that is the promise
    *  `SidebarFilterPopover` is built around, and it is the consumer's to keep. */
@@ -325,16 +316,11 @@ export function CredentialsSidebar({
           activeCount={activeFilterCount}
           panelClassName="min-w-[210px]"
           onClear={() =>
-            // Search, status and tier survive: a user who typed a query and then
-            // clears the facets is narrowing, not starting over — and status and
-            // tier were both chosen in the rail, which is still showing them as
-            // pressed. Undoing a selection the user can see is not "clear
-            // filters", it is a surprise.
+            // Preserve the search and status chosen outside the popover.
             onFiltersChange({
               ...EMPTY_CREDENTIAL_FILTERS,
               search: filters.search,
               status: filters.status,
-              tier: filters.tier,
             })
           }
         >
@@ -367,43 +353,6 @@ export function CredentialsSidebar({
               </SidebarFacet>
             )
           })}
-        </SidebarFilterPopover>
-        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
-      </SidebarToolbar>
-
-      <SidebarSection
-        label="Status"
-        count={statusRows.filter((r) => r.always || r.count > 0).length}
-        collapsible
-        collapsed={!statusOpen}
-        onToggle={() => setStatusOpen(!statusOpen)}
-        className="border-b border-white/[0.06]"
-      >
-        {statusRows
-          .filter((row) => row.always || row.count > 0)
-          .map((row) => {
-            const Icon = row.icon
-            return (
-              <SidebarRow
-                key={row.key}
-                selected={filters.status === row.key}
-                onSelect={() => set({ status: row.key })}
-              >
-                <Icon
-                  className={cn("h-3 w-3 shrink-0 text-muted-foreground/70", row.tone)}
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate">{row.label}</span>
-                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">
-                  {row.count}
-                </span>
-              </SidebarRow>
-            )
-          })}
-      </SidebarSection>
-
-      {onSelectProvider && <ProviderFilterSection providers={loginProviders} selected={[]} active={false} onSelect={onSelectProvider} />}
-
       {/* ── Tier ── (single-select, and the one section that prints zeroes)
        *
        * Every other facet in this rail omits an empty row, because a control
@@ -466,6 +415,43 @@ export function CredentialsSidebar({
           })}
         </SidebarSection>
       )}
+
+        </SidebarFilterPopover>
+        <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
+      </SidebarToolbar>
+
+      <SidebarSection
+        label="Status"
+        count={statusRows.filter((r) => r.always || r.count > 0).length}
+        collapsible
+        collapsed={!statusOpen}
+        onToggle={() => setStatusOpen(!statusOpen)}
+        className="border-b border-white/[0.06]"
+      >
+        {statusRows
+          .filter((row) => row.always || row.count > 0)
+          .map((row) => {
+            const Icon = row.icon
+            return (
+              <SidebarRow
+                key={row.key}
+                selected={filters.status === row.key}
+                onSelect={() => set({ status: row.key })}
+              >
+                <Icon
+                  className={cn("h-3 w-3 shrink-0 text-muted-foreground/70", row.tone)}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1 truncate">{row.label}</span>
+                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">
+                  {row.count}
+                </span>
+              </SidebarRow>
+            )
+          })}
+      </SidebarSection>
+
+      {onSelectProvider && <ProviderFilterSection providers={loginProviders} selected={[]} active={false} onSelect={onSelectProvider} />}
 
       <div className="flex min-h-0 flex-1 flex-col">
         <SidebarSection

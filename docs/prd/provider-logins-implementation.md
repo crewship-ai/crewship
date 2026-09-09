@@ -5,6 +5,34 @@ the session report and PR #2430. The session report remains untracked.
 
 ## Acceptance scope
 
+### Account group UI increment (2026-09-08, #2440)
+
+Credentials exposes Account groups only through the existing OWNER/ADMIN gate.
+The dialog supports paged list/create/edit/removal with existing brand icons,
+compatible account selection, priorities and cross-owner consent. Legacy CLI
+token accounts must be re-imported before pool membership; no token is read by
+the group UI. A fresh detail revision is used for editing; stale writes preserve
+the draft and never fetch a new revision to retry automatically. Workspace-keyed
+React Query caches and component remounts isolate data and drafts; denied reads
+do not expose cached metadata. Removal requires confirmation and keeps accounts.
+
+Copy explicitly identifies groups as definitions, not assigned runtime pools.
+Scoped pool binding, actual run selection/payer, active-execution guards and
+trusted availability observations are still separate unfinished acceptance
+items. UI tests use API fixtures, not successful live-provider acceptance.
+Reproduce isolated browser checks with `pnpm exec prisma generate`, `pnpm build`,
+then `pnpm exec playwright test --config=playwright.pool-ui.config.ts`.
+
+Validation: 26 credential-related Vitest files / 566 tests passed; the isolated
+browser suite passed all five desktop/mobile and role-gating scenarios. The
+production static export passed; ESLint reported zero errors and 32 warnings.
+The full Go suite (`-p=2 ./... -count=1 -timeout 40m`) and `go vet -p=2 ./...`
+passed. The lifecycle review fixes were integrated during that run, so the
+generator/store/API pool tests are also rerun against the final integrated tree.
+A deliberate cache-visibility mutation made both the disabled-role and denied
+reload tests fail; restoring the guards returned all three hook tests to green.
+These checks do not constitute live-provider or production RBAC acceptance.
+
 ### Pool lifecycle increment (2026-09-08, #2440)
 
 Adds OWNER/ADMIN-only PUT and DELETE for pool definitions and matching

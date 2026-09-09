@@ -11,6 +11,7 @@
 // from /credentials is tracked separately. This form is the flat
 // "paste a secret" path Doppler/Vercel are built around.
 
+import { credentialTagClassName } from "@/lib/credentials/tag-accent"
 import * as React from "react"
 import { Eye, EyeOff, ChevronDown, ChevronRight, X, Plus, Check, ChevronsUpDown, FlaskConical, CheckCircle2, XCircle, Tag, KeyRound, FileText, ShieldCheck } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -277,7 +278,7 @@ export function CredentialForm({
         tags: [...new Set([...values.tags, tagDraft.trim().toLowerCase()].filter(Boolean))].slice(0, 8),
         name: values.name.trim(),
         description: values.description.trim(),
-        value: values.value.trim(),
+        value: values.value,
       })
       if (result) setError(result)
     } catch {
@@ -325,7 +326,8 @@ export function CredentialForm({
 
   return (
     <form ref={formRef} onSubmit={handleSubmit} className={surface ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "space-y-4"}>
-      <CreateSurfaceBody padded={surface} scroll={surface} className={surface ? "space-y-4" : "contents"}>
+      <CreateSurfaceBody padded={surface} scroll={surface} className={surface ? "space-y-5 pb-6" : "contents"}>
+      {surface && <div className="flex items-center gap-2 border-b border-border/60 pb-3 text-sm font-medium"><FileText aria-hidden="true" className="size-4 text-muted-foreground" /> Credential details</div>}
       {/* Name + brand picker. The picker doubles as auto-detection
           preview: typing "notion" suggests Notion automatically; user
           can click the chip to override or pick a different brand
@@ -356,14 +358,14 @@ export function CredentialForm({
             onChange={(e) => handleNameChange(e.target.value)}
             onBlur={() => setNameBlurred(true)}
             className={cn(
-              "font-mono text-sm pr-9",
+              "text-sm", !surface && "font-mono pr-9",
               !surface && nameBlurred && nameInvalid && !nameIsLegacy && "border-destructive/50",
             )}
             aria-invalid={!surface && nameBlurred && nameInvalid && !nameIsLegacy}
             autoFocus={mode === "create"}
             required
           />
-          {detected.key !== "NONE" && (
+          {!surface && detected.key !== "NONE" && (
             <div
               className="absolute right-2.5 top-1/2 -translate-y-1/2"
               style={{ color: brandColor(detected) }}
@@ -374,10 +376,9 @@ export function CredentialForm({
           )}
         </div>
         {surface ? (
-          <p className="text-xs text-muted-foreground">
-            A name to recognise this secret. If an agent uses the name as an environment variable,
-            keep that name unchanged or update its binding too.
-          </p>
+          mode === "edit" && values.name !== initialName.current ? <p role="status" className="text-xs text-warn">
+            Renaming? Update any agent binding that uses the old name as an environment variable.
+          </p> : null
         ) : nameBlurred && nameInvalid && !nameIsLegacy ? (
           <div className="flex items-center gap-2 flex-wrap text-[11px] text-destructive">
             <span>
@@ -416,9 +417,9 @@ export function CredentialForm({
       {surface && <div className="space-y-1.5">
         <Label htmlFor="cred-description" className="text-xs"><FileText className="h-3.5 w-3.5" /> Description</Label>
         <Textarea id="cred-description" placeholder="What is this secret used for?"
-          value={values.description} onChange={(e) => setField("description", e.target.value)} />
+          rows={2} className="min-h-16 resize-y" value={values.description} onChange={(e) => setField("description", e.target.value)} />
       </div>}
-      {!hideValue && surface && mode === "edit" && <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+      {!hideValue && surface && mode === "edit" && <div className={cn("rounded-xl border p-3 space-y-2 transition-colors", replaceValue ? "border-warn/40 bg-warn/5" : "border-border/60 bg-muted/20")}>
         <label className="flex items-center gap-2 text-sm font-medium">
           <KeyRound aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
           <Checkbox checked={replaceValue} onCheckedChange={(checked) => {
@@ -427,7 +428,7 @@ export function CredentialForm({
           }} />
           Replace the stored secret
         </label>
-        <p className="text-xs text-muted-foreground">Keep this off to edit details only. Replacing a secret updates Crewship, not the external service that issued it.</p>
+        <p className="text-xs text-muted-foreground">{replaceValue ? "Updates Crewship only. Change the value at the issuing service separately." : "Your stored value stays unchanged."}</p>
       </div>}
       {!hideValue && (!surface || mode !== "edit" || replaceValue) && (
         <div className={cn("space-y-1.5", surface && "rounded-xl border border-warn/30 bg-card p-4")}>
@@ -513,7 +514,7 @@ export function CredentialForm({
             <Badge
               key={t}
               variant="outline"
-              className="text-[10px] gap-1 font-mono"
+              className={cn("text-[10px] gap-1 font-mono", credentialTagClassName(t))}
             >
               {t}
               <button
@@ -560,7 +561,7 @@ export function CredentialForm({
             </datalist>
           )}
         </div>
-        <p id="cred-tags-hint" className="text-[11px] text-muted-foreground">Enter or comma to add · × to remove. Unsaved text is included when you save.</p>
+        <p id="cred-tags-hint" className="text-[11px] text-muted-foreground">Enter or comma to add · × to remove.</p>
       </div>
 
       {/* Advanced toggle */}
@@ -568,17 +569,18 @@ export function CredentialForm({
         type="button"
         aria-expanded={advancedOpen}
         onClick={() => setAdvancedOpen((o) => !o)}
-        className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+        aria-controls="credential-access-settings"
+        className="flex min-h-10 w-full items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
       >
         {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         <ShieldCheck className="h-3.5 w-3.5" /> Access & security
         <span className="text-muted-foreground">
-          {surface ? "(expiry, Keeper protection, visibility)" : "(description, expiry, scope, provider override)"}
+          {surface ? (advancedOpen ? "Hide settings" : "Change settings") : "(description, expiry, scope, provider override)"}
         </span>
       </button>
 
       {advancedOpen && (
-        <div className="space-y-3 pl-4 border-l border-white/10">
+        <div id="credential-access-settings" className="space-y-4 rounded-xl border border-border/60 p-4">
           {surface && (values.scope !== initial?.scope || JSON.stringify(values.crewIds) !== JSON.stringify(initial?.crewIds ?? [])) &&
             <p role="status" className="rounded-lg border border-warn/30 p-3 text-xs text-warn">Access will change to {values.scope === "WORKSPACE" ? "workspace scope" : `${values.crewIds.length} selected crews`}. Agents relying on inherited access may gain or lose this credential. Existing direct grants and delivery bindings must be reviewed separately.</p>}
           {/* Description */}
@@ -605,19 +607,19 @@ export function CredentialForm({
               className="text-sm w-[180px]"
             />
             <p className="text-[10px] text-muted-foreground">
-              Optional — drives the &quot;Expiring&quot; KPI and the 30-day warning banner.
+              Optional. Reminds you before this credential expires.
             </p>
           </div>}
 
-          {/* Keeper tier */}
-          <div className="space-y-1">
+          {/* Provider sign-in has its own protection policy. */}
+          {!lockProvider && <div className="space-y-1">
             <Label htmlFor="cred-tier" className="text-xs">Keeper tier</Label>
             <Select
               value={String(values.securityLevel)}
               onValueChange={(v) => setField("securityLevel", Number(v))}
             >
               <SelectTrigger id="cred-tier" className="text-sm">
-                <SelectValue />
+                <SelectValue>{CREDENTIAL_TIERS.find((tier) => tier.level === values.securityLevel)?.label}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {CREDENTIAL_TIERS.map((t) => (
@@ -637,7 +639,7 @@ export function CredentialForm({
             )}>
               {CREDENTIAL_TIERS.find((t) => t.level === values.securityLevel)?.consequence}
             </p>
-          </div>
+          </div>}
 
           {/* Scope */}
           <div className="space-y-1">
