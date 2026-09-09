@@ -127,8 +127,10 @@ The routines workspace reads a run's step executions and its artifacts from
 two paginated endpoints, and the schedule board from a calendar endpoint.
 
 Executions and artifacts each answer in two shapes on the same path. Without a
-selector they return a page of rows — at most 100, with `next_cursor` set when
-more remain, which is passed back as `?after=`. Name one row with
+selector they return a page of rows — at most 100 executions, at most 50
+artifacts — with `next_cursor` set when more remain, which is passed back as
+`?after=`. The two caps differ, so a client that treats a short page as the last
+one has to know which endpoint it is reading. Name one row with
 `?execution_id=` or `?artifact_id=` and the response is that row's payload
 instead. `?download=` on artifacts is the exception: it streams the stored
 bytes with the artifact's own content type, `nosniff`, an `attachment`

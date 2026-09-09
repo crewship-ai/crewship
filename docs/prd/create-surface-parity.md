@@ -81,7 +81,7 @@ Counted across `components/**` and `app/**` on 2026-08-23. Not about the modals 
 | Hairline borders | border-white/[0.04 · 0.05 · 0.06 · 0.07 · 0.08 · 0.1 · 0.10 · 0.12 · 0.15 · 0.20] | 10 alphas · 260 uses | border-hairline (a --border mix, so it works in light mode too) |
 | Modal shells outside the three primitives | fixed inset-0 z-50 written by hand in feature components | 9 files | CreateSurface for creates, Sheet for inspectors, AlertDialog for confirms |
 | Typography scales | .type-* (app) and .type-page-* (Pages) describe the same four roles | 2 scales + raw text-[11.5px] / text-[12.5px] / text-[15px] | one scale; .type-page-* folds into .type-* |
-| Raw <button> in feature code | hand-styled buttons next to the shared <Button> in the same files | 477 raw vs 419 shared | shared variants; raw <button> only where there is genuinely no variant |
+| Raw `<button>` in feature code | hand-styled buttons next to the shared `<Button>` in the same files | 477 raw vs 419 shared | shared variants; raw `<button>` only where there is genuinely no variant |
 
 ## 4. Parity ledger
 
