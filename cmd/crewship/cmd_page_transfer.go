@@ -26,6 +26,7 @@ package main
 //     document byte for byte.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -49,54 +51,11 @@ import (
 
 const pageBundleFormatCLI = "crewship-page-bundle/v1"
 
-type pageBundlePanelJSON struct {
-	ID     string `json:"id" yaml:"id"`
-	Schema string `json:"schema" yaml:"schema"`
-	Title  string `json:"title,omitempty" yaml:"title,omitempty"`
-	// The panel's glyph, from the closed set the server validates against
-	// (internal/pages/icons.go). Carried so `export | import` is a round trip:
-	// a field the bundle drops is a field the install silently loses.
-	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
-	// The panel's tab (internal/pages/tabs.go), carried for the same reason:
-	// a bundle that dropped it would install one long scroll where the author
-	// drew several screens.
-	Tab        string `json:"tab,omitempty" yaml:"tab,omitempty"`
-	Owner      string `json:"owner" yaml:"owner"`
-	Producer   string `json:"producer" yaml:"producer"`
-	SLASeconds int    `json:"sla_seconds" yaml:"sla_seconds"`
-	Span       int    `json:"span,omitempty" yaml:"span,omitempty"`
-}
-
-type pageBundlePageJSON struct {
-	Name        string                `json:"name" yaml:"name"`
-	Slug        string                `json:"slug" yaml:"slug"`
-	Description string                `json:"description,omitempty" yaml:"description,omitempty"`
-	Owner       string                `json:"owner,omitempty" yaml:"owner,omitempty"`
-	Panels      []pageBundlePanelJSON `json:"panels" yaml:"panels"`
-}
-
-type pageBundleRefJSON struct {
-	Ref      string   `json:"ref" yaml:"ref"`
-	Kind     string   `json:"kind" yaml:"kind"`
-	Bindable bool     `json:"bindable" yaml:"bindable"`
-	UsedBy   []string `json:"used_by,omitempty" yaml:"used_by,omitempty"`
-}
-
-type pageBundleJSON struct {
-	Format string              `json:"format" yaml:"format"`
-	Page   pageBundlePageJSON  `json:"page" yaml:"page"`
-	Refs   []pageBundleRefJSON `json:"references,omitempty" yaml:"references,omitempty"`
-}
+type pageBundleJSON = pages.TransferBundle
 
 // pageImportBodyJSON is the bundle plus the two things only the importer
 // knows.
-type pageImportBodyJSON struct {
-	Format string              `json:"format"`
-	Page   pageBundlePageJSON  `json:"page"`
-	Refs   []pageBundleRefJSON `json:"references,omitempty"`
-	Slug   string              `json:"slug,omitempty"`
-	Bind   map[string]string   `json:"bind,omitempty"`
-}
+type pageImportBodyJSON = pages.TransferImport
 
 // ── export ─────────────────────────────────────────────────────────────────
 
@@ -135,6 +94,22 @@ ordinary reader, so it needs the same authority as editing the page.`,
 			return fmt.Errorf("read response: %w", err)
 		}
 
+		var projectBundle pages.TransferBundle
+		if err := json.Unmarshal(body, &projectBundle); err != nil {
+			return err
+		}
+		if projectBundle.Format == pages.TransferV2 {
+			encoded, err := pages.MarshalProjectTransfer(projectBundle)
+			if err != nil {
+				return err
+			}
+			f := newFormatter()
+			if f.Format == "json" || f.Format == "ndjson" {
+				return pageEmitMachine(f, body, "{}")
+			}
+			_, err = fmt.Fprint(cmd.OutOrStdout(), string(encoded))
+			return err
+		}
 		f := newFormatter()
 		if f.Format == "json" || f.Format == "ndjson" {
 			return pageEmitMachine(f, body, "{}")
@@ -185,11 +160,12 @@ publishing is per panel, human-only, and never a bulk action.`,
 		slug = strings.TrimSpace(slug)
 
 		body := pageImportBodyJSON{
-			Format: bundle.Format,
-			Page:   bundle.Page,
-			Refs:   bundle.Refs,
-			Slug:   slug,
-			Bind:   bind,
+			Format:  bundle.Format,
+			Page:    bundle.Page,
+			Refs:    bundle.Refs,
+			Project: bundle.Project,
+			Slug:    slug,
+			Bind:    bind,
 		}
 		client, err := pageClient()
 		if err != nil {
@@ -245,12 +221,20 @@ func pageReadBundle(path string) (*pageBundleJSON, error) {
 	var raw []byte
 	var err error
 	if path == "-" {
-		raw, err = io.ReadAll(os.Stdin)
+		raw, err = io.ReadAll(io.LimitReader(os.Stdin, pages.MaxTransferBytes+1))
 	} else {
-		raw, err = os.ReadFile(path)
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return nil, openErr
+		}
+		defer f.Close()
+		raw, err = io.ReadAll(io.LimitReader(f, pages.MaxTransferBytes+1))
 	}
 	if err != nil {
 		return nil, cli.WithExitCode(fmt.Errorf("read %s: %w", path, err), cli.ExitValidation)
+	}
+	if len(raw) > pages.MaxTransferBytes {
+		return nil, fmt.Errorf("page bundle exceeds size limit")
 	}
 	var bundle pageBundleJSON
 	if err := yaml.Unmarshal(raw, &bundle); err != nil {
@@ -261,9 +245,18 @@ func pageReadBundle(path string) (*pageBundleJSON, error) {
 			"%s carries no `format` — a bundle is what `crewship page export` writes, not a page document; "+
 				"to author a page use `crewship page create --file`", path), cli.ExitValidation)
 	}
-	if bundle.Format != pageBundleFormatCLI {
+	if bundle.Format != pageBundleFormatCLI && bundle.Format != pages.TransferV2 {
 		return nil, cli.WithExitCode(fmt.Errorf(
 			"%s declares format %q; this build reads %s", path, bundle.Format, pageBundleFormatCLI), cli.ExitValidation)
+	}
+	if bundle.Format == pages.TransferV2 {
+		req, err := pages.ParseProjectTransfer(bytes.NewReader(raw))
+		if err != nil {
+			return nil, err
+		}
+		bundle = pageBundleJSON{Format: req.Format, Page: req.Page, Refs: req.Refs, Meta: req.Meta, Project: req.Project}
+	} else if bundle.Project != nil {
+		return nil, fmt.Errorf("v1 bundle cannot contain a project")
 	}
 	if len(bundle.Page.Panels) == 0 {
 		return nil, cli.WithExitCode(fmt.Errorf(

@@ -11,8 +11,8 @@ CREWSHIP_TEST_PAGE_BUILD_IMAGE="$(cat "$evidence_dir/image-id")"
 export PAGES_TEST_BUILD_IMAGE="$CREWSHIP_TEST_PAGE_BUILD_IMAGE"
 export CREWSHIP_TEST_PAGE_ARTIFACT_OUT="$evidence_dir/artifact.json"
 go test -p 1 -json -count=1 -timeout=10m \
-  ./internal/pagebuild ./internal/api ./internal/sidecar \
-  -run '^(TestDockerPreviewBuildIntegration|TestPageBuildDockerRoundTrip|TestPageProjectMCPDockerIntegration)$' \
+  ./internal/pagebuild ./internal/api ./internal/sidecar ./cmd/crewship ./examples/pages-apps \
+  -run '^(TestDockerPreviewBuildIntegration|TestPageBuildDockerRoundTrip|TestPageProjectMCPDockerIntegration|TestSeedPageAppLifecycle|TestOperationsCollectorPayloads)$' \
   | tee "$evidence_dir/go.jsonl"
 python3 - "$evidence_dir/go.jsonl" <<'PY'
 import json, sys
@@ -23,6 +23,8 @@ required = {
     "TestDockerPreviewBuildIntegration/lockfile",
     "TestPageBuildDockerRoundTrip",
     "TestPageProjectMCPDockerIntegration",
+    "TestSeedPageAppLifecycle/publish",
+    "TestOperationsCollectorPayloads",
 }
 passed = {event.get("Test") for event in events if event["Action"] == "pass"}
 skipped = [event.get("Test") for event in events if event["Action"] == "skip"]

@@ -1,0 +1,21 @@
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  slug: mysql-health
+  name: MySQL health
+spec:
+  panels:
+    - id: health
+      title: Database connection
+      schema: status.v1
+      owner: crew/ops
+      producer: routine/mysql-health-check
+      sla: 90s
+      actions:
+        - id: refresh
+          kind: call
+          label: Check MySQL now
+          routine: mysql-health-check
+          confirm:
+            title: Check the database connection?
+            body: Run the declared health routine in the operations crew.

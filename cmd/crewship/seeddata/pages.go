@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/crewship-ai/crewship/internal/pages"
 )
 
 // PageDef is one demo page: the spec a human would author, plus a payload per
@@ -31,8 +33,9 @@ type PageDef struct {
 	// once, at creation, and moving it afterwards is a transfer with its own
 	// rules. It rides on the create request, exactly as `crewship page create
 	// --owner` does.
-	Owner  string         `yaml:"owner,omitempty"`
-	Panels []PagePanelDef `yaml:"panels"`
+	Owner   string               `yaml:"owner,omitempty"`
+	Panels  []PagePanelDef       `yaml:"panels"`
+	Project *pages.SourceProject `yaml:"-"`
 }
 
 // PagePanelDef is a panel's spec with its demo payload attached.
@@ -93,5 +96,5 @@ func mustLoadPages() []PageDef {
 	if len(doc.Pages) == 0 {
 		panic("seeddata: builtin/pages.yaml decoded to zero pages — schema drift?")
 	}
-	return doc.Pages
+	return append(doc.Pages, operationsPage())
 }

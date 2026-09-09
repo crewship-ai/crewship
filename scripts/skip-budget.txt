@@ -144,4 +144,5 @@
 
 # 139 2026-09-09: #2472 compiler image and browser-server harness guards; mandatory pages-apps CI exercises both.
 # 141 2026-09-09: #2472 API and MCP integration guards; mandatory Pages CI supplies their compiler image.
-141
+# 143 2026-09-09: #2472 adds seed and Node collector dependency guards; mandatory Pages CI exercises both.
+143
