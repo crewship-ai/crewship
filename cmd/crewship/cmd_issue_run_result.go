@@ -10,6 +10,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -24,10 +25,12 @@ var issueResultCmd = &cobra.Command{
 The run must belong to this issue — one of its own assignments, or one of its
 tasks' — otherwise the server answers 404 rather than reading across issues.
 
-Run ids come from 'crewship issue runs <identifier>'.`,
-	Example: `  crewship issue runs ENG-4
-  crewship issue result ENG-4 asg_9f2c1b
-  crewship issue result ENG-4 asg_9f2c1b -f json`,
+The id is the assignment id — the 'id' field of 'crewship issue runs
+<identifier> -f json'. It is NOT the RUN column of the table that command
+prints: that column is the journal trace id, and passing it answers 404.`,
+	Example: `  crewship issue runs ENG-4 -f json
+  crewship issue result ENG-4 m_1a0864071c85b082f6adb2c
+  crewship issue result ENG-4 m_1a0864071c85b082f6adb2c -f json`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -47,6 +50,13 @@ Run ids come from 'crewship issue runs <identifier>'.`,
 			return err
 		}
 		if err := cli.CheckError(resp); err != nil {
+			// The table printed by `issue runs` shows the journal trace id in
+			// its RUN column, while this endpoint matches on the assignment id.
+			// Anyone reading the id off that table lands here on their first
+			// try, so say where the right one is rather than just refusing.
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("%w\n\nThe id here is the assignment id, not the RUN column of 'crewship issue runs'.\nTake the 'id' field from: crewship issue runs %s -f json", err, args[0])
+			}
 			return err
 		}
 		var out struct {

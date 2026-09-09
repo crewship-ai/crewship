@@ -137,3 +137,45 @@ func TestIssueDetail_SurvivesMissingWorkRow(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 }
+
+// An issue that ever produced an execution could not be deleted at all: the
+// DELETE returned a raw FOREIGN KEY violation as a 500, on a handler whose own
+// comment promises "a mistakenly created issue can always be got rid of".
+//
+// Three NO ACTION edges hang off the tables that cascade from missions:
+// assignments.issue_execution_id, mission_tasks.issue_execution_id and
+// issue_executions.review_task_id. The first is the fatal one — assignments
+// survive the delete (their mission_id is ON DELETE SET NULL) while the
+// execution they point at is cascaded away — and the other two point at each
+// other, so their order inside one cascade is not something to rely on either.
+func TestIssueDelete_SurvivesAnIssueThatRan(t *testing.T) {
+	h, user, ws, crew, lead, worker := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-90", "BACKLOG")
+
+	execID := generateCUID()
+	if _, err := h.db.Exec(`INSERT INTO issue_executions(id,mission_id,work_revision,brief_revision,stage,reviewer_agent_id,created_at,updated_at)
+		VALUES(?,?,0,0,'working',?,datetime('now'),datetime('now'))`, execID, id, lead); err != nil {
+		t.Fatal(err)
+	}
+	chatID := generateCUID()
+	if _, err := h.db.Exec(`INSERT INTO chats(id,workspace_id,agent_id,created_at) VALUES(?,?,?,datetime('now'))`, chatID, ws, worker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO assignments(id,workspace_id,chat_id,mission_id,issue_execution_id,assigned_by_id,assigned_to_id,task,status,created_at)
+		VALUES(?,?,?,?,?,?,?,'ran','COMPLETED',datetime('now'))`, generateCUID(), ws, chatID, id, execID, lead, worker); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.Delete(rec, covIWReq(user, ws, "OWNER", "DELETE", "", crew, "ENG-90"))
+	if rec.Code >= 300 {
+		t.Fatalf("delete of an issue that ran: %d %s", rec.Code, rec.Body.String())
+	}
+	var left int
+	if err := h.db.QueryRow(`SELECT count(*) FROM missions WHERE id=?`, id).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Fatalf("issue still present after delete")
+	}
+}
