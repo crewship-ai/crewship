@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-09T16:40:00Z",
+  "as_of": "2026-09-09T16:43:00Z",
   "issue": 2472,
   "deployment": {
     "pid": "3786408",
@@ -137,5 +137,11 @@
     "state": "local lease suite x10, race x5, API concurrent saves x30 and vet passed; new remote macOS pending",
     "source_head": "a9ff7ad726d6fd3d082ea7a55f838f073e98a133",
     "ci_run": 34377781669
+  },
+  "current_ci": {
+    "source": 34377781669,
+    "server": 34378372215,
+    "ui": 34378375514,
+    "state": "in_progress"
   }
 }

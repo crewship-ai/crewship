@@ -1,4 +1,4 @@
-# Pages Apps — current handoff, 2026-09-09 16:40 UTC
+# Pages Apps — current handoff, 2026-09-09 16:43 UTC
 
 Task: independent counter-review, then user “vše oprav a pokračuj”.
 Issue/claim: #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
@@ -114,8 +114,13 @@ returning ENOENT; follow-up `a9ff7ad7` still needs CI/review. It uses exclusive 
 reopens the winner on EEXIST, with independent-handle first-open regressions.
 It is deployed as `34fd43e5`; health, running hash and fsck verified. The service permits one included
 review per hour: do not burst requests or merge based on green/throttled status.
-Other four PRs have no actual review yet. Wait for actual reviews, resolve valid
+Other four PRs have no actual review yet. Earliest next included slot is
+about 17:14 UTC; do not submit a burst. No merge has been attempted. Wait for actual reviews, resolve valid
 findings and verify CI before merging. Release the claim when stopping/finished.
+
+Current follow-up CI: source 34377781669, server 34378372215, UI 34378375514.
+The stacked server/UI runs were dispatched explicitly because CI only
+automatically triggers on PRs targeting main. They are still pending.
 
 Full CI before the lock initialization follow-up: UI 34374672182 passed Go,
 shuffle, macOS, Linux arm64, frontend and browser isolation; race jobs remain
