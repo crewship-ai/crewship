@@ -70,9 +70,15 @@ func effectivePendingTrigger(pr PendingRun) (TriggeredVia, string) {
 }
 
 // PendingRunStore is the DB access layer for deferred dispatch.
-type PendingRunStore struct {
-	db *sql.DB
+type pendingRunDB interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
+type PendingRunStore struct{ db pendingRunDB }
+
+// NewPendingRunStoreTx lets admission checks and enqueue share one transaction.
+func NewPendingRunStoreTx(tx *sql.Tx) *PendingRunStore { return &PendingRunStore{db: tx} }
 
 // NewPendingRunStore wraps a DB handle.
 func NewPendingRunStore(db *sql.DB) *PendingRunStore {

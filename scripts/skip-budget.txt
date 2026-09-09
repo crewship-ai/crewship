@@ -143,4 +143,5 @@
 #                     the #1546 precedent. The branch added no other skip.
 
 # 139 2026-09-09: #2472 compiler image and browser-server harness guards; mandatory pages-apps CI exercises both.
-139
+# 141 2026-09-09: #2472 API and MCP integration guards; mandatory Pages CI supplies their compiler image.
+141

@@ -135,6 +135,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"pages":         IntentInclude,
 	"page_panels":   IntentInclude,
 	"page_versions": IntentInclude,
+	// Durable draft metadata and revision audit. Source files live outside
+	// SQLite; until file-phase integration, back up page_projects_path alongside
+	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.
+	"page_project_publications": IntentInclude,
+	"page_project_withdrawals":  IntentInclude,
+	"page_project_live":         IntentInclude,
+	"page_project_builds":       IntentInclude,
+	"page_project_drafts":       IntentInclude,
+	"page_project_revisions":    IntentInclude,
 	// page_grants is the ACL. Dropping it on restore would silently
 	// widen or narrow who can read a page, and `granted_by_user_id` is
 	// NOT NULL precisely so a grant always names the human accountable

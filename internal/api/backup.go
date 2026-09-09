@@ -60,7 +60,8 @@ type BackupHandler struct {
 	// and RestoreBackup can land them back + rewrite payload_ref.
 	// Empty disables both (matches the rest of the memory subsystem's
 	// "empty BlobRoot disables versioning" convention).
-	memoryBlobRoot string
+	memoryBlobRoot   string
+	pageProjectsPath string
 }
 
 // NewBackupHandler constructs a BackupHandler. dockerOps may be nil
@@ -263,6 +264,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CrewContainerName: h.resolveCrewContainerName(),
 		DockerOps:         ops,
 		BlobRoot:          h.memoryBlobRoot,
+		PageProjectsPath:  h.pageProjectsPath,
 	})
 	if err != nil {
 		h.logger.Warn("backup create failed", "error", err, "workspace", workspaceID, "user", user.ID)
@@ -431,6 +433,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		DockerOps:         ops,
 		ContainerFor:      h.resolveCrewContainerName(),
 		BlobRoot:          h.memoryBlobRoot,
+		PageProjectsPath:  h.pageProjectsPath,
 		Logger: func(msg string) {
 			h.logger.Info("backup restore", "message", msg, "path", req.Path, "workspace_id", workspaceID)
 		},

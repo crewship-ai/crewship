@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real compiler + browser contract. Missing prerequisites fail, never skip.
+# Real compiler + MCP + browser contract. Missing prerequisites fail, never skip.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 evidence_dir="${PAGES_TEST_EVIDENCE_DIR:-/tmp/crewship-pages-ci}"
@@ -11,8 +11,8 @@ CREWSHIP_TEST_PAGE_BUILD_IMAGE="$(cat "$evidence_dir/image-id")"
 export PAGES_TEST_BUILD_IMAGE="$CREWSHIP_TEST_PAGE_BUILD_IMAGE"
 export CREWSHIP_TEST_PAGE_ARTIFACT_OUT="$evidence_dir/artifact.json"
 go test -p 1 -json -count=1 -timeout=10m \
-  ./internal/pagebuild \
-  -run '^TestDockerPreviewBuildIntegration$' \
+  ./internal/pagebuild ./internal/api ./internal/sidecar \
+  -run '^(TestDockerPreviewBuildIntegration|TestPageBuildDockerRoundTrip|TestPageProjectMCPDockerIntegration)$' \
   | tee "$evidence_dir/go.jsonl"
 python3 - "$evidence_dir/go.jsonl" <<'PY'
 import json, sys
@@ -21,6 +21,8 @@ required = {
     "TestDockerPreviewBuildIntegration",
     "TestDockerPreviewBuildIntegration/typecheck",
     "TestDockerPreviewBuildIntegration/lockfile",
+    "TestPageBuildDockerRoundTrip",
+    "TestPageProjectMCPDockerIntegration",
 }
 passed = {event.get("Test") for event in events if event["Action"] == "pass"}
 skipped = [event.get("Test") for event in events if event["Action"] == "skip"]

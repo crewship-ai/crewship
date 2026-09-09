@@ -70,7 +70,7 @@ func TestRoutinesMCP_ToolsList_ValidSchema(t *testing.T) {
 			t.Errorf("tool %q inputSchema.type = %v, want object", tl.Name, schema["type"])
 		}
 	}
-	want := []string{"save_routine", "list_routines", "run_routine", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest"}
+	want := []string{"save_routine", "list_routines", "run_routine", "page_project", "save_page", "discover_capabilities", "workspace_overview", "validate_manifest"}
 	if len(got) != len(want) {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}

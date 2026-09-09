@@ -50,6 +50,9 @@ import "net/http"
 
 func (r *Router) registerPageTransferRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	if r.pages != nil {
+		p.SetProjectStore(r.pages.projectStore)
+	}
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace

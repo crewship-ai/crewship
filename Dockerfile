@@ -69,6 +69,9 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+# CLI embeds the supported Pages dependency lock and source starter.
+COPY tools/ ./tools/
+COPY examples/ ./examples/
 # config/ is the embedded model catalog (config/embed.go + models.json),
 # imported by internal/llm since #2305 — a root-level package like schemas/,
 # and missing from this stage the same way (#2328). scripts/dockerfile-sources
@@ -122,7 +125,7 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
 # -- Runner --
 FROM alpine:3.24
 
-RUN apk --no-cache add ca-certificates && \
+RUN apk --no-cache add ca-certificates git docker-cli && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
 
 RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \

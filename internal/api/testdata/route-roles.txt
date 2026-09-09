@@ -61,6 +61,7 @@ DELETE /api/v1/pages/{slug}/grants roleSelf
 DELETE /api/v1/pages/{slug}/public/{tokenId} roleSelf
 DELETE /api/v1/pages/{slug}/webhooks/{webhookId} roleSelf
 DELETE /api/v1/projects/{projectId} roleManage
+DELETE /api/v1/provider-logins/pools/{poolId} roleManage
 DELETE /api/v1/recurring-issues/{recurringId} roleManage
 DELETE /api/v1/relations/{relationId} roleCreate
 DELETE /api/v1/saved-views/{viewId} roleSelf
@@ -185,10 +186,10 @@ POST /api/v1/credentials roleInline
 POST /api/v1/credentials/bindings roleManage
 POST /api/v1/credentials/test roleSelf
 POST /api/v1/credentials/{credentialId}/fields roleCreate
+POST /api/v1/credentials/{credentialId}/refresh roleCreate
 POST /api/v1/credentials/{credentialId}/reveal roleInline
 POST /api/v1/credentials/{credentialId}/rotate roleInline
 POST /api/v1/credentials/{credentialId}/test roleCreate
-POST /api/v1/credentials/{credentialId}/refresh roleCreate
 POST /api/v1/crew-ai-suggest roleCreate
 POST /api/v1/crew-connections roleCreate
 POST /api/v1/crew-templates/{slug}/deploy roleCreate
@@ -207,8 +208,8 @@ POST /api/v1/crews/{crewId}/issues/{identifier}/comments roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/relations roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/review roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/start roleCreate
-POST /api/v1/crews/{crewId}/issues/{identifier}/work roleCreate
 POST /api/v1/crews/{crewId}/issues/{identifier}/stop roleCreate
+POST /api/v1/crews/{crewId}/issues/{identifier}/work roleCreate
 POST /api/v1/crews/{crewId}/members roleCreate
 POST /api/v1/crews/{crewId}/missions roleCreate
 POST /api/v1/crews/{crewId}/missions/{missionId}/clone roleCreate
@@ -263,7 +264,14 @@ POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/onboarding/setup-agent/start roleSelf
 POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
+POST /api/v1/pages/maintenance roleManage
+POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
+POST /api/v1/pages/{slug}/project/build roleSelf
+POST /api/v1/pages/{slug}/project/check roleSelf
+POST /api/v1/pages/{slug}/project/publish roleSelf
+POST /api/v1/pages/{slug}/project/restore roleSelf
+POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/webhooks roleSelf
@@ -271,8 +279,6 @@ POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
 POST /api/v1/provider-logins/device roleInline
 POST /api/v1/provider-logins/pools roleManage
-PUT /api/v1/provider-logins/pools/{poolId} roleManage
-DELETE /api/v1/provider-logins/pools/{poolId} roleManage
 POST /api/v1/recipes/{slug}/install roleManage
 POST /api/v1/recurring-issues roleCreate
 POST /api/v1/saved-views roleCreate
@@ -331,6 +337,7 @@ PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crews/{crewId} roleManage
 PUT /api/v1/crews/{crewId}/files/save roleCreate
+PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate
 PUT /api/v1/crews/{crewId}/persona roleCreate
 PUT /api/v1/crews/{crewId}/policy roleCreate
 PUT /api/v1/feature-flags/{key}/override roleManage
@@ -342,9 +349,9 @@ PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
 PUT /api/v1/pages/{slug}/grants roleSelf
 PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
+PUT /api/v1/pages/{slug}/project roleSelf
+PUT /api/v1/provider-logins/pools/{poolId} roleManage
 PUT /api/v1/users/me/peer-consent roleSelf
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/tags roleCreate
-
-PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy roleCreate

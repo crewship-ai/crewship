@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -131,5 +133,55 @@ func TestValidate_CrewshipPageWriteNeedsNoActingAgent(t *testing.T) {
 	}
 	if !offered {
 		t.Error("page.write should appear in the 'verbs that can act unattended' remedy list")
+	}
+}
+
+func TestPageWriteWholeObjectTemplatePreservesPayloadTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name, output string
+		wantOK       bool
+	}{
+		{"metric", `{"value":42,"sparkline":[1,2,3],"unit":"MB"}`, true},
+		{"status", `{"items":[{"name":"container","state":"ok","label":"alive"}]}`, true},
+		{"array", `[1,2]`, false}, {"null", `null`, false},
+		{"invalid", `not json`, false}, {"scalar", `42`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actions := &recordingCrewship{}
+			e := &Executor{crewship: actions}
+			step := Step{ID: "publish", Type: StepCrewship, Action: "page.write", Args: map[string]any{"page": "ops", "panel": "memory", "data": "{{ steps.collect.output }}"}}
+			_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{StepOutputs: map[string]string{"collect": tc.output}}, RunInput{}, "run-test")
+			if (err == nil) != tc.wantOK {
+				t.Fatalf("err=%v", err)
+			}
+			if !tc.wantOK {
+				return
+			}
+			got, err := json.Marshal(actions.seen[0].Args["data"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var want, actual any
+			_ = json.Unmarshal([]byte(tc.output), &want)
+			_ = json.Unmarshal(got, &actual)
+			wantBytes, _ := json.Marshal(want)
+			actualBytes, _ := json.Marshal(actual)
+			if string(wantBytes) != string(actualBytes) {
+				t.Fatalf("payload types changed: %s", got)
+			}
+		})
+	}
+}
+
+func TestPageWriteObjectTemplateDryRunDoesNotNeedCollectorOutput(t *testing.T) {
+	actions := &recordingCrewship{}
+	e := &Executor{crewship: actions}
+	step := Step{ID: "publish", Type: StepCrewship, Action: "page.write", Args: map[string]any{"page": "ops", "panel": "memory", "data": "{{ steps.collect.output }}"}}
+	_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{}, RunInput{Mode: ModeDryRun}, "dry-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(actions.seen) != 0 {
+		t.Fatal("dry run dispatched a write")
 	}
 }

@@ -16,6 +16,7 @@ type unauthenticatedOperation struct {
 }
 
 var expectedUnauthenticatedOperations = []unauthenticatedOperation{
+	{"GET", "/api/v1/pages/runtime/bootstrap", "constant public HTML on the configured runtime Host; no DB, user data, project source or artifacts; initialization requires the configured Studio parent"},
 	{"GET", "/api/health", "liveness probe must work before login"},
 	{"POST", "/api/v1/auth/forgot", "starts account recovery before login"},
 	{"GET", "/api/v1/auth/google/status", "reports whether pre-login Google authentication is available"},
