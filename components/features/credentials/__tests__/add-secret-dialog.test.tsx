@@ -153,9 +153,9 @@ describe("the shared create surface", () => {
     h.apiFetch.mockResolvedValue({ ok: true, status: 201, json: async () => ({ id: "cred_new" }) })
     const { onSuccess } = renderDialog()
 
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^token/i }))
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "internal-thing" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "internal-thing" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
 
@@ -172,7 +172,7 @@ describe("the shared create surface", () => {
 
   it("asks before throwing away a half-typed secret", async () => {
     renderDialog()
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^token/i }))
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
 
     fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })

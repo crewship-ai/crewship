@@ -23,6 +23,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Security
 - ⚠️ **Behaviour change:** agent peer-profile endpoints now allow only the signed-in user's own profile, including for workspace administrators; administrator-wide exports retain their explicit administration gate. Personal profiles are excluded from general memory history and group-chat prompts. Personalization opt-out is checked before prompt assembly, and cross-crew user-model reads follow the authoritative workspace index.
 
+- **Guided credentials and provider setup** (#2465) — direct type selection, consistent branded forms, text-file imports, colored tags and compact assignment previews. Save for later creates no delivery bindings; explicit assignment checks occupied slots. Partial saves retry incomplete writes, and provider re-login updates the existing account atomically while retaining assignments.
+- **Credential and private-service protection** (#2465) — private service configuration is encrypted at rest and omitted from public/exported views; re-encryption supports the stored format. Credential disclosure refreshes authorization before returning values, and restricted approval details are scoped to eligible viewers.
+
 - ⚠️ **Behaviour change: default administrator reveal permission** (#2461) — OWNER/ADMIN memberships without explicit capability overrides now receive `credentials:reveal`, as does the admin preset. Existing explicit sets (including revocations) remain authoritative. Workspace opt-in, human-session checks, scope, SEALED denial and audit remain required.
 
 - **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.

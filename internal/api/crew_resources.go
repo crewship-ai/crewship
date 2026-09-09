@@ -32,6 +32,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // DatastoreCap describes one datastore the crew container can reach.
@@ -104,6 +105,11 @@ type serviceForResources struct {
 // Malformed JSON or unnamed services contribute nothing.
 func parseDatastores(servicesJSON string) []DatastoreCap {
 	out := []DatastoreCap{}
+	plain, err := serviceconfig.Open(servicesJSON)
+	if err != nil {
+		return out
+	}
+	servicesJSON = plain
 	if strings.TrimSpace(servicesJSON) == "" {
 		return out
 	}

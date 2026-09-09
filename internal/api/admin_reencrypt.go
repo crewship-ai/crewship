@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
@@ -39,6 +40,8 @@ import (
 type reencryptTarget struct {
 	Table  string
 	Column string
+	// Prefix wraps the standard envelope for purpose-specific documents.
+	Prefix string
 	// Where is an extra predicate for columns that only SOMETIMES hold
 	// envelopes. Currently unused (escalations.resolution left the inventory
 	// in #2408) and kept for the next such column.
@@ -64,6 +67,7 @@ type reencryptTarget struct {
 //   - oauth_states.code_verifier           — PKCE verifier (ephemeral rows)
 //   - agents.webhook_secret                — agent webhook signing secret (#1072/#1029)
 //   - pipeline_webhooks.signing_secret     — pipeline webhook HMAC key (#1029)
+//   - crews.services_json                 — private service documents (crewsvc wrapper)
 //
 // The two webhook columns are FAIL-OPEN at rest (encrypted only when a key is
 // configured; #1072). A key-less deployment can't run reencrypt at all, and a
@@ -92,6 +96,7 @@ var reencryptTargets = []reencryptTarget{
 	{Table: "oauth_states", Column: "code_verifier"},
 	{Table: "agents", Column: "webhook_secret", FailOpen: true},
 	{Table: "pipeline_webhooks", Column: "signing_secret", FailOpen: true},
+	{Table: "crews", Column: "services_json", Where: "services_json LIKE 'crewsvc:%'", Prefix: "crewsvc:"},
 }
 
 // reencryptBatchSize bounds how many row UPDATEs share one transaction:
@@ -233,7 +238,8 @@ func (h *ReencryptHandler) reencryptColumn(ctx context.Context, tgt reencryptTar
 			rows.Close()
 			return res, fmt.Errorf("scan: %w", err)
 		}
-		if v, ok := encryption.ParseEnvelopeVersion(value); ok && v == version {
+		envelope := strings.TrimPrefix(value, tgt.Prefix)
+		if v, ok := encryption.ParseEnvelopeVersion(envelope); ok && v == version {
 			res.Skipped++
 			continue
 		}
@@ -246,7 +252,7 @@ func (h *ReencryptHandler) reencryptColumn(ctx context.Context, tgt reencryptTar
 		}
 		// Older envelope or legacy raw-base64 value: decrypt with whatever
 		// key its prefix names (legacy = v1), re-encrypt with the current key.
-		plain, err := encryption.Decrypt(value)
+		plain, err := encryption.Decrypt(envelope)
 		if err != nil {
 			// Row id + shape only — never the value (it may be a plaintext
 			// secret that predates encryption).
@@ -260,7 +266,7 @@ func (h *ReencryptHandler) reencryptColumn(ctx context.Context, tgt reencryptTar
 			rows.Close()
 			return res, fmt.Errorf("encrypt with %s key: %w", version, err)
 		}
-		updates = append(updates, pendingUpdate{rowid: rowid, oldValue: value, newValue: enc})
+		updates = append(updates, pendingUpdate{rowid: rowid, oldValue: value, newValue: tgt.Prefix + enc})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()

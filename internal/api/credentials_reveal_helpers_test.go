@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -150,6 +151,10 @@ func (r *revealRig) seedMember(t *testing.T, wsID, userID, role string, caps []s
 		t.Fatalf("seed member %s/%s: %v", wsID, userID, err)
 	}
 	InvalidateCapabilityCache(wsID, userID)
+	if _, err := r.db.Exec(`INSERT OR IGNORE INTO user_sessions (id,user_id,created_at,expires_at,last_used_at) VALUES (?,?,?, ?,?)`,
+		"sess-"+userID, userID, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Add(time.Hour).Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed interactive session: %v", err)
+	}
 }
 
 // seedCredential inserts an ACTIVE workspace-scoped credential with an

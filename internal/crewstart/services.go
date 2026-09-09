@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 type serviceWire struct {
@@ -54,6 +55,11 @@ type serviceHealthWire struct {
 // credentials (internal/manifest/auto_managed.go) travel as literal Env values
 // rather than refs, so that is the common, fully-working case.
 func DecodeServices(body string, envValueFor func(envVar string) string) ([]provider.CrewService, error) {
+	plain, err := serviceconfig.Open(body)
+	if err != nil {
+		return nil, err
+	}
+	body = plain
 	if strings.TrimSpace(body) == "" {
 		return nil, nil
 	}

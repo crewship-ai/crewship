@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 type updateCrewRequest struct {
@@ -154,7 +155,24 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// TrimSpace handles a payload of "   " or "\n", which the
 	// previous != "" check would have stored verbatim, diverging
 	// from the documented clear-on-empty semantics.
+	var previousServices sql.NullString
 	if req.ServicesJSON != nil {
+		if err := h.db.QueryRowContext(r.Context(), "SELECT services_json FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, workspaceID).Scan(&previousServices); err != nil {
+			replyInternalError(w, h.logger, "read service configuration for update", err)
+			return
+		}
+		// Older manifest clients regenerate passwords when the read snapshot
+		// is redacted. Do not let that silently replace a running service's
+		// authentication. Runtime-reference migration must precede such edits.
+		previousPlain, openErr := serviceconfig.Open(previousServices.String)
+		if openErr != nil {
+			replyInternalError(w, h.logger, "open service configuration for update", openErr)
+			return
+		}
+		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousPlain {
+			replyError(w, http.StatusConflict, "Private service settings cannot be replaced through crew updates; existing credentials and services were left unchanged")
+			return
+		}
 		trimmedServices := strings.TrimSpace(*req.ServicesJSON)
 		req.ServicesJSON = &trimmedServices
 		if trimmedServices != "" {
@@ -339,7 +357,12 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if *req.ServicesJSON == "" {
 			ub.Set("services_json", nil)
 		} else {
-			ub.Set("services_json", *req.ServicesJSON)
+			sealed, sealErr := serviceconfig.Seal(*req.ServicesJSON)
+			if sealErr != nil {
+				replyInternalError(w, h.logger, "protect service configuration", sealErr)
+				return
+			}
+			ub.Set("services_json", sealed)
 		}
 		// Services do NOT participate in the cached image hash —
 		// they're separate containers built from upstream images,
@@ -399,10 +422,22 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query, args := ub.Build("crews", "id = ?", crewID)
-	_, err = h.db.ExecContext(r.Context(), query, args...)
+	where := "id = ? AND workspace_id = ? AND deleted_at IS NULL"
+	whereArgs := []any{crewID, workspaceID}
+	if req.ServicesJSON != nil {
+		// Compare-and-swap closes the window between the privacy check and
+		// writing the configuration; a concurrent writer must not be lost.
+		where += " AND services_json IS ?"
+		whereArgs = append(whereArgs, previousServices)
+	}
+	query, args := ub.Build("crews", where, whereArgs...)
+	result, err := h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "update crew", err)
+		return
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		replyError(w, http.StatusConflict, "Crew changed concurrently; reload before retrying")
 		return
 	}
 

@@ -11,7 +11,7 @@
  *
  * Deliberate choices:
  *
- *  · The offered way out — "Rotate instead" — is a primary button here, not a
+ *  · The offered way out — "Replace value instead" — is a primary button here, not a
  *    footnote. §2.6 L8: most legitimate reasons to reveal are really reasons
  *    to rotate, and a control used rarely is a control that keeps working.
  *  · The value is rendered exactly once, in the result panel, and there is no
@@ -48,7 +48,7 @@ export interface RevealDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Takes the user to the rotation flow instead — the offered better path. */
-  onRotateInstead: () => void
+  onRotateInstead?: () => void
 }
 
 export function RevealDialog(props: RevealDialogProps) {
@@ -186,18 +186,17 @@ function RevealDialogSession({
               </p>
             </div>
 
-            <div className="rounded-md border border-primary/25 bg-primary/[0.06] px-3 py-2.5 text-xs">
-              <div className="font-medium">Have you considered rotating?</div>
+            {onRotateInstead && <div className="rounded-md border border-primary/25 bg-primary/[0.06] px-3 py-2.5 text-xs">
+              <div className="font-medium">Already have a replacement?</div>
               <p className="mt-1 text-[11px] text-muted-foreground">
-                If you need the value in order to paste it somewhere, rotation is the safer route:
-                the new value is shown once at creation and the old one drains through the grace
-                window, so nothing existing is ever disclosed.
+                You can store a new value without revealing the existing one. Create or change it
+                at your provider first; Crewship only updates its stored copy.
               </p>
               <Button size="sm" className="mt-2" onClick={onRotateInstead}>
                 <RefreshCw className="mr-1.5 h-3 w-3" />
-                Rotate instead
+                Replace value instead
               </Button>
-            </div>
+            </div>}
 
             {error && (
               <div

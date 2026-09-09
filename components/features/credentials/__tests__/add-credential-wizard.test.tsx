@@ -58,7 +58,6 @@ function renderWizard(overrides: { onSuccess?: () => void; onCancel?: () => void
 /** Walk to step 2 with the given shape selected. */
 function pickShape(label: RegExp) {
   fireEvent.click(screen.getByRole("button", { name: label }))
-  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
 }
 
 function bodyOf(call: unknown[]): Record<string, unknown> {
@@ -120,18 +119,18 @@ describe("step 1 — the shape decides the form, not the brand", () => {
 describe("the step bar", () => {
   it("announces the step you are on rather than only tinting it", () => {
     renderWizard()
-    expect(screen.getByRole("button", { name: /shape/i })).toHaveAttribute("aria-current", "step")
+    expect(screen.getByRole("button", { name: /type/i })).toHaveAttribute("aria-current", "step")
   })
 
   it("walks back to a finished step but will not skip ahead to an unfinished one", () => {
     renderWizard()
     pickShape(/^login/i)
-    expect(screen.getByRole("button", { name: /values/i })).toHaveAttribute("aria-current", "step")
+    expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
     // Step 3 needs a password and a name first; offering it would be a link
     // to a form that cannot be submitted.
-    expect(screen.getByRole("button", { name: /delivery/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /use/i })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole("button", { name: /shape/i }))
+    fireEvent.click(screen.getByRole("button", { name: /type/i }))
     expect(screen.getByRole("button", { name: /^login/i })).toBeInTheDocument()
   })
 
@@ -148,7 +147,7 @@ describe("the step bar", () => {
     expect(bar).toHaveAttribute("aria-valuemax", "3")
     // The chip row is what a pointer device gets; it does not take width on a
     // phone, and it is not what the phone reads.
-    const chips = screen.getByRole("button", { name: /shape/i }).parentElement!
+    const chips = screen.getByRole("button", { name: /type/i }).parentElement!
     expect(chips.className).toContain("max-sm:hidden")
   })
 })
@@ -166,6 +165,7 @@ describe("layout on a phone", () => {
 
   it("docks the actions in a footer the scrolling body cannot carry off-screen", () => {
     renderWizard()
+    pickShape(/^token/i)
     const body = screen.getByTestId("wizard-body")
     const footer = screen.getByTestId("wizard-footer")
     expect(body.className).toContain("overflow-y-auto")
@@ -181,6 +181,7 @@ describe("layout on a phone", () => {
   // one place that number is now decided; this surface used to be 40.5px.
   it("gives the footer buttons a thumb-sized target and the width to share", () => {
     renderWizard()
+    pickShape(/^token/i)
     const cont = screen.getByRole("button", { name: /^continue$/i })
     expect(cont.className).toContain("max-sm:h-12")
     expect(cont.className).toContain("max-sm:flex-[2]")
@@ -211,30 +212,14 @@ describe("layout on a phone", () => {
 // start — I just want to give an icon, which brand it is, and that's it." The
 // icon lives on the first step now, next to the shape, and it is still a hint:
 // nothing about it gates the flow.
-describe("the brand icon is offered up front", () => {
-  it("sits on the first step without becoming a required choice", () => {
+describe("the brand icon belongs beside the name", () => {
+  it("starts without a selected type or an unnecessary Continue", () => {
     renderWizard()
-    expect(screen.getByRole("button", { name: /provider: generic secret/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^continue$/i })).not.toBeDisabled()
-  })
-
-  it("carries an icon picked on the first step through to the saved credential", async () => {
-    const { onSuccess } = renderWizard()
-    fireEvent.click(screen.getByRole("button", { name: /provider: generic secret/i }))
-    fireEvent.change(screen.getByPlaceholderText("Search brands…"), { target: { value: "notion" } })
-    fireEvent.click(screen.getByTitle("Notion"))
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-
-    // Deliberately unrecognisable, so the provider on the wire can only have
-    // come from the choice made on step 1.
-    fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "opaque-value-1" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "INTERNAL" } })
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
-
-    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
-    const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
-    expect(bodyOf(createCall)).toMatchObject({ provider: "NOTION" })
+    expect(screen.queryByRole("button", {name: /provider: generic secret/i})).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", {name: /^continue$/i})).not.toBeInTheDocument()
+    expect(screen.getByRole("button", {name: /^Token/})).toHaveAttribute("aria-pressed", "false")
+    pickShape(/^token/i)
+    expect(screen.getByRole("button", {name: /provider: generic secret/i})).toBeInTheDocument()
   })
 })
 
@@ -255,7 +240,7 @@ describe("provider login (#2428)", () => {
     if (p.key === "OPENAI") fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
     if (p.key === "OPENAI" || p.key === "ANTHROPIC") fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
     expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
-    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue(p.label)
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue(p.label)
     expect(screen.getByRole("link", { name: /get api key/i })).toHaveAttribute("href", providerConnectionGuide(p.key)!.url)
     expect(screen.getByText(providerConnectionGuide(p.key)!.instruction)).toBeInTheDocument()
     expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
@@ -265,14 +250,15 @@ describe("provider login (#2428)", () => {
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
     fireEvent.change(screen.getByLabelText(/^API key$/), { target: { value: "fixture-key" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "My production account" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "My production account" } })
     fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
     fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/ }))
     expect(screen.getByLabelText(/^API key$/)).toHaveValue("fixture-key")
     fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
     fireEvent.click(screen.getByRole("button", { name: /^Groq / }))
+    fireEvent.click(screen.getByRole("button", { name: /change and clear value/i }))
     expect(screen.getByLabelText(/^API key$/)).toHaveValue("")
-    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("My production account")
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("My production account")
   })
 
   it("starts directly with a provider, without using a decorative brand picker", () => {
@@ -288,10 +274,11 @@ describe("provider login (#2428)", () => {
     renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^Gemini \/ Google/i }))
     expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /^Google account/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Import Gemini login/i }))
     fireEvent.change(screen.getByLabelText(/Gemini login/), { target: { value: "old-google-token" } })
     fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
     fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/i }))
+    fireEvent.click(screen.getByRole("button", { name: /change and clear value/i }))
     expect(screen.getByLabelText(/^API key$/i)).toHaveValue("")
     expect(screen.queryByRole("button", { name: /^Subscription/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Sign in with a code/i })).not.toBeInTheDocument()
@@ -302,11 +289,11 @@ describe("provider login (#2428)", () => {
     const { onSuccess } = renderWizard()
     fireEvent.click(screen.getByRole("button", { name: /^Grok \/ xAI/i }))
     fireEvent.change(screen.getByLabelText(/^API key$/i), { target: { value: "fixture-xai-key" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "Grok account" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Grok account" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     expect(screen.queryByRole("group", { name: "How closely Keeper guards it" })).not.toBeInTheDocument()
-    expect(screen.getByText("Account protection")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    expect(screen.getByText("How will you use it?")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
     expect(bodyOf(createCall)).toMatchObject({ provider: "XAI", type: "PROVIDER_LOGIN", mode: "api_key", value: "fixture-xai-key" })
@@ -320,8 +307,8 @@ describe("provider login (#2428)", () => {
   it("will not continue without a provider — the server routes by it", () => {
     renderWizard()
     pickShape(/provider login/i)
-    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
-    expect(screen.queryByRole("button", { name: /save secret/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^continue$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /save secret|save & assign/i })).not.toBeInTheDocument()
   })
 
   it("stores a ChatGPT login as PROVIDER_LOGIN · OPENAI · subscription and asks for the whole auth.json", async () => {
@@ -332,9 +319,9 @@ describe("provider login (#2428)", () => {
     expect(box.tagName).toBe("TEXTAREA")
     expect(screen.getByText(/paste the contents of ~\/\.codex\/auth\.json/i)).toBeInTheDocument()
     fireEvent.change(box, { target: { value: '{"tokens":{"id_token":"i","access_token":"a","refresh_token":"r","account_id":"x"}}' } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -350,9 +337,9 @@ describe("provider login (#2428)", () => {
     pickOpenAI()
     fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
     fireEvent.change(screen.getByLabelText(/^api key$/i), { target: { value: "sk-proj-abc" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "OpenAI API" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "OpenAI API" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -367,7 +354,7 @@ describe("provider login (#2428)", () => {
     expect(screen.getByRole("button", { name: /sign in with a code/i })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
-    expect(screen.queryByRole("button", { name: /sign in with a code/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "false")
   })
 
   it("keeps the setup-token paste for Anthropic — there is no device flow to offer", () => {
@@ -415,33 +402,30 @@ describe("provider login (#2428)", () => {
     await screen.findByText("Signed in. Continue to choose access for this account.")
     const starts = () => h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/provider-logins/device?") && init?.method === "POST").length
     const startsBeforeBack = starts()
-    fireEvent.click(screen.getByRole("button", { name: /^back$/i }))
-    expect(screen.getByRole("button", { name: /^Claude \/ Anthropic/i })).toBeDisabled()
-    fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
-    expect(screen.getByText("Signed in. Continue to choose access for this account.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^back$/i })).toBeDisabled()
     expect(starts()).toBe(startsBeforeBack)
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     if (scope === "CREW") {
+      fireEvent.click(screen.getByRole("button", { name: /assign now/i }))
       fireEvent.click(screen.getByRole("button", { name: /selected crews/i }))
       fireEvent.click(screen.getByRole("combobox"))
       fireEvent.click(await screen.findByRole("option", { name: "Engineering" }))
       fireEvent.keyDown(screen.getByPlaceholderText("Search crews…"), { key: "Escape" })
-      fireEvent.change(screen.getByLabelText(/slot/i), { target: { value: "" } })
     }
-    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
 
     const creates = h.apiFetch.mock.calls.filter(([url, init]) => String(url).startsWith("/api/v1/credentials?") && (init as { method?: string })?.method === "POST")
     expect(creates).toHaveLength(0)
     const patch = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/cred_dev?"))!
-    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana", scope })
-    const bind = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials/bindings"))!
+    expect(bodyOf(patch)).toMatchObject({ name: "ChatGPT Plus · jana", scope: "WORKSPACE" })
+    const bind = h.apiFetch.mock.calls.find(([url, init]) => String(url).startsWith("/api/v1/credentials/bindings") && init?.method === "POST")!
     if (scope === "CREW") {
-      expect(bodyOf(patch).crew_ids).toEqual(["crew-one"])
-      expect(bind).toBeUndefined()
+      expect(bodyOf(patch).crew_ids).toBeUndefined()
+      expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "CREW", crew_id: "crew-one" })
     } else {
-      expect(bodyOf(bind)).toMatchObject({ credential_id: "cred_dev", scope: "WORKSPACE" })
+      expect(bind).toBeUndefined()
     }
   })
 
@@ -462,10 +446,10 @@ describe("provider login (#2428)", () => {
     // a select over them.
     await waitFor(() => expect(screen.getByLabelText(/^owner$/i).tagName).toBe("SELECT"))
     fireEvent.change(screen.getByLabelText(/^owner$/i), { target: { value: "u_jana" } })
-    fireEvent.change(screen.getByLabelText(/codex login \(auth\.json\)/i), { target: { value: "{}" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "ChatGPT Plus · jana" } })
+    fireEvent.change(screen.getByLabelText(/codex login \(auth\.json\)/i), { target: { value: '{"tokens":{"access_token":"fixture-access","id_token":"fixture-id","account_id":"fixture-account"}}' } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "ChatGPT Plus · jana" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save login/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
     expect(bodyOf(createCall)).toMatchObject({ owner_user_id: "u_jana" })
@@ -482,7 +466,7 @@ describe("provider login (#2428)", () => {
     )
     expect(screen.getByRole("button", { name: /connect/i })).toHaveAttribute("aria-current", "step")
     expect(screen.getByRole("button", { name: /sign in with a code/i })).toHaveAttribute("aria-pressed", "true")
-    expect(screen.getByLabelText(/name \(which account\)/i)).toHaveValue("ChatGPT Plus · jana")
+    expect(screen.getByLabelText(/^name$/i)).toHaveValue("ChatGPT Plus · jana")
     expect(screen.getByTestId("device-sign-in")).toBeInTheDocument()
     expect(screen.queryByLabelText(/^owner$/i)).not.toBeInTheDocument()
   })
@@ -504,7 +488,7 @@ describe("brand detection is a hint", () => {
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "zzz-some-internal-thing" } })
     expect(screen.queryByText(/looks like/i)).not.toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "internal-thing" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "internal-thing" } })
     expect(screen.getByRole("button", { name: /^continue$/i })).not.toBeDisabled()
   })
 
@@ -512,7 +496,7 @@ describe("brand detection is a hint", () => {
     renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "opaque-value" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "gitlab-ci" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "gitlab-ci" } })
     expect(screen.getByText(/looks like gitlab/i)).toBeInTheDocument()
   })
 })
@@ -533,9 +517,10 @@ describe("step 2 → 3 gating", () => {
     renderWizard()
     pickShape(/^key pair/i)
     fireEvent.change(screen.getByLabelText(/secret access key/i), { target: { value: "s3cret" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "aws-prod" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "aws-prod" } })
     // access_key_id is required and still empty.
-    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
     // …and names the part that is holding it up, rather than a dead button.
     expect(screen.getByText(/is still empty/i)).toBeInTheDocument()
 
@@ -547,7 +532,8 @@ describe("step 2 → 3 gating", () => {
     renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    expect(screen.getByRole("button", { name: /^continue$/i })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute("aria-current", "step")
   })
 })
 
@@ -555,7 +541,7 @@ describe("step 2 → 3 gating", () => {
 function toScopeStep(name = "github-acme", value = "github_pat_11ABCDE") {
   pickShape(/^token/i)
   fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value } })
-  fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: name } })
+  fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: name } })
   fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
 }
 
@@ -563,14 +549,16 @@ describe("step 3 — scope and slot", () => {
   it("prefills the slot from the detected brand but lets the user overwrite it", async () => {
     const { onSuccess } = renderWizard()
     toScopeStep()
-    const slot = screen.getByLabelText(/slot/i) as HTMLInputElement
+    fireEvent.click(screen.getByRole("button", {name: /assign now/i}))
+    fireEvent.click(screen.getByRole("button", {name: /all agents/i}))
+    const slot = screen.getByLabelText(/variable name/i) as HTMLInputElement
     expect(slot.value).toBe("GH_TOKEN")
 
     fireEvent.change(slot, { target: { value: "GH_TOKEN_READONLY" } })
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
-    const bindingCall = h.apiFetch.mock.calls.find(([url]) => String(url).includes("/credentials/bindings"))!
+    const bindingCall = h.apiFetch.mock.calls.find(([url, init]) => String(url).includes("/credentials/bindings") && init?.method === "POST")!
     expect(bodyOf(bindingCall)).toMatchObject({
       credential_id: "cred_new",
       scope: "WORKSPACE",
@@ -586,35 +574,35 @@ describe("step 3 — scope and slot", () => {
     h.role = "MANAGER"
     renderWizard()
     toScopeStep()
-    expect(screen.queryByLabelText(/slot/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/delivered under its own name/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/variable name/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", {name: /assign now/i})).not.toBeInTheDocument()
   })
 
   it("never posts a binding for a role that cannot create one", async () => {
     h.role = "MANAGER"
     const { onSuccess } = renderWizard()
     toScopeStep()
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     expect(h.apiFetch.mock.calls.some(([url]) => String(url).includes("/credentials/bindings"))).toBe(false)
   })
 
   // Without a binding the delivery layer falls back to the credential's own
   // name, so a name that is not a legal env var silently reaches nothing.
-  it("warns when there is no slot and the name is not a legal env var", () => {
-    renderWizard()
+  it("saves a human display name without assigning it as a variable", async () => {
+    const {onSuccess} = renderWizard()
     toScopeStep("github acme", "opaque")
-    fireEvent.change(screen.getByLabelText(/slot/i), { target: { value: "" } })
-    expect(screen.getByText(/not a valid environment-variable name/i)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /use github_acme/i }))
-    expect(screen.queryByText(/not a valid environment-variable name/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", {name: /save secret|save & assign/i}))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    expect(h.apiFetch.mock.calls.some(([url]) => String(url).includes("/bindings"))).toBe(false)
   })
 
   it("refuses to save a crew-scoped credential with no crew picked", async () => {
     renderWizard()
     toScopeStep()
+    fireEvent.click(screen.getByRole("button", {name: /assign now/i}))
     fireEvent.click(screen.getByRole("button", { name: /selected crews/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
     expect(await screen.findByText(/pick at least one crew/i)).toBeInTheDocument()
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as { method?: string })?.method === "POST"
       && String(h.apiFetch.mock.calls[0][0]).includes("/api/v1/credentials?"))).toBe(false)
@@ -628,10 +616,10 @@ describe("saving", () => {
     fireEvent.change(screen.getByLabelText(/secret access key/i), { target: { value: "s3cret" } })
     fireEvent.change(screen.getByLabelText(/access key id/i), { target: { value: "AKIA1" } })
     fireEvent.change(screen.getByLabelText(/region/i), { target: { value: "eu-central-1" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "aws-prod" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "aws-prod" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.change(screen.getByLabelText(/slot/i), { target: { value: "AWS_SECRET_ACCESS_KEY" } })
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
 
@@ -655,9 +643,9 @@ describe("saving", () => {
     pickShape(/^login/i)
     fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: "hunter2" } })
     fireEvent.change(screen.getByLabelText(/^username$/i), { target: { value: "svc-account" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "db-login" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "db-login" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -673,9 +661,9 @@ describe("saving", () => {
     fireEvent.change(screen.getByLabelText(/custom field 1 key/i), { target: { value: "tenant_id" } })
     fireEvent.change(screen.getByLabelText(/custom field 1 value/i), { target: { value: "acme" } })
     fireEvent.click(screen.getByRole("button", { name: /custom field 1 is secret/i }))
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "THING" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "THING" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const fieldCalls = h.apiFetch.mock.calls.filter(([url]) => String(url).includes("/fields"))
@@ -692,10 +680,10 @@ describe("saving", () => {
     const { onSuccess } = renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "expiring-thing" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "expiring-thing" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
     fireEvent.change(screen.getByLabelText(/expires on/i), { target: { value: "2027-01-15" } })
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -706,9 +694,9 @@ describe("saving", () => {
     const { onSuccess } = renderWizard()
     pickShape(/^token/i)
     fireEvent.change(screen.getByLabelText(/^token$/i), { target: { value: "abc123" } })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "no-expiry-thing" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "no-expiry-thing" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -727,9 +715,9 @@ describe("saving", () => {
     const tagInput = screen.getByLabelText(/^tags$/i)
     fireEvent.change(tagInput, { target: { value: "Prod" } })
     fireEvent.keyDown(tagInput, { key: "Enter" })
-    fireEvent.change(screen.getByLabelText(/name \(which account\)/i), { target: { value: "THING" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "THING" } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalled())
     const createCall = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
@@ -740,7 +728,7 @@ describe("saving", () => {
     h.apiFetch.mockResolvedValue(fail(409, { error: "Credential with this name already exists" }))
     const { onSuccess } = renderWizard()
     toScopeStep()
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     expect(await screen.findByText(/credential with this name already exists/i)).toBeInTheDocument()
     expect(onSuccess).not.toHaveBeenCalled()
@@ -751,27 +739,29 @@ describe("saving", () => {
   // The credential row exists by then. Reporting "save failed" would send the
   // user to create it again, which 409s on the unique name.
   it("reports a failed slot claim as a partial save, not as a failure", async () => {
-    h.apiFetch.mockImplementation(async (url: string) => {
-      if (String(url).includes("/bindings")) {
+    h.apiFetch.mockImplementation(async (url: string, init?: {method?: string}) => {
+      if (String(url).includes("/bindings") && init?.method === "POST") {
         return fail(409, { error: "slot GH_TOKEN is already bound in this scope — delete the existing binding first" })
       }
       return ok({ id: "cred_new" }, 201)
     })
     const { onSuccess } = renderWizard()
     toScopeStep()
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
+    fireEvent.click(screen.getByRole("button", {name: /assign now/i}))
+    fireEvent.click(screen.getByRole("button", {name: /all agents/i}))
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
 
     expect(await screen.findByText(/already bound in this scope/i)).toBeInTheDocument()
     expect(screen.getByText(/but some parts did not land/i)).toBeInTheDocument()
-    expect(onSuccess).toHaveBeenCalled()
+    expect(onSuccess).not.toHaveBeenCalled()
   })
 
   it("reports a network failure without claiming anything about the vault's contents", async () => {
     h.apiFetch.mockRejectedValue(new TypeError("offline"))
     const { onSuccess } = renderWizard()
     toScopeStep()
-    fireEvent.click(screen.getByRole("button", { name: /save secret/i }))
-    expect(await screen.findByText(/network error while saving/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /save secret|save & assign/i }))
+    expect(await screen.findByText(/credential may have been saved/i)).toBeInTheDocument()
     expect(onSuccess).not.toHaveBeenCalled()
   })
 })

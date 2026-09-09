@@ -564,6 +564,7 @@ export default function CredentialsPage() {
     const login = cred.login
     const provider = (login?.provider ?? cred.provider).toUpperCase()
     openAdd({
+      credentialId: cred.id,
       itemType: "PROVIDER_LOGIN",
       provider,
       loginMode: login?.mode ?? "subscription",
@@ -807,7 +808,13 @@ export default function CredentialsPage() {
           workspaceId={workspaceId}
           open={addOpen}
           onOpenChange={(o) => { setAddOpen(o); if (!o) setAddInitial(undefined) }}
-          onSuccess={handleRefresh}
+          onSuccess={(id) => {
+            handleRefresh()
+            if (id && workspaceId) apiFetch(`/api/v1/credentials/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`)
+              .then((r) => { if (!r.ok) throw new Error(); return r.json() })
+              .then((credential: Credential) => { if (!credential?.id) throw new Error(); setDetailCredential(credential); setDetailOpen(true) })
+              .catch(() => toast.error("Saved. Open the credential from the list to review its details."))
+          }}
           knownTags={tagsInUse}
           initial={addInitial}
         />
@@ -818,6 +825,7 @@ export default function CredentialsPage() {
           workspaceId={workspaceId}
           credentialId={rotateCredential.id}
           credentialName={rotateCredential.name}
+          credentialType={rotateCredential.type}
           open={rotateOpen}
           onOpenChange={(o) => { setRotateOpen(o); if (!o) setRotateCredential(null) }}
           onRotated={handleRefresh}

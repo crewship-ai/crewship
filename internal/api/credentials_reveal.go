@@ -13,12 +13,13 @@ package api
 //	L0  classification — SEALED is never revealable, by any role
 //	L1  workspace default-deny — off until an OWNER turns it on
 //	L2  capability — OWNER/ADMIN defaults include it; explicit overrides win
+//	L3.2 fresh server-side login (five minutes); default demo password denied
 //	L3.3 mandatory, non-trivial reason
 //	L4  chained audit as a PRECONDITION — no chained write, no value
 //	L9  agents never reveal — interactive human sessions only
 //
 // Deliberately NOT here, and deferred in §0 with reasons: four-eyes approval
-// for RESTRICTED (L3.4), session freshness / step-up re-auth (L3.2),
+// for RESTRICTED (L3.4), dedicated step-up re-auth UI,
 // one-time tokens with a 30 s window (L3.5), auto-seal on anomaly (L6),
 // separation-of-duty warnings (L7). Each is a real layer; adding them to this
 // change would have made it unreviewable, and the core carries most of the
@@ -325,6 +326,9 @@ func (h *CredentialRevealHandler) Reveal(w http.ResponseWriter, r *http.Request)
 	reason := strings.TrimSpace(body.Reason)
 	if msg := revealReasonError(reason); msg != "" {
 		replyError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if !h.requireFreshRevealLogin(w, r) {
 		return
 	}
 
