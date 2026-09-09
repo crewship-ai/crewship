@@ -32,6 +32,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Pages application Studio** — source editing, previews, reviewed publication history and declared routine actions. Panel-only Pages render immediately; temporary 503s preserve an open application, while withdrawal clears stale code. Desktop Chromium support and routine-definition changes are shown explicitly. Workspace appearance reaches applications without rebuilding them.
+
 - **Pages application CLI and operations starter** — initialize, pack, save, build, review/publish, roll back and withdraw custom applications; inspect Git history, verify integrity and reclaim optional workspace history. Seed and collector examples are covered by real Docker and Node checks.
 
 - **Pages application API** — workspace-scoped drafts, builds and reviewed publications, transactional action authorization, agent MCP authoring, recoverable storage quotas, integrity checks and protected backup/restore. Publication retries report the current live version.
