@@ -126,3 +126,19 @@ func TestBeginSessionRun_EmptyChatIDRecordsNothing(t *testing.T) {
 		t.Error("a chat-less run opened a buffer on the empty session channel")
 	}
 }
+
+func TestIssueWorkersShareReplayWithoutEndingTheMission(t *testing.T) {
+	hub := newRunningHub(t)
+	mission := hub.BeginSessionRun("issue-stream")
+	hub.EmitSessionEvent("issue-stream", ChatEvent{Type: "text", Content: "Worker A", Metadata: map[string]any{"agent_id": "a"}})
+	hub.EmitSessionEvent("issue-stream", ChatEvent{Type: "text", Content: "Worker B", Metadata: map[string]any{"agent_id": "b"}})
+	replay := hub.ReplaySession("session:issue-stream", 0)
+	if !replay.Active || len(replay.Frames) != 3 {
+		t.Fatalf("worker publication lost active mission replay: %+v", replay)
+	}
+	mission.Emit(ChatEvent{Type: "done"})
+	mission.End()
+	if hub.ReplaySession("session:issue-stream", 0).Active {
+		t.Fatal("mission still active after completion")
+	}
+}

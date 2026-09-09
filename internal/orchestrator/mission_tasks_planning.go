@@ -231,7 +231,8 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	b.WriteString("  Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start\n\n")
 	b.WriteString("Option C — If you can handle this yourself (solo crew / simple task):\n")
 	b.WriteString("  Just do the work directly and produce the result.\n\n")
-	b.WriteString("After creating tasks or completing the work, the system will handle the rest.\n")
+	b.WriteString("After delegation, finish this turn. The issue engine will schedule a Lead review after the workers finish; do not poll, sleep, or promise a background continuation. Report WORK_CREATED when you delegated work.\n")
+	b.WriteString(AssignmentOutcomeInstructions)
 	b.WriteString("[END PLANNING REQUEST]")
 
 	// Create a planning assignment.

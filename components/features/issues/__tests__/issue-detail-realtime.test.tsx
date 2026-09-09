@@ -185,7 +185,7 @@ describe("IssueDetailSurface — an agent's write reaches the open tab", () => {
 // off `fetchSubResources`' own `runs` state — exactly what `run.outcome`
 // is supposed to keep fresh without a reload.
 function liveFetchWithRun(initialStatus: string) {
-  const server = { title: "As the reader left it", runStatus: initialStatus }
+  const server = { title: "As the reader left it", runStatus: initialStatus, outcome: "" }
   const calls = { issue: 0, runs: 0 }
 
   global.fetch = vi.fn((url: string) => {
@@ -213,6 +213,7 @@ function liveFetchWithRun(initialStatus: string) {
           {
             id: "run-1",
             status: server.runStatus,
+            outcome: server.outcome,
             agent_name: "Backend Dev",
             task: "Fix the thing",
             duration_ms: 0,
@@ -240,17 +241,22 @@ describe("IssueDetailSurface — run.outcome and issue.session.state repaint the
     expect(realtime.subs.has("issue.session.state")).toBe(true)
   })
 
-  it("repaints the run's STATUS pill from Running to Done on run.outcome — a REAL frame, not a subscription check", async () => {
+  it.each([
+    ["SUCCEEDED", "Reported success"],
+    ["FAILED", "Failed"],
+    ["NEEDS_HUMAN", "Needs human input"],
+  ])("repaints a live run with its %s outcome rather than process completion", async (outcome, label) => {
     const { server } = liveFetchWithRun("RUNNING")
     await openIssue()
     await waitFor(() => expect(screen.getByText("Running")).toBeInTheDocument())
 
     // The run finishes server-side. Only the broadcast tells this open tab.
     server.runStatus = "COMPLETED"
-    emit("run.outcome", { mission_id: "id-ENG-1", assignment_id: "run-1", status: "COMPLETED", outcome: "SUCCEEDED" })
+    server.outcome = outcome
+    emit("run.outcome", { mission_id: "id-ENG-1", assignment_id: "run-1", status: "COMPLETED", outcome })
 
-    // formatStatus (lib/format-status.ts) renders COMPLETED as "Done".
-    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(label)).toBeInTheDocument())
+    expect(screen.queryByText("Done")).not.toBeInTheDocument()
     expect(screen.queryByText("Running")).not.toBeInTheDocument()
   })
 

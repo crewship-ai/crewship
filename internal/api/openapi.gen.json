@@ -3680,11 +3680,21 @@
       },
       "CrewIssueResponseV1": {
         "properties": {
+          "brief_revision": {
+            "type": "integer"
+          },
+          "client_review_required": {
+            "type": "boolean"
+          },
           "created_at": {
             "type": "string"
           },
           "description": {
             "type": "string"
+          },
+          "execution": {
+            "additionalProperties": true,
+            "type": "object"
           },
           "id": {
             "type": "string"
@@ -3736,11 +3746,21 @@
       "CrewIssueSubtasksResponseV1": {
         "items": {
           "properties": {
+            "brief_revision": {
+              "type": "integer"
+            },
+            "client_review_required": {
+              "type": "boolean"
+            },
             "created_at": {
               "type": "string"
             },
             "description": {
               "type": "string"
+            },
+            "execution": {
+              "additionalProperties": true,
+              "type": "object"
             },
             "id": {
               "type": "string"
@@ -5563,12 +5583,18 @@
             ],
             "type": "string"
           },
+          "brief_revision": {
+            "type": "integer"
+          },
           "comment": {
             "type": "string"
           },
           "reassign_to": {
             "nullable": true,
             "type": "string"
+          },
+          "revision": {
+            "type": "integer"
           }
         },
         "required": [
@@ -7366,6 +7392,26 @@
           "updated_at": {
             "type": "string"
           },
+          "work_mode": {
+            "type": "string"
+          },
+          "work_note": {
+            "type": "string"
+          },
+          "work_revision": {
+            "type": "integer"
+          },
+          "work_stopping": {
+            "type": "boolean"
+          },
+          "worker_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "worker_user_id": {
+            "nullable": true,
+            "type": "string"
+          },
           "workspace_id": {
             "type": "string"
           }
@@ -7395,7 +7441,11 @@
           "parent_issue_id",
           "milestone_id",
           "sub_issues_count",
-          "comment_count"
+          "comment_count",
+          "work_mode",
+          "work_revision",
+          "work_note",
+          "work_stopping"
         ],
         "type": "object"
       },
@@ -7564,6 +7614,36 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "IssueReviewPolicyRequest": {
+        "properties": {
+          "client_review_required": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "client_review_required"
+        ],
+        "type": "object"
+      },
+      "IssueReviewPolicyResponse": {
+        "properties": {
+          "client_review_required": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "client_review_required"
         ],
         "type": "object"
       },
@@ -50553,6 +50633,22 @@
             }
           },
           {
+            "in": "query",
+            "name": "before_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -51798,8 +51894,66 @@
               }
             },
             "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
           },
-          "404": {
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/review-policy": {
+      "put": {
+        "operationId": "put_api_v1_crews_crewId_issues_identifier_review-policy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueReviewPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssueReviewPolicyResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
             "content": {
               "application/json": {
                 "schema": {
@@ -51827,7 +51981,37 @@
                 }
               }
             },
-            "description": "Not Found"
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -51927,8 +52111,14 @@
                       "outcome": {
                         "type": "string"
                       },
+                      "result_stale": {
+                        "type": "boolean"
+                      },
                       "result_summary": {
                         "type": "string"
+                      },
+                      "result_truncated": {
+                        "type": "boolean"
                       },
                       "source": {
                         "type": "string"
@@ -52070,6 +52260,174 @@
               }
             },
             "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/runs/{runId}/result": {
+      "get": {
+        "operationId": "get_api_v1_crews_crewId_issues_identifier_runs_runId_result",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "runId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "outcome": {
+                      "type": "string"
+                    },
+                    "result_summary": {
+                      "description": "Full stored output, without the list preview truncation; may be empty.",
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -53140,6 +53498,166 @@
               }
             },
             "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "crews"
+        ]
+      }
+    },
+    "/api/v1/crews/{crewId}/issues/{identifier}/work": {
+      "post": {
+        "operationId": "post_api_v1_crews_crewId_issues_identifier_work",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crewId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "take_over",
+                      "handoff_agent",
+                      "handoff_human",
+                      "submit"
+                    ],
+                    "type": "string"
+                  },
+                  "note": {
+                    "maxLength": 20000,
+                    "type": "string"
+                  },
+                  "operation_id": {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "target_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "revision",
+                  "action"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -104884,6 +105402,16 @@
               }
             },
             "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "400": {
             "content": {

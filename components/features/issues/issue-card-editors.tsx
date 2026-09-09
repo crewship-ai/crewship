@@ -45,6 +45,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
+import { hasIssueAgentDelegate } from "@/lib/issue-execution"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -807,7 +808,7 @@ export function TitleEditor({
 
   return (
     <span className="group/title flex min-w-0 items-center gap-1.5">
-      <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
+      <h1 className="break-words text-lg font-semibold tracking-tight">{title}</h1>
       <button
         type="button"
         aria-label="Edit title"
@@ -834,9 +835,8 @@ export type WorkflowAction = "start" | "stop" | "approve" | "request_changes" | 
 /**
  * The five verbs, gated on status the way the server gates them.
  *
- * `Start work` needs an assignee because the endpoint does: starting an
- * unassigned issue has nobody to hand it to, and offering the button anyway
- * only buys a toast.
+ * `Start work` dispatches an agent. A human owner alone cannot execute;
+ * conversely, a human owner must not hide an existing agent delegate.
  */
 export function IssueWorkflowActions({
   issue,
@@ -850,7 +850,7 @@ export function IssueWorkflowActions({
   const [asking, setAsking] = React.useState(false)
   const [reason, setReason] = React.useState("")
 
-  const canStart = (issue.status === "BACKLOG" || issue.status === "TODO") && !!issue.assignee_id
+  const canStart = (issue.status === "BACKLOG" || issue.status === "TODO") && hasIssueAgentDelegate(issue)
   const canStop = issue.status === "IN_PROGRESS"
   const canReview = issue.status === "REVIEW"
   const canReopen =

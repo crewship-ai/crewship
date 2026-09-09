@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -383,4 +384,71 @@ func TestIssueRuns_FollowUpRun_SourceIsMention(t *testing.T) {
 		return
 	}
 	t.Fatalf("follow-up run %s missing from results; body=%s", followUpAssign, rr.Body.String())
+}
+
+func TestIssueRunResultReturnsFullStoredOutputAndFencesIssue(t *testing.T) {
+	h, user, ws, crew, lead, agent := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "TODO")
+	output := strings.Repeat("Complete evidence with unicode: ověřeno.\n", 500) + "THE FINAL RESULT"
+	seedMissionAssignment(t, h, ws, id, agent, "full-output", "COMPLETED", output, "", "")
+	req := issueRunsRequest(t, user, ws, crew, "ENG-1")
+	req.SetPathValue("runId", "full-output")
+	rr := httptest.NewRecorder()
+	h.RunResult(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("result: %d %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["result_summary"] != output {
+		t.Fatal("full result was truncated or changed")
+	}
+	seedIssue(t, h.db, ws, crew, lead, "ENG-2", "TODO")
+	req = issueRunsRequest(t, user, ws, crew, "ENG-2")
+	req.SetPathValue("runId", "full-output")
+	rr = httptest.NewRecorder()
+	h.RunResult(rr, req)
+	if rr.Code != 404 {
+		t.Fatalf("unrelated issue could read result: %d", rr.Code)
+	}
+}
+
+func TestIssueRunsStalenessUsesTheRequestedIssue(t *testing.T) {
+	for _, legacy := range []bool{true, false} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			h, user, ws, crew, lead, agent := newTestIssueHandler(t)
+			id := seedIssue(t, h.db, ws, crew, lead, "ENG-1", "TODO")
+			other := seedIssue(t, h.db, ws, crew, lead, "ENG-2", "TODO")
+			seedMissionAssignment(t, h, ws, id, agent, "old-run", "COMPLETED", "Evidence", "", "")
+			var attribution any = other
+			if legacy {
+				attribution = nil
+			}
+			if _, err := h.db.ExecContext(t.Context(), `UPDATE assignments SET issue_brief_revision=1,mission_id=? WHERE id='old-run'`, attribution); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.db.ExecContext(t.Context(), `UPDATE issue_work SET brief_revision=2 WHERE mission_id=?`, id); err != nil {
+				t.Fatal(err)
+			}
+			rr := httptest.NewRecorder()
+			h.ListRuns(rr, issueRunsRequest(t, user, ws, crew, "ENG-1"))
+			var runs []issueRunDTO
+			if err := json.Unmarshal(rr.Body.Bytes(), &runs); rr.Code != 200 || err != nil || len(runs) != 1 || !runs[0].ResultStale {
+				t.Fatalf("stale result lost: %d %s %v", rr.Code, rr.Body.String(), err)
+			}
+		})
+	}
+}
+
+func TestIssueRunResultRejectsUnreadableRole(t *testing.T) {
+	h, user, ws, crew, _, _ := newTestIssueHandler(t)
+	req := issueRunsRequest(t, user, ws, crew, "ENG-1")
+	req = withWorkspaceUser(req, user, ws, "")
+	rr := httptest.NewRecorder()
+	h.RunResult(rr, req)
+	if rr.Code != 403 {
+		t.Fatalf("unreadable role got %d", rr.Code)
+	}
 }
