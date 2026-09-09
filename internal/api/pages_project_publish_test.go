@@ -220,6 +220,7 @@ func testApplicationDevelopmentOrigin(t *testing.T, h *PageHandler, ws, user str
 		}
 		r := pagesRequest(t, "GET", "/", ws, actor, role, "")
 		r.SetPathValue("slug", "health")
+		r.Host = "127.0.0.1:8080" // Explicit HTTP development requires literal loopback.
 		h.pageRuntimeOrigin = "http://" + r.Host
 		w := httptest.NewRecorder()
 		h.PageApplication(w, r)
