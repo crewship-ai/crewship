@@ -1,5 +1,5 @@
 {
-  "as_of": "2026-09-09T16:06:00Z",
+  "as_of": "2026-09-09T16:17:00Z",
   "issue": 2472,
   "deployment": {
     "pid": "3703258",
@@ -111,5 +111,13 @@
     "checked_sources": 3,
     "failures": [],
     "healthy": true
+  },
+  "live_database": {
+    "migrations": 300,
+    "integrity": "ok"
+  },
+  "distribution_build": {
+    "status": "passed",
+    "url": "https://github.com/crewship-ai/crewship/actions/runs/34375031600"
   }
 }

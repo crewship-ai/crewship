@@ -1,5 +1,9 @@
 # Pages Apps: vlastní kontrola a oponentura oponentury
 
+> Historical scope: this review records the state before the subsequent fixes on
+> the same day. Current implementation and measured results are in
+> [the hardening handoff](pages-apps-hardening-handoff-2026-09-09.md).
+
 Datum: 2026-09-09. Autor: Codex. Zadání: nezávisle analyzovat oponenturu,
 ověřit tvrzení proti implementaci a připravit podklad pro další práci na Pages.
 
