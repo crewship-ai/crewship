@@ -250,3 +250,7 @@ Agent `page_project read` returns `pages_theme` beside the SDK source so the age
 can use the established company palette. Animation belongs in app CSS and must
 respect `prefers-reduced-motion`; Operations Lab demonstrates bounded entrance
 and button feedback without permanent animation or additional API polling.
+
+Runtime origins require HTTPS. HTTP is accepted only for literal loopback IPs
+used in local development; a different browser site is still required unless
+the explicit same-origin development option is enabled.

@@ -28,6 +28,7 @@ harness.stdout.on('data', data => { harnessLog += data })
 harness.stderr.on('data', data => { harnessLog += data })
 const harnessExit = new Promise(resolve => harness.on('exit', code => resolve(code)))
 let browser
+let testFailed = false
 try {
   for (let i = 0; i < 150; i++) {
     try {
@@ -107,6 +108,9 @@ try {
   await page.getByRole('button', { name: 'Stop broken preview' }).click({ timeout: 2000 })
   if (!(await page.getByRole('heading', { name: 'Studio host' }).isVisible())) throw new Error('Host disappeared')
   console.log('PASS: React renders; SDK updates; DOM, storage and fetch denied; Studio removes an infinite-loop frame on a separate site')
+} catch (error) {
+  testFailed = true
+  throw error
 } finally {
   await browser?.close()
   if (runtimeURL) await fetch(new URL('/__stop', runtimeURL)).catch(() => {})
@@ -114,5 +118,8 @@ try {
   const code = await harnessExit
   await new Promise(resolve => server.close(resolve))
   await rm(directory, { recursive: true, force: true })
-  if (code !== 0) throw new Error(`Bootstrap harness failed: ${harnessLog}`)
+  if (code !== 0) {
+    if (testFailed) console.error(`Bootstrap harness also failed: ${harnessLog}`)
+    else throw new Error(`Bootstrap harness failed: ${harnessLog}`)
+  }
 }
