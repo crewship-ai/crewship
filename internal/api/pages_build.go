@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 type pageBuildCoordinator struct {
@@ -27,7 +28,7 @@ func (h *PageHandler) SetBuildWorker(worker pagebuild.Builder, store *pagebuild.
 // A server restart cannot certify the output of an interrupted worker. Its
 // independent container deadline bounds orphan lifetime; a new build is explicit.
 func (h *PageHandler) recoverPageBuilds(ctx context.Context) error {
-	_, err := h.db.ExecContext(ctx, `UPDATE page_project_builds SET state='interrupted',error='Server restarted during build; start a new preview build',completed_at=? WHERE state='running'`, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := h.db.ExecContext(ctx, `UPDATE page_project_builds SET state='interrupted',error='Server restarted during build; start a new preview build',completed_at=? WHERE state='running'`, tsformat.Format(time.Now()))
 	return err
 }
 
@@ -108,7 +109,7 @@ func (h *PageHandler) BuildProject(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 507, "Page build history quota reached")
 		return
 	}
-	job := pageBuildRecord{ID: generateCUID(), SourceRevision: draft.Revision, SourceDigest: draft.Digest, State: "running", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	job := pageBuildRecord{ID: generateCUID(), SourceRevision: draft.Revision, SourceDigest: draft.Digest, State: "running", CreatedAt: tsformat.Format(time.Now())}
 	actorUser, _, actorJSON := projectAuthor(r)
 	if _, err := h.db.ExecContext(r.Context(), `INSERT INTO page_project_builds(id,page_id,source_revision,source_digest,state,requested_by,created_at,actor_json) VALUES(?,?,?,?,?,NULLIF(?,''),?,?)`, job.ID, rec.ID, job.SourceRevision, job.SourceDigest, job.State, actorUser, job.CreatedAt, actorJSON); err != nil {
 		replyInternalError(w, h.logger, "create Page build", err)
@@ -159,7 +160,7 @@ func (h *PageHandler) runPageBuild(c *pageBuildCoordinator, ws, slug, id string,
 	}
 	saveCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stop()
-	if _, saveErr := h.db.ExecContext(saveCtx, `UPDATE page_project_builds SET state=?,artifact_digest=NULLIF(?,''),error=?,completed_at=? WHERE id=? AND state='running'`, state, digest, message, time.Now().UTC().Format(time.RFC3339Nano), id); saveErr != nil {
+	if _, saveErr := h.db.ExecContext(saveCtx, `UPDATE page_project_builds SET state=?,artifact_digest=NULLIF(?,''),error=?,completed_at=? WHERE id=? AND state='running'`, state, digest, message, tsformat.Format(time.Now()), id); saveErr != nil {
 		h.logger.Error("record Page build result", "build_id", id, "error", saveErr)
 		return
 	}

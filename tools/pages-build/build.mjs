@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { StringDecoder } from 'node:string_decoder'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -8,11 +9,14 @@ import { build } from 'vite'
 console.log = (...args) => console.error(...args)
 const root = '/work/project'
 try {
-  let input = ''
+  const decoder = new StringDecoder('utf8')
+  let input = '', size = 0
   for await (const chunk of process.stdin) {
-    input += chunk
-    if (Buffer.byteLength(input) > 4 * 1024 * 1024) throw new Error('Source input exceeds limit')
+    size += chunk.length
+    if (size > 4 * 1024 * 1024) throw new Error('Source input exceeds limit')
+    input += decoder.write(chunk)
   }
+  input += decoder.end()
   const project = JSON.parse(input)
   if (project.format !== 'crewship-page-source/v1' || project.runtime !== 'react-vite-typescript/v1' || !Array.isArray(project.files) || project.files.length > 256) throw new Error('Unsupported source profile')
   await fs.mkdir(root)
@@ -41,7 +45,7 @@ try {
   if (!(await fs.readFile(root + '/pnpm-lock.yaml')).equals(await fs.readFile('/opt/pages/pnpm-lock.yaml'))) throw new Error('Lockfile differs from the installed Pages profile')
   if ([...names].some(name => /(^|\/)(vite|postcss|tailwind)\.config\./.test(name))) throw new Error('Custom build configuration is not supported by this preview profile')
   await fs.symlink('/opt/pages/node_modules', root + '/node_modules')
-  const config = { compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', noEmit: true, strict: true, skipLibCheck: true, allowSyntheticDefaultImports: true, types: ['vite/client', 'react', 'react-dom'], paths: { '@crewship/pages': ['/opt/pages/sdk.ts'] } }, include: [root + '/src/**/*.ts', root + '/src/**/*.tsx'] }
+  const config = { compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', jsx: 'react-jsx', isolatedModules: true, noEmit: true, strict: true, skipLibCheck: true, allowSyntheticDefaultImports: true, types: ['vite/client', 'react', 'react-dom'], paths: { '@crewship/pages': ['/opt/pages/sdk.ts'] } }, include: [root + '/src/**/*.ts', root + '/src/**/*.tsx'] }
   await fs.writeFile(root + '/tsconfig.pages.json', JSON.stringify(config))
   execFileSync('/opt/pages/node_modules/.bin/tsc', ['--project', root + '/tsconfig.pages.json', '--pretty', 'false'], { timeout: 45000, maxBuffer: 64 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
   const result = await build({

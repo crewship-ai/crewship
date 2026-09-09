@@ -53,7 +53,10 @@ func (s *ProjectStore) CheckpointBoundaries(ctx context.Context, ws, page string
 // SetCheckpointBoundaries requires exclusive workspace access (or an isolated
 // restore staging namespace). It never rewrites a commit or SQL receipt.
 func (s *ProjectStore) SetCheckpointBoundaries(ctx context.Context, ws, page string, commits []string) error {
-	if len(commits) == 0 || len(commits) > 4096 {
+	if len(commits) == 0 {
+		return errors.New("checkpoint boundaries require at least one retained commit")
+	}
+	if len(commits) > 4096 {
 		return errors.New("too many checkpoint boundaries")
 	}
 	unique := map[string]bool{}
