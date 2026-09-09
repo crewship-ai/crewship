@@ -1,0 +1,136 @@
+=== RUN   TestMigratePages_TablesAndColumns
+=== PAUSE TestMigratePages_TablesAndColumns
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints
+=== PAUSE TestMigratePages_IndexesAndUniqueConstraints
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows
+=== PAUSE TestMigratePages_ConstraintsRefuseBadRows
+=== RUN   TestMigratePages_DefaultsAreSafe
+=== PAUSE TestMigratePages_DefaultsAreSafe
+=== RUN   TestMigratePages_DeletesFollowTheOwnershipRules
+=== PAUSE TestMigratePages_DeletesFollowTheOwnershipRules
+=== RUN   TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip
+=== PAUSE TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip
+=== RUN   TestMigratePages_ApplyingTwiceIsSafe
+=== PAUSE TestMigratePages_ApplyingTwiceIsSafe
+=== RUN   TestMigratePages_VersionFollowsTheTimestampScheme
+=== PAUSE TestMigratePages_VersionFollowsTheTimestampScheme
+=== CONT  TestMigratePages_TablesAndColumns
+=== CONT  TestMigratePages_DeletesFollowTheOwnershipRules
+=== CONT  TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip
+=== CONT  TestMigratePages_ApplyingTwiceIsSafe
+=== CONT  TestMigratePages_VersionFollowsTheTimestampScheme
+=== CONT  TestMigratePages_ConstraintsRefuseBadRows
+=== CONT  TestMigratePages_DefaultsAreSafe
+=== CONT  TestMigratePages_IndexesAndUniqueConstraints
+--- PASS: TestMigratePages_VersionFollowsTheTimestampScheme (0.00s)
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/page/owner_is_user_xor_crew_—_both_set
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/page/owner_is_user_xor_crew_—_neither_set
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/page/crew-owned_is_legal
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/page/slug_is_unique_per_workspace
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/page/the_same_slug_in_another_workspace_is_a_different_page
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/schema_comes_from_the_closed_set
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/embed.v1_is_reserved_from_the_first_migration
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/sla_must_be_positive
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/span_is_a_grid_span,_1..12
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/producer_kind_comes_from_the_closed_set
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/panel_id_is_unique_within_the_page
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/panel/owner_crew_is_required
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/data/state_is_the_push_outcome,_not_a_freshness_state
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/data/an_ok_push_is_stored
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/data/an_explicit_failure_push_is_stored
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/data/seq_is_unique_per_panel
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/grant/subject_type_is_user|crew|agent
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/grant/level_is_read|produce|write
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/grant/panel_ids_only_narrows_a_produce_grant
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/grant/a_scoped_produce_grant_is_legal
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/grant/only_a_human_issues_one
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/token/expiry_is_required
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/token/publisher_is_required
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/token/a_well-formed_token_is_stored
+=== RUN   TestMigratePages_ConstraintsRefuseBadRows/token/hash_is_unique_across_the_instance
+=== RUN   TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip/a_measured_zero
+=== RUN   TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip/no_basis_to_compute
+--- PASS: TestMigratePages_ConstraintsRefuseBadRows (10.51s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/page/owner_is_user_xor_crew_—_both_set (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/page/owner_is_user_xor_crew_—_neither_set (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/page/crew-owned_is_legal (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/page/slug_is_unique_per_workspace (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/page/the_same_slug_in_another_workspace_is_a_different_page (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/schema_comes_from_the_closed_set (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/embed.v1_is_reserved_from_the_first_migration (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/sla_must_be_positive (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/span_is_a_grid_span,_1..12 (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/producer_kind_comes_from_the_closed_set (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/panel_id_is_unique_within_the_page (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/panel/owner_crew_is_required (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/data/state_is_the_push_outcome,_not_a_freshness_state (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/data/an_ok_push_is_stored (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/data/an_explicit_failure_push_is_stored (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/data/seq_is_unique_per_panel (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/grant/subject_type_is_user|crew|agent (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/grant/level_is_read|produce|write (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/grant/panel_ids_only_narrows_a_produce_grant (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/grant/a_scoped_produce_grant_is_legal (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/grant/only_a_human_issues_one (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/token/expiry_is_required (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/token/publisher_is_required (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/token/a_well-formed_token_is_stored (0.00s)
+    --- PASS: TestMigratePages_ConstraintsRefuseBadRows/token/hash_is_unique_across_the_instance (0.00s)
+--- PASS: TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip (10.51s)
+    --- PASS: TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip/a_measured_zero (0.00s)
+    --- PASS: TestMigratePages_ZeroAndNoDataSurviveTheRoundTrip/no_basis_to_compute (0.00s)
+--- PASS: TestMigratePages_DefaultsAreSafe (10.55s)
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/unique/pages/workspace_id+slug
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/unique/page_panels/page_id+panel_id
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/unique/page_public_tokens/token_hash
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_owner_user
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_owner_crew
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_created_by_agent
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panels_owner_crew
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panel_data_produced_at
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panel_data_run
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_versions_author_user
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_versions_author_agent
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_grants_subject
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_grants_granted_by
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_public_tokens_page
+=== RUN   TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_public_tokens_created_by
+--- PASS: TestMigratePages_IndexesAndUniqueConstraints (10.56s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/unique/pages/workspace_id+slug (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/unique/page_panels/page_id+panel_id (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/unique/page_public_tokens/token_hash (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_owner_user (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_owner_crew (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_pages_created_by_agent (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panels_owner_crew (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panel_data_produced_at (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_panel_data_run (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_versions_author_user (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_versions_author_agent (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_grants_subject (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_grants_granted_by (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_public_tokens_page (0.00s)
+    --- PASS: TestMigratePages_IndexesAndUniqueConstraints/index/idx_page_public_tokens_created_by (0.00s)
+--- PASS: TestMigratePages_ApplyingTwiceIsSafe (10.57s)
+=== RUN   TestMigratePages_DeletesFollowTheOwnershipRules/a_page_owner_cannot_be_deleted_out_from_under_the_page
+=== RUN   TestMigratePages_DeletesFollowTheOwnershipRules/a_grant_dies_with_the_human_who_issued_it
+=== RUN   TestMigratePages_DeletesFollowTheOwnershipRules/deleting_the_page_takes_panels,_payloads_and_versions_with_it
+--- PASS: TestMigratePages_DeletesFollowTheOwnershipRules (10.58s)
+    --- PASS: TestMigratePages_DeletesFollowTheOwnershipRules/a_page_owner_cannot_be_deleted_out_from_under_the_page (0.00s)
+    --- PASS: TestMigratePages_DeletesFollowTheOwnershipRules/a_grant_dies_with_the_human_who_issued_it (0.00s)
+    --- PASS: TestMigratePages_DeletesFollowTheOwnershipRules/deleting_the_page_takes_panels,_payloads_and_versions_with_it (0.00s)
+=== RUN   TestMigratePages_TablesAndColumns/pages
+=== RUN   TestMigratePages_TablesAndColumns/page_panels
+=== RUN   TestMigratePages_TablesAndColumns/page_panel_data
+=== RUN   TestMigratePages_TablesAndColumns/page_versions
+=== RUN   TestMigratePages_TablesAndColumns/page_grants
+=== RUN   TestMigratePages_TablesAndColumns/page_public_tokens
+--- PASS: TestMigratePages_TablesAndColumns (10.59s)
+    --- PASS: TestMigratePages_TablesAndColumns/pages (0.00s)
+    --- PASS: TestMigratePages_TablesAndColumns/page_panels (0.00s)
+    --- PASS: TestMigratePages_TablesAndColumns/page_panel_data (0.00s)
+    --- PASS: TestMigratePages_TablesAndColumns/page_versions (0.00s)
+    --- PASS: TestMigratePages_TablesAndColumns/page_grants (0.00s)
+    --- PASS: TestMigratePages_TablesAndColumns/page_public_tokens (0.00s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/database	10.601s

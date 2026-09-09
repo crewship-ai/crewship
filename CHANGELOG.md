@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Documentation
+- Document experimental Pages application installation, recovery, browser support and the verified limits of the initial release.
+
 ### Changed
 - Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
 - Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.

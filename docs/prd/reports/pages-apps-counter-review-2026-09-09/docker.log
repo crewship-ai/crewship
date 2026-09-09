@@ -1,0 +1,233 @@
+=== RUN   TestDockerPreviewBuildIntegration
+=== RUN   TestDockerPreviewBuildIntegration/typecheck
+=== RUN   TestDockerPreviewBuildIntegration/lockfile
+--- PASS: TestDockerPreviewBuildIntegration (13.26s)
+    --- PASS: TestDockerPreviewBuildIntegration/typecheck (3.77s)
+    --- PASS: TestDockerPreviewBuildIntegration/lockfile (2.80s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/pagebuild	13.270s
+=== RUN   TestPageBuildDockerRoundTrip
+--- PASS: TestPageBuildDockerRoundTrip (9.23s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/api	9.314s
+=== RUN   TestSeedPageAppLifecycle
+=== RUN   TestSeedPageAppLifecycle/disabled-worker
+2026/09/09 13:32:15 INFO port expose registry loaded active=0 stale_expired=0 unresolvable_expired=0
+2026/09/09 13:32:15 WARN run verdict: run_summary provider build failed; outcome verdicts disabled error="ANTHROPIC_API_KEY env not set (required for anthropic aux slot \"claude-haiku-4-5\")"
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:15 ERROR internal token is empty -- all internal API calls will be rejected
+  = app custom-operations: custom source preserved
+=== RUN   TestSeedPageAppLifecycle/publish
+2026/09/09 13:32:16 INFO port expose registry loaded active=0 stale_expired=0 unresolvable_expired=0
+2026/09/09 13:32:16 WARN run verdict: run_summary provider build failed; outcome verdicts disabled error="ANTHROPIC_API_KEY env not set (required for anthropic aux slot \"claude-haiku-4-5\")"
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:16 ERROR internal token is empty -- all internal API calls will be rejected
+  + app custom-operations: built, checked and published
+  = app custom-operations: publication history retained
+  = app custom-operations: publication history retained
+  = app custom-operations: publication history retained
+  = app custom-operations: publication history retained
+=== RUN   TestSeedPageAppLifecycle/custom-page
+2026/09/09 13:32:22 INFO port expose registry loaded active=0 stale_expired=0 unresolvable_expired=0
+2026/09/09 13:32:22 WARN run verdict: run_summary provider build failed; outcome verdicts disabled error="ANTHROPIC_API_KEY env not set (required for anthropic aux slot \"claude-haiku-4-5\")"
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+2026/09/09 13:32:22 ERROR internal token is empty -- all internal API calls will be rejected
+  = app custom-operations: existing Page definition preserved
+--- PASS: TestSeedPageAppLifecycle (10.39s)
+    --- PASS: TestSeedPageAppLifecycle/disabled-worker (4.64s)
+    --- PASS: TestSeedPageAppLifecycle/publish (5.49s)
+    --- PASS: TestSeedPageAppLifecycle/custom-page (0.26s)
+PASS
+ok  	github.com/crewship-ai/crewship/cmd/crewship	10.447s

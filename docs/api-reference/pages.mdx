@@ -1073,3 +1073,219 @@ bounds.
 - [Pages guide](/guides/pages) — what a page is, the freshness contract, tabs, actions, wake gates and the permission model
 - [Page commands](/cli/page) — the CLI, including the producer form
 - [Internal IPC](/api-reference/internal) — the routine and container write path
+
+## Custom application contract
+
+Custom Pages store a portable React/TypeScript source project separately from
+live panel data. Draft edits and builds do not publish. Source operations below
+require session/CLI authentication, workspace context and Page edit permission;
+publication additionally requires Page ownership or workspace administration.
+Application reads/actions enforce the current viewer's Page/panel reach.
+Errors use JSON `{"error":"…"}`. Common statuses are `401` without authentication,
+`403` without authority, `404` for an unavailable Page/resource, `500` for an
+internal storage error, and `503` when required project/build/runtime services
+are not configured. These endpoints are opt-in and experimental.
+
+The supported source format is `crewship-page-source/v1` with runtime
+`react-vite-typescript/v1`. `files` contains `{path, encoding, content}` entries;
+encoding is `utf8` or canonical `base64`. Required files are `package.json`,
+`pnpm-lock.yaml` and `index.html`. Limits: 256 files, 512 KiB decoded per file,
+2 MiB decoded source, 4 MiB serialized transfer. Traversal, reserved paths,
+case collisions and symlinks are rejected. The pinned compiler profile fixes
+supported dependencies; project-defined install/build scripts are not executed.
+
+### Read custom source
+
+`GET /api/v1/pages/{slug}/project`
+
+**Request:** path `slug`, workspace context; no body.
+**Response 200:** `{revision, digest, git_commit, definition, project}`. The
+project contains exact file bytes; the definition is the authored Page document.
+This is an editor-only response, never the reader's application payload.
+**Statuses:** `404` if no draft exists, plus the common authentication/storage
+errors above. The response is `no-store`.
+
+### Save custom source
+
+`PUT /api/v1/pages/{slug}/project`
+
+**Request:** `{expected_revision, project, definition?}`. Revision `0` creates
+an initial draft. An optional complete `definition` replaces the draft Page
+spec; omitting it preserves the previous spec (or copies the existing Page on
+initialization). Public-panel flags cannot be enabled in a portable draft.
+**Response 200:** `{revision, digest, git_commit, state:"draft"}` after a Git
+checkpoint and atomic revision update. Live publications are unchanged.
+**Statuses:** `400` malformed request, `409` revision conflict, `413` oversized
+transfer, `422` invalid source/definition/references, `507` exhausted quota,
+plus common errors. Authentication requires Page edit permission.
+
+### Build custom source
+
+`POST /api/v1/pages/{slug}/project/build`
+
+**Request:** `{expected_revision}`; authenticated Page editor.
+**Response 202:** build record `{id, source_revision, source_digest, state,
+created_at}`. Completion adds `artifact_digest` or `error` and `completed_at`.
+States are `running`, `ready`, `failed`, `interrupted`. One offline compiler
+runs per server; this response is admission, not completed compilation.
+**Statuses:** `400` malformed revision, `409` draft changed, `413` oversized
+request, `429` compiler busy, `507` build-record quota, plus common errors.
+
+### Read build preview
+
+`GET /api/v1/pages/{slug}/project/preview`
+
+**Request:** path `slug`; authenticated Page editor, no body.
+**Response 200:** `{revision, build, runtime_url, artifact?}`. `build` is null
+before the first build. A ready build includes the immutable artifact
+`{format:"crewship-page-preview/v1", javascript, css, toolchain}`. This response
+is `no-store`; execute only through the configured separate-site bootstrap.
+**Statuses:** `404` missing draft, common errors including `503` if the worker
+or required runtime isolation configuration is unavailable. Preview does not
+permit SDK actions against the published application.
+
+### List source history
+
+`GET /api/v1/pages/{slug}/project/history`
+
+**Request:** authenticated Page editor; optional positive `before` revision.
+**Response 200:** `{revisions, next_before}` with at most 50 entries. Each entry
+contains `revision`, `digest`, `git_commit`, `actor`, `created_at`, `restorable`.
+An agent-authored entry uses the agent ID as `actor`; it is not a user ID.
+`next_before: 0` means no further page. Metadata is `no-store`.
+**Statuses:** `400` invalid cursor, plus common errors.
+
+### Read historical source
+
+`GET /api/v1/pages/{slug}/project/history/{revision}`
+
+**Request:** authenticated Page editor; positive path `revision`.
+**Response 200:** the same shape as the current source response, verified
+against its Git checkpoint and saved Page definition.
+**Statuses:** `400` invalid revision, `404` missing revision, `409` legacy
+revision without a saved definition, plus common errors.
+
+### Restore source draft
+
+`POST /api/v1/pages/{slug}/project/restore`
+
+**Request:** authenticated Page editor; `{revision, expected_revision}` names
+the historical source and the current draft revision respectively.
+**Response 200:** `{revision, digest, git_commit, state:"draft"}` for a new
+checkpoint. Restore does not move the live application or erase later history.
+**Statuses:** `400` malformed body, `409` stale revision or unrestorable
+history, `413` oversized body, `422` invalid current references, `507` quota,
+plus common errors.
+
+### Check a publication candidate
+
+`POST /api/v1/pages/{slug}/project/check`
+
+**Request:** authenticated Page editor; `{build_id, expected_revision}`.
+**Response 200:** `{build_id, source_revision, git_commit, artifact_digest,
+checks}` after source/artifact integrity and current reference checks.
+`browser_review` and `security_review` remain `required`; this is not an
+automatic safety certification and does not publish or invoke actions.
+**Statuses:** `400` malformed body, `409` incompatible source/build or failed
+integrity checks, `413` oversized body, `422` invalid current bindings, plus
+common errors.
+
+### Publish or roll back an application
+
+`POST /api/v1/pages/{slug}/project/publish`
+
+**Authentication:** Page owner or workspace administrator; edit grant alone
+is insufficient. **Request:** `{build_id, expected_revision,
+expected_publication, reviewed_code:true}`. Use publication `0` for the first
+publication. For rollback, send `{rollback_version, expected_publication,
+reviewed_code:true}` and omit `build_id` and `expected_revision`.
+**Response 200:** immutable receipt `{version, build_id, source_revision,
+source_digest, git_commit, artifact_digest, created_at}`. The live pointer and
+Page declaration change atomically. An exact retry returns its original
+receipt without rewinding a newer live publication. Rollback creates a new
+publication from the old artifact and declaration; it preserves the draft and
+does not undo completed routine effects.
+**Statuses:** `400` invalid or conflicting fields/missing review confirmation,
+`409` changed draft, publication or declaration, `413` oversized body,
+`422` invalid bindings, `507` publication quota, plus common errors.
+
+### Read the live application
+
+`GET /api/v1/pages/{slug}/application`
+
+**Authentication:** current Page reach. **Request:** path `slug`; optional
+`If-None-Match` header containing the previously returned `ETag`.
+**Response 200:** `{publication, can_publish, artifact?, runtime_url?}`. An
+unpublished Page returns `publication:null`. A published response includes the
+immutable receipt and compiled artifact, never the source project. **304** is
+returned for an unchanged ETag only after current authorization is checked;
+no artifact bytes are read or retransmitted. The tag includes publication,
+runtime and publishing authority. Responses are `no-store`; Studio explicitly
+keeps the active artifact in memory and sends its ETag for revalidation.
+**Statuses:** common errors; `404` also conceals a Page outside viewer reach.
+Reading published artifacts works with the compiler disabled.
+
+### Dispatch a published action
+
+`POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}`
+
+**Authentication:** existing action-dispatch role, current Page/panel access
+and routine policy. **Request:** `Idempotency-Key` header (1–128 bytes), JSON
+`{publication, inputs}` at most 32 KiB. Only a stored `call` action is accepted;
+there is no shell, arbitrary URL or routine-name parameter. The Studio SDK
+broker obtains confirmation in the trusted host before sending this request.
+**Response 202:** existing action queue receipt including `pending_id`; this
+does not mean the routine completed. Keys/debounce are scoped by viewer and
+publication. Publication/declaration checks and enqueue share a transaction.
+**Statuses:** `400` missing key or invalid inputs, `404` inaccessible action,
+`409` publication/declaration changed, `413` body too large, `429` rate limit,
+plus common errors. Refresh and review the new declaration after `409`.
+
+### Read own application action status
+
+`GET /api/v1/pages/{slug}/application/actions/{pendingId}`
+
+**Authentication:** only the user who dispatched this pending action, with
+current access to the originating panel. **Request:** Page `slug` and the
+returned `pendingId`; no body.
+**Response 200:** `{pending_id, pending_status, run_id, run_status}`. Run fields
+can be empty before execution. A disconnect or client timeout is not cancellation.
+**Statuses:** `401` unauthenticated, `403` forbidden, `404` unavailable Page,
+panel or another viewer's pending action, `500` storage failure.
+
+### Bootstrap the isolated runtime
+
+`GET /api/v1/pages/runtime/bootstrap`
+
+**Authentication:** none. **Request:** no body; serve on the configured origin
+on a different site from Studio. **Response 200:** fixed `text/html` bootstrap
+with sandbox/CSP protections. It contains no user data, code artifacts, source
+or credentials; the authorized Studio host initializes a private MessagePort.
+**Status 404:** runtime origin is not configured. This is the only route that
+needs exposure on the runtime reverse-proxy alias. A separate site does not
+provide a portable hard browser CPU/memory limit or complete anti-exfiltration
+protection; custom source still requires review.
+
+### Publication history and withdrawal
+
+`GET /api/v1/pages/{slug}/project/publications` requires Page edit access and
+returns at most 50 receipts, `next_before`, `publication_version`, `published`
+and `can_publish`. Use `?before=<version>` to paginate. Each receipt identifies
+its exact source revision/build, original publisher, rollback target and any
+withdrawal time. Source inspection uses the existing project-history endpoint.
+
+`POST /api/v1/pages/{slug}/project/unpublish` requires Page ownership or workspace
+administration and a body `{"expected_publication":3}`. A stale version returns
+409. Withdrawal hides the application, preserves panels and history, and keeps
+the version counter for future publication. Repeating the same withdrawal is
+idempotent; an old successful publish retry cannot reactivate withdrawn code.
+
+### Application panel history
+
+`GET /api/v1/pages/{slug}/application/panels/{panelId}/history` requires readable
+panel access and `publication=<mounted-version>`. Optional `limit` is 1–20;
+`before` is a positive sequence cursor. The response contains `items` (sequence,
+data, producedAt, state), `next_before` (0 at the end), and `publication`.
+Responses are bounded to 1 MiB and never contain producer/run metadata. A stale,
+withdrawn or definition-mismatched publication returns 409; an inaccessible panel
+returns 404. The SDK exposes this as `getPanelHistory(panelId, {limit, before})`.

@@ -1,0 +1,338 @@
+{
+  "created_at_utc": "2026-09-09T12:58:09.095617+00:00",
+  "scope": "Author self-audit; file identity is not proof of correctness. Logs were read, not rerun by this audit. No log bodies or credentials are included.",
+  "worktree": "/srv/crewship/crewship_3/.claude/worktrees/pages-apps-project",
+  "branch": "feat/pages-apps-project",
+  "base_commit": "676e16e45897bf6767f47156a894fb01bfb56162",
+  "implementation_uncommitted": true,
+  "source_files": [
+    {
+      "path": "docs/prd/pages-apps-v1.md",
+      "bytes": 50997,
+      "sha256": "3fc919cc0fc77b12e60b2f87682b09dab6f70abb983f3244deb9f336eb861e75"
+    },
+    {
+      "path": "docs/prd/pages-apps-handoff.md",
+      "bytes": 41342,
+      "sha256": "bdcf53fe1b4c3a6629b8a5993ba9880ced96e8379d642c0021d63bb653432627"
+    },
+    {
+      "path": "docs/prd/pages-apps-review-audit-2026-09-09.md",
+      "bytes": 44817,
+      "sha256": "379359238bdf9e6d6adf919c8f10640fdc79df3ed2593bbee5f5c64b912ed4b6"
+    },
+    {
+      "path": "internal/pages/project.go",
+      "bytes": 8200,
+      "sha256": "c5f7115cf8ced97707255746d79ad36707f2c85f62581e2c880f285c25dbade1"
+    },
+    {
+      "path": "internal/pages/project_store.go",
+      "bytes": 3967,
+      "sha256": "a970d2c64cffd2ed4d4a75e246213149e425b5fd8035c65bf4c63a41a6b60e12"
+    },
+    {
+      "path": "internal/pages/project_git.go",
+      "bytes": 7699,
+      "sha256": "65673decef623ba7b774de59b4d4060bb3e386b4a50970348a5851ad5d2bee62"
+    },
+    {
+      "path": "internal/pages/project_archive.go",
+      "bytes": 8758,
+      "sha256": "59c6f95ed6a943099d6764451cbe7083144579e020e3261b5a79eaa302f6e321"
+    },
+    {
+      "path": "internal/pages/project_lease.go",
+      "bytes": 1104,
+      "sha256": "0c9ba76fda4eb4359586abfd2a3163809c9a23a2c4d7fe5b85a9428b73adf89b"
+    },
+    {
+      "path": "internal/pages/project_retention.go",
+      "bytes": 3415,
+      "sha256": "b89a9d0f920f1fb8e26891dfaf72233ebbb8476eee7d35693afc2164d155fed1"
+    },
+    {
+      "path": "internal/pages/transfer.go",
+      "bytes": 2798,
+      "sha256": "19f8f2f96a94ca892435e2e2b35672faa51aea86b547e232e9e5d2386f1118fe"
+    },
+    {
+      "path": "internal/pages/transfer_parse.go",
+      "bytes": 1860,
+      "sha256": "3f5b3a21d9ae7b0c37341630f6fe8b3178f2fb4af1df5b9928ac3541072531d5"
+    },
+    {
+      "path": "internal/pagebuild/build.go",
+      "bytes": 1466,
+      "sha256": "969096a6792755c024d07c9709a58ca1eb902cf8153196b6cbb1aae5191afa42"
+    },
+    {
+      "path": "internal/pagebuild/docker.go",
+      "bytes": 3629,
+      "sha256": "075659722e768fe50d3e5ee7d25e25c54bece79ca8fafde37dc24205b2dcd3af"
+    },
+    {
+      "path": "internal/pagebuild/runtime.go",
+      "bytes": 3510,
+      "sha256": "f0056c8ed91c6f620509a6a4943bb484c922ddd4376919cdd329f19f262ec477"
+    },
+    {
+      "path": "internal/pagebuild/bootstrap.js",
+      "bytes": 1538,
+      "sha256": "0bb9d02fa724a7b80b107f0198dda61bd42ace66ef39a041554707e3be7d9ed7"
+    },
+    {
+      "path": "internal/pagebuild/store.go",
+      "bytes": 3195,
+      "sha256": "a80aff2b9a9c8427a4206bd5650637373881d5a35515c40d923a77b23a0e4b72"
+    },
+    {
+      "path": "internal/api/pages_project.go",
+      "bytes": 9336,
+      "sha256": "afb25ce4ad5a58b71e3d81ccfb2623fe9a22d82a8e8b102d116a5795a3b27a4b"
+    },
+    {
+      "path": "internal/api/pages_project_internal.go",
+      "bytes": 8866,
+      "sha256": "58fc92fac078fee642f9b96e3c63cd6ab48d5f45a56ff14d85fc11550de9ef67"
+    },
+    {
+      "path": "internal/api/pages_project_publish.go",
+      "bytes": 16698,
+      "sha256": "49fdf206cce7bcec73428cd5b977047cc77ce618854673ff3e307ec74125923d"
+    },
+    {
+      "path": "internal/api/pages_project_retention.go",
+      "bytes": 4866,
+      "sha256": "a9ee1bd0e17dac3aebc2f2cbc83447a19dc41dea78242aa2e8cbd26cb2b1f2f6"
+    },
+    {
+      "path": "internal/api/pages_application_actions.go",
+      "bytes": 6893,
+      "sha256": "fd073af00b563f73660deecf62b0944a05632dd467e1d98cdaf90d10269dac4d"
+    },
+    {
+      "path": "internal/api/pages_application_history.go",
+      "bytes": 3917,
+      "sha256": "0f9d37f41a5f7311735f4f1cf3413ede614324598d099d7a775cda1bf675eaea"
+    },
+    {
+      "path": "internal/api/pages_grants.go",
+      "bytes": 26947,
+      "sha256": "6708f2ea77e5b973431126cd9d9ad7f8aa489149a5d5006f3f2e38fc5edd0139"
+    },
+    {
+      "path": "internal/api/workspace_pages_theme.go",
+      "bytes": 931,
+      "sha256": "7e84409911c6c2a024cfecfc8e7a31bd49a31c9d09a86cc433321472b4d11edd"
+    },
+    {
+      "path": "internal/sidecar/pages_project.go",
+      "bytes": 2944,
+      "sha256": "dc51b256f31f34c6bfbde30b25f54f665291297b61761065466548f620b15330"
+    },
+    {
+      "path": "internal/backup/pageprojects.go",
+      "bytes": 11814,
+      "sha256": "f35ef5b6e510ece1a4b7c196b91520a8d64f5cda546bb52b82eb46f2556a51e1"
+    },
+    {
+      "path": "internal/backup/runner_create.go",
+      "bytes": 22726,
+      "sha256": "023e5766d12cf5ba58073b0f7266fcaf50e9aa8118866867ec3882a8b7761d46"
+    },
+    {
+      "path": "internal/backup/runner_restore.go",
+      "bytes": 63230,
+      "sha256": "7e71e06bab18b00c5f24ce98346848fd6d809c6b0534a6899308c7801ea5fa3c"
+    },
+    {
+      "path": "tools/pages-build/build.mjs",
+      "bytes": 4998,
+      "sha256": "8fd3c20d78012bb34d24261eba32a874caa3031c9bd908e258224bf9cacf839a"
+    },
+    {
+      "path": "tools/pages-build/sdk.ts",
+      "bytes": 4916,
+      "sha256": "1d6cfe6b07ab1fa7865405162230140c7e5f373c9ea3d3b6af896a54e172b51a"
+    },
+    {
+      "path": "tools/pages-build/package.json",
+      "bytes": 295,
+      "sha256": "b86b1aad4d7933e4cf0ae5787bf94b0c7f2f62cafd835a28fc91bde9d941d8ae"
+    },
+    {
+      "path": "tools/pages-build/pnpm-lock.yaml",
+      "bytes": 22723,
+      "sha256": "c40f8630f865db6ed5f51269d18f126d82b86d9ccd9c0ae1ef8d5c882cae6ee9"
+    },
+    {
+      "path": "tools/pages-build/README.md",
+      "bytes": 14529,
+      "sha256": "3c6658d6b9e643ffd80f261c070f14ba6bf69a8ad156020510a70cf78cf657cc"
+    },
+    {
+      "path": "hooks/use-page-application.ts",
+      "bytes": 3367,
+      "sha256": "3f00da064c7b520c628a4a195bd7bacbae08e31ae11cda5beda824b61deb0051"
+    },
+    {
+      "path": "hooks/use-workspace.ts",
+      "bytes": 6301,
+      "sha256": "a82b673ca80e3e712f33e5f540f7ebe8dce8b23ad800c4bf9e941007b0aded42"
+    },
+    {
+      "path": "lib/pages/preview-runtime.ts",
+      "bytes": 5358,
+      "sha256": "7afd186075f453f8fefcd948f8cf7e32fc7128cc229ed1f06040525a72686fdf"
+    },
+    {
+      "path": "components/features/pages/page-preview.tsx",
+      "bytes": 9309,
+      "sha256": "92a051af37e5a0de16f675a2ee005d678aa6de2cd495b8b2fd86fab45c66b27e"
+    },
+    {
+      "path": "components/features/pages/page-application.tsx",
+      "bytes": 2625,
+      "sha256": "b32945e21dc069bd876ee578e5a498619016b6f63243e71bc981aa6429a617cc"
+    },
+    {
+      "path": "components/features/pages/use-application-actions.tsx",
+      "bytes": 5510,
+      "sha256": "a4b72f2d3bccc0a64d8eeaf185eb07004442cbdddf1946e3fbd9468cbcec1d90"
+    },
+    {
+      "path": "components/features/pages/pages-layout.tsx",
+      "bytes": 16827,
+      "sha256": "b40415cd6ddb26cec11ba64211b0c4c585acf96d0a3e4ed16c3e0ffda448a0f8"
+    },
+    {
+      "path": "components/layout/sub-bar.tsx",
+      "bytes": 8955,
+      "sha256": "1416a22e3d44a1171411b05d7eeee3eda22d23649b16732c23446fcc506201d5"
+    },
+    {
+      "path": "examples/pages-apps/custom-operations.page.yaml",
+      "bytes": 43583,
+      "sha256": "daa31df0d35a93f8d4d89d16ab3fb54d676d229e3b03de9d5f90e5cc05bf0e22"
+    },
+    {
+      "path": "examples/pages-apps/custom-operations.routine.yaml",
+      "bytes": 779,
+      "sha256": "0c4a22daad5bd150ce97afd1b0600adcb677c4be0b5f45dfe7aa1747748de9cd"
+    },
+    {
+      "path": "examples/pages-apps/scripts/collect_container.mjs",
+      "bytes": 2238,
+      "sha256": "f29197807aabecd998fc0b952088d511a738653642e4b82164690e7e3dcb6301"
+    },
+    {
+      "path": "cmd/crewship/cmd_seed_page_app.go",
+      "bytes": 5276,
+      "sha256": "d7ca4f9dc328cb4d4e94df637c5ac20101f4ea78dc48c7e0a083c65677968958"
+    },
+    {
+      "path": "e2e/pages-loading-smoke.mjs",
+      "bytes": 5182,
+      "sha256": "df04ec726ac018471f4bdc2916ca873444c673bdfd9dd75b96437195614841fd"
+    },
+    {
+      "path": "e2e/pages-appearance-smoke.mjs",
+      "bytes": 5083,
+      "sha256": "68f451e79b0f226b64d713da8f49f7d72a6de8c9ccca06689c2b1f330bde3050"
+    }
+  ],
+  "local_test_logs": [
+    {
+      "path": "/tmp/pages-loading-all-go.log",
+      "bytes": 9708,
+      "sha256": "0fea0619692fd0b792c89026367c7270f17c80caab9ed4d25cab5350f934e605"
+    },
+    {
+      "path": "/tmp/pages-loading-all-frontend.log",
+      "bytes": 29308,
+      "sha256": "27f09ece898e443772fe5b26b36b57aca32873c87e35f20f1e666f9372d5c863"
+    },
+    {
+      "path": "/tmp/pages-loading-responsive-tests.log",
+      "bytes": 14105,
+      "sha256": "1d4995d7a8e7ec581b54113448b7defcf37fc4d0b3ee4656a3c8713acc8c2509"
+    },
+    {
+      "path": "/tmp/pages-loading-vet.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/tmp/pages-loading-final-build.log",
+      "bytes": 3372,
+      "sha256": "f9384d2369a5e560f8364be417c9f6f883397c5d8b8899bf2bba0de0e3a9ffbe"
+    },
+    {
+      "path": "/tmp/pages-loading-final-lint.log",
+      "bytes": 5661,
+      "sha256": "b9e0f763db3c22fce1acdfa1e6243cf265089af7a6e1d135aff59fe1b29c3741"
+    },
+    {
+      "path": "/tmp/pages-loading-final-browser.log",
+      "bytes": 244,
+      "sha256": "c6e34dc957de70916e11ab71d2049830a6432e561bad8715459f792b0fb62864"
+    },
+    {
+      "path": "/tmp/pages-loading-live-action.log",
+      "bytes": 815,
+      "sha256": "abb36dee89fce9791cfaf5e14d2525c22a5379fda110907ae39fc8a753db7e1f"
+    },
+    {
+      "path": "/tmp/pages-theme-live-browser.log",
+      "bytes": 173,
+      "sha256": "6b3ebb5fd811e946bacfbd98c8ce1096e04a8dfa41b7263ed536824802136b26"
+    },
+    {
+      "path": "/tmp/pages-theme-seed-docker.log",
+      "bytes": 20147,
+      "sha256": "fc646479b7da7016b21eb74173d2b5cbb3b3d6b619a3f773aa87741aa9e51ecc"
+    },
+    {
+      "path": "/tmp/pages-loading-docs.log",
+      "bytes": 248,
+      "sha256": "4b91c593a4f0a5d89d530d5233935a5fc5c181d80fa5dbaa4df710c1095e230c"
+    }
+  ],
+  "deployment": {
+    "url": "https://crewship-dev3.unifylab.cz/pages/custom-operations",
+    "publication": 3,
+    "binary": {
+      "path": "/srv/crewship/dev3-pages-release/crewship",
+      "bytes": 147168845,
+      "sha256": "f82b350d6c229892e25b8df7e66c1c745abc4826b226ff2d0b0e1aa7db531fe7"
+    },
+    "source_digest": "4ad8095167662e7f55be7762114e9e2706949ce0360200d905bf6d928697ea16",
+    "artifact_digest": "c10d979889a7dbcd86caee7361124c0b4202aaa1d6abdfdf1da7d8668298c38e",
+    "build_image": "sha256:cca058230111eea5d07fa69c7537647ee46ea1b5b841233e3ff632e65b0dafb2"
+  },
+  "observations": {
+    "entire_service_memory_current_bytes": 147214336,
+    "entire_service_memory_not_incremental_pages_cost": true,
+    "pages_directory_disk_usage_kib": 1096,
+    "build_image_docker_size_bytes": 123250463,
+    "live_artifact_javascript_plus_css_bytes": 207467,
+    "live_artifact_json_bytes": 223147
+  },
+  "test_summary": {
+    "go_tested_packages": 139,
+    "go_no_test_packages": 11,
+    "frontend_test_files": 670,
+    "frontend_tests": 8192,
+    "lint_errors": 0,
+    "lint_warnings": 32,
+    "normal_live_browsers": [
+      "Chromium",
+      "WebKit"
+    ],
+    "pathological_stop_loop_not_closed": [
+      "Firefox",
+      "WebKit"
+    ]
+  }
+}
