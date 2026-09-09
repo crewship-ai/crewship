@@ -20,6 +20,7 @@ events = [json.loads(line) for line in open(sys.argv[1])]
 required = {
     "TestDockerPreviewBuildIntegration",
     "TestDockerPreviewBuildIntegration/typecheck",
+    "TestDockerPreviewBuildIntegration/utf8-chunks",
     "TestDockerPreviewBuildIntegration/lockfile",
 }
 passed = {event.get("Test") for event in events if event["Action"] == "pass"}
