@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { RoutineFixtureImport } from "../routine-fixture-import"
@@ -81,6 +83,10 @@ describe("fixture import", () => {
       />,
     )
     load()
+    const requestedPath = h.fetch.mock.calls[0][0] as string
+    const route = requestedPath.replace("/workspaces/ws/", "/workspaces/{workspaceId}/").replace(/\/r$/, "/{runId}")
+    const spec = JSON.parse(readFileSync(resolve(process.cwd(), "internal/api/openapi.gen.json"), "utf8"))
+    expect(spec.paths[route]?.get, `GET ${requestedPath} must exist in the server contract`).toBeDefined()
     await screen.findByText(/Source run r/)
     fireEvent.change(screen.getByLabelText("Step to test"), { target: { value: "send" } })
     expect(screen.getByRole("button", { name: "Test with fixtures" })).toBeDisabled()

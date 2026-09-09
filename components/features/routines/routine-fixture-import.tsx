@@ -39,7 +39,7 @@ export function RoutineFixtureImport({
     const id = runId.trim()
     try {
       const response = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/${encodeURIComponent(id)}`,
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipeline-runs/${encodeURIComponent(id)}`,
       )
       if (!response.ok) throw new Error(`Could not read captured run (${response.status}).`)
       const raw: unknown = await response.json()
