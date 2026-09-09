@@ -1829,3 +1829,33 @@ The list lives in `internal/api/workspaces.go` and must stay in sync with `lib/l
 - [Routines guide](/guides/routines) -- authoring DSL pipelines end-to-end
 - [Routines cookbook](/guides/routines-cookbook) -- copy-paste pipeline examples
 - [Credentials guide](/guides/credentials) -- required for the `/skills/generate` endpoint
+
+### Test a routine step with sample data
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Request body:** `definition` (object) and `step_id` (string) are required.
+`inputs` is an optional object of recipe input values; `step_outputs` maps
+upstream step IDs to output strings. `fixture_output` supplies a replacement
+output for an agent, HTTP or script step. An empty string is an explicit sample.
+
+Transforms compute with the production transform implementation using the
+supplied inputs and step outputs. External steps only check the supplied output;
+the endpoint never calls agents, services or scripts. Only top-level steps are
+supported. Dependencies, conditions, retries and outcome graders are not run;
+external schema references are blocked. References to runtime context or secrets
+are unavailable and cannot silently become empty values.
+
+**Response:** `200 OK`, `RoutineFixtureResult`: `execution_mode`, `step_id`,
+`step_type`, `definition_hash`, `fixture_hash`, `output_source`, `output`, `valid`,
+`validation_declared`, optional `validation_reason`, and `limitations`.
+`valid: false` reports a failed output check; no declared check is distinguished
+by `validation_declared: false`. These results are not publication proofs.
+
+`400` means invalid definition, unsupported step type, missing sample values or
+malformed input; `403` means insufficient role. A failed output check returns
+`200` with `valid: false` so clients can display its evidence.
