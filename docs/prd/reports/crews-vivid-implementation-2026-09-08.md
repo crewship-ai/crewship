@@ -81,3 +81,11 @@ Validation: seven focused memory tests passed, including rendered peer Markdown 
 Earlier broad Go regression completed: all internal packages passed, including API (686s) and database (699s). The sole failure was cmd/crewship compilation racing the new web export (embedded asset filenames replaced during build); a CLI + web rerun was started after deployment completed, log `/tmp/memory-about-go-retry.log`.
 
 Post-deploy retry completed successfully: `go test ./cmd/crewship ./web -count=1 -timeout 10m` passed. Together with the completed internal suite and prior scripts/tools tests, every tested Go package has a passing result; the original combined invocation remains recorded as failed due to the build/export race, not described as one green run.
+
+## Stable preference categories — 2026-09-09
+
+About me now groups preferences under Communication, Language, Work, Appearance and Other. Icons belong to this fixed category registry, not individual fact titles. All nine current stated-technical extractor fields are mapped, alongside legacy imported keys. Namespaced imported keys such as `communication.meeting_notes` support arbitrary titles without extending the registry. Unknown keys/namespaces retain their title and content in Other with its stable icon; no inference is made from personal text. Human-readable labels affect presentation only, never the stored fact key or delete endpoint. The UI does not expand the extractor's existing closed set of admissible fields.
+
+Eleven focused tests cover new titles within a category, unknown/prototype-like keys, current extractor fields, visible grouping, Markdown and confirmed deletion using the original key. Backend sources and stored memory are unchanged.
+
+Deployed and verified on Dev2. Live categories, browser-only new-name fixtures, equal icons within a category, Other fallback, cancel-forget and mobile overflow checks passed with no console/API errors. All 11 focused tests, production build, lint (0 errors, 32 pre-existing warnings), Go memory/usermodel/web tests and full Go vet passed. Existing broad Go baseline is documented above; backend code did not change. No live personal data was mutated for this validation.

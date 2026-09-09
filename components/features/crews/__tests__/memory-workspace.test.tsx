@@ -112,3 +112,25 @@ it('renders personal notes as Markdown and confirms forgetting with the original
   fireEvent.click(screen.getByRole('button', { name: 'Confirm', exact: true }))
   await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => String(url).includes('/user-model/facts/styl_odpovedi?workspace_id=ws1') && init?.method === 'DELETE')).toBe(true))
 })
+
+it('groups newly named preferences without hiding unknown types', async () => {
+  vi.spyOn(global, 'fetch').mockImplementation(async url => {
+    const path = String(url)
+    if (path.includes('/user-model')) return new Response(JSON.stringify({ exists: true, facts: [
+      { key: 'communication.meeting_notes', value: 'Send a short recap' },
+      { key: 'communication.review_questions', value: 'Bundle questions together' },
+      { key: 'unexpected_new_notice', value: 'Retain this new preference' },
+    ] }))
+    if (path.includes('/peer-cards')) return new Response(JSON.stringify({ peers: [] }))
+    if (path.includes('/peer-consent')) return new Response(JSON.stringify({ opted_out: false }))
+    return response([])
+  })
+  render(<MemoryWorkspace workspaceId="ws1" agentId="a1" />)
+  await screen.findByText('No saved notes yet.')
+  fireEvent.click(screen.getByRole('button', { name: 'About me' }))
+  const communication = await screen.findByRole('region', { name: 'Communication preferences' })
+  expect(communication).toHaveTextContent('Send a short recap')
+  expect(communication).toHaveTextContent('Bundle questions together')
+  expect(screen.getByRole('region', { name: 'Other preferences' })).toHaveTextContent('Retain this new preference')
+  expect(screen.getByRole('button', { name: 'Forget Unexpected new notice' })).toBeVisible()
+})

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { BookOpen, Brain, Download, RefreshCw, ShieldCheck, Users, Languages, MessageSquare, Palette, CheckCheck, Info, SlidersHorizontal, Trash2, ChevronRight } from "lucide-react"
+import { BookOpen, Brain, Download, RefreshCw, ShieldCheck, Users, MessageSquare, SlidersHorizontal, Trash2, ChevronRight } from "lucide-react"
 import { WorkspaceEmpty, WorkspaceGlyph } from "./workspace-visuals"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { MemoryExportButton } from "./agent-canvas-tabs/memory-export-button"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { MemoryNotesBrowser, memoryNoteLabel, type MemoryDocument } from "./memory-notes-browser"
+import { preferenceCategories, preferenceCategory, preferenceLabel } from "./preference-categories"
 import { cn } from "@/lib/utils"
 import { invalidate, readThrough } from "@/lib/stale-cache"
 
@@ -119,17 +120,6 @@ function RecordedVersion({ sha, path, workspaceId }: { sha: string; path: string
   return <div className="mt-4 rounded-xl border border-border p-4"><p className="font-medium text-foreground">Recorded version</p><p className="text-xs mt-1">Historical snapshot. The current note remains above.</p>{state.error ? <p role="alert" className="mt-3">This version could not be read.</p> : state.content === undefined ? <p className="mt-3">Loading version…</p> : <pre className="mt-3 whitespace-pre-wrap break-words font-sans">{state.content || "This version is empty."}</pre>}</div>
 }
 
-function preferencePresentation(key: string) {
-  const known: Record<string, { label: string; icon: typeof Info }> = {
-    jazyk: { label: "Jazyk", icon: Languages }, language: { label: "Language", icon: Languages },
-    styl_odpovedi: { label: "Styl odpovědí", icon: MessageSquare }, response_style: { label: "Response style", icon: MessageSquare },
-    vzhled_aplikace: { label: "Vzhled aplikace", icon: Palette }, design_preferences: { label: "Design preferences", icon: Palette },
-    overeni_prace: { label: "Ověření práce", icon: CheckCheck }, ukazka: { label: "Ukázková data", icon: Info },
-  }
-  const fallback = key.replace(/[_-]+/g, " ").trim()
-  return known[key] ?? { label: fallback.charAt(0).toLocaleUpperCase() + fallback.slice(1), icon: SlidersHorizontal }
-}
-
 interface MyModel { exists: boolean; content?: string; facts: { key: string; value: string }[] }
 interface MyCards { peers: { id: string; agent_slug: string; content?: string }[] }
 export function PersonalMemory({ workspaceId, refreshRevision = 0 }: { workspaceId: string; refreshRevision?: number }) {
@@ -158,10 +148,15 @@ export function PersonalMemory({ workspaceId, refreshRevision = 0 }: { workspace
     <section className="space-y-4" aria-label="Saved preferences">
       <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><SlidersHorizontal aria-hidden="true" className="size-4 text-muted-foreground" /><h3 className="font-medium">Saved preferences</h3>{model.data && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{model.data.facts?.length ?? 0}</span>}</div>{model.data?.exists && <Button size="sm" variant="ghost" onClick={() => setAction({ path: "user-model", label: "Forget all saved preferences" })}><Trash2 className="size-3.5" />Forget all preferences</Button>}</div>
       {!model.data ? <p className="text-sm">{model.error ? "Unavailable" : "Loading…"}</p> : !model.data.exists ? <div className="rounded-2xl border border-border bg-card"><WorkspaceEmpty icon={SlidersHorizontal} title="No saved preferences yet." description="Your retained preferences will appear here as individual cards." /></div> : <>
-        <ul className="grid gap-3 sm:grid-cols-2">{(model.data.facts ?? []).map(fact => {
-          const { label, icon: Icon } = preferencePresentation(fact.key)
-          return <li key={fact.key} className="min-w-0 rounded-2xl border border-border bg-card p-4"><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2.5"><Icon aria-hidden="true" className="size-4 shrink-0 text-purple" /><h4 className="break-words text-sm font-medium">{label}</h4></div><Button size="icon-sm" variant="ghost" aria-label={`Forget ${label}`} title={`Forget ${label}`} onClick={() => setAction({ path: `user-model/facts/${encodeURIComponent(fact.key)}`, label: `Forget ${label}` })}><Trash2 className="size-3.5 text-muted-foreground" /></Button></div><p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{fact.value}</p></li>
-        })}</ul>
+        <div className="space-y-5">{preferenceCategories.map(category => {
+          const facts = (model.data?.facts ?? []).filter(fact => preferenceCategory(fact.key).id === category.id)
+          if (!facts.length) return null
+          const Icon = category.icon
+          return <section key={category.id} aria-label={`${category.label} preferences`}><h4 className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground"><Icon aria-hidden="true" className="size-3.5" />{category.label}<span className="ml-1">{facts.length}</span></h4><ul className="grid gap-3 sm:grid-cols-2">{facts.map(fact => {
+          const label = preferenceLabel(fact.key)
+          return <li key={fact.key} className="min-w-0 rounded-2xl border border-border bg-card p-4"><div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2.5"><Icon aria-hidden="true" className="size-4 shrink-0 text-purple" /><h5 className="break-words text-sm font-medium">{label}</h5></div><Button size="icon-sm" variant="ghost" aria-label={`Forget ${label}`} title={`Forget ${label}`} onClick={() => setAction({ path: `user-model/facts/${encodeURIComponent(fact.key)}`, label: `Forget ${label}` })}><Trash2 className="size-3.5 text-muted-foreground" /></Button></div><p className="mt-3 break-words text-sm leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{fact.value}</p></li>
+        })}</ul></section>
+        })}</div>
         {model.data.content && !model.data.facts?.length && <div className="rounded-2xl border border-border bg-card p-5"><MarkdownContent className="break-words [overflow-wrap:anywhere]">{model.data.content}</MarkdownContent></div>}
         <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">How forgetting works</summary><p className="mt-2 max-w-3xl leading-relaxed">Deleting a preference removes its saved value. Future conversations may teach it again while personalization is on. Original-message evidence is not yet recorded for these preferences.</p></details>
       </>}
