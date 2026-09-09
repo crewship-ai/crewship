@@ -1341,6 +1341,27 @@ Imports **skip the save validation gate** by design -- a marketplace bundle is p
 
 When a pipeline hits a `step_wait` of kind `approval`, the run parks and a waitpoint row is created. The UI's `/inbox` lists pending waitpoints; approving or rejecting wakes the parked run.
 
+### Typed human decisions
+
+An approval wait can declare `decision_form` with `fields` (routine input
+specifications) and `actions` (`id`, `label`, `approved`). The server freezes this
+form when it creates the waitpoint. Later recipe edits cannot change the question
+or validation for a pending decision. Standing trust does not auto-answer a form.
+
+The authenticated approve endpoint accepts the flat request
+`{"approved":true,"action_id":"go","data":{"count":0,"enabled":false}}`.
+The action must exist and its `approved` value must match. The server validates
+required fields and types without converting strings into numbers or booleans.
+Rejection relaxes required fields. `400` means an invalid answer, `403` means an
+unauthorized actor, and `409` means the decision was already answered or expired.
+The accepted JSON answer is the wait step output for downstream steps.
+
+Typed decisions require an authenticated workspace member with `MANAGER`+;
+the public token callback returns `403` even for a well-formed form answer.
+Their pending-list rows carry `decision_form` and omit `callback_url`.
+Legacy binary approvals retain the public callback and their historical output.
+Identity comes from authentication, never from an answer's data fields.
+
 ### List pending waitpoints
 
 ```

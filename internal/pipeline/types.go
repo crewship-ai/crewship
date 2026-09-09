@@ -224,18 +224,18 @@ type ExecutionTier struct {
 // (e.g. Max=0.5 would round to 0). Validation rejects fractional
 // bounds when the input Type is "integer".
 type InputSpec struct {
-	Widget      string   `json:"widget,omitempty"`
-	Options     []string `json:"options,omitempty"`
-	AllowCustom bool     `json:"allow_custom,omitempty"`
-	Placeholder string   `json:"placeholder,omitempty"`
-	Label       string   `json:"label,omitempty"`
-	Name        string   `json:"name"`
-	Type        string   `json:"type"` // string | integer | number | boolean | array | object
-	Required    bool     `json:"required,omitempty"`
-	Default     any      `json:"default,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Min         *float64 `json:"min,omitempty"`
-	Max         *float64 `json:"max,omitempty"`
+	Widget      string   `json:"widget,omitempty" yaml:"widget,omitempty"`
+	Options     []string `json:"options,omitempty" yaml:"options,omitempty"`
+	AllowCustom bool     `json:"allow_custom,omitempty" yaml:"allow_custom,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty" yaml:"placeholder,omitempty"`
+	Label       string   `json:"label,omitempty" yaml:"label,omitempty"`
+	Name        string   `json:"name" yaml:"name"`
+	Type        string   `json:"type" yaml:"type"` // string | integer | number | boolean | array | object
+	Required    bool     `json:"required,omitempty" yaml:"required,omitempty"`
+	Default     any      `json:"default,omitempty" yaml:"default,omitempty"`
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Min         *float64 `json:"min,omitempty" yaml:"min,omitempty"`
+	Max         *float64 `json:"max,omitempty" yaml:"max,omitempty"`
 }
 
 // OutputSpec declares one named output the pipeline produces. Outputs
@@ -553,7 +553,8 @@ type ScriptStep struct {
 // goroutine on a condition channel and resumes when the waitpoint
 // fires.
 type WaitStep struct {
-	Kind string `json:"kind"` // approval | datetime | event
+	DecisionForm *DecisionForm `json:"decision_form,omitempty"`
+	Kind         string        `json:"kind"` // approval | datetime | event
 	// approval fields
 	ApprovalPrompt string `json:"approval_prompt,omitempty"`
 	// ApprovalTitle is the one-line label the inbox row carries — what

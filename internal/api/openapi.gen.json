@@ -12489,6 +12489,35 @@
             "format": "date-time",
             "type": "string"
           },
+          "decision_form": {
+            "properties": {
+              "actions": {
+                "items": {
+                  "properties": {
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fields": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
           "invoking_crew_id": {
             "type": "string"
           },
@@ -13358,11 +13387,18 @@
       },
       "WorkflowWaitpointApprovalRequest": {
         "properties": {
+          "action_id": {
+            "type": "string"
+          },
           "approved": {
             "type": "boolean"
           },
           "comment": {
             "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
           }
         },
         "type": "object"

@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // SQLWaitpointStore is the production WaitpointStore backed by the
@@ -203,6 +204,17 @@ func (s *SQLWaitpointStore) Close() {
 // CreateApproval mints a token, persists the waitpoint row, and
 // returns the token. Default timeout is 24h if req.TimeoutSec is 0.
 func (s *SQLWaitpointStore) CreateApproval(ctx context.Context, req WaitpointApprovalRequest) (string, error) {
+	formJSON := ""
+	if req.DecisionForm != nil {
+		if err := ValidateDecisionForm(req.DecisionForm); err != nil {
+			return "", fmt.Errorf("%w: %v", ErrDecisionInput, err)
+		}
+		raw, err := json.Marshal(req.DecisionForm)
+		if err != nil {
+			return "", err
+		}
+		formJSON = string(raw)
+	}
 	timeoutSec := req.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = 24 * 3600
@@ -256,10 +268,10 @@ INSERT INTO pipeline_waitpoints (
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO pipeline_waitpoints (
     token, workspace_id, pipeline_run_id, step_id, kind, prompt,
-    invoking_crew_id, status, timeout_at, routine_version
-) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'pending', ?, ?)`,
+    invoking_crew_id, status, timeout_at, routine_version, decision_form_json
+) VALUES (?, ?, ?, ?, 'approval', ?, ?, 'pending', ?, ?, ?)`,
 		token, req.WorkspaceID, req.PipelineRunID, req.StepID,
-		nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt, nullableRoutineVersion(routineVersion),
+		nullableStr(req.Prompt), nullableStr(req.InvokingCrewID), timeoutAt, nullableRoutineVersion(routineVersion), formJSON,
 	)
 	if err != nil {
 		return "", fmt.Errorf("waitpoints: insert: %w", err)
@@ -317,6 +329,7 @@ INSERT INTO pipeline_waitpoints (
 		Priority:    "high",
 		Blocking:    true,
 		Payload: map[string]interface{}{
+			"decision_form":    req.DecisionForm,
 			"pipeline_run_id":  req.PipelineRunID,
 			"step_id":          req.StepID,
 			"invoking_crew_id": req.InvokingCrewID,
@@ -422,7 +435,7 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 
 // consumeTrust fires a standing grant if one covers this gate.
 func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) (TrustGrantUse, bool) {
-	if tc.pipelineID == "" || tc.definitionHash == "" {
+	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" {
 		return TrustGrantUse{}, false
 	}
 	// A strict crew has opted out of every shortcut around the operator.
@@ -445,7 +458,7 @@ func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointAppro
 // payload shape is stable for consumers.
 func (s *SQLWaitpointStore) trustOffer(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) map[string]any {
 	offer := map[string]any{"eligible": false}
-	if tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
+	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
 		return offer
 	}
 	prior, err := s.trust.PriorApprovals(ctx, req.WorkspaceID, tc.pipelineID, req.StepID, tc.definitionHash)
@@ -619,16 +632,41 @@ func (s *SQLWaitpointStore) WaitpointStatus(ctx context.Context, token string) (
 // status (or belongs to a different workspace) — protects against
 // double-decide races and cross-tenant completion alike.
 func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error {
+	now := tsformat.Format(time.Now())
+	var formJSON string
+	var expired bool
+	if err := s.db.QueryRowContext(ctx, `SELECT decision_form_json, julianday(timeout_at) <= julianday(?) FROM pipeline_waitpoints WHERE token=? AND workspace_id=? AND status='pending'`, now, token, workspaceID).Scan(&formJSON, &expired); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAlreadyDecided
+		}
+		return fmt.Errorf("waitpoints: update: read decision form: %w", err)
+	}
+	if expired {
+		return s.settleExpiredApproval(ctx, workspaceID, token, now)
+	}
+	if formJSON != "" {
+		var form DecisionForm
+		if err := json.Unmarshal([]byte(formJSON), &form); err != nil {
+			return fmt.Errorf("read decision form: %w", err)
+		}
+		normalized, err := NormalizeDecisionAnswer(&form, approved, payload)
+		if err != nil {
+			return err
+		}
+		payload = normalized
+	}
 	status := "approved"
 	if !approved {
 		status = "denied"
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// Expiry is part of the decision CAS, not dependent on the 30-second
+	// sweeper having run. julianday handles historical timezone/fraction forms.
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = ?, decided_at = ?, decided_by_user_id = ?, decision_payload = ?
-WHERE token = ? AND workspace_id = ? AND status = 'pending'`,
-		status, now, nullableStr(deciderUserID), nullableStr(payload), token, workspaceID,
+WHERE token = ? AND workspace_id = ? AND status = 'pending'
+  AND julianday(timeout_at) > julianday(?)`,
+		status, now, nullableStr(deciderUserID), nullableStr(payload), token, workspaceID, now,
 	)
 	if err != nil {
 		return fmt.Errorf("waitpoints: update: %w", err)
@@ -654,6 +692,33 @@ WHERE token = ? AND workspace_id = ? AND status = 'pending'`,
 	}
 	s.mu.Unlock()
 	return nil
+}
+
+// Settle expiry on the attempted decision as well as on the periodic sweep,
+// so its pending Inbox card does not remain actionable after a refused answer.
+func (s *SQLWaitpointStore) settleExpiredApproval(ctx context.Context, workspaceID, token, now string) error {
+	var runID string
+	err := s.db.QueryRowContext(ctx, `UPDATE pipeline_waitpoints
+ SET status='timed_out', decided_at=?
+ WHERE workspace_id=? AND token=? AND status='pending' AND julianday(timeout_at)<=julianday(?)
+ RETURNING pipeline_run_id`, now, workspaceID, token, now).Scan(&runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrAlreadyDecided
+	}
+	if err != nil {
+		return fmt.Errorf("waitpoints: settle expiry: %w", err)
+	}
+	inbox.ResolveBySource(ctx, s.db, slog.Default(), "waitpoint", token, "timed_out", "")
+	s.mu.Lock()
+	if ch, ok := s.listeners[token]; ok {
+		select {
+		case ch <- waitDecision{approved: false}:
+		default:
+		}
+	}
+	s.mu.Unlock()
+	s.resumeRun(runID)
+	return ErrAlreadyDecided
 }
 
 // CancelWaitpointsForRun flips every still-pending waitpoint belonging to a

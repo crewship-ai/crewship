@@ -43,6 +43,44 @@ type fakeWaitpointStore struct {
 	waitErr     error
 }
 
+type failingApprovalOutputStore struct{ fakeWaitpointStore }
+
+func (*failingApprovalOutputStore) ApprovalOutput(context.Context, string, string) (string, error) {
+	return "", errors.New("temporary database read failure")
+}
+
+func TestN15LegacyApprovalDoesNotDependOnSecondRead(t *testing.T) {
+	store := &failingApprovalOutputStore{fakeWaitpointStore: fakeWaitpointStore{waitApprove: true}}
+	e := &Executor{waitpoints: store}
+	out, _, _, err := e.runWaitStep(context.Background(), waitStepReq("approval"), emptyRender(), RunInput{}, "run-1", 0)
+	if err != nil || out != "waited:approval:approved" {
+		t.Fatalf("approved legacy gate failed: %q %v", out, err)
+	}
+}
+
+type transientApprovalOutputStore struct {
+	fakeWaitpointStore
+	reads int
+}
+
+func (s *transientApprovalOutputStore) ApprovalOutput(context.Context, string, string) (string, error) {
+	s.reads++
+	if s.reads == 1 {
+		return "", errors.New("temporary database read failure")
+	}
+	return `{"action_id":"accept","data":{"count":0,"enabled":false}}`, nil
+}
+func TestN15TypedApprovalSurvivesTransientOutputRead(t *testing.T) {
+	store := &transientApprovalOutputStore{fakeWaitpointStore: fakeWaitpointStore{waitApprove: true}}
+	e := &Executor{waitpoints: store}
+	step := waitStepReq("approval")
+	step.Wait.DecisionForm = &DecisionForm{Actions: []DecisionAction{{ID: "accept", Label: "Accept", Approved: true}}}
+	out, _, _, err := e.runWaitStep(context.Background(), step, emptyRender(), RunInput{WorkspaceID: "ws"}, "run-1", 0)
+	if err != nil || out != `{"action_id":"accept","data":{"count":0,"enabled":false}}` {
+		t.Fatalf("typed approval lost after committed decision: %q %v", out, err)
+	}
+}
+
 func (f *fakeWaitpointStore) CreateApproval(_ context.Context, req WaitpointApprovalRequest) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

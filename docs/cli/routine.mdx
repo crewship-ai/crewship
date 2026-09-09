@@ -1804,3 +1804,11 @@ Runtime references in offline step tests use explicit samples: `--env` supplies
 `env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
 supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
 secret values must be strings. No server environment or credential vault is read.
+### Answer a typed waitpoint
+
+`crewship routine waitpoints approve <token> --action <id> --input '{"count":0,"enabled":false}'`
+sends a named decision with typed fields through the authenticated workspace
+endpoint. Use `routine waitpoints reject <token>` for an action whose `approved` value is false. The server
+checks action consistency and the frozen form; malformed values fail without
+resolving the waitpoint. The authenticated user's identity is recorded separately
+from the answer. Legacy approvals still work without `--action` or `--input`.
