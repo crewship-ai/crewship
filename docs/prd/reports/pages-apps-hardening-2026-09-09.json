@@ -1,15 +1,12 @@
 {
-  "as_of": "2026-09-09T16:17:00Z",
+  "as_of": "2026-09-09T16:40:00Z",
   "issue": 2472,
   "deployment": {
-    "pid": "3703258",
-    "sha256": "d020592a333345028f9c03a2cd569b4cc2829ac432179e9f56707bc2aded1c7d",
-    "commit": "529a3298",
+    "pid": "3786408",
+    "sha256": "98017c717556f2e43811870440f953948e340212ba76c03a2ef58e98517c9782",
+    "commit": "34fd43e5",
     "health": {
-      "episodic": "vector",
-      "service": "crewshipd",
-      "status": "ok",
-      "uptime": "10.804069922s"
+      "status": "ok"
     }
   },
   "compiler_image": "sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b",
@@ -62,7 +59,7 @@
       "run_id": "run_cmtua364y000ac5f80683",
       "run_status": "completed"
     },
-    "visibleRunStatus": "Stav požadavku: fired. Běh: completed.",
+    "visibleRunStatus": "Stav po\u017eadavku: fired. B\u011bh: completed.",
     "displayChanged": true
   },
   "live_panel_writes": [
@@ -119,5 +116,26 @@
   "distribution_build": {
     "status": "passed",
     "url": "https://github.com/crewship-ai/crewship/actions/runs/34375031600"
+  },
+  "live_reader_revocation": {
+    "role": "VIEWER",
+    "applicationLoadedBeforeRevocation": true,
+    "applicationStatusAfterRevocation": 404,
+    "iframeRemoved": true,
+    "test_membership_removed": true
+  },
+  "source_review": {
+    "state": "approved_before_lock_followup",
+    "submitted_at": "2026-09-09T16:29:21Z",
+    "second_finding": "withdrawn by reviewer after verified rebuttal",
+    "url": "https://github.com/crewship-ai/crewship/pull/2475#discussion_r3970751997"
+  },
+  "macos_followup": {
+    "run": 34374675235,
+    "failure": "concurrent first lock open returned ENOENT",
+    "fix": "open existing inode, exclusive create when missing, reopen winner on EEXIST",
+    "state": "local lease suite x10, race x5, API concurrent saves x30 and vet passed; new remote macOS pending",
+    "source_head": "a9ff7ad726d6fd3d082ea7a55f838f073e98a133",
+    "ci_run": 34377781669
   }
 }

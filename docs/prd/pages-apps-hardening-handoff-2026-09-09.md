@@ -1,4 +1,4 @@
-# Pages Apps — current handoff, 2026-09-09 16:17 UTC
+# Pages Apps — current handoff, 2026-09-09 16:40 UTC
 
 Task: independent counter-review, then user “vše oprav a pokračuj”.
 Issue/claim: #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
@@ -8,8 +8,8 @@ do not switch it or overwrite its files.
 ## Current deployed state
 
 Only dev3 was deployed, through the existing `crewship-ws@3` wrapper.
-Live code commit: `529a3298`, clean build. Verified running executable SHA256:
-`d020592a333345028f9c03a2cd569b4cc2829ac432179e9f56707bc2aded1c7d`.
+Live code commit: `34fd43e5`, clean build. Verified running executable SHA256:
+`98017c717556f2e43811870440f953948e340212ba76c03a2ef58e98517c9782`.
 Compiler image configured in `/srv/crewship/dev3-pages-release/start.sh`:
 `sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b`.
 
@@ -37,7 +37,7 @@ copy upgraded from 294 to 300 successfully.
 - Desktop Chromium policy, visible development-origin limitation and navigation
   stop. Non-loopback runtime requires HTTPS. SDK action keys work without UUID API.
 - Streaming UTF-8 input, isolated TypeScript modules, empty Git quota/boundaries,
-  interrupted-lock retry, canonical SQL timestamps and CI build path filters.
+  interrupted-lock retry, exclusive first lock-file creation, canonical SQL timestamps and CI build path filters.
 
 ## Measured evidence
 
@@ -58,6 +58,9 @@ Current contract: `pages-apps-v1.md`; install/recovery:
   Docker compiler/API/MCP/seed/Node collector, deterministic one-byte UTF-8 input,
   Chromium process isolation/loop removal and compiled SDK action/status/history.
   Evidence: `/tmp/pages-2472-verified-final/`, corresponding `.log`.
+- Follow-up first-lock creation passed the lease suite ten times, its race
+  regression five times and the actual API concurrent-save test thirty times
+  (11.223s); vet passed. New macOS CI confirmation remains pending.
 - Final concurrency/publication/lease regressions passed ten repetitions; earlier
   admission-recovery/concurrent-save regressions passed twenty repetitions.
 - Live Chromium loading/narrow viewport/reduced-motion passed; real WebKit offered
@@ -67,6 +70,10 @@ Current contract: `pages-apps-v1.md`; install/recovery:
   `run_cmtua364y000ac5f80683`. Both panels have sequence 342 at 15:53:48Z from that
   exact run. This proves the real UI → confirmation → queue → routine → data loop.
 - Live fsck: 3 sources, 3 checkpoints, 3 artifacts, 26 Git objects, zero failures.
+- Live VIEWER with only a read grant opened the application. Revoking that grant
+  returned 404 from the application endpoint and removed the open iframe on
+  revalidation. The temporary workspace membership was removed afterwards.
+  Evidence: `/tmp/pages-2472-live-loading/live-reader.json`.
 - Final distribution Docker build passed:
   https://github.com/crewship-ai/crewship/actions/runs/34375031600
 
@@ -77,8 +84,8 @@ Page MCP init/create, but `page_create` returned 403 and no Page/source/build wa
 created. The response says `pending_review: true`; no actionable approval-queue
 item exists. User was asked for explicit approval of a separate trusted test
 crew. No existing policy was loosened. Do not substitute transport coverage for
-successful live LLM authoring. Separate live reader/revocation acceptance remains;
-automated authorization/cache regressions already pass.
+successful live LLM authoring. Live reader/revocation acceptance now passes,
+as do automated authorization/cache regressions.
 
 User also needs to choose a separately registrable runtime domain outside
 unifylab.cz and DNS/TLS management. Dev3's explicit same-origin exception is an
@@ -91,26 +98,40 @@ Preserved original 201-file implementation: `1bbae70e`. Integrated main remains
 
 | PR | Layer | Files | Current head |
 |---|---|---:|---|
-| #2475 | source/compiler/core CI | 46 | 0b7c78df |
-| #2477 | API/storage/backup/MCP/config/contracts | 87 | 038ecdc1 |
-| #2479 | CLI/seed/examples/SDK browser CI | 40 | 20b9df93 |
-| #2480 | UI | 44 | 3a60231e |
+| #2475 | source/compiler/core CI | 46 | a9ff7ad7 |
+| #2477 | API/storage/backup/MCP/config/contracts | 87 | 70068341 |
+| #2479 | CLI/seed/examples/SDK browser CI | 40 | 916f43c8 |
+| #2480 | UI | 44 | 01c0e9fa |
 | #2481 | design/reviews/operations docs | 31 before this update | see branch |
 
 Each PR is based on its predecessor. Preserve ancestry (merge commits) when
 merging; retarget the next PR to main and verify the diff remains under 100 files.
 CodeRabbit reviewed source at 15:36 and requested changes. Nine actionable
-findings were addressed; response is posted. Final incremental review was
-requested 16:14:34 and is actually pending. The service permits one included
+findings were addressed; response is posted. Second incremental review completed 16:23:11. Its sole new provider-seam
+request was withdrawn after code-based rebuttal; source was approved 16:29:21.
+A subsequent macOS CI failure identified concurrent first lock-file creation
+returning ENOENT; follow-up `a9ff7ad7` still needs CI/review. It uses exclusive creation and
+reopens the winner on EEXIST, with independent-handle first-open regressions.
+It is deployed as `34fd43e5`; health, running hash and fsck verified. The service permits one included
 review per hour: do not burst requests or merge based on green/throttled status.
 Other four PRs have no actual review yet. Wait for actual reviews, resolve valid
 findings and verify CI before merging. Release the claim when stopping/finished.
 
-Final full CI: UI 34374672182, server 34374675235, source 34374044883. No failed
-jobs observed at 16:17; some Go/race jobs still running. Earlier failures were
-fixed (storage teardown, HTTP fixtures, timestamps, docs placement and flags);
-one macOS concurrent save 503 was not independently reproduced. Diagnostics and
-signal retry were added; inspect the final macOS result rather than assuming.
+Full CI before the lock initialization follow-up: UI 34374672182 passed Go,
+shuffle, macOS, Linux arm64, frontend and browser isolation; race jobs remain
+pending. Server 34374675235 failed macOS concurrent first save (200 + 500):
+`openat .git-maintenance.lock: no such file or directory`. Source run is
+34374044883. Do not treat the UI macOS pass as disproving the server failure.
+Earlier storage teardown, HTTP fixture, timestamp and documentation failures
+were fixed. The earlier EINTR retry did not fix this newly diagnosed open error.
+
+Shared disk also filled while linking the final API test/server. The API test
+passed with stripped symbols; the production build completed using our private
+`/dev/shm` directory for temporary files. Deployment moved the generated
+binaries into the release directory to avoid duplicate copies. Original
+rollback snapshot remains; the temporary previous-executable links were removed
+only after the new running hash, health and fsck passed. No integration binary
+copy remains; use `/srv/crewship/dev3-pages-release/crewship` with port 8083.
 
 Shared disk filled during lint; only our completed `.next` intermediates and
 obsolete test executables were deleted. Keep compiles serialized (`GOGC=30`,
