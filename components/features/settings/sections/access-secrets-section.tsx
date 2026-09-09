@@ -164,7 +164,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
 
       <SettingsCard
         title="Who may reveal"
-        description="Reveal is granted per person, never by role. Being an OWNER is not sufficient."
+        description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
       >
         {holders === null ? (
           <SettingsEmpty>Loading the capability grants…</SettingsEmpty>

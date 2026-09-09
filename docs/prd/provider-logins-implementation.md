@@ -5,6 +5,34 @@ the session report and PR #2430. The session report remains untracked.
 
 ## Acceptance scope
 
+### Pool lifecycle increment (2026-09-08, #2440)
+
+Adds OWNER/ADMIN-only PUT and DELETE for pool definitions and matching
+`credential pool update/delete` commands. Strong numeric ETags / If-Match
+protect against stale replacement and removal (428 absent, 412 stale).
+Definition revision is separate from selection sequence. Provider/mode remain
+fixed, retained members keep round-robin history, and complete replacement
+membership is validated atomically, including tenant and cross-owner consent.
+
+Removal is a soft deletion: accounts and membership remain, the name stays
+reserved, and list/detail/selection exclude the retired definition. Audits
+use the existing best-effort administrative path, not a transactional outbox.
+This is still definition management: there are no runtime pool bindings yet.
+Binding/active-execution guards and immutable selected-account snapshots must
+land before the runtime binding layer is enabled; this increment does not
+claim those acceptance criteria are met.
+
+Red-first store tests failed to compile before Update/Delete/ErrStale existed.
+Targeted store/API/CLI/OpenAPI tests and strict documentation inventory passed.
+Full integrated `go test -p=2 ./... -count=1 -timeout 40m` and `go vet -p=2 ./...`
+passed against main 34ecc79a plus #2450 and these changes (API 159.274s,
+database 500.386s): `/tmp/pool-lifecycle-full.log`, `/tmp/pool-lifecycle-vet.log`.
+Additional final targeted tests passed, including retirement backup round-trip
+and CLI no-retry behavior. Store/API lifecycle race tests passed (55.376s /
+61.149s); changed-package lint reported zero issues. Only merged #2450 was
+deployed on dev3 (3fd53767), not this lifecycle increment. No real token was
+read and no paid provider request was made.
+
 ### Pool API review follow-up (2026-09-07, PR #2450)
 
 The create operation now declares its required JSON body and 400 validation

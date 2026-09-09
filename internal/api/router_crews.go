@@ -441,6 +441,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/provider-logins/pools/{poolId}", authed(wsCtx(http.HandlerFunc(providerPools.Get))))
 	// openapi: responses 400
 	r.authedMut("POST", "/api/v1/provider-logins/pools", roleManage, providerPools.Create)
+	// openapi: responses 400,404,409,412,428
+	r.authedMut("PUT", "/api/v1/provider-logins/pools/{poolId}", roleManage, providerPools.Update)
+	// openapi: responses 400,404,412,428
+	r.authedMut("DELETE", "/api/v1/provider-logins/pools/{poolId}", roleManage, providerPools.Delete)
 
 	// Device-code sign-in to a model provider (#2428, PRD provider-logins
 	// §10.3). Start creates a credential at the end, so it is gated inline

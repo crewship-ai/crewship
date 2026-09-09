@@ -10,32 +10,26 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Changed
-
 - Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
-
 - Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.
-
 - Crew and agent Work tabs use shared concept icons and dashboard cards. Routines replaces the generic Automations link with crew-owned routine previews; issue and mission links preserve the selected team or agent.
-
 - Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.
-
 - Crews and agents share the Routines dashboard visual language, with avatar-based team browsing, server-side purpose search and name sorting, compact crew lists, real run outcome charts, and scoped work/access previews. Create/Edit forms and Memory now expose clearer icon-based navigation and actionable empty states.
-
 ### Fixed
-
 - Agent inbox cost summaries query the actual ledger timestamp, including the beginning of the current month. Memory refresh also reloads personal data; exports identify their scope and report empty scopes and download outcomes. Crew navigation updates the selected canvas reliably. The placeholder agent container restart is replaced by a working, confirmed crew-level action with accurate next-run recreation feedback.
 - Invalidated cache requests cannot overwrite newer results, and failed relation refreshes preserve known cached data. Historical collaboration no longer implies an automatic delegation trigger.
-
 ### Changed
-
 - **Crews & Agents now separates Overview, Work, Team and Memory.** Create and Edit share the same agent and crew forms; advanced runtime settings remain available. Overview shows scoped run metrics, recent outcomes and conversations. Memory reads current knowledge independently of version history and exposes the signed-in user's preferences.
-
 ### Security
-
 - ⚠️ **Behaviour change:** agent peer-profile endpoints now allow only the signed-in user's own profile, including for workspace administrators; administrator-wide exports retain their explicit administration gate. Personal profiles are excluded from general memory history and group-chat prompts. Personalization opt-out is checked before prompt assembly, and cross-crew user-model reads follow the authoritative workspace index.
 
+- ⚠️ **Behaviour change: default administrator reveal permission** (#2461) — OWNER/ADMIN memberships without explicit capability overrides now receive `credentials:reveal`, as does the admin preset. Existing explicit sets (including revocations) remain authoritative. Workspace opt-in, human-session checks, scope, SEALED denial and audit remain required.
+
+- **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
 
 ### Added
+
+- **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
 
 - **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.
 
