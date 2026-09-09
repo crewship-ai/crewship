@@ -44,7 +44,9 @@ func TestInternalDraftSharesUserCASWithoutPublishing(t *testing.T) {
 		t.Fatalf("response %+v", out)
 	}
 	var count int
-	db.QueryRow(`SELECT COUNT(*) FROM pipelines WHERE slug='ai-draft'`).Scan(&count)
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipelines WHERE slug='ai-draft'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
 	if count != 0 {
 		t.Fatal("agent draft published a recipe")
 	}
@@ -109,5 +111,36 @@ func TestInternalDraftSharesUserCASWithoutPublishing(t *testing.T) {
 	other.AuthorCrewID = sibling
 	if w = call(h.InternalSaveDraft, other, crew); w.Code != 403 {
 		t.Fatalf("forged crew %d", w.Code)
+	}
+}
+
+func TestN1AgentDraftPreservesBrowserPublicationBytes(t *testing.T) {
+	h, _, ws, crew := triggerSaveRig(t)
+	def := `{"name":"agent-proof","steps":[{"id":"text","type":"transform","transform":{"input":"https://example.test/?a=1&b=2 <review> 2 > 1","expression":"."}}]}`
+	in := internalDraftRequest{WorkspaceID: ws, Slug: "agent-proof", AuthorCrewID: crew, AuthorAgentID: "a-trigger", Draft: pipeline.Draft{Slug: "agent-proof", Document: json.RawMessage(`{"slug":"agent-proof","definition":` + def + `}`)}}
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(in); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(t.Context(), ctxInternalTokenWS, ws)
+	ctx = context.WithValue(ctx, ctxInternalTokenCrew, crew)
+	req := httptest.NewRequest("POST", "/draft", &buf).WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.InternalSaveDraft(w, req)
+	if w.Code != 200 {
+		t.Fatalf("agent save: %d %s", w.Code, w.Body)
+	}
+	draft, err := h.store.GetDraft(t.Context(), ws, "agent-proof")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(draft.Document, &document); err != nil {
+		t.Fatal(err)
+	}
+	if string(document["definition"]) != def {
+		t.Fatal("agent save changed browser definition bytes")
 	}
 }

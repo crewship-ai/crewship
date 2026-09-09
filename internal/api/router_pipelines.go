@@ -95,6 +95,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/drafts", authed(wsCtx(http.HandlerFunc(pipes.ListDrafts))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", authed(wsCtx(http.HandlerFunc(pipes.GetDraft))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/drafts", roleCreate, pipes.SaveDraft)
+	// openapi: responses 201,400,401,403,409,422,500
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish", roleCreate, pipes.PublishDraft)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", roleCreate, pipes.DeleteDraft)
 

@@ -136,13 +136,13 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 		return ErrDraftConflict
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("draft publication: consume reviewed draft: %w", err)
 	}
 	var id string
 	var revision int
 	err = tx.QueryRowContext(ctx, `SELECT id,publication_revision FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, in.WorkspaceID, in.Slug).Scan(&id, &revision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return fmt.Errorf("draft publication: read published base: %w", err)
 	}
 	if id != d.BasePipelineID || revision != d.BaseRevision {
 		return ErrDraftConflict
@@ -152,17 +152,17 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 	}
 	dsl, err := Parse([]byte(in.DefinitionJSON))
 	if err != nil {
-		return err
+		return fmt.Errorf("draft publication: parse publication definition: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,name,inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND target_pipeline_version IS NULL AND enabled=1 AND deleted_at IS NULL ORDER BY id`, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("draft publication: read enabled schedules: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var schedule, name, raw string
 		if err := rows.Scan(&schedule, &name, &raw); err != nil {
-			return err
+			return fmt.Errorf("draft publication: read schedule preset: %w", err)
 		}
 		var supplied map[string]any
 		if err := json.Unmarshal([]byte(raw), &supplied); err != nil {
@@ -186,5 +186,8 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 			}
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("draft publication: iterate schedules: %w", err)
+	}
+	return nil
 }

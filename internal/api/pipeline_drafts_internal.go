@@ -102,7 +102,10 @@ func (h *PipelineHandler) internalDraft(w http.ResponseWriter, r *http.Request, 
 		}
 		document["author_crew_id"], _ = json.Marshal(in.AuthorCrewID)
 		document["author_agent_id"], _ = json.Marshal(in.AuthorAgentID)
-		d.Document, _ = json.Marshal(document)
+		if d.Document, err = encodeDraftDocument(document); err != nil {
+			replyError(w, 500, "Could not prepare draft")
+			return
+		}
 		d.WorkspaceID = in.WorkspaceID
 		d.UpdatedBy = "crew:" + callerCrew
 		if callerAgent != "" {

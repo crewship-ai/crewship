@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -30,15 +31,17 @@ func (s *Server) routineDraft(ctx context.Context, args routineDraftArguments, a
 		}
 		body["draft"] = args.Draft
 	}
-	encoded, err := json.Marshal(body)
-	if err != nil {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(body); err != nil {
 		return http.StatusBadRequest, mustJSON(map[string]string{"error": "invalid draft"})
 	}
 	path := "/api/v1/internal/pipelines/drafts/get"
 	if save {
 		path = "/api/v1/internal/pipelines/drafts/save"
 	}
-	res, err := s.ipcRequestJSON(ctx, http.MethodPost, path, encoded)
+	res, err := s.ipcRequestJSON(ctx, http.MethodPost, path, encoded.Bytes())
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "draft request failed: " + err.Error()})
 	}

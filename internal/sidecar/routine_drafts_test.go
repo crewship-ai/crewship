@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,12 +16,27 @@ func TestRoutinesMCPDraftInjectsIdentityAndNeverPublishes(t *testing.T) {
 		if r.URL.Path != "/api/v1/internal/pipelines/drafts/save" {
 			t.Errorf("unexpected execution/publication path %s", r.URL.Path)
 		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if strings.Contains(string(raw), `\u0026`) {
+			t.Error("IPC changed draft definition bytes")
+		}
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Error(err)
+			return
+		}
 		if body["workspace_id"] != "ws" || body["author_crew_id"] != "crew" || body["author_agent_id"] != "agent" {
 			t.Error("forged identity", body)
 		}
-		draft := body["draft"].(map[string]any)
+		draft, ok := body["draft"].(map[string]any)
+		if !ok {
+			t.Error("missing draft envelope")
+			return
+		}
 		if draft["revision"] != float64(5) || draft["id"] != "draft1" {
 			t.Error("lost CAS", draft)
 		}
@@ -29,7 +45,7 @@ func TestRoutinesMCPDraftInjectsIdentityAndNeverPublishes(t *testing.T) {
 	}))
 	defer upstream.Close()
 	s := newRoutineMCPTestServer(t, &IPCConfig{BaseURL: upstream.URL, Token: "test", WorkspaceID: "ws", CrewID: "crew", AgentID: "agent"})
-	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_routine_draft","arguments":{"slug":"demo","workspace_id":"forged","author_crew_id":"forged","draft":{"id":"draft1","slug":"demo","revision":5,"document":{"slug":"demo","definition":{}}}}}}`))
+	req := httptest.NewRequest("POST", "/mcp/routines", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_routine_draft","arguments":{"slug":"demo","workspace_id":"forged","author_crew_id":"forged","draft":{"id":"draft1","slug":"demo","revision":5,"document":{"slug":"demo","definition":{"description":"Sales & Ops <review>"}}}}}}`))
 	req.Host = "127.0.0.1:9119"
 	w := httptest.NewRecorder()
 	s.handleRoutinesMCP(w, req)

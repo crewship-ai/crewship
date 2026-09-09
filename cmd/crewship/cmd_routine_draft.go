@@ -79,6 +79,10 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 				}
 				body = map[string]any{"id": draft.ID, "revision": draft.Revision}
 				if action == "publish" {
+					var definition map[string]json.RawMessage
+					if err := json.Unmarshal(draft.Document["definition"], &definition); err != nil || definition == nil {
+						return fmt.Errorf("draft document has no definition object to validate")
+					}
 					// Validate exactly the file's document; publication rejects if another
 					// editor saved a different revision while this proof was being minted.
 					testBody := map[string]any{"definition": draft.Document["definition"]}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
@@ -21,11 +22,15 @@ func TestRoutineDraftPublishValidatesExactRevision(t *testing.T) {
 	validated, published := false, false
 	stub.OnPost(base+"/test_run", func(r *http.Request, body []byte) (int, []byte, string) {
 		var b map[string]any
-		json.Unmarshal(body, &b)
+		if err := json.Unmarshal(body, &b); err != nil {
+			t.Error(err)
+			return 400, nil, "application/json"
+		}
 		if b["author_crew_id"] != "crew1" {
 			t.Error("lost author context")
 		}
-		if b["definition"].(map[string]any)["name"] != "digest" {
+		definition, ok := b["definition"].(map[string]any)
+		if !ok || definition["name"] != "digest" {
 			t.Error("validated wrong definition")
 		}
 		validated = true
@@ -36,7 +41,10 @@ func TestRoutineDraftPublishValidatesExactRevision(t *testing.T) {
 			t.Error("published before validation")
 		}
 		var b map[string]any
-		json.Unmarshal(body, &b)
+		if err := json.Unmarshal(body, &b); err != nil {
+			t.Error(err)
+			return 400, nil, "application/json"
+		}
 		if b["id"] != "d1" || b["revision"] != float64(7) || b["save_token"] != "proof" || b["approve_risk"] != false {
 			t.Errorf("publication=%v", b)
 		}
@@ -60,5 +68,24 @@ func TestRoutineDraftPublishFailsWithoutProof(t *testing.T) {
 	cmd := newRoutineDraftCommand("publish")
 	if err := cmd.RunE(cmd, []string{file}); err == nil {
 		t.Fatal("accepted missing proof")
+	}
+}
+
+func TestRoutineDraftPublishRejectsMissingDefinitionLocally(t *testing.T) {
+	for _, doc := range []string{`{}`, `{"definition":null}`, `{"definition":[]}`} {
+		t.Run(doc, func(t *testing.T) {
+			stub := covSetupCli5(t)
+			called := false
+			stub.OnPost("/api/v1/workspaces/"+covWSCli5+"/pipelines/test_run", func(*http.Request, []byte) (int, []byte, string) { called = true; return 400, nil, "application/json" })
+			file := filepath.Join(t.TempDir(), "draft.json")
+			if err := os.WriteFile(file, []byte(`{"id":"d","slug":"digest","revision":1,"document":`+doc+`}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := newRoutineDraftCommand("publish")
+			err := cmd.RunE(cmd, []string{file})
+			if err == nil || !strings.Contains(err.Error(), "definition object") || called {
+				t.Fatalf("expected local definition error without HTTP request: %v, called=%v", err, called)
+			}
+		})
 	}
 }
