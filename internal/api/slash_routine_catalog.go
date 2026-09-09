@@ -166,11 +166,17 @@ func slashFormSchemaForInputs(inputs []pipeline.InputSpec) []slashFormField {
 			continue
 		}
 		out = append(out, slashFormField{
-			Name:      in.Name,
-			Type:      slashWidgetForInputType(in.Type),
-			Required:  in.Required,
-			Default:   formatInputDefault(in.Default),
-			ValueType: in.Type,
+			Name:        in.Name,
+			Label:       in.Label,
+			Type:        routineInputWidget(in),
+			Min:         in.Min,
+			Max:         in.Max,
+			Options:     in.Options,
+			AllowCustom: in.AllowCustom,
+			Placeholder: in.Placeholder,
+			Required:    in.Required,
+			Default:     formatInputDefault(in.Default),
+			ValueType:   in.Type,
 			// The author's own words about what the value means. Without
 			// this the chat form shows a bare box labelled `obdobi` while
 			// the routine's detail page — which reads the definition
@@ -316,4 +322,17 @@ func (h *SlashCommandsHandler) routineSlashCommands(ctx context.Context, workspa
 			"workspace_id", workspaceID, "limit", maxSlashRoutineCommands, "dropped", truncated)
 	}
 	return out
+}
+
+func routineInputWidget(in pipeline.InputSpec) string {
+	if len(in.Options) > 0 {
+		if in.Type == "array" {
+			return "multiselect"
+		}
+		return "select"
+	}
+	if in.Widget != "" {
+		return in.Widget
+	}
+	return slashWidgetForInputType(in.Type)
 }

@@ -32,7 +32,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
+
 - **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
+
 - **The issue work contract has its CLI half** (#2449) — `crewship issue review-policy` requires or drops human acceptance before an issue counts as done, and `crewship issue result` prints what one of an issue's runs reported back. Both endpoints existed with no command, so the web panel was their only door; the rule is that every endpoint gets one, because that is the contract an agent drives. Their acceptance tests run the binary against a real router, and so does `crewship issue work`, which had none.
 
 - **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
@@ -86,6 +89,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
 
 ### Changed
+
+- **Two OSV advisories published overnight, cleared** — `sharp` 0.35.3 → 0.35.4 and, transitively, every `@img/sharp-*` platform sibling plus `@img/sharp-libvips-*` 1.3.3. The advisory (GHSA-rgj7-g3m4-5g8c, CVSS 8.9) is not in sharp's own code but in the libheif it bundles, so the override floor moves rather than a direct dependency. `google.golang.org/grpc` 1.83.1 → 1.83.2 (GHSA-2v4p-qf9q-27wj), an indirect module. Neither was introduced by a change here: both versions sat on `main` while the Security workflow was green, and the scanner reads a live advisory database, so the build went red without a commit. The remaining finding, `golang.org/x/crypto` 0.56.0 (GO-2026-5932), has no fixed version published and is Unknown severity, which the gate does not block on.
 
 - ⚠️ **The Go language floor moved 1.26 → 1.27** — `go.mod`'s `go` directive, which is a promise to anyone building Crewship from source, not just a CI detail. It was held at 1.26 deliberately since #2060 and moved here because a dependency forced it: `shoutrrr` v0.19.0 declares `go 1.27`, and the go command refuses a main module whose floor sits below its dependencies'. Building from source now needs a 1.27 toolchain. `scripts/go-toolchain-pin.sh` still does **not** check this line — it is a separate decision from which compiler builds the release, and folding the two together would raise the floor silently on every toolchain bump.
 

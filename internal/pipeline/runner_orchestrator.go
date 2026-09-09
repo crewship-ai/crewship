@@ -54,14 +54,15 @@ import (
 // one pipeline run; the executor's StepOutputs map is the only
 // communication channel).
 type OrchestratorRunner struct {
-	db        *sql.DB
-	orch      *orchestrator.Orchestrator
-	container provider.ContainerProvider
-	resolver  chatbridge.ChatResolver
-	logWriter *logcollector.Writer
-	convStore *conversation.Store
-	journalE  journal.Emitter
-	logger    *slog.Logger
+	artifactPublisher ArtifactPublisher
+	db                *sql.DB
+	orch              *orchestrator.Orchestrator
+	container         provider.ContainerProvider
+	resolver          chatbridge.ChatResolver
+	logWriter         *logcollector.Writer
+	convStore         *conversation.Store
+	journalE          journal.Emitter
+	logger            *slog.Logger
 	// crewRuntime resolves a crew's full PROVISIONED container config
 	// (cached image, mounts, caps, env, limits) by crew id, so a script
 	// step's cold-crew container launches from the provisioned image —
@@ -92,14 +93,15 @@ func (r *OrchestratorRunner) SetAgentRunLock(l *chatbridge.AgentRunLock) {
 // documented purpose so a wiring miss is easy to spot at the
 // construction site.
 type OrchestratorRunnerDeps struct {
-	DB        *sql.DB
-	Orch      *orchestrator.Orchestrator
-	Container provider.ContainerProvider
-	Resolver  chatbridge.ChatResolver
-	LogWriter *logcollector.Writer // optional
-	ConvStore *conversation.Store  // optional
-	Journal   journal.Emitter      // optional
-	Logger    *slog.Logger
+	ArtifactPublisher ArtifactPublisher
+	DB                *sql.DB
+	Orch              *orchestrator.Orchestrator
+	Container         provider.ContainerProvider
+	Resolver          chatbridge.ChatResolver
+	LogWriter         *logcollector.Writer // optional
+	ConvStore         *conversation.Store  // optional
+	Journal           journal.Emitter      // optional
+	Logger            *slog.Logger
 	// CrewRuntime resolves a crew id → provisioned CrewConfig for script
 	// steps (see the field doc on OrchestratorRunner). Optional: nil falls
 	// back to a minimal {ID} config.
@@ -133,16 +135,17 @@ func NewOrchestratorRunner(deps OrchestratorRunnerDeps) (*OrchestratorRunner, er
 		deps.Logger = slog.Default()
 	}
 	return &OrchestratorRunner{
-		db:           deps.DB,
-		orch:         deps.Orch,
-		container:    deps.Container,
-		resolver:     deps.Resolver,
-		logWriter:    deps.LogWriter,
-		convStore:    deps.ConvStore,
-		journalE:     deps.Journal,
-		logger:       deps.Logger,
-		crewRuntime:  deps.CrewRuntime,
-		agentRunLock: deps.AgentRunLock,
+		artifactPublisher: deps.ArtifactPublisher,
+		db:                deps.DB,
+		orch:              deps.Orch,
+		container:         deps.Container,
+		resolver:          deps.Resolver,
+		logWriter:         deps.LogWriter,
+		convStore:         deps.ConvStore,
+		journalE:          deps.Journal,
+		logger:            deps.Logger,
+		crewRuntime:       deps.CrewRuntime,
+		agentRunLock:      deps.AgentRunLock,
 	}, nil
 }
 

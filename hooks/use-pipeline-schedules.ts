@@ -127,14 +127,6 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
       )
       if (controller.signal.aborted) return
       if (!res.ok) {
-        // 503 = backend not wired yet (scheduler skipped on test
-        // server / build without DB). Treat as "no schedules" rather
-        // than a hard error so the page still renders.
-        if (res.status === 503) {
-          setSchedules([])
-          setLoading(false)
-          return
-        }
         setError(`pipeline schedules: ${res.status}`)
         setLoading(false)
         return

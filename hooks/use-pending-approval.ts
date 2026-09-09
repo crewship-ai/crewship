@@ -17,6 +17,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 // timeout sweeper) all re-fetch.
 
 export interface PendingWaitpoint {
+  inbox_item_id?: string
   token: string
   pipeline_run_id: string
   step_id: string

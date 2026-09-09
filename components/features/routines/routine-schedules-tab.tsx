@@ -8,10 +8,12 @@ import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, Pill, FieldLabel } from "./_shared"
+import { Card, Pill, FieldLabel } from "./_shared"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { RoutineOnceSchedule } from "./routine-once-schedule"
+import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import { RoutineScheduleEditorDialog } from "./routine-schedule-editor-dialog"
 
 // RoutineSchedulesTab — cron-trigger CRUD restyled for the dashboard.
@@ -133,49 +135,20 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
         </Card>
       )}
 
-      {/* §13.2 "If it overlaps" — read-only: concurrency_key/max_concurrent
-          are routine-wide DSL fields, not per-schedule, so the writable
-          door is the Editor tab, not a control here. */}
-      <Card title="If it overlaps" subtitle="applies to every trigger of this routine">
-        <div className="px-4 py-3 text-[12px] text-muted-foreground" data-testid="schedule-concurrency-readonly">
-          {concurrencyKey ? (
-            <>
-              Serialized by <span className="font-mono text-foreground/85">{concurrencyKey}</span>, up to{" "}
-              <span className="text-foreground/85">{maxConcurrent && maxConcurrent > 0 ? maxConcurrent : 1}</span> at once — a new run beyond
-              that limit is rejected (429), not queued.
-            </>
-          ) : (
-            "Unbounded — no concurrency_key set, so runs of this routine never wait on each other."
-          )}
-          {" "}Change it in the routine's Editor tab (
-          <span className="font-mono">concurrency_key</span> / <span className="font-mono">max_concurrent</span>
-          ).
-        </div>
-      </Card>
+      <section aria-label="Schedules" className="space-y-4">
+
 
       {/* List card */}
       {ours.length === 0 && !formOpen ? (
-        <Card title="Schedules">
-          <EmptyState
-            icon={Calendar}
-            title="No schedules yet"
-            description="Add a cron trigger to run this routine on a cadence. Schedules are workspace-wide cron jobs that invoke this routine with optional preset inputs."
-            action={
-              <Button
-                size="sm"
-                variant="default"
-                onClick={() => setFormOpen(true)}
-                className="h-9 gap-1.5 px-4 text-sm"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add schedule
-              </Button>
-            }
-          />
+        <Card title="Repeating schedules">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+            <p className="text-sm text-muted-foreground">Choose the days and time this routine should repeat.</p>
+            <Button size="sm" onClick={() => setFormOpen(true)}><Plus className="mr-1 h-3.5 w-3.5" />Add schedule</Button>
+          </div>
         </Card>
-      ) : (
+      ) : ours.length > 0 ? (
         <Card
-          title="Active schedules"
+          title="Repeating schedules"
           subtitle={`${ours.length} for this routine`}
           action={
             !formOpen && (
@@ -222,12 +195,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                     )}
                     <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12px] text-muted-foreground">
-                    <span>{s.cron_expr}</span>
-                    <span className="opacity-60">·</span>
-                    <span>{s.timezone}</span>
-                    <span className="text-foreground/70">— {describeCron(s.cron_expr)}</span>
-                  </div>
+                  <div className="text-xs text-muted-foreground"><span className="text-foreground/80">{describeCron(s.cron_expr)}</span><span> · {s.timezone}</span></div>
                   {health.reason && (
                     <p
                       className={cn(
@@ -243,12 +211,12 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                     <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
                       {s.next_run_at && (
                         <span>
-                          Next: <span className="text-foreground/85">{new Date(s.next_run_at).toLocaleString()}</span>
+                          Next: <span className="text-foreground/85">{new Date(s.next_run_at).toLocaleString("en-GB")}</span>
                         </span>
                       )}
                       {s.last_run_at && (
                         <span>
-                          Last: <span className="text-foreground/85">{new Date(s.last_run_at).toLocaleString()}</span>
+                          Last: <span className="text-foreground/85">{new Date(s.last_run_at).toLocaleString("en-GB")}</span>
                           {s.last_status && (
                             <span className="ml-1 text-muted-foreground">({s.last_status})</span>
                           )}
@@ -322,7 +290,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
             })}
           </ol>
         </Card>
-      )}
+      ) : null}
 
       {/* Inline form */}
       {formOpen && (
@@ -337,28 +305,8 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                 className="mt-1.5 h-9 text-sm"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <FieldLabel>Cron expression</FieldLabel>
-                <Input
-                  aria-label="Cron expression"
-                  value={cronExpr}
-                  onChange={(e) => setCronExpr(e.target.value)}
-                  className="mt-1.5 h-9 font-mono text-sm"
-                />
-                <p className="mt-1.5 text-[11px] text-muted-foreground">{describeCron(cronExpr)}</p>
-              </div>
-              <div>
-                <FieldLabel>Timezone</FieldLabel>
-                <Input
-                  aria-label="Timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className="mt-1.5 h-9 text-sm"
-                />
-              </div>
-            </div>
-            <div>
+            <RoutineRecurrenceFields cron={cronExpr} timezone={timezone} onCronChange={setCronExpr} onTimezoneChange={setTimezone} />
+            <details><summary className="cursor-pointer text-xs text-muted-foreground">Advanced inputs · JSON</summary><div className="mt-3">
               <FieldLabel>Inputs (JSON)</FieldLabel>
               <textarea
                 aria-label="Inputs JSON"
@@ -370,6 +318,7 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
                 Passed as inputs to every invocation. Leave as <span className="font-mono">{`{}`}</span> for default inputs.
               </p>
             </div>
+            </details>
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setFormOpen(false)} disabled={busy} className="h-9 px-4">
                 Cancel
@@ -381,6 +330,31 @@ export function RoutineSchedulesTab({ workspaceId, pipelineId, slug, concurrency
           </div>
         </Card>
       )}
+
+      <RoutineOnceSchedule key={slug} workspaceId={workspaceId} slug={slug} />
+      </section>
+      <details className="rounded-xl border border-border/60 bg-card p-4"><summary className="cursor-pointer text-xs text-muted-foreground">Advanced execution settings</summary>
+      {/* §13.2 "If it overlaps" — read-only: concurrency_key/max_concurrent
+          are routine-wide DSL fields, not per-schedule, so the writable
+          door is the Editor tab, not a control here. */}
+      <Card title="If it overlaps" subtitle="applies to every trigger of this routine">
+        <div className="px-4 py-3 text-[12px] text-muted-foreground" data-testid="schedule-concurrency-readonly">
+          {concurrencyKey ? (
+            <>
+              Serialized by <span className="font-mono text-foreground/85">{concurrencyKey}</span>, up to{" "}
+              <span className="text-foreground/85">{maxConcurrent && maxConcurrent > 0 ? maxConcurrent : 1}</span> at once — a new run beyond
+              that limit is rejected (429), not queued.
+            </>
+          ) : (
+            "Unbounded — no concurrency_key set, so runs of this routine never wait on each other."
+          )}
+          {" "}Change it using Edit code in Definition (
+          <span className="font-mono">concurrency_key</span> / <span className="font-mono">max_concurrent</span>
+          ).
+        </div>
+      </Card>
+
+      </details>
 
       <RoutineScheduleEditorDialog
         schedule={editing}

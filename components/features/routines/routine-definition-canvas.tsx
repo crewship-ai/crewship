@@ -45,7 +45,7 @@ function definitionRun(slug: string, name: string): PipelineRun {
     sub_spans: null,
     cost_usd: 0,
     duration_ms: 0,
-    triggered_via: "schedule",
+    triggered_via: "definition",
     triggered_by_id: "",
     invoking_crew_id: "",
     invoking_agent_id: "",
@@ -102,7 +102,7 @@ export function RoutineDefinitionCanvas({
         waitpointTokensByStepId={NO_TOKENS}
         heatmapBuckets={NO_BUCKETS}
         stepMetrics={NO_METRICS}
-        initialFocus="start"
+        initialFocus="all"
         centerOnSelect
         focusStepId={focusStepId}
         recenterOnResize

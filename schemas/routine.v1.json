@@ -159,6 +159,11 @@
       "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
+        "widget": { "type": "string", "enum": ["text", "textarea", "number", "boolean", "select", "multiselect"] },
+        "options": { "type": "array", "maxItems": 200, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "allow_custom": { "type": "boolean", "description": "Permit a custom answer alongside a single-choice string list." },
+        "placeholder": { "type": "string" },
+        "label": { "type": "string", "description": "Human-readable field name; name stays the stable input key." },
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
@@ -182,6 +187,8 @@
       "required": ["name", "type"],
       "additionalProperties": false,
       "properties": {
+        "label": { "type": "string" },
+        "value_labels": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Author-defined descriptions of primitive result values." },
         "name": { "type": "string" },
         "type": { "type": "string", "enum": ["string", "integer", "number", "boolean", "array", "object"] },
         "description": { "type": "string" }
@@ -367,6 +374,7 @@
       "additionalProperties": false,
       "description": "Rubric-based output evaluation by a separate grader agent. Runs after structural Validation passes. Iterates the worker if rubric fails (up to max_iterations). agent_run-only.",
       "properties": {
+        "required": {"type": "boolean", "description": "Fail closed if the grader cannot establish a verdict. Omitted preserves legacy advisory behavior on grader errors."},
         "grader_agent_slug": {
           "type": "string",
           "description": "Slug of an agent in the routine's AUTHOR crew that grades worker output. Cross-family judging recommended (smart-tier judge for fast-tier worker)."

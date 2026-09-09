@@ -22,6 +22,9 @@ export interface Pipeline {
   invocation_count: number
   last_invoked_at?: string
   last_invocation_status?: string
+  head_version?: number
+  last_recorded_run_id?: string
+  last_run_outcome?: string
   icon?: string
   color?: string
   // Lifecycle status: "active" (normal/runnable), "proposed" (risky /

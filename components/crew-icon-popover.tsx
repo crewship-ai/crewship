@@ -12,6 +12,8 @@ import {
 import { cn } from "@/lib/utils"
 
 interface CrewIconPopoverProps {
+  modal?: boolean
+  ariaLabel?: string
   icon: string
   color: string
   size?: "sm" | "md" | "lg" | "xl"
@@ -19,7 +21,7 @@ interface CrewIconPopoverProps {
   onColorChange: (color: string) => void
 }
 
-export function CrewIconPopover({ icon, color, size = "xl", onIconChange, onColorChange }: CrewIconPopoverProps) {
+export function CrewIconPopover({ icon, color, size = "xl", ariaLabel = "Choose crew icon", modal = false, onIconChange, onColorChange }: CrewIconPopoverProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
@@ -45,9 +47,9 @@ export function CrewIconPopover({ icon, color, size = "xl", onIconChange, onColo
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={setOpen} modal={modal}>
       <PopoverTrigger asChild>
-        <button type="button" className="relative group cursor-pointer" aria-label="Choose crew icon">
+        <button type="button" className="relative group cursor-pointer" aria-label={ariaLabel}>
           <CrewIcon icon={icon} color={color} size={size} />
           <div className={cn(
             "absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center",
@@ -69,6 +71,8 @@ export function CrewIconPopover({ icon, color, size = "xl", onIconChange, onColo
               return (
                 <button
                   key={p.id}
+                  aria-label={`Choose ${p.id} color`}
+                  aria-pressed={active}
                   type="button"
                   onClick={() => onColorChange(p.id)}
                   className="transition-all hover:scale-105 shrink-0"

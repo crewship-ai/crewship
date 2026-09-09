@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -26,8 +28,9 @@ const maxExecBodyBytes = 1 << 20 // 1 MiB
 // any other value is silently ignored (treat as no override) so a
 // future tier name added to the executor doesn't break old clients.
 type runRequestBody struct {
-	Inputs       map[string]any `json:"inputs"`
-	TierOverride string         `json:"tier_override,omitempty"`
+	PinnedVersion *int           `json:"pinned_version,omitempty"`
+	Inputs        map[string]any `json:"inputs"`
+	TierOverride  string         `json:"tier_override,omitempty"`
 	// TriggeredVia + TriggeredByID let the caller (UI button, issue
 	// detail panel, etc.) attribute the run for the dashboards. Server
 	// validates against the closed enum so a malicious / typo'd value
@@ -44,6 +47,7 @@ type runRequestBody struct {
 	// Any of DelaySeconds>0 or DebounceKey set parks the trigger in
 	// pending_runs; the dispatcher fires it priority-first, expiring it
 	// if TTLSeconds elapses first. Priority orders the dispatch queue.
+	FireAt               string `json:"fire_at,omitempty"`
 	DelaySeconds         int    `json:"delay_seconds,omitempty"`
 	TTLSeconds           int    `json:"ttl_seconds,omitempty"`
 	DebounceKey          string `json:"debounce_key,omitempty"`
@@ -125,6 +129,30 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Historical manual starts still pass current governance and the selected
+	// recipe's integration/resource/credential preflight. Never gate HEAD and
+	// then execute a different archived definition.
+	if body.PinnedVersion != nil {
+		if *body.PinnedVersion <= 0 {
+			replyError(w, http.StatusBadRequest, "pinned_version must be positive")
+			return
+		}
+		if body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "" {
+			replyError(w, http.StatusBadRequest, "pinned_version is supported for immediate manual starts; configure the version on a schedule for planned starts")
+			return
+		}
+		v, verr := h.store.GetVersion(r.Context(), p.ID, *body.PinnedVersion)
+		if errors.Is(verr, pipeline.ErrNotFound) {
+			replyError(w, http.StatusNotFound, "recipe version not found")
+			return
+		}
+		if verr != nil {
+			replyError(w, http.StatusInternalServerError, "load recipe version")
+			return
+		}
+		p.DefinitionJSON = v.DefinitionJSON
+	}
+
 	// invoking_crew_id / invoking_agent_id come from a future
 	// header (X-Crewship-Invoking-Crew, X-Crewship-Invoking-Agent)
 	// that the sidecar will inject when an in-container agent
@@ -176,6 +204,10 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// dispatcher path doesn't re-check), which fails fast on a forgotten
 	// integration rather than after the delay elapses.
 	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if err := pipeline.ValidateFormInputs(dsl, body.Inputs); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if h.gateMissingIntegrations(w, r, workspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}
@@ -202,13 +234,14 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	// fires it priority-first once fire_at arrives (and expires it if
 	// ttl elapses first). Immediate runs (no delay/debounce) fall through
 	// to the synchronous path below unchanged.
-	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "") {
+	if h.db != nil && (body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "") {
 		h.enqueueDeferredRun(w, r, workspaceID, invokingUser, p, body)
 		return
 	}
 
 	exec := h.newExecutor()
 	input := pipeline.RunInput{
+		PinnedVersion:     body.PinnedVersion,
 		PipelineID:        p.ID,
 		WorkspaceID:       workspaceID,
 		InvokingCrewID:    invokingCrew,
@@ -267,7 +300,46 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, map[string]string{"run_id": dispatch.RunID, "status": "IN_PROGRESS"})
 		return
 	}
-	res, err := exec.Run(r.Context(), input)
+	var res *pipeline.RunResult
+	if strings.Contains(r.Header.Get("Prefer"), "respond-async") {
+		type finishedRun struct {
+			result *pipeline.RunResult
+			err    error
+		}
+		started := make(chan string, 1)
+		finished := make(chan finishedRun, 1)
+		input.OnStarted = func(id string) {
+			select {
+			case started <- id:
+			default:
+			}
+		}
+		finish := beginBackgroundWork()
+		parent := h.lifecycleCtx
+		if parent == nil {
+			parent = context.Background()
+		}
+		go func() {
+			defer finish()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					finished <- finishedRun{err: fmt.Errorf("routine panicked: %v", recovered)}
+				}
+			}()
+			result, runErr := exec.Run(parent, input)
+			finished <- finishedRun{result, runErr}
+		}()
+		select {
+		case id := <-started:
+			w.Header().Set("Preference-Applied", "respond-async")
+			writeJSON(w, http.StatusAccepted, map[string]string{"run_id": id, "status": "IN_PROGRESS"})
+			return
+		case done := <-finished:
+			res, err = done.result, done.err
+		}
+	} else {
+		res, err = exec.Run(r.Context(), input)
+	}
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal
 		// error. Map before the catch-all.
@@ -354,6 +426,10 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// Integration + resource preconditions (same fail-open contract as Run).
 	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		if err := pipeline.ValidateFormInputs(dsl, body.Inputs); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if h.gateMissingIntegrations(w, r, body.WorkspaceID, p.AuthorCrewID, "", dsl.NormalizedIntegrationsRequired()) {
 			return
 		}
@@ -738,7 +814,11 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	if tagFilter != "" {
 		records, err = h.runStore.ListByTag(r.Context(), p.ID, tagFilter, limit)
 	} else {
-		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit)
+		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit, r.URL.Query().Get("before"))
+	}
+	if errors.Is(err, pipeline.ErrUnknownRunCursor) {
+		replyError(w, http.StatusBadRequest, "unknown 'before' cursor for this routine")
+		return
 	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)
@@ -748,6 +828,7 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	// Stable wire shape — explicit DTO so internal renames don't
 	// silently break the API contract.
 	type runRecordDTO struct {
+		PipelineVersion  *int    `json:"pipeline_version,omitempty"`
 		ID               string  `json:"id"`
 		PipelineID       string  `json:"pipeline_id"`
 		PipelineSlug     string  `json:"pipeline_slug"`
@@ -796,16 +877,17 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	out := make([]runRecordDTO, 0, len(records))
 	for _, rec := range records {
 		dto := runRecordDTO{
-			ID:            rec.ID,
-			PipelineID:    rec.PipelineID,
-			PipelineSlug:  rec.PipelineSlug,
-			Status:        string(rec.Status),
-			Mode:          string(rec.Mode),
-			StartedAt:     rec.StartedAt.Format(time.RFC3339Nano),
-			CurrentStepID: rec.CurrentStepID,
-			Output:        rec.Output,
-			CostUSD:       rec.CostUSD,
-			DurationMs:    rec.DurationMs,
+			PipelineVersion: rec.PipelineVersion,
+			ID:              rec.ID,
+			PipelineID:      rec.PipelineID,
+			PipelineSlug:    rec.PipelineSlug,
+			Status:          string(rec.Status),
+			Mode:            string(rec.Mode),
+			StartedAt:       rec.StartedAt.Format(time.RFC3339Nano),
+			CurrentStepID:   rec.CurrentStepID,
+			Output:          rec.Output,
+			CostUSD:         rec.CostUSD,
+			DurationMs:      rec.DurationMs,
 			// Sanitize: error_message comes verbatim from executor /
 			// runner / DB driver — could carry stack traces, file
 			// paths, half-rendered prompts, secrets the validation
@@ -1047,11 +1129,12 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 func (h *PipelineHandler) ListPendingWaitpoints(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT token, pipeline_run_id, step_id, kind, COALESCE(prompt, ''), COALESCE(invoking_crew_id, ''),
-       timeout_at, created_at
-FROM pipeline_waitpoints
-WHERE workspace_id = ? AND status = 'pending'
-ORDER BY created_at DESC
+SELECT wp.token, wp.pipeline_run_id, wp.step_id, wp.kind, COALESCE(wp.prompt, ''), COALESCE(wp.invoking_crew_id, ''),
+       wp.timeout_at, wp.created_at,
+       COALESCE((SELECT i.id FROM inbox_items i WHERE i.workspace_id=wp.workspace_id AND i.kind='waitpoint' AND i.source_id=wp.token LIMIT 1), '')
+FROM pipeline_waitpoints wp
+WHERE wp.workspace_id = ? AND wp.status = 'pending'
+ORDER BY wp.created_at DESC
 LIMIT 200`, workspaceID)
 	if err != nil {
 		h.logger.Error("waitpoints list", "error", err)
@@ -1060,6 +1143,7 @@ LIMIT 200`, workspaceID)
 	}
 	defer rows.Close()
 	type wpRow struct {
+		InboxItemID    string `json:"inbox_item_id,omitempty"`
 		Token          string `json:"token"`
 		PipelineRunID  string `json:"pipeline_run_id"`
 		StepID         string `json:"step_id"`
@@ -1079,7 +1163,7 @@ LIMIT 200`, workspaceID)
 	out := make([]wpRow, 0, 50)
 	for rows.Next() {
 		var row wpRow
-		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt); err == nil {
+		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt, &row.InboxItemID); err == nil {
 			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
 			out = append(out, row)
 		}

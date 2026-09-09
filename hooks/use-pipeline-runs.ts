@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api-fetch"
 // issue_identifier so the UI doesn't fan out to per-row lookups.
 export interface PipelineRun {
   id: string
+  outcome?: string
   pipeline_id: string
   pipeline_slug: string
   pipeline_name: string

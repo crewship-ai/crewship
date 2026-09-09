@@ -8,6 +8,7 @@ import { useJournalList } from "@/hooks/use-journal-list"
 import { useJournalStream } from "@/hooks/use-journal-stream"
 import type { JournalEntry } from "@/lib/types/journal"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 import {
   extractVerdict,
@@ -62,6 +63,8 @@ export const RUN_WORK_ENTRY_TYPES = [
 ] as const
 
 interface RunActivityTimelineProps {
+  /** Routine run view: expose pagination/errors and expand the event rail. */
+  showControls?: boolean
   workspaceId: string | null
   /**
    * Journal filter params — e.g. `{ mission_id }` for an issue run or
@@ -97,6 +100,7 @@ export function RunActivityTimeline({
   workspaceId,
   params,
   live = true,
+  showControls = false,
   title = "Run activity",
   hideWhenEmpty = true,
   forceRunning = false,
@@ -111,7 +115,7 @@ export function RunActivityTimeline({
   const paramsKey = JSON.stringify(params)
   const stableParams = useMemo(() => params, [paramsKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { entries, loading, prependLive } = useJournalList({
+  const { entries, loading, prependLive, error, refresh, nextCursor, loadMore, loadingMore } = useJournalList({
     workspaceId,
     params: stableParams,
     enabled,
@@ -125,13 +129,19 @@ export function RunActivityTimeline({
     (entry: JournalEntry) => {
       if (params.trace_id && entry.trace_id !== params.trace_id) return
       if (params.mission_id && entry.mission_id !== params.mission_id) return
+      if (params.run_id && entry.trace_id !== params.run_id && entry.actor_id !== params.run_id && entry.payload?.run_id !== params.run_id) return
       prependLive(entry)
     },
-    [params.trace_id, params.mission_id, prependLive],
+    [params.trace_id, params.mission_id, params.run_id, prependLive],
   )
   useJournalStream({ workspaceId, params: stableParams, enabled: enabled && live, onEntry })
 
-  const rows = useMemo(() => humanizeRun(entries), [entries])
+  const rows = useMemo(() => {
+    const rows = humanizeRun(entries)
+    if (!showControls) return rows
+    const completed = new Set(entries.filter(e => e.entry_type === "pipeline.run.completed").map(e => e.id))
+    return rows.map(row => completed.has(row.id) ? { ...row, title: "Execution completed", detail: "The result verdict is shown in Run summary." } : row)
+  }, [entries, showControls])
   // Extracted from the raw entries, NOT from `rows` — a verdict is generated
   // AFTER the run finishes, so by wall-clock timestamp it would otherwise
   // sort to the end of `rows`. It's rendered as a pinned header instead (see
@@ -143,22 +153,20 @@ export function RunActivityTimeline({
   const running = detectedRunning || (forceRunning && entries.length === 0)
 
   if (!enabled) return null
-  if (hideWhenEmpty && !loading && rows.length === 0 && !running) return null
+  if (hideWhenEmpty && !loading && rows.length === 0 && !running && !(showControls && error)) return null
 
-  return (
-    <RunActivityRail
-      rows={rows}
-      verdict={verdict}
-      running={running}
-      loading={loading}
-      title={title}
-      card={card}
-      className={className}
-    />
-  )
+  const rail = <RunActivityRail rows={rows} verdict={verdict} running={running} loading={loading} title={title} card={card} className={className} defaultExpanded={showControls} rowNoun={showControls ? "event" : "step"} />
+  if (!showControls) return rail
+  return <div className="space-y-3">
+    {error && <p role="alert" className="rounded-xl border border-destructive/20 bg-card p-4 text-sm text-destructive">Activity could not be loaded. <button className="underline" onClick={() => void refresh()}>Retry</button></p>}
+    {(!error || rows.length > 0) && rail}
+    {nextCursor && <Button variant="outline" size="sm" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? "Loading events…" : "Load older events"}</Button>}
+  </div>
 }
 
 interface RunActivityRailProps {
+  defaultExpanded?: boolean
+  rowNoun?: "step" | "event"
   rows: RunActivityRow[]
   /** LLM-generated outcome verdict (#1403) — pinned as the rail's first,
    * always-visible row. When present, the step timeline below it starts
@@ -203,6 +211,8 @@ const VERDICT_ICON_TONE: Record<RunVerdictOutcome, string> = {
 export function RunActivityRail({
   rows,
   verdict,
+  defaultExpanded = false,
+  rowNoun = "step",
   running = false,
   waiting = false,
   loading = false,
@@ -214,7 +224,7 @@ export function RunActivityRail({
   // Collapsed by default when a verdict exists — the one-liner is the
   // answer; the full step timeline is opt-in detail. No verdict → always
   // open, matching the rail's behavior before #1403.
-  const [timelineOpen, setTimelineOpen] = useState(!verdict)
+  const [timelineOpen, setTimelineOpen] = useState(defaultExpanded || !verdict)
   const open = verdict ? timelineOpen : true
   const VerdictIcon = verdict ? VERDICT_ICON[verdict.outcome] : null
 
@@ -280,7 +290,7 @@ export function RunActivityRail({
     return (
       <DetailCard
         title={title}
-        subtitle={rows.length > 0 ? `${rows.length} ${rows.length === 1 ? "step" : "steps"}` : undefined}
+        subtitle={rows.length > 0 ? `${rows.length} ${rowNoun}${rows.length === 1 ? "" : "s"}` : undefined}
         action={status}
         className={className}
         data-testid="run-activity"
@@ -301,7 +311,7 @@ export function RunActivityRail({
           {status}
         </div>
         {rows.length > 0 && (
-          <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} steps</span>
+          <span className="text-[10px] text-foreground/35 tabular-nums">{rows.length} {rowNoun}{rows.length === 1 ? "" : "s"}</span>
         )}
       </div>
       {body}

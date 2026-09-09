@@ -151,6 +151,7 @@ export function RoutinesExplorer({
     if (filters.invocations !== "all") n++
     if (filters.authorAgentId) n++
     if (filters.showEphemeral) n++
+    if (filters.showTestRoutines) n++
     return n
   }, [filters])
 
@@ -296,6 +297,7 @@ export function RoutinesExplorer({
                   <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                     Visibility
                   </div>
+                  <button onClick={() => onChange({ ...filters, showTestRoutines: !filters.showTestRoutines })} aria-pressed={!!filters.showTestRoutines} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"><EyeOff className="h-3.5 w-3.5" /><span className="flex-1">Show test recipes</span>{filters.showTestRoutines && <Check className="h-3 w-3" />}</button>
                   <button
                     onClick={() => onChange({ ...filters, showEphemeral: !filters.showEphemeral })}
                     className={cn(
@@ -307,7 +309,7 @@ export function RoutinesExplorer({
                   >
                     <EyeOff className="h-3.5 w-3.5 shrink-0" />
                     <span className="flex-1">
-                      {filters.showEphemeral ? "Hiding nothing" : "Show ephemeral"}
+                      {filters.showEphemeral ? "Include ephemeral" : "Show ephemeral"}
                     </span>
                     {filters.showEphemeral && <Check className="h-3 w-3 shrink-0" />}
                   </button>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { initialAdminTab } from "../page"
+import { initialAdminTab } from "../navigation"
 
 // Admin was the one console whose URL never changed — /admin whichever section
 // you were on. So a section could not be bookmarked, pasted into a ticket, or

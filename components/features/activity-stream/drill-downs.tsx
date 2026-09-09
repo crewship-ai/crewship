@@ -23,19 +23,14 @@
 // one more village.
 
 import * as React from "react"
-import { Bot, CircleDot, Clock, ListTree, Terminal } from "lucide-react"
+import { Bot, CircleDot, Clock, ListTree } from "lucide-react"
 
 import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
-import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
-import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
-import { apiFetch } from "@/lib/api-fetch"
+import { RoutineRunDetail } from "@/components/features/routines/routine-run-detail"
 import { entityHref } from "@/lib/entity-links"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
-import { runHeadline } from "@/lib/run-digest"
 import { assignmentsOf } from "@/lib/activity-lenses"
 import type { ChainSummary } from "@/hooks/use-chains"
 
@@ -212,112 +207,6 @@ export interface RunDrillDownProps {
   routineSlug?: string
 }
 
-/**
- * Which routine a run belongs to, asked of the journal.
- *
- * `?run=<id>` is the commonest inbound link in the product (the inbox, the
- * bell, the dashboard, a routine's run rows) and it carries no routine. The
- * run's own row lives in the routine's run-records list, so without the slug
- * the page could only say "this run's record is not loaded" over a run the
- * journal can name. Every entry a routine run emits carries the slug in its
- * payload; one small read resolves it. `slug` is null while asking and ""
- * when the journal holds nothing for that id; `failed` is set when the
- * journal could not be asked at all, which is a different sentence than
- * "no routine claims this run" and gets a retry instead (S6).
- */
-function useRoutineSlugOfRun(
-  workspaceId: string,
-  runID: string,
-  known?: string,
-): { slug: string | null; failed: boolean; retry: () => void } {
-  const [slug, setSlug] = React.useState<string | null>(known ?? null)
-  const [failed, setFailed] = React.useState(false)
-  const [attempt, setAttempt] = React.useState(0)
-  React.useEffect(() => {
-    if (known) {
-      setSlug(known)
-      setFailed(false)
-      return
-    }
-    let cancelled = false
-    setSlug(null)
-    setFailed(false)
-    const qs = new URLSearchParams({ workspace_id: workspaceId, run_id: runID, limit: "20" })
-    apiFetch(`/api/v1/journal?${qs.toString()}`)
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return (await r.json()) as { entries?: Array<{ payload?: Record<string, unknown>; refs?: Record<string, unknown> }> }
-      })
-      .then((body) => {
-        if (cancelled) return
-        for (const e of body?.entries ?? []) {
-          const bag = { ...(e.payload ?? {}), ...(e.refs ?? {}) }
-          const found = bag["pipeline_slug"] ?? bag["routine_slug"]
-          if (typeof found === "string" && found) {
-            setSlug(found)
-            return
-          }
-        }
-        setSlug("")
-      })
-      .catch(() => {
-        if (cancelled) return
-        setFailed(true)
-        setSlug("")
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, runID, known, attempt])
-  const retry = React.useCallback(() => setAttempt((a) => a + 1), [])
-  return { slug, failed, retry }
-}
-
-/**
- * One run: what it did, step by step.
- *
- * This replaced a page whose whole content was "3 events mentioning this run" —
- * three journal lines saying started, step completed, completed. True, and not
- * what somebody clicking a run is asking. They want the picture the routine
- * shows, but of THIS execution: which step, when, how long, what it cost.
- *
- * The steps come from the routine's run-records list rather than a per-run
- * endpoint, because the record for this run carries its own output, duration
- * and error and the list is one indexed query the page beside this already
- * makes.
- */
-/**
- * A run's status as a tone, for the strip and the pill.
- *
- * `failed ? destructive : success` was the whole rule, so a run that was
- * cancelled, interrupted or still going rendered GREEN beside the word naming
- * its state — the strip's one job is to be readable at a glance, and a green
- * "cancelled" is read as fine. An unknown status gets the neutral tone rather
- * than a guess, the same rule rowStatusToken follows for colours.
- */
-function runStatusTone(status: string): StatItem["tone"] {
-  switch (status.toLowerCase()) {
-    case "completed":
-      return "success"
-    case "failed":
-    case "timeout":
-      return "destructive"
-    case "cancelled":
-    case "interrupted":
-    case "waiting":
-      return "warn"
-    default:
-      return "default"
-  }
-}
-
-/**
- * What the journal knows about a run as an AGENT run: who ran it, for which
- * crew, on which issue. GET /api/v1/runs/{id} answers for runs the mission
- * engine dispatched (they carry `mission_identifier`) and 404s for a routine
- * run, which has no run.* entries — so the links are drawn from what comes
- * back and nothing is invented for the other kind.
- */
 interface RunMeta {
   agent_slug?: string
   agent_name?: string
@@ -325,26 +214,6 @@ interface RunMeta {
   crew_slug?: string
   mission_id?: string
   mission_identifier?: string
-}
-
-function useRunMeta(runID: string): RunMeta | null {
-  const [meta, setMeta] = React.useState<RunMeta | null>(null)
-  React.useEffect(() => {
-    let cancelled = false
-    setMeta(null)
-    apiFetch(`/api/v1/runs/${encodeURIComponent(runID)}`)
-      .then(async (r) => (r.ok ? ((await r.json()) as RunMeta) : null))
-      .then((m) => {
-        if (!cancelled) setMeta(m)
-      })
-      .catch(() => {
-        if (!cancelled) setMeta(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [runID])
-  return meta
 }
 
 /** The §5 links of a run — routine, issue, agent, crew, journal — each through entityHref. */
@@ -358,131 +227,8 @@ export function runRelatedLinks(runID: string, routineSlug: string | undefined, 
   return out
 }
 
-export function RunDrillDown({ workspaceId, runID, routineSlug: knownSlug }: RunDrillDownProps) {
-  const meta = useRunMeta(runID)
-  const { slug: resolved, failed: lookupFailed, retry: retryLookup } = useRoutineSlugOfRun(workspaceId, runID, knownSlug)
-  const routineSlug = resolved || undefined
-  const resolving = resolved === null
-  const { records, loading: recordsLoading } = usePipelineRunRecords(workspaceId, routineSlug ?? null)
-  const loading = resolving || recordsLoading
-  const run = React.useMemo(() => records.find((r) => r.id === runID), [records, runID])
-
-  const head = run
-    ? runHeadline({
-        id: run.id,
-        status: run.status,
-        started_at: run.started_at,
-        duration_ms: run.duration_ms,
-        output: run.output,
-        error_message: run.error_message,
-      })
-    : null
-
-  const stats: StatItem[] = run
-    ? [
-        { label: "Status", value: run.status, tone: runStatusTone(run.status) },
-        { label: "Started", value: new Date(run.started_at).toLocaleTimeString(undefined, { hour12: false }), mono: true },
-        { label: "Duration", value: formatDurationMs(run.duration_ms), mono: true },
-        { label: "Cost", value: run.cost_usd > 0 ? `$${run.cost_usd.toFixed(4)}` : "—", mono: true },
-        { label: "Trigger", value: run.triggered_via ?? "—" },
-        // Depth 0 is the overwhelming majority, so naming it "started by hand"
-        // says more than the number does.
-        { label: "Composed", value: (run.chain_depth ?? 0) > 0 ? `depth ${run.chain_depth}` : "root" },
-      ]
-    : []
-
-  return (
-    <Shell>
-      <Appear order={0}>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="min-w-0 font-mono text-base font-semibold tracking-tight">{runID}</h1>
-          {run && <Pill tone={runStatusTone(run.status)}>{run.status}</Pill>}
-          {routineSlug && <Pill tone="default">{routineSlug}</Pill>}
-        </div>
-        {/* Where this run leads — the second leg of the one timeline. A run
-            used to be a dead end: nothing on this page linked its issue, its
-            agent or its journal. */}
-        <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="run-related-links">
-          {runRelatedLinks(runID, routineSlug, meta).map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-foreground hover:border-primary hover:no-underline"
-            >
-              {l.label}
-              <span aria-hidden className="text-muted-foreground">→</span>
-            </a>
-          ))}
-        </div>
-      </Appear>
-
-      {run && (
-        <Appear order={1}>
-          <StatStrip items={stats} />
-        </Appear>
-      )}
-
-      {/* What it produced, before what it emitted. The output IS the answer;
-          the journal lines are the evidence. */}
-      {head?.text && (
-        <Appear order={2}>
-          <DetailCard title="Result" subtitle={run?.failed_at_step ? `failed at ${run.failed_at_step}` : undefined}>
-            {/* Model- and author-written; React escapes it and nothing here
-                renders HTML from the server. */}
-            <pre className="max-h-[240px] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground">
-              {run?.status === "failed" ? run?.error_message : run?.output}
-            </pre>
-          </DetailCard>
-        </Appear>
-      )}
-
-      {loading && !run && (
-        <div className="flex items-center justify-center gap-2 py-16 text-xs text-muted-foreground">
-          <Spinner className="h-3.5 w-3.5" /> Loading the run…
-        </div>
-      )}
-
-      {!loading && !run && lookupFailed && (
-        <Appear order={2}>
-          <EmptyState
-            icon={Terminal}
-            title="Could not ask the journal which routine ran this"
-            description="The lookup that names the routine failed, so the run record could not be fetched. The steps below are whatever the journal answered on its own."
-            action={
-              <Button size="sm" variant="outline" onClick={retryLookup} data-testid="run-routine-lookup-retry">
-                Try again
-              </Button>
-            }
-          />
-        </Appear>
-      )}
-      {!loading && !run && !lookupFailed && (
-        <Appear order={2}>
-          <EmptyState
-            icon={Terminal}
-            title={routineSlug ? "This run is not in its routine's records" : "No routine claims this run"}
-            description={
-              routineSlug
-                ? `The routine “${routineSlug}” keeps its newest runs on file and this one is older than that window. Its steps, as the journal recorded them, are below.`
-                : "The journal holds no routine entries for this id, so there is no run record to show. Whatever it did record is below."
-            }
-          />
-        </Appear>
-      )}
-
-      {/* The steps, live. Same component the trace page uses, so a run reads
-          the same wherever it is opened. */}
-      <Appear order={3}>
-        <RunActivityTimeline
-          workspaceId={workspaceId}
-          params={{ run_id: runID }}
-          title="Steps"
-          card
-          hideWhenEmpty={false}
-        />
-      </Appear>
-    </Shell>
-  )
+export function RunDrillDown({ workspaceId, runID }: RunDrillDownProps) {
+  return <RoutineRunDetail key={`${workspaceId}:${runID}`} workspaceId={workspaceId} runId={runID} />
 }
 
 /* ------------------------------------------------------------------ *

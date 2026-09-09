@@ -1,27 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import type { JournalEntry } from "@/lib/types/journal"
 
 // Control the two data hooks the timeline composes. We drive `entries`
 // directly so the test exercises humanize + render, not the fetch layer.
 let mockEntries: JournalEntry[] = []
 let mockLoading = false
+let mockError: string | null = null
+let mockCursor: string | null = null
+const mockLoadMore = vi.fn()
+const mockRefresh = vi.fn()
+const mockPrepend = vi.fn()
+let mockOnEntry: ((entry: JournalEntry) => void) | undefined
 
 vi.mock("@/hooks/use-journal-list", () => ({
   useJournalList: () => ({
     entries: mockEntries,
     loading: mockLoading,
-    prependLive: () => {},
-    nextCursor: null,
+    prependLive: mockPrepend,
+    nextCursor: mockCursor,
     loadingMore: false,
-    error: null,
-    refresh: async () => {},
-    loadMore: async () => {},
+    error: mockError,
+    refresh: mockRefresh,
+    loadMore: mockLoadMore,
   }),
 }))
 
 vi.mock("@/hooks/use-journal-stream", () => ({
-  useJournalStream: () => ({ status: "connected", lastError: null }),
+  useJournalStream: ({ onEntry }: { onEntry: (entry: JournalEntry) => void }) => { mockOnEntry = onEntry; return { status: "connected", lastError: null } },
 }))
 
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
@@ -41,6 +47,9 @@ describe("RunActivityTimeline", () => {
   beforeEach(() => {
     mockEntries = []
     mockLoading = false
+    mockError = null
+    mockCursor = null
+    vi.clearAllMocks()
   })
 
   it("renders nothing without any filter", () => {
@@ -97,6 +106,9 @@ describe("RunActivityTimeline — card variant", () => {
   beforeEach(() => {
     mockEntries = []
     mockLoading = false
+    mockError = null
+    mockCursor = null
+    vi.clearAllMocks()
   })
 
   const twoSteps = () => [
@@ -138,4 +150,39 @@ describe("RunActivityTimeline — card variant", () => {
     expect(root).not.toHaveClass("rounded-xl")
     expect(screen.getByText("2 steps")).toBeInTheDocument()
   })
+})
+
+
+describe("routine activity controls", () => {
+  it("exposes fetch failure instead of claiming an empty history", () => {
+    mockEntries = []; mockLoading = false; mockError = "unavailable"; mockCursor = null
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls hideWhenEmpty={false} />)
+    expect(screen.getByRole("alert")).toHaveTextContent("Activity could not be loaded")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(mockRefresh).toHaveBeenCalled()
+    expect(screen.queryByText(/No activity/)).not.toBeInTheDocument()
+  })
+  it("lets the client retrieve older events from the same filtered journal", () => {
+    mockError = null; mockCursor = "older"; mockEntries = []
+    render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls hideWhenEmpty={false} />)
+    fireEvent.click(screen.getByRole("button", { name: "Load older events" }))
+    expect(mockLoadMore).toHaveBeenCalled()
+  })
+})
+
+
+it("counts journal events separately from recipe steps and names execution completion", () => {
+  mockError = null; mockCursor = null; mockEntries = [entry({ entry_type: "pipeline.run.completed", ts: "2026-06-26T10:31:09Z" })]
+  render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls card hideWhenEmpty={false} />)
+  expect(screen.getByText("1 event")).toBeInTheDocument()
+  expect(screen.getByText("Execution completed")).toBeInTheDocument()
+})
+
+it("ignores live events from other runs while accepting all supported run references", () => {
+  mockError = null; mockEntries = []; mockPrepend.mockClear()
+  render(<RunActivityTimeline workspaceId="ws_1" params={{ run_id: "run_1" }} showControls hideWhenEmpty={false} />)
+  mockOnEntry?.(entry({ entry_type: "pipeline.run.started", ts: "2026-06-26T10:31:00Z", actor_id: "run_other" }))
+  expect(mockPrepend).not.toHaveBeenCalled()
+  for (const reference of [{ actor_id: "run_1" }, { trace_id: "run_1" }, { payload: { run_id: "run_1" } }]) mockOnEntry?.(entry({ entry_type: "pipeline.run.started", ts: "2026-06-26T10:31:00Z", ...reference }))
+  expect(mockPrepend).toHaveBeenCalledTimes(3)
 })

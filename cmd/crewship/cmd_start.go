@@ -676,12 +676,13 @@ var startCmd = &cobra.Command{
 				loopbackURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port)
 				pipelineResolver := chatbridge.NewIPCResolver(loopbackURL, cfg.Auth.InternalToken, logger)
 				pipeRunner, err := pipeline.NewOrchestratorRunner(pipeline.OrchestratorRunnerDeps{
-					DB:        deps.DB,
-					Orch:      srv.Orchestrator(),
-					Container: deps.Container,
-					Resolver:  pipelineResolver,
-					LogWriter: srv.LogWriter(),
-					ConvStore: srv.ConversationStore(),
+					ArtifactPublisher: api.NewRoutineArtifactPublisher(deps.DB, cfg.Storage.BasePath),
+					DB:                deps.DB,
+					Orch:              srv.Orchestrator(),
+					Container:         deps.Container,
+					Resolver:          pipelineResolver,
+					LogWriter:         srv.LogWriter(),
+					ConvStore:         srv.ConversationStore(),
 					// Journal is the sink for agent sub-span capture (run.agent_span,
 					// the leaf of the drillable run-trace). Without it journalE is nil
 					// and emitRunAgentSpan silently no-ops, so the trace shows steps

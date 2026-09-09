@@ -200,7 +200,8 @@ type Executor struct {
 	// Nil = persistence disabled; runs stay in journal_entries +
 	// in-memory only (pre-v83 behaviour). Production wiring passes a
 	// real store at boot so list-active-runs + boot-recovery work.
-	runStore *RunStore
+	runStore       *RunStore
+	executionStore *ExecutionStore
 
 	// stateStore persists cross-run routine state (migration v155, #1420):
 	// the {{ routine.state.* }} read namespace + `state_write` step binding,
@@ -762,6 +763,11 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("executor: parse stored DSL: %w", err)
 	}
+	if in.Mode != ModeDryRun {
+		if err := ValidateFormInputs(dsl, in.Inputs); err != nil {
+			return nil, err
+		}
+	}
 	// Apply per-step prompt/model overrides (v121) over the versioned
 	// DSL. No-op when the store isn't wired or has no rows for this
 	// pipeline — the run then executes exactly as authored.
@@ -964,6 +970,9 @@ func (e *Executor) RunDefinition(ctx context.Context, dsl *DSL, in RunInput) (*R
 // The unexported pipeline + dsl fields are populated internally by
 // Run / RunDefinition; callers leave them zero.
 type RunInput struct {
+	// OnStarted runs after the run row is durable, before the first step.
+	OnStarted func(runID string)
+
 	PipelineID      string // optional; required only for Run (not RunDefinition)
 	WorkspaceID     string
 	AuthorCrewID    string // populated from pipeline row in Run
@@ -1179,6 +1188,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 	}
 
 	dsl := in.dsl
+	if in.Mode != ModeDryRun {
+		if err := ValidateFormInputs(dsl, in.Inputs); err != nil {
+			return nil, err
+		}
+	}
 	pipelineID := ""
 	pipelineSlug := dsl.Name
 	if in.pipeline != nil {
@@ -1297,7 +1311,9 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// would conflate "this run completed" with "this nested
 			// step completed"). Failure is non-fatal: best-effort
 			// projection alongside the canonical journal.
-			e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt)
+			if startErr := e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt); startErr != nil {
+				return nil, startErr
+			}
 		}
 		// Deferred terminal write — captures result via closure so
 		// every return path (linear / DAG / cost-cap / retry-
@@ -1566,6 +1582,7 @@ func (e *Executor) runLinearStep(
 	if step.If != "" {
 		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, step, step.If)
+			e.recordSkippedExecution(ctx, in, runID, step)
 			result.StepOutputs[step.ID] = "<skipped>"
 			e.persistStepOutput(ctx, in, depth, runID, step.ID, result.StepOutputs[step.ID], result.CostUSD, startedAt)
 			return nil
@@ -1731,7 +1748,7 @@ func (e *Executor) completeRun(ctx context.Context, in RunInput, emit *pipelineE
 // Returns (output, costUSD, durationMs, error). Error is non-nil only
 // when the step ultimately failed after exhausting the fallback chain
 // (or when the step type is unsupported).
-func (e *Executor) runStep(
+func (e *Executor) runStepBody(
 	ctx context.Context,
 	step Step,
 	renderedPrompt string,
@@ -2019,6 +2036,9 @@ func (e *Executor) runAgentStep(
 				// validation_failed entry for observability and
 				// fall through to returning the worker's output.
 				emit.emitValidationFailed(ctx, step, "grader error: "+gradeErr.Error(), OnFailAbort)
+				if step.Outcomes.Required {
+					return res.Output, totalCost, time.Since(stepStart).Milliseconds(), fmt.Errorf("required outcomes check unavailable: %w", gradeErr)
+				}
 				return res.Output, totalCost, time.Since(stepStart).Milliseconds(), nil
 			}
 			if gradeRes.passed {
@@ -2423,16 +2443,16 @@ func (e *Executor) persistWaveOutputs(ctx context.Context, in RunInput, depth in
 // Inserting with empty pipelineID would violate the FK on
 // pipeline_runs; saved-pipeline runs always have a real pipelineID
 // via the in.pipeline.ID field.
-func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipelineID, pipelineSlug string, inputs map[string]any, startedAt time.Time) {
+func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipelineID, pipelineSlug string, inputs map[string]any, startedAt time.Time) error {
 	if e.runStore == nil {
-		return
+		return nil
 	}
 	if pipelineID == "" {
 		// Unsaved-draft run (RunDefinition path) — no
 		// matching pipelines row exists yet, so the FK insert would
 		// fail. Skip the projection write; the journal entries that
 		// already fired are sufficient for audit on draft runs.
-		return
+		return nil
 	}
 	inputsRaw, _ := json.Marshal(inputs)
 	if string(inputsRaw) == "null" {
@@ -2480,12 +2500,32 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 	rec.PipelineVersion = in.PinnedVersion
 	if err := e.runStore.Insert(ctx, rec); err != nil {
 		e.persistWarn("run start", runID, err)
+		if e.executionStore != nil {
+			return err
+		}
+	} else {
+		if e.executionStore != nil && in.dsl != nil {
+			raw, marshalErr := json.Marshal(in.dsl)
+			if marshalErr == nil {
+				_, marshalErr = e.executionStore.db.ExecContext(ctx, `UPDATE pipeline_runs SET executed_definition_json=? WHERE id=? AND executed_definition_json IS NULL`, string(raw), runID)
+			}
+			if marshalErr != nil {
+				e.persistWarn("capture effective definition", runID, marshalErr)
+				_ = e.runStore.MarkTerminal(context.WithoutCancel(ctx), MarkTerminalInput{RunID: runID, Status: RunStatusFailed, ErrorMessage: "Could not capture the effective recipe"})
+				return marshalErr
+			}
+		}
+		if in.OnStarted != nil {
+			in.OnStarted(runID)
+		}
 	}
+
 	if len(in.Tags) > 0 {
 		if err := e.runStore.SetTags(ctx, in.WorkspaceID, runID, in.Tags); err != nil {
 			e.persistWarn("run tags", runID, err)
 		}
 	}
+	return nil
 }
 
 // persistRunTerminal writes the finalized run state into pipeline_runs.

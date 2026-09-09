@@ -1,0 +1,62 @@
+//go:build linux
+
+package pipeline
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestScriptProcessStop_KillsChildBeforeSideEffect(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Fatal("Linux script process tests require setsid from util-linux")
+	}
+	root := t.TempDir()
+	control := filepath.Join(root, "control")
+	marker := filepath.Join(root, "unwanted-output")
+	cmd := exec.Command("setsid", "sh", "-c", scriptProcessWrapper, "crewship-script", control, "sh", "-c", `trap '' TERM; (sleep 1; touch "$1") & wait`, "test", marker)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	for i := 0; i < 100; i++ {
+		if _, err := os.Stat(filepath.Join(control, "pid")); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop := exec.Command("sh", "-c", scriptStopWrapper, "crewship-script-stop", control)
+	if out, err := stop.CombinedOutput(); err != nil {
+		t.Fatalf("stop failed: %v %s", err, out)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("child survived cancellation: %v", err)
+	}
+}
+
+// Docker exec may start setsid as a process-group leader, making setsid fork.
+// Without --wait it then reports 0 even when the actual script fails.
+func TestScriptProcessWrapper_PreservesForkedChildExit(t *testing.T) {
+	if _, err := exec.LookPath("setsid"); err != nil {
+		t.Fatal("Linux script process tests require setsid from util-linux")
+	}
+	root := t.TempDir()
+	artifact := filepath.Join(root, "artifact.txt")
+	command := exec.Command("sh", "-c", `umask 022; exec "$@"`, "fixture", "setsid", "--fork", "--wait", "sh", "-c", scriptProcessWrapper, "fixture", filepath.Join(root, "control"), "sh", "-c", `echo result > "$1"; echo partial; exit 7`, "fixture", artifact)
+	output, err := command.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 7 || !strings.Contains(string(output), "partial") {
+		t.Fatalf("script failure was lost: %q %v", output, err)
+	}
+	info, statErr := os.Stat(artifact)
+	if statErr != nil || info.Mode().Perm() != 0644 {
+		t.Fatalf("control umask leaked into artifact: %v %v", info, statErr)
+	}
+
+}

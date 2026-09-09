@@ -44,6 +44,7 @@ import (
 func openFactoryTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openResumeTestDB(t)
+	installExecutionSchema(t, db)
 	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
 		t.Fatalf("schedule schema: %v", err)
 	}
@@ -90,6 +91,11 @@ CREATE TABLE IF NOT EXISTS pipeline_signal_waits (
 // fullExecutorDeps builds an ExecutorDeps with every field populated —
 // the shape every production call site is expected to pass.
 func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps {
+	var present int
+	_ = db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='pipeline_step_executions'`).Scan(&present)
+	if present == 0 {
+		installExecutionSchema(t, db)
+	}
 	t.Helper()
 	wpStore := NewSQLWaitpointStore(db)
 	t.Cleanup(wpStore.Close)

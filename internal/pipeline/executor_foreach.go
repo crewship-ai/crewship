@@ -80,7 +80,7 @@ func (e *Executor) runForeachStep(ctx context.Context, step Step, in RunInput, p
 			if feCtx.Err() != nil {
 				return
 			}
-			out, cost, ierr := e.runForeachItem(feCtx, step, item, in, parentRender, runID, pipelineID, emit, depth)
+			out, cost, ierr := e.runForeachItem(foreachExecutionContext(feCtx, idx), step, item, in, parentRender, runID, pipelineID, emit, depth)
 			results[idx] = itemResult{out: out, cost: cost}
 			if ierr != nil {
 				firstErr.CompareAndSwap(nil, &foreachItemErr{index: idx, err: ierr})

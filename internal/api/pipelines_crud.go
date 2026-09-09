@@ -76,6 +76,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	//     identifiers truncated to 3 per routine to bound payload.
 	// Both are best-effort — if the lookup fails we log and keep the
 	// list minus the enrichment rather than failing the whole call.
+	h.enrichRecordedRoutineState(r.Context(), workspaceID, out)
 	enrichPipelineListAuthorNames(r.Context(), h.db, h.logger, out)
 	enrichPipelineListLinkedIssues(r.Context(), h.db, h.logger, workspaceID, out)
 	writeJSON(w, http.StatusOK, out)
@@ -97,6 +98,9 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := toPipelineResponse(p, true)
+	batch := []pipelineResponse{out}
+	h.enrichRecordedRoutineState(r.Context(), workspaceID, batch)
+	out = batch[0]
 	// Only for a routine actually awaiting review — the lookup is a
 	// wasted query otherwise, and a stale reason on an active routine
 	// would be worse than none.

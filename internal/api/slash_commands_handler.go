@@ -46,7 +46,13 @@ type slashCommand struct {
 // back to "text" for unknown types so adding a new type here doesn't
 // require coordinated UI rollout.
 type slashFormField struct {
-	Name string `json:"name"`
+	Min         *float64 `json:"min,omitempty"`
+	Max         *float64 `json:"max,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	AllowCustom bool     `json:"allow_custom,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Label       string   `json:"label,omitempty"`
+	Name        string   `json:"name"`
 	// Type is the WIDGET to draw: text, textarea, cron, timezone,
 	// secret, slug, priority, number, boolean, … It answers "what does
 	// the user see", not "what does the server receive".
