@@ -41,6 +41,11 @@ var responseShapeContracts = []struct {
 	value any
 }{
 	{
+		name:    "PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy",
+		pointer: "/components/schemas/IssueReviewPolicyResponse",
+		value:   issueReviewPolicyResponse{},
+	},
+	{
 		name:    "GET /api/v1/inbox rows[]",
 		pointer: "/components/schemas/FinalInboxList/properties/rows/items",
 		value:   inboxItemResponse{},

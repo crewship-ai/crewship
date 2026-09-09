@@ -54,6 +54,7 @@ type agentConfigResolver interface {
 }
 
 type AssignmentHandler struct {
+	attachments    *AttachmentHandler
 	loginRefresher runStartRefresher
 	// Serializes follow-up selection through claim attachment. Agent execution
 	// stays asynchronous; a fast completion waits before selecting again.

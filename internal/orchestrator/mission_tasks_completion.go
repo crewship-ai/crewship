@@ -49,6 +49,24 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		taskStatus = "CANCELLED"
 	}
 
+	// A clean process exit is not task success. Consume the persisted outcome;
+	// nullable legacy rows retain their historical technical-status behaviour.
+	var outcome sql.NullString
+	outcomeErr := e.db.QueryRowContext(ctx, `SELECT outcome FROM assignments WHERE id=?`, assignmentID).Scan(&outcome)
+	if outcomeErr != nil && !errors.Is(outcomeErr, sql.ErrNoRows) {
+		return fmt.Errorf("load assignment outcome: %w", outcomeErr)
+	}
+	if status == "COMPLETED" && outcome.Valid {
+		switch outcome.String {
+		case OutcomeNeedsHuman:
+			taskStatus = "AWAITING_APPROVAL"
+		case OutcomePartial, OutcomeFailed:
+			taskStatus = "FAILED"
+		case OutcomeCancelled:
+			taskStatus = "CANCELLED"
+		}
+	}
+
 	// Circuit breaker: track consecutive failures per agent
 	if assignedAgentID.Valid {
 		e.cbMu.Lock()
@@ -119,7 +137,9 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		_ = e.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, assignedAgentID.String).Scan(&agentName)
 
 		var commentBody string
-		if handoff.Parsed && handoff.Summary != "" {
+		if taskStatus == "AWAITING_APPROVAL" {
+			commentBody = fmt.Sprintf("**%s needs your input.**\n\n%s", agentName, handoff.Summary)
+		} else if handoff.Parsed && handoff.Summary != "" && taskStatus == "COMPLETED" {
 			commentBody = fmt.Sprintf("**%s completed their work** (confidence: %s)\n\n%s", agentName, handoff.Confidence, handoff.Summary)
 			if handoff.Artifacts != "" {
 				commentBody += "\n\n**Artifacts:** " + handoff.Artifacts
@@ -158,6 +178,8 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			action := "task_completed"
 			if taskStatus == "FAILED" {
 				action = "task_failed"
+			} else if taskStatus == "AWAITING_APPROVAL" {
+				action = "commented"
 			}
 			if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
 				ID:        generateID(),
@@ -431,6 +453,9 @@ func (e *MissionEngine) checkMissionCompletion(ctx context.Context, ms *missionS
 // missions table (never mission_tasks rows), which is what makes sharing
 // that snapshot with the subsequent deadlock check safe.
 func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms *missionState, tasks []TaskInfo) error {
+	if handled, err := e.checkIssueExecution(ctx, ms); handled {
+		return err
+	}
 	if len(tasks) == 0 {
 		// No mission_tasks — check if lead planning completed and all assignments are done.
 		// This handles the case where lead used /assign (creates assignments, not mission_tasks).
@@ -465,7 +490,7 @@ func (e *MissionEngine) checkMissionCompletionWithTasks(ctx context.Context, ms 
 		// still goes to REVIEW — work happened and is worth reviewing.
 		var failed int
 		if err := e.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND status = 'FAILED'`, ms.ID).Scan(&failed); err != nil {
+			`SELECT COUNT(*) FROM assignments WHERE group_id = ? AND (status IN ('FAILED','TIMEOUT','CANCELLED') OR (outcome IS NOT NULL AND outcome NOT IN ('SUCCEEDED','NO_CHANGE','WORK_CREATED')))`, ms.ID).Scan(&failed); err != nil {
 			// This count decides FAILED vs REVIEW; a swallowed error would
 			// leave failed=0 and silently send an all-failed mission to review.
 			return fmt.Errorf("count failed assignments for mission %s: %w", ms.ID, err)

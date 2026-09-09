@@ -440,7 +440,7 @@ func TestAsgCov2_FinishAssignment_MissionComment_Handoff(t *testing.T) {
 	asgID := "asg2-fin-handoff"
 	covAsg2InsertAssignment(t, h, asgID, wsID, missionID, leadID, workerID)
 
-	result := "preamble\n---HANDOFF---\nsummary: shipped the feature\nconfidence: high\nartifacts: pr#42\n---END HANDOFF---"
+	result := "preamble\n---HANDOFF---\nsummary: shipped the feature\noutcome: SUCCEEDED\nconfidence: high\nartifacts: pr#42\n---END HANDOFF---"
 	h.finishAssignment(context.Background(), asgID, "", missionID, "asg-worker", wsID, result, "", nil)
 
 	var commentBody string
@@ -486,7 +486,7 @@ func TestAsgCov2_FinishAssignment_MissionComment_LongPlainResult(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT body FROM mission_comments WHERE mission_id = ?`, missionID).Scan(&commentBody); err != nil {
 		t.Fatalf("query comment: %v", err)
 	}
-	if !strings.Contains(commentBody, "completed their work") || !strings.Contains(commentBody, "...") {
+	if strings.Contains(commentBody, "completed their work") || !strings.Contains(commentBody, "no outcome reported") {
 		t.Errorf("comment not truncated plain summary: %q", commentBody)
 	}
 }

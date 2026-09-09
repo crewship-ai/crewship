@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { getIssueWorker } from "@/lib/issue-execution"
 import type { Mission, IssuePriority, MissionStatus } from "@/lib/types/mission"
 
 export interface FilteredIssuesArgs {
@@ -49,7 +50,7 @@ export function useFilteredIssues({
       filtered = filtered.filter((i) => i.crew_id === filterCrewId)
     }
     if (filterAgentId) {
-      filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
+      filtered = filtered.filter((i) => getIssueWorker(i).id === filterAgentId)
     }
     if (filterPriority) {
       filtered = filtered.filter((i) => (i.priority || "none") === filterPriority)
@@ -59,7 +60,7 @@ export function useFilteredIssues({
       filtered = filtered.filter((i) =>
         i.title.toLowerCase().includes(q) ||
         (i.identifier && i.identifier.toLowerCase().includes(q)) ||
-        (i.assignee_name && i.assignee_name.toLowerCase().includes(q)) ||
+        (getIssueWorker(i).name?.toLowerCase().includes(q)) ||
         (i.crew_name && i.crew_name.toLowerCase().includes(q))
       )
     }

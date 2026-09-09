@@ -219,15 +219,18 @@ func assembleContextPack(ctx context.Context, db *sql.DB, workspaceID, missionID
 // the public DTOs do.
 func renderIssueSnapshot(ctx context.Context, db *sql.DB, workspaceID, missionID string) (string, error) {
 	var identifier, title, description, status, priority, ownerName, delegateName, parentIdentifier sql.NullString
+	var mode, note string
+	var revision int
 	err := db.QueryRowContext(ctx, `
 		SELECT m.identifier, m.title, m.description, m.status, m.priority,
-		       u.full_name, ag.name, pm.identifier
+		       u.full_name, ag.name, pm.identifier,COALESCE(iw.mode,'agent'),COALESCE(iw.note,''),COALESCE(iw.revision,0)
 		  FROM missions m
+		  LEFT JOIN issue_work iw ON iw.mission_id=m.id
 		  LEFT JOIN users   u  ON u.id  = m.owner_user_id
 		  LEFT JOIN agents  ag ON ag.id = m.delegate_agent_id
 		  LEFT JOIN missions pm ON pm.id = m.parent_issue_id
 		 WHERE m.id = ? AND m.workspace_id = ?`, missionID, workspaceID).Scan(
-		&identifier, &title, &description, &status, &priority, &ownerName, &delegateName, &parentIdentifier)
+		&identifier, &title, &description, &status, &priority, &ownerName, &delegateName, &parentIdentifier, &mode, &note, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -239,6 +242,29 @@ func renderIssueSnapshot(ctx context.Context, db *sql.DB, workspaceID, missionID
 	b.WriteString("[ISSUE SNAPSHOT]\n")
 	fmt.Fprintf(&b, "Issue %s: %s\n", identifier.String, title.String)
 	fmt.Fprintf(&b, "Status: %s   Priority: %s\n", status.String, orDefault(priority.String, "none"))
+
+	fmt.Fprintf(&b, "Work mode: %s; work revision: %d\n", mode, revision)
+	if note != "" {
+		clipped, _ := clipRunes(note, 800)
+		fmt.Fprintf(&b, "Latest handoff: %s\n", clipped)
+	}
+	rows, fileErr := db.QueryContext(ctx, `SELECT id,filename FROM attachments WHERE owner_type='issue' AND mission_id=? AND workspace_id=? ORDER BY created_at DESC LIMIT 8`, missionID, workspaceID)
+	if fileErr != nil {
+		return "", fileErr
+	}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return "", err
+		}
+		fmt.Fprintf(&b, "Attached file: %s (id %s; fetch through issue attachments)\n", name, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return "", err
+	}
+	rows.Close()
 	if description.String != "" {
 		fmt.Fprintf(&b, "Goal: %s\n", description.String)
 	}
