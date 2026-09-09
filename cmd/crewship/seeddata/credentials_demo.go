@@ -82,6 +82,23 @@ ZHVtbXktbm90LWEtcmVhbC1zZWNyZXQtbm90LWEtdXNhYmxlLWNlcnRpZmljYXRl
 // locked-down ones after.
 func DemoCredentials() []DemoCredential {
 	return []DemoCredential{
+		{
+			Def: CredentialDef{
+				Name: "demo-v2-json-file", Description: "Demo JSON credential file — inert, not a Google service account",
+				Type: "GENERIC_SECRET", Provider: "GCP",
+				Value: `{"demo":true,"token":"dummy-not-a-real-secret-json-file"}`,
+			},
+			Fields:        []DemoField{{Key: "filename", Value: "demo-credentials.json"}},
+			SecurityLevel: 2, Tags: []string{"demo", "demo-v2", "file"},
+		},
+		{
+			Def: CredentialDef{
+				Name: "demo-v2-key-pair", Description: "Demo AWS key pair — inert, no cloud access",
+				Type: "GENERIC_SECRET", Provider: "AWS", Value: dummyPrefix + "key-pair",
+			},
+			Fields:        []DemoField{{Key: "access_key_id", Value: "DEMO-ACCESS-ID"}, {Key: "region", Value: "eu-central-1"}},
+			SecurityLevel: 3, Tags: []string{"demo", "demo-v2", "key-pair"},
+		},
 		// Two accounts of ONE provider — the case a workspace could not express
 		// before bindings, because both would have had to be called GH_TOKEN.
 		// DemoBindings points each at its own crew.
@@ -133,7 +150,7 @@ func DemoCredentials() []DemoCredential {
 				Name:        "smtp-relay",
 				Description: "SMTP relay login for outbound demo mail — inert",
 				Type:        "USERPASS",
-				Provider:    "NONE",
+				Provider:    "MAILGUN",
 				Value:       dummyPrefix + "smtp-password",
 			},
 			Username: "demo-mailer",
@@ -162,7 +179,7 @@ func DemoCredentials() []DemoCredential {
 				Name:        "mtls-client-cert",
 				Description: "Client certificate for an mTLS demo endpoint — not usable",
 				Type:        "CERTIFICATE",
-				Provider:    "NONE",
+				Provider:    "CLOUDFLARE",
 				Value:       demoCertificatePEM,
 			},
 			SecurityLevel: 3,

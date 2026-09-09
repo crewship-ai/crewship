@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/providerlogin"
@@ -31,6 +32,7 @@ type providerPoolMemberView struct {
 
 // Explicit wire DTOs exclude internal generation fingerprints and ciphertext.
 type providerPoolView struct {
+	Revision        int64                    `json:"revision"`
 	ID              string                   `json:"id"`
 	Name            string                   `json:"name"`
 	Provider        string                   `json:"provider"`
@@ -104,7 +106,8 @@ func (h *ProviderPoolHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Same best-effort settings audit as other administrative definitions.
 	// No submitted account material or names are copied into the audit log.
 	auditFromRequest(r, h.db, "provider_pool.create", "PROVIDER_POOL", pool.ID, map[string]interface{}{"allow_cross_owner": body.AllowCrossOwner, "member_count": len(body.Members)})
-	writeJSON(w, 201, providerPoolView{ID: pool.ID, Name: strings.TrimSpace(body.Name), Provider: providerlogin.Canonical(body.Provider), Mode: body.Mode, AllowCrossOwner: body.AllowCrossOwner, CreatedBy: &user.ID, MemberCount: len(body.Members), Members: body.Members})
+	w.Header().Set("ETag", `"1"`)
+	writeJSON(w, 201, providerPoolView{Revision: 1, ID: pool.ID, Name: strings.TrimSpace(body.Name), Provider: providerlogin.Canonical(body.Provider), Mode: body.Mode, AllowCrossOwner: body.AllowCrossOwner, CreatedBy: &user.ID, MemberCount: len(body.Members), Members: body.Members})
 }
 
 // List is a bounded, keyset-paginated metadata read; it never consumes a turn.
@@ -113,9 +116,9 @@ func (h *ProviderPoolHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT p.id,p.name,p.provider,p.mode,p.allow_cross_owner,p.created_by,
+	rows, err := h.db.QueryContext(r.Context(), `SELECT p.id,p.name,p.provider,p.mode,p.allow_cross_owner,p.created_by,p.revision,
 		(SELECT COUNT(*) FROM provider_login_pool_members m WHERE m.pool_id=p.id)
-		FROM provider_login_pools p WHERE p.workspace_id=? AND p.id>? ORDER BY p.id LIMIT 101`, ws, r.URL.Query().Get("after"))
+		FROM provider_login_pools p WHERE p.workspace_id=? AND p.deleted_at IS NULL AND p.id>? ORDER BY p.id LIMIT 101`, ws, r.URL.Query().Get("after"))
 	if err != nil {
 		replyInternalError(w, h.logger, "list provider pools", err)
 		return
@@ -124,7 +127,7 @@ func (h *ProviderPoolHandler) List(w http.ResponseWriter, r *http.Request) {
 	items := make([]providerPoolView, 0)
 	for rows.Next() {
 		var item providerPoolView
-		if err := rows.Scan(&item.ID, &item.Name, &item.Provider, &item.Mode, &item.AllowCrossOwner, &item.CreatedBy, &item.MemberCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Provider, &item.Mode, &item.AllowCrossOwner, &item.CreatedBy, &item.Revision, &item.MemberCount); err != nil {
 			replyInternalError(w, h.logger, "scan provider pool", err)
 			return
 		}
@@ -159,7 +162,7 @@ func (h *ProviderPoolHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var item providerPoolView
-	err = tx.QueryRowContext(r.Context(), `SELECT id,name,provider,mode,allow_cross_owner,created_by FROM provider_login_pools WHERE workspace_id=? AND id=?`, ws, r.PathValue("poolId")).Scan(&item.ID, &item.Name, &item.Provider, &item.Mode, &item.AllowCrossOwner, &item.CreatedBy)
+	err = tx.QueryRowContext(r.Context(), `SELECT id,name,provider,mode,allow_cross_owner,created_by,revision FROM provider_login_pools WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, ws, r.PathValue("poolId")).Scan(&item.ID, &item.Name, &item.Provider, &item.Mode, &item.AllowCrossOwner, &item.CreatedBy, &item.Revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, 404, "Provider pool not found")
 		return
@@ -201,5 +204,6 @@ func (h *ProviderPoolHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item.MemberCount = len(item.Members)
+	w.Header().Set("ETag", `"`+strconv.FormatInt(item.Revision, 10)+`"`)
 	writeJSON(w, 200, item)
 }

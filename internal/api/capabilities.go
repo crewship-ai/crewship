@@ -79,12 +79,11 @@ const (
 	//     renamed later without a data migration, so it is spelled the
 	//     way the security document spells it rather than the way the
 	//     local convention would.
-	//  2. It appears in NO bundle — not even BundleAdmin, which is the
-	//     role-derived fallback for OWNER and ADMIN. That is the whole
-	//     point of the layer: role is a necessary condition for reveal
-	//     and never a sufficient one, so an OWNER whose membership row
-	//     has never been touched must NOT come out holding it. If you
-	//     add it to a bundle you have deleted L2.
+	//  2. OWNER/ADMIN memberships without an explicit capability set and
+	//     the admin preset grant it by default (product decision 2026-09-08).
+	//     Explicit sets remain authoritative, so revocation is respected.
+	//     Workspace policy, interactive session, scope, classification and
+	//     audit still gate every disclosure independently.
 	CapabilityCredentialReveal = "credentials:reveal"
 
 	// CapabilityIssueCreate gates issue.Create. Issues are the
@@ -100,7 +99,7 @@ const (
 	// is how an admin lets a specific MEMBER author pages without
 	// promoting them.
 	//
-	// It appears in no bundle, like credentials:reveal: the v109
+	// It appears in no bundle: the v109
 	// migration's stored capability sets predate it, and adding a
 	// string to a bundle that the backfill never wrote would make the
 	// role-derived fallback disagree with what is in the column.
@@ -177,9 +176,8 @@ const (
 	// who run their own routines and file their own issues.
 	BundlePower CapabilityBundle = "power"
 
-	// BundleAdmin grants the full capability set, including
-	// credential mutation. Matches the post-migration v109 backfill
-	// for OWNER + ADMIN rows.
+	// BundleAdmin is today's admin preset, including credential mutation
+	// and reveal. It is not the immutable v109 backfill.
 	BundleAdmin CapabilityBundle = "admin"
 )
 
@@ -212,6 +210,7 @@ func BundleCapabilities(b CapabilityBundle) []string {
 			CapabilitySkillCreate,
 			CapabilityCredentialCreate,
 			CapabilityCredentialRotate,
+			CapabilityCredentialReveal,
 			CapabilityIssueCreate,
 			CapabilityMemoryWrite,
 		}
