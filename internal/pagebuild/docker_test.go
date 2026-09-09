@@ -1,8 +1,13 @@
 package pagebuild
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,6 +68,42 @@ func TestDockerPreviewBuildIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	t.Run("utf8-chunks", func(t *testing.T) {
+		source := pageprofile.Source()
+		const marker = "Příliš žluťoučký kůň 🐴"
+		for i := range source.Files {
+			if source.Files[i].Path == "src/main.tsx" {
+				source.Files[i].Content = "console.log(" + fmt.Sprintf("%q", marker) + "); export {}"
+			}
+		}
+		input, err := json.Marshal(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := containerArgs("crewship-page-utf8-"+rand.Text(), image)
+		// Exercise the installed worker itself with every multibyte code point split.
+		args = append(args[:len(args)-1], "--input-type=module", "-e", `
+import { Readable } from 'node:stream';
+const chunks=[]; for await (const chunk of process.stdin) chunks.push(chunk);
+const input=Buffer.concat(chunks);
+Object.defineProperty(process, 'stdin', {value: Readable.from((async function*(){for(const byte of input) yield Buffer.from([byte])})())});
+await import('/opt/pages/build.mjs');`)
+		cmd := exec.CommandContext(context.Background(), "docker", args...)
+		cmd.Stdin = bytes.NewReader(input)
+		var logs bytes.Buffer
+		cmd.Stderr = &logs
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("chunked compiler: %v %s", err, logs.String())
+		}
+		var artifact Artifact
+		if err := json.Unmarshal(output, &artifact); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(artifact.JavaScript, marker) || strings.ContainsRune(artifact.JavaScript, '\ufffd') {
+			t.Fatalf("UTF-8 changed in artifact: %s", artifact.JavaScript)
+		}
+	})
 	t.Run("typecheck", func(t *testing.T) {
 		bad := pageprofile.Source()
 		for i := range bad.Files {
