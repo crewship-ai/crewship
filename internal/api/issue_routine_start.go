@@ -12,7 +12,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/tsformat"
-	"strings"
 )
 
 type issueRoutineDispatchKey struct{}
@@ -111,19 +110,19 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 	h.routines.Run(response, request)
 	if response.code >= 400 {
 		fail(fmt.Errorf("routine start rejected: %s", response.body.String()))
-		// Proxy the routine handler's own error, but never its content type.
-		// This body can carry a caller-supplied slug or input value back
-		// verbatim, and a JSON API that lets the writer sniff a type off such
-		// a body is one `<` away from serving it as HTML. Fixed type, no
-		// sniffing; the inner handler already writes problem+json.
 		for key, values := range response.header {
-			if strings.EqualFold(key, "Content-Type") || strings.EqualFold(key, "Content-Length") {
-				continue
-			}
 			w.Header()[key] = values
 		}
-		w.Header().Set("Content-Type", "application/problem+json")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// The proxied body is this API's own JSON error document, and it can
+		// quote a value the caller supplied (a slug inside a validation
+		// message). Naming the type rather than letting net/http sniff the
+		// bytes keeps a browser that reaches this endpoint directly from
+		// reading such a quote as markup. SecurityHeaders already sends
+		// nosniff and a default-src 'none' CSP; this is the same rule stated
+		// where the bytes are written.
+		if w.Header().Get("Content-Type") == "" {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		}
 		w.WriteHeader(response.code)
 		_, _ = w.Write(response.body.Bytes())
 		return

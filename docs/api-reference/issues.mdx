@@ -23,10 +23,10 @@ Issues are crew-scoped tracker items: each carries a human-readable identifier (
 | `PATCH` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#update-issue) | Update an issue |
 | `DELETE` | [`/api/v1/crews/{crewId}/issues/{identifier}`](#delete-issue) | Delete an issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/work`](#transfer-issue-work) | Transfer work between people and agents |
+| `PUT` | [`/api/v1/crews/{crewId}/issues/{identifier}/review-policy`](#set-issue-review-policy) | Require or drop human acceptance of the work |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/start`](#start-issue) | Start issue execution |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/stop`](#stop-issue) | Stop a running issue |
 | `POST` | [`/api/v1/crews/{crewId}/issues/{identifier}/review`](#review-issue) | Submit a review decision |
-| `PUT` | [`/api/v1/crews/{crewId}/issues/{identifier}/review-policy`](#set-review-policy) | Turn client acceptance on or off |
 | `PATCH` | [`/api/v1/issues/bulk`](#bulk-update) | Bulk-update up to 100 issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/subtasks`](#list-sub-issues) | List an issue's sub-issues |
 | `GET` | [`/api/v1/crews/{crewId}/issues/{identifier}/activity`](#list-activity) | List an issue's activity log |
@@ -430,16 +430,18 @@ but have not yet finished; handing back or submitting must wait.
 The work state, cancellation, comment and audit receipt commit together.
 WebSocket events: `issue.updated`; human handoff also emits `inbox.updated`.
 
-### Set Review Policy
+CLI: [`crewship issue work`](/cli/issue#crewship-issue-work).
+
+### Set Issue Review Policy
 
 ```http
 PUT /api/v1/crews/{crewId}/issues/{identifier}/review-policy?workspace_id={workspaceId}
 ```
 
-Turns client acceptance on or off for one issue. Acceptance can change only
-before work starts: the update is refused once the issue leaves `TODO`/
-`BACKLOG` or while any assignment is still live, so a stale browser cannot
-quietly drop the acceptance step on work already in flight.
+Sets whether a person has to accept the work before the issue counts as done.
+The policy is part of the issue's work contract, so it can change only while
+the issue has not started: `TODO` or `BACKLOG`, with no assignment still
+running.
 
 **Auth:** authenticated workspace `OWNER`, `ADMIN`, or `MANAGER` (`create`).
 
@@ -448,22 +450,28 @@ quietly drop the acceptance step on work already in flight.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `revision` | integer | Yes | Current `work_revision` returned by Get Issue |
-| `client_review_required` | boolean | Yes | Whether the result needs client acceptance |
+| `client_review_required` | boolean | Yes | `true` requires human acceptance, `false` drops it |
 
 ```json
 {"revision":3,"client_review_required":true}
 ```
 
 **Response:** `200 OK` — `{"revision":4,"client_review_required":true}`. The
-revision is the new one; send it with the next change.
+revision is the issue's new `work_revision`; pass it to the next call that
+pins one.
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `revision` or `client_review_required`, or malformed JSON |
+| `400` | `revision` or `client_review_required` missing |
 | `401` | Not authenticated |
-| `403` | Role cannot change the policy |
-| `409` | Stale revision, issue past `TODO`/`BACKLOG`, or work already running |
+| `403` | Role cannot change work |
+| `409` | Stale revision, work already started, or the issue is no longer `TODO`/`BACKLOG` |
 | `500` | Update could not be committed |
+
+The CAS on `revision` is what stops a stale browser from silently removing
+acceptance that was added to newer work. WebSocket event: `issue.updated`.
+
+CLI: [`crewship issue review-policy`](/cli/issue#crewship-issue-review-policy).
 
 ### Start Issue
 
@@ -852,6 +860,8 @@ endpoint does not invent a deliverable or confirm acceptance of the issue.
 | `403` | Workspace access denied |
 | `404` | Run is absent or belongs to another issue/crew/workspace |
 | `500` | Stored result could not be read |
+
+CLI: [`crewship issue result`](/cli/issue#crewship-issue-result).
 
 ## Runs
 

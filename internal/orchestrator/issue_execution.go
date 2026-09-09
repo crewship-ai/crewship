@@ -56,7 +56,15 @@ func (e *MissionEngine) checkIssueExecution(ctx context.Context, ms *missionStat
 		var runStatus, runOutcome, output string
 		err = tx.QueryRowContext(ctx, `SELECT status,COALESCE(outcome,''),COALESCE(output,'') FROM pipeline_runs WHERE id=? AND workspace_id=?`, routineRun, ms.WorkspaceID).Scan(&runStatus, &runOutcome, &output)
 		if err == sql.ErrNoRows {
-			started, _ := time.Parse(time.RFC3339Nano, created)
+			started, perr := time.Parse(time.RFC3339Nano, created)
+			if perr != nil {
+				// An unparseable created_at parses to the zero time, which
+				// reads as infinitely old and would settle a live execution
+				// as failed on the strength of a bad timestamp. Hold it and
+				// say so instead — the dispatch watchdog can wait.
+				e.logger.Error("issue execution: unparseable created_at", "execution_id", id, "created_at", created)
+				return true, nil
+			}
 			if time.Since(started) > 2*time.Minute {
 				return true, e.settleIssueExecution(ctx, tx, ms, id, "failed", "FAILED", "Routine dispatch was interrupted before a run was recorded. Start again to retry.", now)
 			}

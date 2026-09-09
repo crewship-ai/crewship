@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
 
+- **The issue work contract has its CLI half** (#2449) — `crewship issue review-policy` requires or drops human acceptance before an issue counts as done, and `crewship issue result` prints what one of an issue's runs reported back. Both endpoints existed with no command, so the web panel was their only door; the rule is that every endpoint gets one, because that is the contract an agent drives. Their acceptance tests run the binary against a real router, and so does `crewship issue work`, which had none.
+
 - **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
 
 - **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.

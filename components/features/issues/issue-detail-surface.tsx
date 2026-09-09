@@ -668,7 +668,11 @@ export function IssueDetailSurface({
         setBusy(false)
       }
     },
-    [base, qs, patch, refresh],
+    // work_revision and brief_revision are read inside this callback and sent
+    // as the review CAS values: leaving them out of the deps pins the first
+    // pair the component ever saw, so a review posted after any other write
+    // carries a stale revision.
+    [base, qs, patch, refresh, issue?.work_revision, issue?.brief_revision],
   )
 
   /* ---------------------------------------------------------------- *
