@@ -1554,7 +1554,22 @@ jobs:
     # Whole job measures 17m53s with the shard split out, slowest binary
     # cmd/crewship at 940.9s. The 25m -timeout is ~1.6x headroom for that
     # one package, not an expectation.
-    timeout-minutes: 35
+    #
+    # 35 -> 55 (2026-09-09). That 17m53s measurement stopped holding: five
+    # runs on 2026-09-09 ended at 35m0s, 35m16s (x2), 35m17s and 35m18s —
+    # GitHub's cancel, not a test. One of them had already logged its test
+    # step as successful when the wrapper was killed, which is what makes
+    # this a wall-clock problem rather than a hung binary: `-timeout` is per
+    # test binary, so `go test ./...` can spend more than 35m in total
+    # without any single package coming near 25m.
+    #
+    # 55 matches the internal/api shard below. It does NOT weaken the
+    # property this number was chosen for: `-timeout` stays at 25m, so a
+    # genuinely stuck binary still panics with its goroutine dump long
+    # before the job cap, and the log still says which package hung. What
+    # changes is only that a slow runner no longer kills a passing suite
+    # and reports it as a failure nobody can diagnose from the log.
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
