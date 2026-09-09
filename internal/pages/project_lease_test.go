@@ -3,10 +3,55 @@ package pages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestProjectLeaseConcurrentFirstOpen(t *testing.T) {
+	for _, git := range []bool{false, true} {
+		t.Run(fmt.Sprintf("git=%t", git), func(t *testing.T) {
+			directory := t.TempDir()
+			for iteration := 0; iteration < 16; iteration++ {
+				workspace := fmt.Sprintf("fresh-%d", iteration)
+				start, release := make(chan struct{}), make(chan struct{})
+				results := make(chan error, 16)
+				var workers sync.WaitGroup
+				for i := 0; i < 16; i++ {
+					workers.Go(func() {
+						// Independent handles: no shared in-memory mutex may hide
+						// races when creating the persistent lock inode.
+						store := &ProjectStore{Directory: directory}
+						<-start
+						acquire := store.Lease
+						if git {
+							acquire = store.GitLease
+						}
+						unlock, err := acquire(t.Context(), workspace, false)
+						results <- err
+						if err == nil {
+							<-release
+							unlock()
+						}
+					})
+				}
+				close(start)
+				for i := 0; i < 16; i++ {
+					if err := <-results; err != nil {
+						t.Errorf("concurrent first lease: %v", err)
+					}
+				}
+				close(release)
+				workers.Wait()
+				if t.Failed() {
+					return
+				}
+			}
+		})
+	}
+}
 
 func TestProjectLeaseProtectsReadersAndWorkspaceIsolation(t *testing.T) {
 	store := &ProjectStore{Directory: t.TempDir()}
