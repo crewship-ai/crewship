@@ -148,12 +148,12 @@ func (s *ProjectStore) Get(ctx context.Context, workspace, digest string) (*Sour
 	}
 	r, err := s.root(workspace, false)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open Page source namespace: %w", err)
 	}
 	defer r.Close()
 	f, err := r.Open(digest + ".yaml")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open Page source %s: %w", digest, err)
 	}
 	defer f.Close()
 	p, err := ParseSourceProject(f)

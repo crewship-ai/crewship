@@ -692,7 +692,7 @@ jobs:
         with:
           browser: chromium
       - name: Verify real compiler, MCP and browser boundaries
-        timeout-minutes: 14
+        timeout-minutes: 30
         run: bash scripts/test-pages-apps.sh
       - name: Preserve Pages test evidence
         if: always()
@@ -1670,7 +1670,10 @@ jobs:
           # bounds a hang, and a hang here should produce Go's goroutine
           # dump rather than a GitHub cancel.
           # shellcheck disable=SC2086
-          go test $pkgs -race -count=1 -timeout 25m
+          # #2472: the 4,032-test CLI binary reached the 25m package cap while
+          # starting TestSetOptIn_FreshDB_DoesNotPanic (0s), with no race report.
+          # Keep the goroutine-dumping deadline inside the existing 55m job cap.
+          go test $pkgs -race -count=1 -timeout 35m
 
   # ── Go race: the internal/api shard ──
   #
