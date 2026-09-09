@@ -31,6 +31,7 @@ func TestDockerBuildPolicy(t *testing.T) {
 func TestDockerPreviewBuildIntegration(t *testing.T) {
 	image := os.Getenv("CREWSHIP_TEST_PAGE_BUILD_IMAGE")
 	if image == "" {
+		// SKIP-WAIVER(#2472): ordinary Go tests need no image; pages-apps CI builds it and rejects skips.
 		t.Skip("set CREWSHIP_TEST_PAGE_BUILD_IMAGE to a locally built pinned tools image")
 	}
 	builder := &DockerBuilder{Image: image}

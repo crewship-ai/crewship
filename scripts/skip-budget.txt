@@ -142,4 +142,5 @@
 #                     SKIP-WAIVER comment, deliberately no tracking issue, on
 #                     the #1546 precedent. The branch added no other skip.
 
-137
+# 139 2026-09-09: #2472 compiler image and browser-server harness guards; mandatory pages-apps CI exercises both.
+139

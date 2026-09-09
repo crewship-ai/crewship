@@ -44,6 +44,7 @@ func TestRuntimeHeadersAndConstantBootstrap(t *testing.T) {
 func TestServeRuntimeBrowserHarness(t *testing.T) {
 	file := os.Getenv("CREWSHIP_TEST_RUNTIME_FILE")
 	if file == "" {
+		// SKIP-WAIVER(#2472): this blocking server is started by the mandatory Chromium CI harness.
 		t.Skip("browser harness only")
 	}
 	studio := os.Getenv("CREWSHIP_TEST_STUDIO_ORIGIN")
