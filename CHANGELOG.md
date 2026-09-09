@@ -18,6 +18,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
+
 - **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
 - **The issue work contract has its CLI half** (#2449) — `crewship issue review-policy` requires or drops human acceptance before an issue counts as done, and `crewship issue result` prints what one of an issue's runs reported back. Both endpoints existed with no command, so the web panel was their only door; the rule is that every endpoint gets one, because that is the contract an agent drives. Their acceptance tests run the binary against a real router, and so does `crewship issue work`, which had none.
 
