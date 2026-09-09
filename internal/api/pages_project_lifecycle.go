@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func (h *PageHandler) PublicationHistory(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +116,7 @@ func (h *PageHandler) UnpublishProject(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 409, "Publication changed; reload before withdrawing")
 		return
 	}
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_withdrawals(page_id,version,actor_user_id,created_at) VALUES(?,?,?,?) ON CONFLICT(page_id,version) DO NOTHING`, rec.ID, req.Expected, user.ID, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_withdrawals(page_id,version,actor_user_id,created_at) VALUES(?,?,?,?) ON CONFLICT(page_id,version) DO NOTHING`, rec.ID, req.Expected, user.ID, tsformat.Format(time.Now())); err != nil {
 		replyInternalError(w, h.logger, "record withdrawal", err)
 		return
 	}

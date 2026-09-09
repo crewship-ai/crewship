@@ -67,7 +67,10 @@ func (s *ProjectStore) Prune(ctx context.Context, ws string, sources map[string]
 		return errors.New("too many Page repositories")
 	}
 	retained := map[string]string{}
-	for page := range checkpoints {
+	for page, commits := range checkpoints {
+		if len(commits) == 0 {
+			continue
+		}
 		retained[fmt.Sprintf("%x", sha256.Sum256([]byte(page)))] = page
 	}
 	for _, repo := range repos {

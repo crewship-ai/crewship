@@ -39,7 +39,7 @@ func TestAcceptance_PageProjectGitHistoryRestore(t *testing.T) {
 	options := []api.RouterOption{api.WithPageProjectsPath(projectsPath)}
 	image := os.Getenv("PAGES_TEST_BUILD_IMAGE")
 	if image != "" {
-		options = append(options, api.WithPageBuildImage(image), api.WithPageRuntime("http://pages.example.net", "http://studio.example.com"))
+		options = append(options, api.WithPageBuildImage(image), api.WithPageRuntime("https://pages.example.net", "https://studio.example.com"))
 	}
 	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), options...)
 	if err != nil {

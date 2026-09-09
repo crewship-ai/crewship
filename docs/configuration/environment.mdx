@@ -162,6 +162,11 @@ These are not configuration — Crewship sets them on the crew container itself,
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend. `localfs` is the only implemented provider; any other value is refused at startup rather than accepted and ignored. |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
 | `CREWSHIP_STORAGE_MEMORY_ROOT` | *(unset)* | Parent directory for the workspace memory tier. Unset disables that tier and memory versioning. `crewship start` derives it from the data directory, but **only when `DATABASE_URL` is unset** — set this explicitly in any deployment that brings its own database |
+| `CREWSHIP_PAGE_PROJECTS_PATH` | *(unset)* | Protected absolute source/Git/artifact directory outside and non-overlapping with crew storage; unset disables custom Page projects. Never mount it into crews. |
+| `CREWSHIP_PAGE_BUILD_IMAGE` | *(unset)* | Enables the optional offline Page compiler. Requires the projects path and a preinstalled immutable `sha256:…` image ID or `repository@sha256:…` digest; tags and automatic pulls are rejected. |
+| `CREWSHIP_PAGE_STUDIO_ORIGIN` | Falls back to `CREWSHIP_NEXTJS_URL` | Public browser origin allowed to initialize Page applications. Set explicitly behind a proxy; keep `CREWSHIP_NEXTJS_URL` on the internal API transport used by token sync and agent IPC. |
+| `CREWSHIP_PAGE_RUNTIME_ORIGIN` | *(unset)* | Dedicated HTTP(S) origin on a different site from Studio (`CREWSHIP_PAGE_STUDIO_ORIGIN`, falling back to `CREWSHIP_NEXTJS_URL`), e.g. `https://apps.example.net` for `https://studio.example.com`. Expose only `/api/v1/pages/runtime/bootstrap` on its proxy alias. Required to preview/publish/serve custom applications. |
+| `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN` | `false` | Reviewed-code development demos only. Literal `true` permits runtime and public Studio to use the exact same origin. Preserves sandbox/CSP/RBAC, but a stuck Page can freeze the Studio tab; no browser process isolation guarantee. Never enabled by a Page author. |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
 ## State

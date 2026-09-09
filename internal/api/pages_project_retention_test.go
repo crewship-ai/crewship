@@ -134,6 +134,12 @@ func TestPageWorkspaceBuildQuotaRecoversAfterRetention(t *testing.T) {
 			}
 		}
 	}
+	// Drain before TempDir cleanup: accepting the build starts an asynchronous writer.
+	t.Cleanup(func() {
+		if !waitForBackgroundWork(5e9) {
+			t.Error("Page build did not finish before storage cleanup")
+		}
+	})
 	// Admission must reclaim history itself, without waiting for hourly maintenance.
 	w := buildRequest(t, h, "POST", "/", ws, user, "OWNER", `{ "expected_revision":1 }`)
 	var count int
