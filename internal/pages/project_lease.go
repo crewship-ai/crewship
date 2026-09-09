@@ -2,6 +2,7 @@ package pages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -26,7 +27,17 @@ func (s *ProjectStore) fileLease(ctx context.Context, ws, name string, exclusive
 	if err != nil {
 		return nil, err
 	}
-	file, err := root.OpenFile(name, os.O_CREATE|os.O_RDWR, 0600)
+	// Open an existing inode without O_CREATE. Concurrent first opens with
+	// O_CREATE|O_RDWR returned ENOENT on the macOS CI filesystem. Exclusive
+	// creation gives the losing initializer an explicit EEXIST path; it then
+	// opens the winner's inode. Lease files are never removed or replaced.
+	file, err := root.OpenFile(name, os.O_RDWR, 0600)
+	if errors.Is(err, os.ErrNotExist) {
+		file, err = root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+		if errors.Is(err, os.ErrExist) {
+			file, err = root.OpenFile(name, os.O_RDWR, 0600)
+		}
+	}
 	root.Close()
 	if err != nil {
 		return nil, err
