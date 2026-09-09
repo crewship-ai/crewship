@@ -91,6 +91,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// required. Distinct from /internal/pipelines/save which the
 	// sidecar uses with X-Internal-Token; this route uses normal
 	// JWT auth and records authorship as the calling user.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/fixture_test", roleCreate, pipes.FixtureTest)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/save", roleCreate, pipes.Save)
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/drafts", authed(wsCtx(http.HandlerFunc(pipes.ListDrafts))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", authed(wsCtx(http.HandlerFunc(pipes.GetDraft))))

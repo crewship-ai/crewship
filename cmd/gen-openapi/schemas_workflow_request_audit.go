@@ -104,7 +104,13 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	publishResponse["required"] = []string{"id", "slug", "name", "dsl_version", "definition_hash", "ephemeral", "workspace_visible", "invocation_count", "authored_via", "status", "created_at", "updated_at", "linked_issue_count"}
 	draftListEntry := obj(map[string]any{"slug": str(), "revision": integer(), "updated_at": str()})
 	draftListEntry["required"] = []string{"slug", "revision", "updated_at"}
+	fixtureTest := obj(map[string]any{"definition": anyObject(), "step_id": str(), "inputs": anyObject(), "step_outputs": map[string]any{"type": "object", "additionalProperties": str()}, "fixture_output": str()})
+	fixtureTest["required"] = []string{"definition", "step_id"}
+	fixtureResult := obj(map[string]any{"execution_mode": str(), "step_id": str(), "step_type": str(), "definition_hash": str(), "fixture_hash": str(), "output_source": str(), "output": str(), "valid": boolean(), "validation_declared": boolean(), "validation_reason": str(), "limitations": arr(str())})
+	fixtureResult["required"] = []string{"execution_mode", "step_id", "step_type", "definition_hash", "fixture_hash", "output_source", "output", "valid", "validation_declared", "limitations"}
 	components := map[string]any{
+		"WorkflowFixtureTestRequest":  fixtureTest,
+		"RoutineFixtureResult":        fixtureResult,
 		"RoutineDraft":                draft,
 		"RoutineDraftSaveRequest":     draftSave,
 		"RoutineDraftRevisionRequest": draftRevision,
@@ -136,7 +142,8 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish": {Request: ref("RoutinePublishRequest"), Response: ref("RoutinePublishResponse"), SuccessStatuses: []string{"201"}},
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":     request("WorkflowPipelineRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch": request("WorkflowBatchRunRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run": request("WorkflowPipelineRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run": request("WorkflowStepRunRequest"),
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/test_run": request("WorkflowTestRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/save": request("WorkflowPipelineSaveRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/import": request("WorkflowPipelineImportRequest"),
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test": {Request: ref("WorkflowFixtureTestRequest"), Response: ref("RoutineFixtureResult"), SuccessStatuses: []string{"200"}},
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/test_run":     request("WorkflowTestRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/save": request("WorkflowPipelineSaveRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/import": request("WorkflowPipelineImportRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback": request("WorkflowRollbackRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata": request("WorkflowRunMetadataRequest"), "POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal": request("WorkflowSignalRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run": request("WorkflowEmptyRequest"), "POST /api/v1/workspaces/{workspaceId}/pipeline-schedules": request("WorkflowScheduleRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}": request("WorkflowScheduleRequest"),
 		// B8 (#2359): activate a draft trigger — no request body.
