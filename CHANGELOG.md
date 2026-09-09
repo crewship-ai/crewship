@@ -32,6 +32,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Pages application foundation** — portable source projects, immutable bounded Git checkpoints, protected storage maintenance and an offline React compiler bound to the server release. API and authoring UI follow separately.
+
 - **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
 
 - **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
