@@ -1092,3 +1092,17 @@ crewship page project unpublish health --expected-publication 3 --yes
 Requires Page ownership or workspace administration. Panels, source and retained
 publication history remain available. The version counter does not reset; stale
 requests return 409. Withdrawal does not cancel routines already queued.
+
+## `crewship page project compact`
+
+Runs workspace-wide Page storage maintenance (OWNER or ADMIN required).
+Without flags, retains the configured recent history plus current draft/live/running
+roots. `--discard-history --yes` explicitly discards optional history across all
+Pages in this workspace while keeping those protected roots. This cannot recover
+space occupied entirely by protected current content.
+
+## `crewship page project fsck <slug>`
+
+Checks referenced sources, checkpoint contents, artifacts and reachable Git
+objects with Page edit permission. Returns `healthy`, object counts and failures;
+the command exits nonzero when unhealthy. It does not repair or publish anything.
