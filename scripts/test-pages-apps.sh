@@ -36,3 +36,10 @@ go test -c -o "$evidence_dir/runtime.test" ./internal/pagebuild
 export CREWSHIP_TEST_RUNTIME_BINARY="$evidence_dir/runtime.test"
 timeout 90s node e2e/pages-preview-smoke.mjs "$evidence_dir/artifact.json" \
   | tee "$evidence_dir/browser.log"
+
+# The CLI example exercises action/status/history over the real compiled SDK.
+export CREWSHIP_TEST_PAGE_MAIN="$PWD/examples/pages-apps/main.tsx.tmpl"
+export CREWSHIP_TEST_PAGE_ACTIONS=1
+go test -p 1 -count=1 -timeout=5m ./internal/pagebuild -run '^TestDockerPreviewBuildIntegration$'
+timeout 90s node e2e/pages-preview-smoke.mjs "$evidence_dir/artifact.json" \
+  | tee "$evidence_dir/sdk-browser.log"
