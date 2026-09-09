@@ -121,8 +121,15 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret,
     if (!dirty) return
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     const onNavigate = (event: MouseEvent) => {
-      const link = (event.target as Element)?.closest?.("a[href]")
-      if (link && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
+      const link = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null
+      // Only guard a click that actually leaves this view. An in-page anchor
+      // (href="#", a fragment, a download, a new tab) does not discard the
+      // draft, and prompting on it — then swallowing the event in the capture
+      // phase, before React sees it — breaks every anchor-shaped control on
+      // the page for as long as the editor stays dirty.
+      const href = link?.getAttribute("href") ?? ""
+      const navigates = !!link && !link.hasAttribute("download") && link.target !== "_blank" && href !== "" && !href.startsWith("#")
+      if (navigates && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
     }
     window.addEventListener("beforeunload", beforeUnload)
     document.addEventListener("click", onNavigate, true)

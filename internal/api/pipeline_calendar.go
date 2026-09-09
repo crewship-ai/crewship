@@ -79,7 +79,6 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		replyError(w, 500, "load pending runs")
 		return
 	}
-	pendingCount := 0
 	for pending.Next() {
 		var id, slug, name, at string
 		if err := pending.Scan(&id, &slug, &name, &at); err != nil {
@@ -87,8 +86,10 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			replyError(w, 500, "read pending runs")
 			return
 		}
-		pendingCount++
-		if pendingCount > 1000 {
+		// One budget for the whole response, not one per source: the planned
+		// loop above already counts against len(events), and a separate
+		// counter here let a busy workspace return a thousand of each.
+		if len(events) >= 1000 {
 			truncated = true
 			break
 		}
@@ -106,15 +107,13 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer rows.Close()
-	count := 0
 	for rows.Next() {
 		var id, slug, name, at, status, outcome string
 		if err := rows.Scan(&id, &slug, &name, &at, &status, &outcome); err != nil {
 			replyError(w, 500, "read calendar runs")
 			return
 		}
-		count++
-		if count > 1000 {
+		if len(events) >= 1000 {
 			truncated = true
 			break
 		}

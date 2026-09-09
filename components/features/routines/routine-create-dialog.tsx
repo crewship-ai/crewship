@@ -384,8 +384,15 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     if (!changed) return
     const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
     const onNavigate = (event: MouseEvent) => {
-      const link = (event.target as Element)?.closest?.("a[href]")
-      if (link && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
+      const link = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null
+      // Only guard a click that actually leaves this view. An in-page anchor
+      // (href="#", a fragment, a download, a new tab) does not discard the
+      // draft, and prompting on it — then swallowing the event in the capture
+      // phase, before React sees it — breaks every anchor-shaped control on
+      // the page for as long as the editor stays dirty.
+      const href = link?.getAttribute("href") ?? ""
+      const navigates = !!link && !link.hasAttribute("download") && link.target !== "_blank" && href !== "" && !href.startsWith("#")
+      if (navigates && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
     }
     window.addEventListener("beforeunload", beforeUnload); document.addEventListener("click", onNavigate, true)
     return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", onNavigate, true) }
@@ -445,7 +452,12 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     bufferRef.current = next
     setLiveText(next)
     const parsed = parseRoutineBuffer(next, dslFormat)
-    if (parsed.ok) setDescription(String(parsed.parsed.description ?? ""))
+    // Mirror the description only when the document actually carries one.
+    // In edit mode it is seeded from the routine and need not appear in the
+    // DSL at all, so `?? ""` made the first keystroke in the Code pane blank
+    // it — and the save path's `description || parsed.description || ""`
+    // then wrote that empty string back over the saved routine.
+    if (parsed.ok && parsed.parsed.description !== undefined) setDescription(String(parsed.parsed.description))
     setParseError(null)
     setTestResult(null)
     setSaveToken(null)

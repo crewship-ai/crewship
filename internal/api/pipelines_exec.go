@@ -816,6 +816,10 @@ func (h *PipelineHandler) ListRunRecords(w http.ResponseWriter, r *http.Request)
 	} else {
 		records, err = h.runStore.ListByPipeline(r.Context(), p.ID, statusFilter, limit, r.URL.Query().Get("before"))
 	}
+	if errors.Is(err, pipeline.ErrUnknownRunCursor) {
+		replyError(w, http.StatusBadRequest, "unknown 'before' cursor for this routine")
+		return
+	}
 	if err != nil {
 		h.logger.Error("pipeline list run-records: query", "error", err)
 		replyError(w, http.StatusInternalServerError, "list run records")

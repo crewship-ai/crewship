@@ -406,7 +406,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   const showKillControl = canKillRoutine(role)
 
   const latestOutcome = runRecords[0]?.outcome
-  const status = latestOutcome === "FAILED" ? "failed" : latestOutcome === "NEEDS_HUMAN" ? "waiting" : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
+  const status = latestOutcome === "FAILED" ? "failed" : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
   // Run-status pill routes its colors through the shared palette
   // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
   // the status pills rendered in Inbox / Issues / Activity — failed reads
@@ -416,8 +416,15 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   // A live approval gate wins over the persisted last_invocation_status: the
   // run reads as "running" in the DB while parked, but the human is the
   // bottleneck, so we show the awaiting-approval state instead.
+  // NEEDS_HUMAN is the outcome of a run that finished, not a waitpoint: there
+  // is nothing to approve. lib/routine-run-presentation.ts says so in as many
+  // words ("this outcome alone is not an approval request"), so it reads as
+  // BLOCKED — the same warn tone that file gives it — rather than borrowing
+  // the violet approval-gate pill and claiming a decision is pending.
   const runStatus: { token: string; label: string } = pendingApproval || status === "waiting"
     ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
+    : latestOutcome === "NEEDS_HUMAN"
+    ? { token: "BLOCKED", label: "Last run · needs your attention" }
     : status === "completed" || status === "succeeded" || status === "success"
       ? { token: "COMPLETED", label: "Last run · completed" }
       : status === "failed" || status === "error"
