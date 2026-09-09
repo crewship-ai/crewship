@@ -773,6 +773,96 @@ Soft-deletes the pipeline (`deleted_at` set). Versions, run history, and bound s
 | `403` | Caller below `ADMIN` |
 | `404` | Pipeline not found |
 
+### List routine drafts
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/drafts
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Response:** `200 OK`, an array of up to 100 `{slug, revision, updated_at}`
+entries, newest edit first. Draft documents are read separately. `403` means
+insufficient role; `500` means the draft list could not be read.
+
+### Read a routine draft
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Response:** `200 OK`, a `RoutineDraft` envelope containing `id`, `workspace_id`,
+`slug`, `revision`, `base_pipeline_id`, `base_revision`, `document`, `updated_by`,
+`created_at` and `updated_at`. With no saved draft, revision zero describes the
+current published recipe and its base revision. With no published recipe either,
+the document is `{}` and the base ID is empty. Missing drafts are therefore not
+`404`. `403` means insufficient role; `500` means the read failed.
+
+### Save a routine draft
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/drafts
+```
+
+**Auth:** workspace `MANAGER`+; the authenticated user supplies `updated_by`.
+
+**Request body:** the draft envelope returned by the read operation, with edits
+inside `document`. Preserve `id`, `revision`, `base_pipeline_id` and
+`base_revision`. The document contains the ordinary save fields, including
+`slug`, `name`, `description` and an object `definition`; its slug must match the
+envelope. Incomplete definitions can be saved. Temporary publication tokens and
+legacy validation/governance bypass fields are discarded.
+
+**Response:** `200 OK`, the exact newly stored `RoutineDraft` with its incremented
+revision. An unpublished draft can move to a free slug without changing its ID;
+a draft editing a published recipe cannot. Saving does not publish or activate
+a trigger. `400` means malformed input; `403` means insufficient role; `409`
+means the revision/base changed or the target slug is occupied; `500` means the
+write failed. Keep the returned envelope for the next edit or publication.
+
+### Discard a routine draft
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Request body:** `{"id":"draft-id","revision":2}`. Both identify the exact
+saved draft; a discarded and recreated draft has a different ID.
+
+**Response:** `204 No Content`. Only that draft revision is deleted. `400` means
+invalid JSON; `403` means insufficient role; `409` means the ID/revision no longer
+matches; `500` means deletion failed. The published recipe remains available.
+
+### Publish a routine draft
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish
+```
+
+**Auth:** workspace `MANAGER`+; normal publication capability review still applies.
+
+**Request body:** `{"id":"draft-id","revision":2,"save_token":"...","approve_risk":false}`.
+First obtain `save_token` from `POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`
+for the exact saved definition and author crew. `approve_risk: true` explicitly
+confirms capability changes when publication reports that review is needed.
+
+**Response:** `201 Created`, the saved recipe (`RoutinePublishResponse`) with its
+version and optional trigger result. Publishing atomically verifies and consumes
+the exact draft, checks its published base, and saves the recipe and trigger.
+Enabled recurring schedules that follow the head must have compatible inputs;
+disabled and version-pinned schedules do not block publication.
+
+`400` means malformed input; `403` means insufficient role; `409` means stale
+revision/base, capability review required, or incompatible schedule inputs;
+`422` means an invalid definition, trigger or publication proof; `500` means
+storage failed. Conflicts preserve both the draft and published recipe.
+A schedule conflict includes `schedule_conflict: {schedule_id, name, reason}`;
+a capability-review conflict includes `risk_reasons`.
+
 ### Save pipeline
 
 ```
