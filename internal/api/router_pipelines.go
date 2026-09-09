@@ -92,6 +92,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// sidecar uses with X-Internal-Token; this route uses normal
 	// JWT auth and records authorship as the calling user.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/save", roleCreate, pipes.Save)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/drafts", authed(wsCtx(http.HandlerFunc(pipes.ListDrafts))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", authed(wsCtx(http.HandlerFunc(pipes.GetDraft))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/drafts", roleCreate, pipes.SaveDraft)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish", roleCreate, pipes.PublishDraft)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", roleCreate, pipes.DeleteDraft)
+
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	// #1422 item 5: native version diff (`?from=N&to=M`) — unified diff of

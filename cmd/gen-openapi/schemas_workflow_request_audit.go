@@ -27,6 +27,22 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
 	empty := obj(map[string]any{})
 
+	draft := obj(map[string]any{
+		"id": str(), "workspace_id": str(), "slug": str(), "revision": integer(),
+		"base_pipeline_id": str(), "base_revision": integer(), "document": anyObject(),
+		"updated_by": str(), "created_at": str(), "updated_at": str(),
+	})
+	draft["required"] = []string{"id", "workspace_id", "slug", "revision", "base_pipeline_id", "base_revision", "document", "updated_by", "created_at", "updated_at"}
+	draftSave := obj(map[string]any{
+		"id": str(), "slug": str(), "revision": integer(), "base_pipeline_id": str(),
+		"base_revision": integer(), "document": anyObject(),
+	})
+	draftSave["required"] = []string{"slug", "document"}
+	draftRevision := obj(map[string]any{"id": str(), "revision": integer()})
+	draftRevision["required"] = []string{"id", "revision"}
+	publication := obj(map[string]any{"id": str(), "revision": integer(), "save_token": str(), "approve_risk": boolean()})
+	publication["required"] = []string{"id", "revision", "save_token"}
+
 	pipelineRun := obj(map[string]any{
 		"inputs": anyObject(), "tier_override": str(), "triggered_via": str(), "triggered_by_id": str(),
 		"tags": arr(str()), "metadata": anyObject(), "delay_seconds": integer(), "ttl_seconds": integer(),
@@ -84,8 +100,18 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	escalationCancel := obj(map[string]any{"reason": str()})
 	waitpoint := obj(map[string]any{"approved": boolean(), "comment": str()})
 
+	publishResponse := obj(map[string]any{"head_version": integer(), "last_recorded_run_id": str(), "last_run_outcome": str(), "id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(), "definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(), "invocation_count": integer(), "last_invoked_at": str(), "last_invocation_status": str(), "author_crew_id": str(), "author_agent_id": str(), "author_agent_name": str(), "author_user_id": str(), "authored_via": str(), "status": str(), "icon": str(), "color": str(), "risk_reasons": arr(str()), "inbox_item_id": str(), "created_at": str(), "updated_at": str(), "linked_issue_count": integer(), "linked_issues": arr(str()), "integrations_required": arr(str()), "manifest": anyObject(), "definition": anyObject(), "trigger": anyObject()})
+	publishResponse["required"] = []string{"id", "slug", "name", "dsl_version", "definition_hash", "ephemeral", "workspace_visible", "invocation_count", "authored_via", "status", "created_at", "updated_at", "linked_issue_count"}
+	draftListEntry := obj(map[string]any{"slug": str(), "revision": integer(), "updated_at": str()})
+	draftListEntry["required"] = []string{"slug", "revision", "updated_at"}
 	components := map[string]any{
-		"WorkflowPipelineRunRequest": pipelineRun, "WorkflowBatchRunRequest": batch, "WorkflowTestRunRequest": testRun,
+		"RoutineDraft":                draft,
+		"RoutineDraftSaveRequest":     draftSave,
+		"RoutineDraftRevisionRequest": draftRevision,
+		"RoutineDraftList":            arr(draftListEntry),
+		"RoutinePublishRequest":       publication,
+		"RoutinePublishResponse":      publishResponse,
+		"WorkflowPipelineRunRequest":  pipelineRun, "WorkflowBatchRunRequest": batch, "WorkflowTestRunRequest": testRun,
 		"WorkflowStepRunRequest": stepRun, "WorkflowPipelineSaveRequest": save, "WorkflowPipelineImportRequest": importBody,
 		"WorkflowScheduleRequest": schedule, "WorkflowReplayRequest": replay, "WorkflowRunMetadataRequest": metadata,
 		"WorkflowSignalRequest": signal, "WorkflowCheckpointRequest": checkpoint, "WorkflowMissionCreateRequest": missionCreate,
@@ -103,7 +129,12 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	}
 	request := func(name string) DomainSchema { return DomainSchema{Request: ref(name)} }
 	routes := map[string]DomainSchema{
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run": request("WorkflowPipelineRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch": request("WorkflowBatchRunRequest"),
+		"GET /api/v1/workspaces/{workspaceId}/pipelines/drafts":          {Response: ref("RoutineDraftList")},
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/drafts":         {Request: ref("RoutineDraftSaveRequest"), Response: ref("RoutineDraft")},
+		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft":    {Response: ref("RoutineDraft")},
+		"DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft": {Request: ref("RoutineDraftRevisionRequest"), SuccessStatuses: []string{"204"}},
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish": {Request: ref("RoutinePublishRequest"), Response: ref("RoutinePublishResponse"), SuccessStatuses: []string{"201"}},
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":     request("WorkflowPipelineRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch": request("WorkflowBatchRunRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run": request("WorkflowPipelineRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run": request("WorkflowStepRunRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/test_run": request("WorkflowTestRunRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/save": request("WorkflowPipelineSaveRequest"), "POST /api/v1/workspaces/{workspaceId}/pipelines/import": request("WorkflowPipelineImportRequest"),
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback": request("WorkflowRollbackRequest"), "PATCH /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata": request("WorkflowRunMetadataRequest"), "POST /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal": request("WorkflowSignalRequest"),

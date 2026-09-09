@@ -939,6 +939,7 @@ type AuthorMeta struct {
 // to Store.Save. The store enforces author metadata, hash, and the
 // test-run gate; the caller owns the raw DSL JSON + parsed slug.
 type SaveInput struct {
+	Publication *DraftPublication
 	WorkspaceID string
 	Slug        string
 	Name        string

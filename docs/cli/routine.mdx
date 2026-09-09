@@ -178,6 +178,47 @@ crewship routine save \
 
 ---
 
+## `crewship routine draft`
+
+Keep edits separate from the published recipe. These commands require MANAGER
+or above in the selected workspace. A saved draft survives editor closure and
+server restart; it does not start work or activate its proposed schedule.
+
+```bash
+crewship routine draft list
+crewship routine draft get digest -f json > draft.json
+# Edit draft.json.document, preserving the outer revision/base fields.
+crewship routine draft save draft.json -f json > saved.json
+crewship routine draft publish saved.json
+```
+
+`get` returns either the saved draft or a revision-zero baseline. For a new
+recipe, fill `document.slug`, `document.name`, and `document.definition`; the
+slug must match the envelope. `save` returns the new revision envelope. Use a
+separate output file so shell redirection cannot truncate the input file.
+
+`publish` validates the exact definition without running its steps, then
+publishes the exact saved ID/revision. Capability changes that require review
+need an explicit `--approve-risk`. A stale editor, changed published recipe or
+incompatible recurring-plan preset returns a conflict; the draft stays saved.
+Unpinned recurring plans follow the newly published recipe. Accepted runs and
+pinned plans keep their version.
+
+```bash
+crewship routine draft publish saved.json --approve-risk
+crewship routine draft discard saved.json
+```
+
+`discard` deletes only the revision named by the file. Legacy `routine save`
+continues to publish directly; it has not become a draft-save command.
+
+Chat authoring uses `get_routine_draft` and `save_routine_draft` against the
+same revision envelope. The agent returns an `editor_url` containing the
+saved draft ID. Open it in Routines to review Recipe / Test / Publish.
+A discarded-and-recreated draft rejects the old link. Neither agent draft
+tool publishes or activates a trigger; legacy `save_routine` still publishes
+directly. Crew/workspace/acting-agent identity is checked by the server.
+
 ## `crewship routine delete <slug>`
 
 Soft-delete a routine after a confirmation prompt. The row is preserved for
