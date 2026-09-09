@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProviderPoolSchemas(t *testing.T) {
 	routes, components := providerLoginSchemaCatalog()
@@ -44,6 +47,56 @@ func TestProviderPoolRequestBodyRequired(t *testing.T) {
 			body := requestBodyForRoute(route{method: "POST", path: tc.path})
 			if got, _ := body["required"].(bool); got != tc.required {
 				t.Fatalf("body required=%v want=%v", got, tc.required)
+			}
+		})
+	}
+}
+
+func TestProviderPoolLifecycleContract(t *testing.T) {
+	ops := loadSpecOperations(t)
+	for _, method := range []string{"put", "delete"} {
+		t.Run(method, func(t *testing.T) {
+			op := ops["/api/v1/provider-logins/pools/{poolId}"][method]
+			found := false
+			for _, p := range op.Parameters {
+				if p.Name == "If-Match" && p.In == "header" && p.Required {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing required precondition header")
+			}
+			for _, code := range []string{"204", "400", "404", "412", "428"} {
+				if _, ok := op.Responses[code]; !ok {
+					t.Errorf("missing %s", code)
+				}
+			}
+			if _, ok := op.Responses["200"]; ok {
+				t.Fatal("documented success body for no-content operation")
+			}
+		})
+	}
+	if body := requestBodyForRoute(route{method: "PUT", path: "/api/v1/provider-logins/pools/{poolId}"}); body["required"] != true {
+		t.Fatal("update body optional")
+	}
+}
+
+func TestProviderPoolCommittedETag(t *testing.T) {
+	ops := loadSpecOperations(t)
+	for _, tc := range []struct{ method, path, status string }{
+		{"post", "/api/v1/provider-logins/pools", "201"},
+		{"get", "/api/v1/provider-logins/pools/{poolId}", "200"},
+		{"put", "/api/v1/provider-logins/pools/{poolId}", "204"},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			var response struct {
+				Headers map[string]any `json:"headers"`
+			}
+			if err := json.Unmarshal(ops[tc.path][tc.method].Responses[tc.status], &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Headers["ETag"] == nil {
+				t.Fatal("committed revision header missing")
 			}
 		})
 	}

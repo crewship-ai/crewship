@@ -270,6 +270,8 @@ POST /api/v1/projects roleCreate
 POST /api/v1/projects/{projectId}/milestones roleCreate
 POST /api/v1/provider-logins/device roleInline
 POST /api/v1/provider-logins/pools roleManage
+PUT /api/v1/provider-logins/pools/{poolId} roleManage
+DELETE /api/v1/provider-logins/pools/{poolId} roleManage
 POST /api/v1/recipes/{slug}/install roleManage
 POST /api/v1/recurring-issues roleCreate
 POST /api/v1/saved-views roleCreate

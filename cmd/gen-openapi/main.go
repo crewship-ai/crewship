@@ -393,6 +393,9 @@ func buildDocument(routes []route) map[string]any {
 				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
 			}
 			if status[0] == '2' {
+				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
+					response.(map[string]any)["headers"] = headers
+				}
 				if status != "204" {
 					response.(map[string]any)["content"] = responseContentForRoute(rt)
 				}
@@ -414,6 +417,7 @@ func buildDocument(routes []route) map[string]any {
 				"description": "Workspace ID or slug.", "schema": map[string]any{"type": "string"},
 			})
 		}
+		params = append(params, routeSchemaCatalog()[rt.method+" "+rt.path].Parameters...)
 		if len(params) > 0 {
 			op["parameters"] = params
 		}
@@ -499,6 +503,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 			merged.Request = schema.Request
 		}
 		merged.RequestRequired = merged.RequestRequired || schema.RequestRequired
+		if schema.SuccessHeaders != nil {
+			merged.SuccessHeaders = schema.SuccessHeaders
+		}
+		if schema.Parameters != nil {
+			merged.Parameters = schema.Parameters
+		}
 		if schema.RequestMedia != nil {
 			merged.RequestMedia = schema.RequestMedia
 		}
@@ -578,6 +588,12 @@ func routeSchemaCatalog() map[string]DomainSchema {
 }
 
 func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
+	if incoming.SuccessHeaders != nil {
+		existing.SuccessHeaders = incoming.SuccessHeaders
+	}
+	if incoming.Parameters != nil {
+		existing.Parameters = incoming.Parameters
+	}
 	existing.RequestRequired = existing.RequestRequired || incoming.RequestRequired
 	if incoming.Request != nil {
 		existing.Request = incoming.Request

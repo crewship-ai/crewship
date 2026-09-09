@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
+
 - **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.
 
 - **Personal notification sounds** — five original short tones, separate Chat/Inbox choices, previews, volume and Do not disturb in Settings → Account → Notification sounds, with a desktop/mobile toolbar shortcut. Authorized fresh human messages and important unread Inbox items can alert after audio is enabled; focused reading, muted rooms, duplicate tabs and history reloads remain quiet.

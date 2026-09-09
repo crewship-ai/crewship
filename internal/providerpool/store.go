@@ -131,7 +131,7 @@ func (s *Store) Choose(ctx context.Context, workspaceID, poolID string, now time
 	var policy Policy
 	var seq int64
 	err = tx.QueryRowContext(ctx, `UPDATE provider_login_pools SET selection_seq = selection_seq + 1
-		WHERE id = ? AND workspace_id = ? AND selection_seq < ?
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND selection_seq < ?
 		RETURNING provider, mode, allow_cross_owner, selection_seq`, poolID, workspaceID, int64(math.MaxInt64)).
 		Scan(&policy.Provider, &policy.Mode, &policy.AllowCrossOwner, &seq)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -174,7 +174,7 @@ func (s *Store) Snapshot(ctx context.Context, workspaceID, poolID string) (Polic
 	defer tx.Rollback()
 	var policy Policy
 	err = tx.QueryRowContext(ctx, `SELECT provider, mode, allow_cross_owner FROM provider_login_pools
-		WHERE id = ? AND workspace_id = ?`, poolID, workspaceID).
+		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, poolID, workspaceID).
 		Scan(&policy.Provider, &policy.Mode, &policy.AllowCrossOwner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Policy{}, nil, ErrNotFound
