@@ -9,6 +9,24 @@ queries:
   # (e.g. cleartext-logging, insecure-randomness).
   - uses: security-extended
 
+# Design-review prototypes are not product code. public/design holds static
+# wireframes from a design round: hard-coded fixtures, no network, no product
+# import, kept under public/ on purpose so a reviewer can open them on a dev
+# instance (docs/prd/ROUTINES-UX-DECISION-2026-09-08.md links them by URL).
+#
+# Their render functions assemble markup by template interpolation and hand it
+# to innerHTML, which js/xss-through-dom reports. Every value a person can type
+# into these mockups already goes through the file's own `esc()`; the rest are
+# literals in the file. CodeQL cannot see that the sink's inputs are fixtures,
+# so the alerts are structural, not findings.
+#
+# Scoped to this directory alone. Everything the product actually serves stays
+# analysed — this is not a query exclusion, and app code under app/, components/
+# and lib/ is unaffected. If a prototype ever imports product code or reads a
+# URL parameter, it belongs outside this directory and back under analysis.
+paths-ignore:
+  - public/design
+
 query-filters:
   # go/log-injection is excluded by policy (#954). Every logger in this
   # codebase roots in internal/logging.New, whose ReplaceAttr hook
