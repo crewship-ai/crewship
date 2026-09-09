@@ -9,9 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: default administrator reveal permission** (#2461) — OWNER/ADMIN memberships without explicit capability overrides now receive `credentials:reveal`, as does the admin preset. Existing explicit sets (including revocations) remain authoritative. Workspace opt-in, human-session checks, scope, SEALED denial and audit remain required.
+
+- **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
+
 ### Added
 
 - **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
+
 - **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
 
 - **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.

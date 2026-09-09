@@ -12,7 +12,7 @@ package api
 //
 //	L0  classification — SEALED is never revealable, by any role
 //	L1  workspace default-deny — off until an OWNER turns it on
-//	L2  capability, not role — OWNER/ADMIN is necessary, never sufficient
+//	L2  capability — OWNER/ADMIN defaults include it; explicit overrides win
 //	L3.3 mandatory, non-trivial reason
 //	L4  chained audit as a PRECONDITION — no chained write, no value
 //	L9  agents never reveal — interactive human sessions only
@@ -126,7 +126,7 @@ const (
 	msgRevealWorkspaceOff = "Reveal is disabled for this workspace. " +
 		"An OWNER must enable it in Settings → Access & Secrets first."
 	msgRevealNoCapability = "Reveal requires the `credentials:reveal` capability on your membership. " +
-		"Being an OWNER or ADMIN is not sufficient — the capability is granted per person."
+		"OWNER/ADMIN defaults include it, but an explicit membership capability set takes precedence."
 	msgRevealOutOfScope = "Reveal is limited to credentials in your own crews."
 	msgRevealSealed     = "This credential is SEALED and can never be revealed, by any role. " +
 		"Rotate it instead — the new value is shown once at creation."

@@ -771,6 +771,9 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Verify bounded credential reveal UI
+        timeout-minutes: 3
+        run: pnpm exec playwright test --config=playwright.reveal.config.ts --output=reveal-test-results
       - name: Verify account group UI and role gating
         timeout-minutes: 3
         run: pnpm exec playwright test --config=playwright.pool-ui.config.ts --output=pool-ui-test-results
@@ -782,6 +785,7 @@ jobs:
           path: |
             playwright-pr-report.json
             test-results/
+            reveal-test-results/
             pool-ui-test-results/
           if-no-files-found: warn
       - name: Dump browser server log on failure

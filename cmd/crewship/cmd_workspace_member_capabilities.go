@@ -93,7 +93,7 @@ Examples:
   crewship workspace member capabilities grant ludmila routine.create issue.create memory.write
 
 Valid capability strings: chat, routine.create, routine.run,
-skill.create, credential.create, credential.rotate, issue.create,
+skill.create, credential.create, credential.rotate, credentials:reveal, issue.create,
 page.create, memory.write.
 
 routine.create authors a routine; routine.run invokes one that already

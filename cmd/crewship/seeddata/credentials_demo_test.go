@@ -1,10 +1,60 @@
 package seeddata
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestDemoCredentialsV2_FileAndKeyPairShapes(t *testing.T) {
+	seen := map[string]bool{}
+	for _, dc := range DemoCredentials() {
+		if dc.Def.Name != "demo-v2-json-file" && dc.Def.Name != "demo-v2-key-pair" {
+			continue
+		}
+		seen[dc.Def.Name] = true
+		if dc.Def.Type != "GENERIC_SECRET" {
+			t.Errorf("%s: wrong storage type", dc.Def.Name)
+		}
+		if dc.Def.Provider == "NONE" || dc.Def.Provider == "" {
+			t.Errorf("%s: missing brand", dc.Def.Name)
+		}
+		// Match by key, never by position. Slice order is not part of the
+		// fixture contract, and asserting dc.Fields[0] lets a shape lose its
+		// second field — the key pair's region — without a test noticing.
+		byKey := make(map[string]DemoField, len(dc.Fields))
+		for _, f := range dc.Fields {
+			byKey[f.Key] = f
+		}
+		requireVisible := func(keys ...string) {
+			for _, k := range keys {
+				f, ok := byKey[k]
+				if !ok {
+					t.Errorf("%s: missing field %q", dc.Def.Name, k)
+					continue
+				}
+				if f.Secret {
+					t.Errorf("%s: field %q must be non-secret", dc.Def.Name, k)
+				}
+				if strings.TrimSpace(f.Value) == "" {
+					t.Errorf("%s: field %q carries no value", dc.Def.Name, k)
+				}
+			}
+		}
+		if dc.Def.Name == "demo-v2-json-file" {
+			if !json.Valid([]byte(dc.Def.Value)) {
+				t.Error("file demo is not JSON")
+			}
+			requireVisible("filename")
+		} else {
+			requireVisible("access_key_id", "region")
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatal("missing v2 demo shapes")
+	}
+}
 
 // The demo vault ships with the product. These tests are about what it must
 // never contain and never imply, not about how many rows it has.

@@ -83,8 +83,8 @@ Every reveal is refused unless ALL of these hold:
 
   • an OWNER has enabled reveal for the workspace (Settings → Access & Secrets,
     or 'crewship credential reveal-policy --enable')
-  • your membership carries the 'credentials:reveal' capability — being an
-    OWNER or ADMIN is necessary but NOT sufficient
+  • your membership carries 'credentials:reveal' (included in OWNER/ADMIN
+    defaults; an explicit membership capability set can withhold it)
   • the credential is not SEALED (SEALED can never be revealed, by anyone)
   • you pass a reason of at least 20 characters, which is recorded
   • the reveal can be written to the tamper-evident audit chain first
@@ -290,7 +290,7 @@ Examples:
 		}
 		if out.Enabled {
 			cli.PrintSuccess("Credential reveal ENABLED for this workspace. " +
-				"Individual people still need the 'credentials:reveal' capability — role alone does not grant it.")
+				"Members need 'credentials:reveal': included in OWNER/ADMIN defaults, but explicit capability sets take precedence.")
 		} else {
 			cli.PrintSuccess("Credential reveal DISABLED for this workspace.")
 		}
