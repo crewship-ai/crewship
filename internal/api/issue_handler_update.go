@@ -499,8 +499,49 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The cascade off `missions` is not self-sufficient. Three NO ACTION edges
+	// hang off the tables that DO cascade:
+	//
+	//   assignments.issue_execution_id     -> issue_executions
+	//   mission_tasks.issue_execution_id   -> issue_executions
+	//   issue_executions.review_task_id    -> mission_tasks
+	//
+	// The first is fatal on its own: assignments outlive the issue by design
+	// (their mission_id is ON DELETE SET NULL), so the cascade deletes the
+	// execution row a surviving assignment still points at and SQLite refuses
+	// the whole statement — every issue that ever ran answered 500 with a raw
+	// "FOREIGN KEY constraint failed". The other two point at each other, so
+	// the order in which one cascade reaches them is not something to rely on.
+	//
+	// So: drop the pointer that outlives its target the same way mission_id is
+	// dropped, and defer the remaining checks to COMMIT, which is what lets a
+	// mutually-referencing pair be removed together. defer_foreign_keys is not
+	// the same lever as foreign_keys — it is designed to be set inside a
+	// transaction and resets itself at the end of one.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		internalError(w, r, h.logger, "delete issue: begin", err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `PRAGMA defer_foreign_keys = ON`); err != nil {
+		internalError(w, r, h.logger, "delete issue: defer foreign keys", err)
+		return
+	}
+	// Scoped by the same status filter as the DELETE below, so an issue this
+	// call is not allowed to delete keeps its execution pointers intact.
+	if _, err := tx.ExecContext(r.Context(),
+		`UPDATE assignments SET issue_execution_id = NULL WHERE issue_execution_id IN (
+			SELECT x.id FROM issue_executions x JOIN missions m ON m.id = x.mission_id
+			WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?
+			  AND m.status IN ('BACKLOG', 'CANCELLED'))`,
+		ident, crewID, wsID); err != nil {
+		internalError(w, r, h.logger, "delete issue: release execution pointers", err)
+		return
+	}
+
 	// Only allow deletion of BACKLOG or CANCELLED issues
-	res, err := h.db.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ? AND status IN ('BACKLOG', 'CANCELLED')`,
 		ident, crewID, wsID)
 	if err != nil {
@@ -514,7 +555,10 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	if affected == 0 {
 		var currentStatus string
-		qErr := h.db.QueryRowContext(r.Context(),
+		// Read through the same transaction: it already holds a write lock, so
+		// asking the pool for a second connection here would be contending
+		// with ourselves for no reason.
+		qErr := tx.QueryRowContext(r.Context(),
 			`SELECT status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
 			ident, crewID, wsID).Scan(&currentStatus)
 		if qErr != nil {
@@ -536,6 +580,13 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		// created issue can always be got rid of; it just takes the status
 		// changes first. Say which ones.
 		writeProblem(w, r, http.StatusBadRequest, issueDeleteRefusal(ident, currentStatus))
+		return
+	}
+	// Commit before the blob sweep: the deferred foreign-key checks run here,
+	// and the sweep below is explicitly best-effort bookkeeping that must not
+	// decide whether the delete happened.
+	if err := tx.Commit(); err != nil {
+		internalError(w, r, h.logger, "delete issue: commit", err)
 		return
 	}
 

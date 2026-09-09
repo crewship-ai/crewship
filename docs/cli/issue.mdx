@@ -295,11 +295,14 @@ run happened.
 
 ```bash
 crewship issue runs ENG-42
-crewship issue result ENG-42 asg_9f2c1b
-crewship issue result ENG-42 asg_9f2c1b -f json
+crewship issue result ENG-42 m_1a0864071c85b082f6adb2c
+crewship issue result ENG-42 m_1a0864071c85b082f6adb2c -f json
 ```
 
-Takes the issue identifier and a run id from `crewship issue runs`. A run that
+Takes the issue identifier and the **assignment id** — the `id` field of
+`crewship issue runs <identifier> -f json`. It is not the `RUN` column of
+that command's table: that column is the journal trace id, and passing it
+answers `404 Run not found for this issue`. A run that
 belongs to another issue answers `404` rather than reading across issues; a
 run that reported nothing says so instead of printing an empty result.
 
