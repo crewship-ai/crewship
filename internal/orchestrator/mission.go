@@ -290,8 +290,10 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 func (e *MissionEngine) StopMission(missionID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if ms, ok := e.active[missionID]; ok {
-		ms.cancel()
+	if ms, ok := e.active[missionID]; ok && ms != nil {
+		if ms.cancel != nil {
+			ms.cancel()
+		}
 		delete(e.active, missionID)
 		e.logger.Info("mission stopped", "mission_id", missionID)
 	}
@@ -312,6 +314,13 @@ func (e *MissionEngine) Shutdown() {
 // runMissionLoop is the main orchestration loop for a single mission.
 // It periodically checks for ready tasks and schedules them.
 func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
+	// One recording spans planning, concurrent workers, and Lead review. A
+	// worker finishing must not terminate the issue's shared chat stream.
+	if e.hub != nil {
+		stream := e.hub.BeginSessionRun(ms.ID)
+		defer func() { stream.Emit(ws.ChatEvent{Type: "done"}); stream.End() }()
+	}
+
 	defer func() {
 		// If context timed out, mark mission as FAILED
 		if ctx.Err() == context.DeadlineExceeded {
@@ -358,11 +367,39 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				return
 			}
 
+			// Fence stale revisions before dispatching another task, not after.
+			executionHandled, executionErr := e.checkIssueExecution(ctx, ms)
+			if executionErr != nil {
+				e.logger.Error("issue execution tick", "error", executionErr)
+				continue
+			}
+			if executionHandled {
+				current, err := e.getMissionStatus(ctx, ms.ID)
+				if err != nil || current != "IN_PROGRESS" {
+					continue
+				}
+			}
+
 			// Lead planning phase: if mission has 0 tasks, dispatch to lead
 			// so they can plan and create tasks autonomously.
 			e.mu.Lock()
 			alreadyPlanning := ms.planningDispatched
 			e.mu.Unlock()
+			if !alreadyPlanning {
+				var boundRoutine bool
+				err := e.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_executions WHERE mission_id=? AND routine_run_id IS NOT NULL AND stage IN ('working','reviewing'))`, ms.ID).Scan(&boundRoutine)
+				if err != nil {
+					e.logger.Error("check issue routine", "error", err)
+					continue
+				}
+				if boundRoutine {
+					alreadyPlanning = true
+					e.mu.Lock()
+					ms.planningDispatched = true
+					e.mu.Unlock()
+				}
+			}
+
 			if !alreadyPlanning {
 				taskCount, countErr := e.countTasks(ctx, ms.ID)
 				if countErr != nil {
@@ -402,8 +439,10 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				continue
 			}
 
-			if err := e.checkMissionCompletionWithTasks(ctx, ms, tasks); err != nil {
-				e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
+			if !executionHandled {
+				if err := e.checkMissionCompletionWithTasks(ctx, ms, tasks); err != nil {
+					e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
+				}
 			}
 
 			// Deadlock detection: all tasks BLOCKED with nothing making progress

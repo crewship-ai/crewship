@@ -205,3 +205,9 @@ describe("IssuesListView bulk update", () => {
     expect(screen.queryByRole("alert")).toBeNull()
   })
 })
+
+it("shows the human currently doing the work in list view", () => {
+  render(<IssuesListView issues={[{ ...issue("held", 1), assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_name: "Petra", worker_user_id: "person" }]} onIssueClick={() => {}} />)
+  expect(screen.getByText("Petra")).toBeInTheDocument()
+  expect(screen.queryByText("Jordan")).not.toBeInTheDocument()
+})

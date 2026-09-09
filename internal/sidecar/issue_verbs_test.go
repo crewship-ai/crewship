@@ -596,3 +596,19 @@ func TestIssueVerbs_NoIPC(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleIssueWorkUsesTrustedActorAndWorkspace(t *testing.T) {
+	mock, got := mockCrewshipd(t, http.StatusOK, `{"revision":4}`)
+	srv := tokenCrewServer(t, mock.URL)
+	w := httptest.NewRecorder()
+	srv.handleIssueWork(w, issueReq(http.MethodPost, "/issue/ENG-7/work", `{"agent_id":"forged","workspace_id":"foreign","action":"handoff_human","target_id":"person","note":"Verify the result","operation_id":"handoff-1","revision":3}`, "boot-token"))
+	if w.Code != 200 {
+		t.Fatalf("handoff: %d %s", w.Code, w.Body.String())
+	}
+	if got.path != "/api/v1/internal/issues/ENG-7/work" || got.body["agent_id"] != "boot-agent" || got.body["workspace_id"] != "ws-1" {
+		t.Fatalf("untrusted identity forwarded: %s %#v", got.path, got.body)
+	}
+	if got.body["note"] != "Verify the result" || got.body["operation_id"] != "handoff-1" {
+		t.Fatal("handoff payload lost")
+	}
+}

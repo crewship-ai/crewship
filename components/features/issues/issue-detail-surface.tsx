@@ -25,6 +25,8 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 
+import { IssueFilesCard } from "./issue-files-card"
+import { IssueWorkPanel } from "./issue-work-panel"
 import { apiFetch } from "@/lib/api-fetch"
 import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
@@ -96,6 +98,8 @@ export function IssueDetailSurface({
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
+  const [commentsHasMore, setCommentsHasMore] = React.useState(false)
+  const [olderBusy, setOlderBusy] = React.useState(false)
   const [comments, setComments] = React.useState<IssueComment[]>([])
   const [activities, setActivities] = React.useState<IssueActivity[]>([])
   const [relations, setRelations] = React.useState<IssueRelation[]>([])
@@ -176,10 +180,14 @@ export function IssueDetailSurface({
     if (!base) return
     const mine = ++subReq.current
     const failed: string[] = []
+    let hasOlder = false
     const get = (path: string, label: string) =>
-      apiFetch(`${base}/${path}?${qs}`)
+      apiFetch(`${base}/${path}?${qs}${path === "comments" ? "&page_size=100" : ""}`)
         .then((r) => {
-          if (r.ok) return r.json()
+          if (r.ok) {
+            if (path === "comments") hasOlder = r.headers?.get?.("X-Has-More") === "true"
+            return r.json()
+          }
           failed.push(label)
           return null
         })
@@ -200,7 +208,7 @@ export function IssueDetailSurface({
     if (mine !== subReq.current) return
     // A failed resource keeps what it had rather than emptying: an error
     // must not erase the comments that were on screen a second ago.
-    if (cs !== null) setComments(Array.isArray(cs) ? cs : [])
+    if (cs !== null) { setComments(Array.isArray(cs) ? cs : []); setCommentsHasMore(hasOlder) }
     if (as !== null) setActivities(Array.isArray(as) ? as : [])
     if (rs !== null) setRelations(Array.isArray(rs) ? rs : [])
     if (rn !== null) setRuns(Array.isArray(rn) ? rn : [])
@@ -218,6 +226,7 @@ export function IssueDetailSurface({
     subReq.current++
     setIssue(null)
     setComments([])
+    setCommentsHasMore(false)
     setActivities([])
     setRelations([])
     setRuns([])
@@ -289,6 +298,20 @@ export function IssueDetailSurface({
   // Only the second was subscribed, so an agent's write reached no open tab:
   // our own writes refetch directly, which is why clicking in the UI always
   // looked fine and only somebody else's change went missing.
+  const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scheduleRefresh = React.useCallback(() => {
+    if (realtimeTimer.current) return
+    realtimeTimer.current = setTimeout(() => {
+      realtimeTimer.current = null
+      void fetchIssue()
+      void fetchSubResources()
+    }, 100)
+  }, [fetchIssue, fetchSubResources])
+  React.useEffect(() => () => {
+    if (realtimeTimer.current) clearTimeout(realtimeTimer.current)
+    realtimeTimer.current = null
+  }, [scheduleRefresh])
+
   const onIssueEvent = React.useCallback(
     (event: RealtimeEvent) => {
       // Off the PAYLOAD, not the envelope. Reading `event.id` finds
@@ -305,10 +328,9 @@ export function IssueDetailSurface({
       // deliberately rather than by widening the filter to match everything.
       const id = (event.payload as { id?: string } | undefined)?.id
       if (id && issue?.id && id !== issue.id) return
-      void fetchIssue()
-      void fetchSubResources()
+      scheduleRefresh()
     },
-    [fetchIssue, fetchSubResources, issue?.id],
+    [scheduleRefresh, issue?.id],
   )
   useRealtimeEvent("issue.updated", onIssueEvent)
   useRealtimeEvent("mission.updated", onIssueEvent)
@@ -325,9 +347,9 @@ export function IssueDetailSurface({
     (event: RealtimeEvent) => {
       const missionId = (event.payload as { mission_id?: string } | undefined)?.mission_id
       if (missionId && issue?.id && missionId !== issue.id) return
-      void fetchSubResources()
+      scheduleRefresh()
     },
-    [fetchSubResources, issue?.id],
+    [scheduleRefresh, issue?.id],
   )
   useRealtimeEvent("issue.session.state", onSessionOrOutcomeEvent)
   useRealtimeEvent("run.outcome", onSessionOrOutcomeEvent)
@@ -361,6 +383,21 @@ export function IssueDetailSurface({
     await fetchSubResources()
     onChanged?.()
   }, [fetchIssue, fetchSubResources, onChanged])
+
+  const loadOlderComments = async () => {
+    if (!base || olderBusy || !comments[0]) return
+    const mine = subReq.current
+    setOlderBusy(true)
+    try {
+      const res = await apiFetch(`${base}/comments?${qs}&page_size=100&before_id=${encodeURIComponent(comments[0].id)}`)
+      if (!res.ok) throw new Error("Could not load older comments")
+      const older = await res.json() as IssueComment[]
+      if (mine !== subReq.current) return
+      setComments((current) => [...older, ...current.filter((item) => !older.some((row) => row.id === item.id))])
+      setCommentsHasMore(res.headers?.get?.("X-Has-More") === "true")
+    } catch { if(mine === subReq.current) toast.error("Could not load older comments. Try again.") }
+    finally { setOlderBusy(false) }
+  }
 
   const patch = React.useCallback(
     async (body: Record<string, unknown>): Promise<boolean> => {
@@ -405,8 +442,13 @@ export function IssueDetailSurface({
         }
         // Re-read rather than append: the server owns the id, the timestamp
         // and — once mentions are parsed there — what the body became.
-        const fresh = await apiFetch(`${base}/comments?${qs}`).then((r) => (r.ok ? r.json() : null))
-        if (Array.isArray(fresh)) setComments(fresh)
+        const mine = subReq.current
+        const response = await apiFetch(`${base}/comments?${qs}&page_size=100`)
+        const fresh = response.ok ? await response.json() : null
+        if (mine === subReq.current && Array.isArray(fresh)) {
+          setComments(fresh)
+          setCommentsHasMore(response.headers?.get?.("X-Has-More") === "true")
+        }
         return true
       } catch {
         toast.error("Failed to add comment")
@@ -566,31 +608,19 @@ export function IssueDetailSurface({
   const runRoutine = React.useCallback(async () => {
     if (!issue?.routine_slug) return
     try {
-      const res = await apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(issue.routine_slug)}/run`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            inputs: {},
-            triggered_via: "issue",
-            // The identifier, so /activity's Runs view can join the run back
-            // to the issue that started it.
-            triggered_by_id: issue.identifier ?? issue.id,
-          }),
-        },
-      )
+      if (!base) return
+      const res = await apiFetch(`${base}/start?${qs}`, { method: "POST" })
       if (!res.ok) {
         const b = await res.json().catch(() => null)
         toast.error(b?.detail ?? "Failed to start routine")
         return
       }
-      toast.success(`Routine ${issue.routine_slug} started — see /activity`)
+      toast.success(`Routine ${issue.routine_slug} started — progress and Lead review appear here`)
       await refresh()
     } catch {
       toast.error("Failed to start routine")
     }
-  }, [issue?.routine_slug, issue?.identifier, issue?.id, workspaceId, refresh])
+  }, [issue?.routine_slug, base, qs, refresh])
 
   const runWorkflow = React.useCallback(
     async (action: WorkflowAction, comment?: string) => {
@@ -611,6 +641,8 @@ export function IssueDetailSurface({
           body: review
             ? JSON.stringify({
                 action: action === "approve" ? "approve" : "request_changes",
+                revision: issue?.work_revision,
+                brief_revision: issue?.brief_revision,
                 ...(comment ? { comment } : {}),
               })
             : undefined,
@@ -636,7 +668,11 @@ export function IssueDetailSurface({
         setBusy(false)
       }
     },
-    [base, qs, patch, refresh],
+    // work_revision and brief_revision are read inside this callback and sent
+    // as the review CAS values: leaving them out of the deps pins the first
+    // pair the component ever saw, so a review posted after any other write
+    // carries a stale revision.
+    [base, qs, patch, refresh, issue?.work_revision, issue?.brief_revision],
   )
 
   /* ---------------------------------------------------------------- *
@@ -724,8 +760,11 @@ export function IssueDetailSurface({
     )}
     <IssueCardDetail
       issue={issue}
+      filesPanel={<IssueFilesCard key={issue.id} issue={issue} editable={editable} />}
+      workPanel={<IssueWorkPanel key={issue.id} issue={issue} agents={roster.agents} editable={editable} onChanged={refresh} latestOutcome={runs[0]?.outcome} />}
       unavailable={subFailed}
       comments={comments}
+      olderComments={commentsHasMore ? <Button size="sm" variant="outline" disabled={olderBusy} onClick={() => void loadOlderComments()}>{olderBusy ? "Loading…" : "Load older comments"}</Button> : undefined}
       activities={activities}
       relations={relations}
       runs={runs}

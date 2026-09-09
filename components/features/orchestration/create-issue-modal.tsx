@@ -54,6 +54,7 @@ import type { AssigneeOption } from "@/components/features/issues/assignee-picke
 import { cn } from "@/lib/utils"
 import { isImeComposing } from "@/lib/ime"
 import { apiFetch } from "@/lib/api-fetch"
+import { useIssuePeople } from "@/hooks/use-issue-people"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, Milestone, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -147,6 +148,7 @@ export function CreateIssueModal({
   const [projectId, setProjectId] = useState<string | null>(null)
   const [selectedLabels, setSelectedLabels] = useState<string[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
+  const { people, error: peopleError } = useIssuePeople(workspaceId, open)
   const [agents, setAgents] = useState<AgentAssigneeOption[]>([])
   const [agentLoad, setAgentLoad] = useState<PickerLoad>("idle")
   /** Bumped by the error state's Try again, purely to re-run the fetch effect. */
@@ -430,7 +432,7 @@ export function CreateIssueModal({
   const selectedProject = projects.find((p) => p.id === projectId)
   const selectedRoutine = routines.find((r) => r.id === routineId)
   const selectedAgent = assigneeId ? agents.find((a) => a.id === assigneeId) ?? null : null
-  const assigneeName = selectedAgent?.name ?? null
+  const assigneeName = assigneeType === "user" ? people.find((person) => person.id === assigneeId)?.name : selectedAgent?.name ?? null
   const selectedMilestone = milestoneId ? milestones.find((m) => m.id === milestoneId) ?? null : null
   const selectedParent = parentIssueId ? parentCandidates.find((i) => i.id === parentIssueId) ?? null : null
 
@@ -573,9 +575,10 @@ export function CreateIssueModal({
         <CreateSurfaceDescriptionInput
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Add description..."
+          placeholder="What should be done, what does a good result look like, and which files or constraints matter?"
           rows={3}
         />
+        {!description && <button type="button" className="px-1 py-2 text-xs text-primary hover:underline" onClick={() => setDescription("## Goal\n\n\n## Done when\n\n\n## Context and constraints\n\n\n## Expected output\n\n")}>Use a task brief template</button>}
       </CreateSurfaceBody>
 
       {/* ── Metadata pills ── */}
@@ -684,6 +687,8 @@ export function CreateIssueModal({
                       header to assign someone.
                     </p>
                   )}
+                  {peopleError && <p role="alert" className="px-3 py-2 text-xs text-destructive">People could not be loaded.</p>}
+                  {people.length > 0 && <CommandGroup heading="People">{people.map((person) => <CommandItem key={person.id} value={`person ${person.name}`} onSelect={() => { setAssigneeType("user"); setAssigneeId(person.id); setAssigneeOpen(false) }}><User className="mr-2 h-3.5 w-3.5" /><span className="text-xs">{person.name}</span>{assigneeId === person.id && <Check className="ml-auto h-3.5 w-3.5" />}</CommandItem>)}</CommandGroup>}
                   {agents.length > 0 && (
                     <CommandGroup heading="Agents">
                       {agents.map((agent) => (

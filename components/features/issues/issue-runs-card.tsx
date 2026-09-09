@@ -1,5 +1,8 @@
 "use client"
 
+import { useState } from "react"
+import { apiFetch } from "@/lib/api-fetch"
+import { MarkdownContent } from "./markdown-content"
 import Link from "next/link"
 import { ArrowUpRight, BookOpen, Play } from "lucide-react"
 
@@ -9,6 +12,8 @@ import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
 import { formatDurationDecimal, relTime } from "@/lib/time"
+import { formatStatus, type StatusMeta } from "@/lib/format-status"
+import { hasIssueAgentDelegate } from "@/lib/issue-execution"
 import type { Mission } from "@/lib/types/mission"
 
 /** `GET /api/v1/crews/{crewId}/issues/{identifier}/runs` (issue_handler_runs.go). */
@@ -26,7 +31,40 @@ export interface IssueRun {
   ended_at?: string
   duration_ms: number
   result_summary?: string
+  result_truncated?: boolean
+  result_stale?: boolean
   error_message?: string
+  outcome?: string
+  source?: "task" | "mention" | "delegation"
+}
+
+const OUTCOMES: Record<string, StatusMeta> = {
+  SUCCEEDED: { label: "Reported success", tone: "success" },
+  NO_CHANGE: { label: "No changes", tone: "muted" },
+  WORK_CREATED: { label: "Work created", tone: "blue" },
+  PARTIAL: { label: "Partial result", tone: "warn" },
+  NEEDS_HUMAN: { label: "Needs human input", tone: "warn" },
+  FAILED: { label: "Failed", tone: "danger" },
+  CANCELLED: { label: "Cancelled", tone: "muted" },
+}
+
+/** Process completion alone says nothing about the result or human acceptance. */
+export function issueRunStatus(run: Pick<IssueRun, "status" | "outcome" | "error_message">): StatusMeta {
+  const status = run.status.trim().toUpperCase()
+  // Live and stopped processes take precedence over stale reported results.
+  if (status !== "COMPLETED") return formatStatus(status)
+  const outcome = run.outcome?.trim().toUpperCase() ?? ""
+  if (Object.hasOwn(OUTCOMES, outcome)) return OUTCOMES[outcome]
+  if (run.error_message?.trim()) return { label: "Run needs attention", tone: "warn" }
+  return { label: "Outcome not reported", tone: "muted" }
+}
+
+function runTitle(issue: Mission, run: IssueRun): string {
+  const task = run.task?.trim()
+  // The runs API also returns complete model prompts in `task`. Keep them
+  // on the run's technical surface instead of rendering prompt scaffolding.
+  if (!task || task.includes("\n") || task.startsWith("[")) return issue.title || "Agent run"
+  return task
 }
 
 /**
@@ -44,10 +82,11 @@ export function issueRunLinks(issue: Pick<Mission, "id" | "identifier">, run?: P
 }
 
 /** What the empty card says, by where the issue is in its life. */
-export function issueRunsEmptyCopy(status: string): string {
-  return status === "BACKLOG" || status === "TODO"
-    ? "Not started yet — nothing has run. Start the issue to hand it to its agent."
-    : "No agent run recorded against this issue."
+export function issueRunsEmptyCopy(issue: Mission): string {
+  if (issue.status !== "BACKLOG" && issue.status !== "TODO") return "No agent run recorded against this issue."
+  if (hasIssueAgentDelegate(issue)) return "No agent runs yet. Start work to hand this issue to its agent."
+  if (issue.owner || issue.assignee_type === "user") return "No agent runs recorded. This issue has a human owner; an agent delegate is optional."
+  return "No agent runs recorded. Assign an agent if you want it to run this issue."
 }
 
 /**
@@ -86,21 +125,22 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
       {unavailable && runs.length === 0 ? (
         <InlineEmpty icon={Play} text="Could not load the runs — try again above." className="border-destructive/40 text-destructive" />
       ) : runs.length === 0 ? (
-        <InlineEmpty icon={Play} text={issueRunsEmptyCopy(issue.status)} />
+        <InlineEmpty icon={Play} text={issueRunsEmptyCopy(issue)} />
       ) : (
         <div className="flex flex-col">
           {runs.map((run) => {
             const l = issueRunLinks(issue, run)
-            const summary = run.error_message || run.result_summary
+            const result = issueRunStatus(run)
+            const source = run.source === "mention" ? "From a message" : run.source === "delegation" ? "Delegated work" : run.source === "task" ? "Planned task" : null
             return (
               <div
                 key={run.id}
                 data-testid="issue-run-row"
-                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 border-t border-border/50 py-2.5 first:border-t-0 md:grid-cols-[auto_minmax(0,1.6fr)_auto_minmax(0,1fr)_auto] md:items-center"
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 border-t border-border/50 py-2.5 first:border-t-0 md:grid-cols-[auto_minmax(0,1fr)_auto_auto] md:items-center"
               >
                 <AgentAvatar seed={run.agent_id ?? run.agent_name ?? run.id} alt="" className="h-6 w-6 shrink-0 rounded-full" />
                 <div className="min-w-0">
-                  <p className="truncate text-[12.5px] font-medium">{run.task || "Agent run"}</p>
+                  <p className="truncate text-[12.5px] font-medium">{runTitle(issue, run)}</p>
                   <p className="truncate text-[11px] text-muted-foreground">
                     {l.agent ? (
                       <Link href={l.agent} className="hover:underline">
@@ -111,18 +151,10 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                     )}
                     {run.started_at && <> · started {relTime(run.started_at)}</>}
                     {run.duration_ms > 0 && <> · {formatDurationDecimal(run.duration_ms)}</>}
+                    {source && <> · {source}</>}
                   </p>
                 </div>
-                <StatusPill status={run.status} live={run.status === "RUNNING"} className="col-start-2 md:col-start-auto" />
-                <p
-                  className={
-                    "col-start-2 min-w-0 truncate text-[11px] md:col-start-auto " +
-                    (run.error_message ? "text-destructive/90" : "text-muted-foreground")
-                  }
-                  title={summary}
-                >
-                  {summary || ""}
-                </p>
+                <StatusPill label={result.label} tone={result.tone} live={run.status === "RUNNING"} className="col-start-2 w-fit md:col-start-auto" />
                 {l.run ? (
                   <Link
                     href={l.run}
@@ -136,11 +168,20 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                     no run
                   </span>
                 )}
+                <div className="col-start-2 col-end-[-1] min-w-0 text-[11px]">
+                  {run.result_stale && <p className="text-warn">This result uses an earlier brief. Check it against the current requirements.</p>}
+                  {run.error_message && <p className="break-words text-destructive/90">{run.error_message}</p>}
+                  {run.result_summary?.trim() ? (
+                    <IssueRunResult issue={issue} run={run} />
+                  ) : run.status === "COMPLETED" ? (
+                    <p className="text-muted-foreground">No summary recorded.</p>
+                  ) : null}
+                </div>
               </div>
             )
           })}
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2 text-[11px] text-muted-foreground">
-            <span>Every run on this issue, newest first. The journal keeps each run&apos;s steps.</span>
+            <span>Recent runs, newest first. Reported success does not confirm that the issue was accepted.</span>
             <Link href={links.journal} className="inline-flex items-center gap-1 text-primary hover:underline">
               <BookOpen className="h-3 w-3" />
               Journal for {issue.identifier ?? "this issue"}
@@ -151,4 +192,25 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
       )}
     </DetailCard>
   )
+}
+
+function IssueRunResult({ issue, run }: { issue: Mission; run: IssueRun }) {
+ const [full, setFull] = useState<string | null>(null)
+ const [loading, setLoading] = useState(false)
+ const [error, setError] = useState(false)
+ async function load() {
+  if (!run.result_truncated || full !== null || loading) return
+  setLoading(true); setError(false)
+  try {
+   const res = await apiFetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier ?? issue.id)}/runs/${encodeURIComponent(run.id)}/result?workspace_id=${encodeURIComponent(issue.workspace_id)}`)
+   if (!res.ok) throw new Error("Result unavailable")
+   const body = await res.json(); setFull(body.result_summary)
+  } catch {setError(true)} finally {setLoading(false)}
+ }
+ return <details className="text-muted-foreground" onToggle={(event) => { if (event.currentTarget.open) void load() }}>
+  <summary className="cursor-pointer rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Reported summary</summary>
+  <div className="mt-2 min-w-0 break-words [overflow-wrap:anywhere]"><MarkdownContent>{full ?? run.result_summary ?? ""}</MarkdownContent></div>
+  {loading && <p role="status">Loading complete result…</p>}
+  {error && <p role="alert">Only the preview is available. <button className="text-primary underline" onClick={() => void load()}>Retry full result</button></p>}
+ </details>
 }

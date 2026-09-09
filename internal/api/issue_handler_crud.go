@@ -273,6 +273,10 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
 		issue.ID).Scan(&issue.CommentCount)
 
+	if err := h.loadIssueExecution(r.Context(), &issue); err != nil {
+		internalError(w, r, h.logger, "get execution", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, issue)
 }
 
@@ -301,6 +305,10 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
 		issue.ID).Scan(&issue.CommentCount)
 
+	if err := h.loadIssueExecution(r.Context(), &issue); err != nil {
+		internalError(w, r, h.logger, "get execution", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, issue)
 }
 

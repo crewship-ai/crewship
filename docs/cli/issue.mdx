@@ -31,6 +31,9 @@ crewship issue <subcommand> [flags]
 | `start` | Start an issue (dispatch to assigned agent) |
 | `stop` | Stop an issue (cancel running tasks) |
 | `review` | Review an issue (approve or request changes) |
+| `work` | Take over an issue, hand it to a person or agent, or submit human work |
+| `review-policy` | Require or drop human acceptance before an issue's work counts as done |
+| `result` | Show what one of an issue's runs reported back |
 | `activity` | Show the activity timeline for an issue |
 | `events` | Show the ordered, seq-cursored event log for an issue (for resync after a dropped realtime frame) |
 | `runs` | List runs triggered by an issue |
@@ -228,6 +231,77 @@ crewship issue labels
 ```
 
 **Output columns:** NAME, COLOR, GROUP
+
+---
+
+## `crewship issue work`
+
+Take over an issue, hand it to a person or agent, or submit human work for
+review. Requires workspace `OWNER`, `ADMIN`, or `MANAGER` access. The owner
+stays accountable even when the current worker changes.
+
+```bash
+crewship issue work ENG-42
+crewship issue work ENG-42 --action handoff_human --target user_123 --note "Verify the attached report"
+crewship issue work ENG-42 --action handoff_agent --target agent_123 --note "Publish the approved version"
+crewship issue work ENG-42 --action submit --note "Verified all findings against the source"
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--action` | string | `take_over` | `take_over`, `handoff_human`, `handoff_agent`, or `submit` |
+| `--target` | string | — | Workspace user or agent ID; required for a handoff |
+| `--note` | string | — | Result, verification or next instructions; required except takeover |
+| `--operation-id` | string | Generated | Stable operation ID when retrying the same request |
+| `--revision` | integer | Current issue revision | Expected `work_revision`; pin this along with operation ID for an exact retry |
+
+An exact retry returns the saved receipt. A changed request under the same ID
+or a stale revision fails with a conflict. Human takeover fences new agent
+work and requests cancellation of active runs. Handback and submission wait
+until those runs have stopped. Handing back to an agent prepares a new step;
+use `crewship issue start` to execute it. `submit` moves human work to review.
+
+---
+
+## `crewship issue review-policy`
+
+Set whether a person has to accept the work before this issue counts as done.
+Requires workspace `OWNER`, `ADMIN`, or `MANAGER` access.
+
+```bash
+crewship issue review-policy ENG-42 --required
+crewship issue review-policy ENG-42 --required=false
+crewship issue review-policy ENG-42 --required --revision 3 -f json
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--required` | boolean | — | Required. `--required` asks for acceptance, `--required=false` drops it |
+| `--revision` | integer | Current issue revision | Expected `work_revision`; a concurrent change is refused rather than overwritten |
+
+The flag has no default on purpose: a bare call is refused rather than
+guessing, because dropping acceptance removes a gate somebody set. The policy
+can change only while the issue is `TODO` or `BACKLOG` with no live
+assignment — once work starts the server answers `409` instead of moving the
+goalposts under the worker.
+
+---
+
+## `crewship issue result`
+
+Print one run's result summary, outcome and status — what the worker reported
+back, where [`crewship issue runs`](#crewship-issue-runs) lists only that the
+run happened.
+
+```bash
+crewship issue runs ENG-42
+crewship issue result ENG-42 asg_9f2c1b
+crewship issue result ENG-42 asg_9f2c1b -f json
+```
+
+Takes the issue identifier and a run id from `crewship issue runs`. A run that
+belongs to another issue answers `404` rather than reading across issues; a
+run that reported nothing says so instead of printing an empty result.
 
 ---
 

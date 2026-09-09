@@ -129,3 +129,12 @@ func (r *sessionRun) End() {
 		r.hub.streams.end(r.channel)
 	}
 }
+
+// EmitSessionEvent publishes into a lifecycle owned by the mission engine.
+// It does not begin or finish a run: concurrent workers share that lifecycle.
+func (h *Hub) EmitSessionEvent(chatID string, event ChatEvent) {
+	if h == nil || chatID == "" {
+		return
+	}
+	(&sessionRun{hub: h, channel: "session:" + chatID}).Emit(event)
+}

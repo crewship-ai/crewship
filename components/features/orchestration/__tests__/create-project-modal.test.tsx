@@ -207,7 +207,7 @@ describe("CreateProjectModal", () => {
     // The section exists and says why it is empty — what must not exist is a
     // control. The old one was an add button with no onClick at all.
     expect(screen.getByText("Milestones")).toBeInTheDocument()
-    expect(screen.getByText(/Milestones cannot be created here/)).toBeInTheDocument()
+    expect(screen.getByText(/add milestones on its project page/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "+" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /add milestone/i })).not.toBeInTheDocument()
   })
@@ -423,7 +423,7 @@ describe("CreateProjectModal — what it no longer hides", () => {
   it("explains the missing milestones instead of leaving a hole", () => {
     render(<CreateProjectModal {...defaultProps} />)
     expect(
-      screen.getByText(/milestones cannot be created here/i),
+      screen.getByText(/add milestones on its project page/i),
     ).toBeInTheDocument()
   })
 

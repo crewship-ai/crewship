@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -44,6 +43,7 @@ type IssueHandler struct {
 	// never calls SetContainer) makes a hard stop report "unsupported"
 	// rather than panic; Tier 1 cooperative stop never reads this field.
 	container provider.ContainerProvider
+	routines  *PipelineHandler
 }
 
 // NewIssueHandler creates a new IssueHandler.
@@ -297,23 +297,32 @@ type issueResponse struct {
 	// old clients during the migration window. Nil when nobody occupies
 	// that slot. A UI must render these as two separate things and must
 	// never fall back to putting an agent in Owner's place.
-	Owner          *issueOwnerResponse    `json:"owner,omitempty"`
-	Delegate       *issueDelegateResponse `json:"delegate,omitempty"`
-	DueDate        *string                `json:"due_date"`
-	SortOrder      float64                `json:"sort_order"`
-	MissionType    string                 `json:"mission_type"`
-	LeadAgentID    string                 `json:"lead_agent_id"`
-	CreatedAt      string                 `json:"created_at"`
-	UpdatedAt      string                 `json:"updated_at"`
-	CompletedAt    *string                `json:"completed_at"`
-	Labels         []labelResponse        `json:"labels"`
-	ProjectID      *string                `json:"project_id"`
-	ProjectName    *string                `json:"project_name,omitempty"`
-	Estimate       *int                   `json:"estimate"`
-	ParentIssueID  *string                `json:"parent_issue_id"`
-	MilestoneID    *string                `json:"milestone_id"`
-	SubIssuesCount int                    `json:"sub_issues_count"`
-	CommentCount   int                    `json:"comment_count"`
+	Execution            *issueExecutionResponse `json:"execution,omitempty"`
+	BriefRevision        int                     `json:"brief_revision,omitempty"`
+	ClientReviewRequired bool                    `json:"client_review_required"`
+	WorkMode             string                  `json:"work_mode"`
+	WorkRevision         int                     `json:"work_revision"`
+	WorkerUserID         *string                 `json:"worker_user_id,omitempty"`
+	WorkerName           *string                 `json:"worker_name,omitempty"`
+	WorkNote             string                  `json:"work_note"`
+	WorkStopping         bool                    `json:"work_stopping"`
+	Owner                *issueOwnerResponse     `json:"owner,omitempty"`
+	Delegate             *issueDelegateResponse  `json:"delegate,omitempty"`
+	DueDate              *string                 `json:"due_date"`
+	SortOrder            float64                 `json:"sort_order"`
+	MissionType          string                  `json:"mission_type"`
+	LeadAgentID          string                  `json:"lead_agent_id"`
+	CreatedAt            string                  `json:"created_at"`
+	UpdatedAt            string                  `json:"updated_at"`
+	CompletedAt          *string                 `json:"completed_at"`
+	Labels               []labelResponse         `json:"labels"`
+	ProjectID            *string                 `json:"project_id"`
+	ProjectName          *string                 `json:"project_name,omitempty"`
+	Estimate             *int                    `json:"estimate"`
+	ParentIssueID        *string                 `json:"parent_issue_id"`
+	MilestoneID          *string                 `json:"milestone_id"`
+	SubIssuesCount       int                     `json:"sub_issues_count"`
+	CommentCount         int                     `json:"comment_count"`
 	// Routine binding — when set, /run-routine on this issue invokes
 	// the bound pipeline. RoutineSlug is denormalized in the response
 	// so the UI doesn't have to round-trip the pipelines list to
@@ -533,17 +542,6 @@ func issueDeleteRefusal(identifier, currentStatus string) string {
 		strings.Join(steps, "\n  ") + "\n  crewship issue delete " + identifier
 }
 
-// addIssueComment inserts a comment on an issue (used by best-effort flows
-// like auto-posted review notes; distinct from the public CreateComment
-// handler in issue_handler_comments.go).
-func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorType, authorID, body string) {
-	commentID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = h.db.ExecContext(ctx,
-		`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		commentID, missionID, authorType, authorID, body, now, now)
-}
-
 // issueSelectQuery returns the base SELECT query for fetching issues.
 // LEFT JOINs into pipelines on routine_id so the response can include
 // routine slug + name without a second round-trip — the Issue UI
@@ -596,8 +594,13 @@ func issueSelectQuery() string {
 		m.owner_user_id,
 		(SELECT full_name FROM users WHERE id = m.owner_user_id) AS owner_name,
 		m.delegate_agent_id,
-		(SELECT name FROM agents WHERE id = m.delegate_agent_id AND workspace_id = m.workspace_id) AS delegate_name
+		(SELECT name FROM agents WHERE id = m.delegate_agent_id AND workspace_id = m.workspace_id) AS delegate_name,
+ COALESCE(iw.mode,'agent'),COALESCE(iw.revision,0),iw.worker_user_id,
+ (SELECT u.full_name FROM users u JOIN workspace_members wm ON wm.user_id=u.id WHERE u.id=iw.worker_user_id AND wm.workspace_id=m.workspace_id),
+ COALESCE(iw.note,''),
+ CASE WHEN iw.mode='human' THEN EXISTS(SELECT 1 FROM assignments a WHERE (a.mission_id=m.id OR a.chat_id=m.id OR a.group_id=m.id) AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED')) OR EXISTS(SELECT 1 FROM pipeline_runs pr JOIN issue_executions x ON x.routine_run_id=pr.id WHERE x.mission_id=m.id AND pr.status IN ('queued','running','waiting')) ELSE 0 END
 	FROM missions m
+	LEFT JOIN issue_work iw ON iw.mission_id=m.id
 	LEFT JOIN crews c ON m.crew_id = c.id
 	LEFT JOIN pipelines p ON m.routine_id = p.id AND p.workspace_id = m.workspace_id`
 }
@@ -618,6 +621,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
 		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 		&ownerUserID, &ownerName, &delegateAgentID, &delegateName,
+		&issue.WorkMode, &issue.WorkRevision, &issue.WorkerUserID, &issue.WorkerName, &issue.WorkNote, &issue.WorkStopping,
 	)
 	if err == nil {
 		issue.Labels = []labelResponse{}

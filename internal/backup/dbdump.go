@@ -155,6 +155,8 @@ var BackupTables = []string{
 	"milestones",
 	"projects",
 	"missions",
+	"issue_work",
+	"issue_executions",
 	"crew_templates",
 	"credentials",
 	// Depth 2: workspace via crews
@@ -1016,6 +1018,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	// that OR IGNORE then swallows. Counted here, reported to the operator
 	// by the caller. See dropped_columns.go.
 	var dropped droppedColumnTally
+	restoredMissions := map[string]bool{}
+	hasIssueWork, err := tableExistsTx(ctx, tx, "issue_work")
+	if err != nil {
+		return stats, fmt.Errorf("backup: probe issue_work: %w", err)
+	}
 	conversationAssignments := map[string]bool{}
 	for _, job := range dump.Tables["workspace_conversation_agent_jobs"] {
 		if id, _ := job["assignment_id"].(string); id != "" {
@@ -1072,7 +1079,31 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		}
 		tableInserted := 0
 		for _, originalRow := range rows {
+			// main's conversation sanitiser runs FIRST: it rebuilds the row
+			// from the original, so the held-work override below — which
+			// copies whatever row is current — has to come after it or its
+			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			// Restoring a held issue must not restart work that was still stopping
+			// at backup time. Preserve historical terminal runs and their brief
+			// snapshots; import nonterminal held runs as cancelled.
+			if table == "assignments" && hasIssueWork {
+				status, _ := row["status"].(string)
+				if status != "COMPLETED" && status != "FAILED" && status != "CANCELLED" {
+					var held bool
+					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issue_work WHERE mode='human' AND (mission_id=? OR mission_id=? OR mission_id=?))`, row["mission_id"], row["chat_id"], row["group_id"]).Scan(&held); err != nil {
+						return stats, fmt.Errorf("backup: read held work: %w", err)
+					}
+					if held {
+						copy := make(map[string]any, len(row)+1)
+						for k, v := range row {
+							copy[k] = v
+						}
+						copy["status"], copy["outcome"] = "CANCELLED", "CANCELLED"
+						row = copy
+					}
+				}
+			}
 			// pendingClamp is only reported if the row actually lands:
 			// INSERT OR IGNORE silently drops a PK collision, and telling an
 			// admin to go re-tier a credential this restore never touched
@@ -1119,6 +1150,18 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			if len(cols) == 0 {
 				continue
 			}
+
+			// A mission insert creates its default work row. Replace only that
+			// generated row, never an existing target mission's work state.
+			replaceWork := false
+			if table == "issue_work" {
+				if missionID, ok := row["mission_id"].(string); ok && restoredMissions[missionID] {
+					replaceWork = true
+					if _, err := tx.ExecContext(ctx, `DELETE FROM issue_work WHERE mission_id=?`, missionID); err != nil {
+						return stats, fmt.Errorf("backup: replace generated work: %w", err)
+					}
+				}
+			}
 			query := fmt.Sprintf(
 				"INSERT OR IGNORE INTO %s (%s) VALUES (%s)",
 				quoteIdent(table),
@@ -1140,6 +1183,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				)
 				args = append(args, row[guard.column])
 			}
+			if replaceWork {
+				query = strings.Replace(query, "INSERT OR IGNORE", "INSERT", 1)
+			}
 			res, err := tx.ExecContext(ctx, query, args...)
 			if err != nil {
 				return stats, fmt.Errorf("backup: insert into %s: %w", table, err)
@@ -1152,6 +1198,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				stats.RowsInserted += int(n)
 				tableInserted += int(n)
 				landed = n > 0
+			}
+			if replaceWork && !landed {
+				return stats, fmt.Errorf("backup: replacement issue work did not insert")
+			}
+			if table == "missions" && landed {
+				if id, ok := row["id"].(string); ok {
+					restoredMissions[id] = true
+				}
 			}
 			if pendingClamp != nil && landed {
 				appendSecurityLevelClamp(&stats, *pendingClamp)

@@ -647,6 +647,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/issues":
 				s.handleIssuesList(w, r)
 				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/work"):
+				s.handleIssueWork(w, r)
+				return
 			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/issue/") && strings.HasSuffix(r.URL.Path, "/comment"):
 				s.handleIssueComment(w, r)
 				return

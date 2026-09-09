@@ -429,3 +429,28 @@ func fenceObjectFields(obj map[string]json.RawMessage, fields []string) {
 		obj[field] = wrapped
 	}
 }
+
+// handleIssueWork forwards a handoff with trusted actor identity. Human-only
+// actions are refused by the API even if an agent constructs the raw payload.
+func (s *Server) handleIssueWork(w http.ResponseWriter, r *http.Request) {
+	agentID, ok := s.issueActor(w, r)
+	if !ok {
+		return
+	}
+	ident, ok := issueIdentFromPath(w, r.URL.Path, "/work")
+	if !ok {
+		return
+	}
+	var req struct {
+		OperationID string `json:"operation_id"`
+		Revision    *int   `json:"revision"`
+		Action      string `json:"action"`
+		TargetID    string `json:"target_id"`
+		Note        string `json:"note"`
+	}
+	if !decodeCappedJSON(w, r, &req) {
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{"workspace_id": s.ipc.WorkspaceID, "agent_id": agentID, "operation_id": req.OperationID, "revision": req.Revision, "action": req.Action, "target_id": req.TargetID, "note": req.Note})
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/issues/"+url.PathEscape(ident)+"/work", "issue handoff", payload)
+}

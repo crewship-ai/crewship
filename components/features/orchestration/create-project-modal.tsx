@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  AlertTriangle,
   CalendarDays,
   Check,
   User,
@@ -19,7 +18,6 @@ import {
   CreateSurfaceFooter,
   CreateSurfaceGrid,
   CreateSurfaceHeader,
-  CreateSurfaceNotice,
   CreateSurfacePicker,
   CreateSurfacePill,
   CreateSurfacePills,
@@ -499,19 +497,8 @@ export function CreateProjectModal({
           </CreateSurfaceGrid>
         </CreateSurfaceSection>
 
-        {/* Milestones cannot be created here: POST
-            /api/v1/projects/{projectId}/milestones 404s until the project
-            already exists (milestone_handler.go's projectExists check), and
-            there is no post-create screen that can add one either. This used
-            to be a code comment only — the user was told nothing. Said
-            out loud instead, matching the read-only reference in
-            docs/prd/create-surface-parity.md §6.2. */}
         <CreateSurfaceSection title="Milestones" icon={Milestone} accent="purple">
-          <CreateSurfaceNotice tone="warn" icon={AlertTriangle}>
-            Milestones cannot be created here — the endpoint refuses until the project exists — and there is
-            no screen anywhere in the web UI that can create one. The CLI can:{" "}
-            <code className="font-mono">crewship milestone create</code>.
-          </CreateSurfaceNotice>
+          <p className="text-xs text-muted-foreground">After creating the project, add milestones on its project page to track deliverables and target dates.</p>
         </CreateSurfaceSection>
           </>
         )}
