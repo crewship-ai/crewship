@@ -197,6 +197,8 @@ var BackupTables = []string{
 	"pipeline_schedules",
 	"pipeline_webhooks",
 	"pipeline_runs",
+	"pipeline_step_executions",
+	"pipeline_run_artifacts",
 	"pipeline_run_step_outputs", // normalized per-step outputs (v159) — run-detail waterfall; FK run_id
 	"pipeline_routine_state",    // cross-run "since last run" watermarks (v155) — FK pipeline_id
 	"pending_runs",              // deferred/debounced triggers — durable queued work
@@ -408,7 +410,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		// bundles); bindings WITH credential_id will FK-fail on restore
 		// against a fresh target. Tracked separately.
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
-	case "pipeline_run_step_outputs":
+	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_versions":

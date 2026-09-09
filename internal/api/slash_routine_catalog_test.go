@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -446,7 +447,7 @@ func TestSlashCatalog_RoutineEntryShape(t *testing.T) {
 		{Name: "vypis_odesilatel", Type: "text", ValueType: "string", Default: "info@rb.cz"},
 	}
 	for i, w := range want {
-		if entry.FormSchema[i] != w {
+		if !reflect.DeepEqual(entry.FormSchema[i], w) {
 			t.Errorf("field %d = %+v, want %+v", i, entry.FormSchema[i], w)
 		}
 	}
@@ -523,5 +524,18 @@ func TestStaticSlashCommandIDsCoverTheCatalog(t *testing.T) {
 	}
 	if slashRoutineCollidesWithStatic("msn-etn-podklady") {
 		t.Error("an ordinary routine slug was treated as a collision")
+	}
+}
+
+func TestSlashRoutineChoiceFields(t *testing.T) {
+	fields := slashFormSchemaForInputs([]pipeline.InputSpec{
+		{Name: "period", Type: "string", Widget: "select", Options: []string{"month", "year"}, AllowCustom: true, Default: "month"},
+		{Name: "teams", Type: "array", Widget: "multiselect", Options: []string{"a,b", "c"}, Default: []any{"a,b"}},
+	})
+	if fields[0].Type != "select" || !fields[0].AllowCustom || !reflect.DeepEqual(fields[0].Options, []string{"month", "year"}) {
+		t.Fatalf("lost choice metadata: %+v", fields[0])
+	}
+	if fields[1].Type != "multiselect" || fields[1].ValueType != "array" || fields[1].Default != `["a,b"]` {
+		t.Fatalf("lost typed default: %+v", fields[1])
 	}
 }

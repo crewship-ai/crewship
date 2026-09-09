@@ -488,6 +488,7 @@ func (e *Executor) executeOneStep(
 	if step.If != "" {
 		if !evalStepCondition(step.If, ctxRender) {
 			emit.emitStepSkipped(ctx, *step, step.If)
+			e.recordSkippedExecution(ctx, in, runID, *step)
 			resMu.Lock()
 			result.StepOutputs[step.ID] = "<skipped>"
 			resMu.Unlock()

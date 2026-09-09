@@ -25,6 +25,8 @@ vi.mock("@/hooks/use-pipeline-schedules", () => ({
   }),
 }))
 
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, json: async () => [] })) }))
+
 import { RoutineSchedulesTab } from "@/components/features/routines/routine-schedules-tab"
 
 function baseSchedule(overrides: Record<string, unknown> = {}) {

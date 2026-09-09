@@ -224,6 +224,11 @@ type ExecutionTier struct {
 // (e.g. Max=0.5 would round to 0). Validation rejects fractional
 // bounds when the input Type is "integer".
 type InputSpec struct {
+	Widget      string   `json:"widget,omitempty"`
+	Options     []string `json:"options,omitempty"`
+	AllowCustom bool     `json:"allow_custom,omitempty"`
+	Placeholder string   `json:"placeholder,omitempty"`
+	Label       string   `json:"label,omitempty"`
 	Name        string   `json:"name"`
 	Type        string   `json:"type"` // string | integer | number | boolean | array | object
 	Required    bool     `json:"required,omitempty"`
@@ -237,9 +242,11 @@ type InputSpec struct {
 // are read from the final step's output by name; we do not enforce
 // strict typing in MVP, the spec is documentary + UI-rendering.
 type OutputSpec struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
+	Label       string            `json:"label,omitempty"`
+	ValueLabels map[string]string `json:"value_labels,omitempty"`
+	Name        string            `json:"name"`
+	Type        string            `json:"type"`
+	Description string            `json:"description,omitempty"`
 }
 
 // CredReq declares a credential the pipeline needs at runtime. Type-
@@ -807,6 +814,9 @@ type Validation struct {
 // MaxIterations caps the retry loop so a stubborn output can't
 // burn unbounded tokens. Default is 3 (one initial run + 2 revisions).
 type Outcomes struct {
+	// Required fails closed when the grader cannot establish a verdict.
+	// Omitted preserves legacy advisory behavior on infrastructure errors.
+	Required bool `json:"required,omitempty"`
 	// Criteria are the named pass/fail rules the grader evaluates
 	// against. Each Rule is a natural-language statement; the grader
 	// agent reads them all in one prompt and returns structured
@@ -989,6 +999,7 @@ type TriggerKind string
 const (
 	// TriggerKindSchedule creates a cron-driven pipeline_schedules row.
 	TriggerKindSchedule TriggerKind = "schedule"
+	TriggerKindOnce     TriggerKind = "once"
 	// TriggerKindManual is an explicit no-op: the caller is stating the
 	// routine intentionally has no trigger, distinct from simply omitting
 	// the field (F17's "warning on the routine page" reads that
@@ -1001,7 +1012,8 @@ const (
 // the routine, its version, AND this trigger in one transaction: all three
 // exist afterward, or none do (B8's atomicity accept line).
 type TriggerInput struct {
-	Kind TriggerKind
+	Kind   TriggerKind
+	FireAt time.Time
 
 	// Schedule fields, used when Kind == TriggerKindSchedule. Mirrors the
 	// subset of SaveScheduleInput an authoring call can set; wake gates and

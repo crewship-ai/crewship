@@ -23,6 +23,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// route — the only draft validation gate is the internal save gate
 	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.storagePath = r.storagePath
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
 	// `crewship` step dispatch — loopback HTTP to our own internal API with
 	// the master token. Options are applied before route registration, so the
@@ -165,12 +166,15 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// breaker. Workspace list also stays out of /pipelines/{slug}/
 	// because it spans every pipeline.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs", authed(wsCtx(http.HandlerFunc(pipes.ListWorkspaceRuns))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/calendar", authed(wsCtx(http.HandlerFunc(pipes.RoutineCalendar))))
 	// #1844. The #863 sub-span I/O gate is read in resolveIOStep
 	// (pipeline_runs.go), not in GetRun's body, so neither name reached the
 	// spec. ?include_io=1 inlines every span's input/output, ?io_step=<stepId>
 	// only that step's.
 	// openapi: query include_io:string io_step:string
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", authed(wsCtx(http.HandlerFunc(pipes.GetRun))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/executions", authed(wsCtx(http.HandlerFunc(pipes.RunExecutions))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/artifacts", authed(wsCtx(http.HandlerFunc(pipes.RunArtifacts))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/tree", authed(wsCtx(http.HandlerFunc(pipes.GetRunTree))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/metadata", roleCreate, pipes.UpdateRunMetadata)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/signal", roleCreate, pipes.SignalRun)

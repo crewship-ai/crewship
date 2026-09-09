@@ -61,6 +61,7 @@ var fileBytesFunnelHandlers = map[string]string{
 // entry here is a claim that has to be checked against the handler's actual
 // source, not assumed from its name.
 var fileBytesExemptHandlers = map[string]string{
+	"PipelineHandler.RunArtifacts": "reads an immutable workspace-scoped content-addressed blob; original file snapshots are confined to crew shared storage using os.Root",
 	"AttachmentHandler.Download": "reads a content-addressed blob keyed by workspace_id+sha256 " +
 		"(readAttachmentBlob, attachments.go) — never touches the crew/agent output tree at all",
 	"MemoryPortabilityHandler.Export": "reads through memport.ReadSource(FormatCrewship); readCrewship " +

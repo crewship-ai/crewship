@@ -138,7 +138,7 @@ export function RoutineOverviewTab({
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(now - i * dayMs)
       bins.push({
-        day: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        day: d.toLocaleDateString("en-GB", { month: "short", day: "numeric" }),
         total: 0,
         failed: 0,
         cost: 0,
@@ -332,7 +332,7 @@ export function RoutineOverviewTab({
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{routine.authored_via.replace(/_/g, " ")}</div>
                 <div className="text-[11px] text-muted-foreground">
-                  {new Date(routine.created_at).toLocaleString()}
+                  {new Date(routine.created_at).toLocaleString("en-GB")}
                 </div>
               </div>
             </div>

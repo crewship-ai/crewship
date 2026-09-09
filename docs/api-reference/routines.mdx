@@ -121,6 +121,35 @@ includes `next_run_at`, `last_run_at`, `last_status`, `last_run_id`, failure
 breaker counters, and wake telemetry. A circuit-breaker disable sets
 `disabled_reason` to `circuit_breaker`.
 
+## Run detail
+
+The routines workspace reads a run's step executions and its artifacts from
+two paginated endpoints, and the schedule board from a calendar endpoint.
+
+Executions and artifacts each answer in two shapes on the same path. Without a
+selector they return a page of rows — at most 100, with `next_cursor` set when
+more remain, which is passed back as `?after=`. Name one row with
+`?execution_id=` or `?artifact_id=` and the response is that row's payload
+instead. `?download=` on artifacts is the exception: it streams the stored
+bytes with the artifact's own content type, `nosniff`, an `attachment`
+disposition and `Cache-Control: private, no-store`, so it is not a JSON body
+at all.
+
+The calendar merges three kinds of event into one list: `planned` occurrences
+computed from schedules, `pending` runs already queued, and `run` rows that
+have executed. `truncated` is true when the window held more than the endpoint
+will return, in which case narrow `from`/`to` rather than paging.
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/executions` | member (`read`) | No body; optional `?execution_id=`, `?after=` | `{ rows[], next_cursor }`, or `{ id, output }` for one execution | `200`, `400`, `403`, `404`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/artifacts` | member (`read`) | No body; optional `?artifact_id=`, `?download=`, `?after=` | `{ artifacts[], truncated, next_cursor }`, `{ id, content }` for one artifact, or the raw bytes for a download | `200`, `400`, `403`, `404`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/calendar` | member (`read`) | No body; `?from=` and `?to=` are required RFC3339 instants spanning at most 32 days | `{ events[], truncated }` | `200`, `400`, `403`, `500` |
+
+A run outside `{workspaceId}` is `404`, as is a named execution or artifact
+that does not belong to the run. A malformed cursor, a missing or unparseable
+`from`/`to`, and a calendar window outside zero to 32 days are all `400`.
+
 ## Webhooks
 
 | Method | Path | Auth | Request | Response | Status |

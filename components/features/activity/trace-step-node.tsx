@@ -546,7 +546,9 @@ function TriggerNodeBase({ data }: NodeProps) {
   // identifier was empty (deleted mission), confusing the user about
   // why the run kicked off.
   const label =
-    d.triggeredVia === "issue"
+    d.triggeredVia === "definition"
+      ? "Recipe start"
+      : d.triggeredVia === "issue"
       ? d.issueIdentifier || "issue"
       : d.triggeredVia === "schedule"
         ? "schedule"

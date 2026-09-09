@@ -270,6 +270,10 @@ func (s *RunStore) cancelWaitpointsFor(ctx context.Context, runID string) error 
 // an error condition (e.g., after restart, before fresh runs).
 var ErrRunNotFoundInStore = errors.New("pipeline_runs: not found")
 
+// ErrUnknownRunCursor is returned when a `before` cursor names no run of the
+// requested pipeline. It is a caller mistake, not an empty result.
+var ErrUnknownRunCursor = errors.New("pipeline_runs: unknown cursor")
+
 // Insert creates a fresh run row. Status defaults to "queued" if zero;
 // CreatedAt + UpdatedAt are server-stamped if zero so callers can pass
 // a partially-filled struct without remembering boilerplate.
@@ -728,7 +732,7 @@ func (s *RunStore) Get(ctx context.Context, runID string) (*RunRecord, error) {
 
 // ListByPipeline returns runs for a pipeline ordered newest-first.
 // Limit caps payload size; status filter optional.
-func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status RunStatus, limit int) ([]*RunRecord, error) {
+func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status RunStatus, limit int, before ...string) ([]*RunRecord, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
@@ -738,7 +742,23 @@ func (s *RunStore) ListByPipeline(ctx context.Context, pipelineID string, status
 		q += ` AND status = ?`
 		args = append(args, string(status))
 	}
-	q += ` ORDER BY started_at DESC LIMIT ?`
+	if len(before) > 0 && before[0] != "" {
+		// Resolve the cursor before using it. The row-value comparison below
+		// is against a subquery, and a subquery that matches nothing yields
+		// NULL — which is never `<` anything, so a deleted run or an id
+		// belonging to another pipeline returned an empty page with 200 and
+		// read as "no more runs" rather than "bad cursor".
+		var anchor int
+		switch err := s.db.QueryRowContext(ctx, `SELECT 1 FROM pipeline_runs WHERE id=? AND pipeline_id=?`, before[0], pipelineID).Scan(&anchor); {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, ErrUnknownRunCursor
+		case err != nil:
+			return nil, fmt.Errorf("pipeline_runs: resolve cursor: %w", err)
+		}
+		q += ` AND (started_at,id) < (SELECT started_at,id FROM pipeline_runs WHERE id=? AND pipeline_id=?)`
+		args = append(args, before[0], pipelineID)
+	}
+	q += ` ORDER BY started_at DESC,id DESC LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.QueryContext(ctx, q, args...)

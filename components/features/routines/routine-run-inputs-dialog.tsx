@@ -38,7 +38,11 @@ import {
  * single-click behaviour everywhere it always had it.
  */
 export interface RoutineRunInputsDialogProps {
+  submitLabel?: "Run" | "Schedule"
   /** Open when non-null; the specs are the routine's declared inputs. */
+  versionChoices?: { value: string; label: string }[]
+  selectedVersion?: string
+  onVersionChange?: (value: string) => void
   inputs: RoutineInputSpec[] | null
   /** Routine name for the heading — what the user clicked Run on. */
   routineName: string
@@ -50,28 +54,33 @@ export interface RoutineRunInputsDialogProps {
 
 export function RoutineRunInputsDialog({
   inputs,
+  versionChoices, selectedVersion, onVersionChange,
+  submitLabel = "Run",
   routineName,
   submitting,
   onCancel,
   onRun,
 }: RoutineRunInputsDialogProps) {
-  if (!inputs?.length) return null
+  if (inputs === null || (!inputs.length && !versionChoices?.length)) return null
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Run {routineName}</DialogTitle>
+          <DialogTitle>{submitLabel} {routineName}</DialogTitle>
           <DialogDescription>
-            Fill in this run&apos;s inputs. Anything left empty falls back to the
-            routine&apos;s own default.
+            Review the inputs for this run. Saved defaults are filled in below.
+            {submitLabel === "Schedule" ? "The routine will start at the selected date and time." : "Starting creates a new run in this routine’s history."}
           </DialogDescription>
         </DialogHeader>
+        {versionChoices && <p className="text-xs text-muted-foreground">A new run repeats work using the selected version. It does not resume the previous attempt or undo its actions.</p>}
+        {versionChoices && <div className="space-y-1"><label htmlFor="routine-run-version" className="text-sm font-medium">Recipe version</label><select id="routine-run-version" className="w-full rounded-md border bg-card p-2 text-sm" value={selectedVersion} onChange={e => onVersionChange?.(e.target.value)} disabled={submitting}>{versionChoices.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select><p className="text-xs text-muted-foreground">Inputs are copied from the selected historical run where names match. Review them before repeating external actions.</p></div>}
         {/* Keyed on the routine so switching selection in the list
             rebuilds the form at the new routine's defaults rather than
             carrying the previous one's answers across. */}
         <InputsForm
-          key={routineName}
+          key={`${routineName}:${selectedVersion ?? "current"}`}
           inputs={inputs}
+          submitLabel={submitLabel}
           submitting={submitting}
           onCancel={onCancel}
           onRun={onRun}
@@ -81,13 +90,15 @@ export function RoutineRunInputsDialog({
   )
 }
 
-function InputsForm({
+export function InputsForm({
   inputs,
   submitting,
   onCancel,
   onRun,
+  submitLabel = "Run",
 }: {
   inputs: RoutineInputSpec[]
+  submitLabel?: string
   submitting?: boolean
   onCancel: () => void
   onRun: (inputs: Record<string, unknown>) => void
@@ -154,7 +165,7 @@ function InputsForm({
           Cancel
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Running…" : "Run"}
+          {submitting ? (submitLabel === "Run" ? "Running…" : "Scheduling…") : submitLabel}
         </Button>
       </DialogFooter>
     </form>

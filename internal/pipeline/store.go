@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -383,6 +384,36 @@ INSERT INTO pipelines (
 // cadence (code-review fix — the original version always inserted).
 func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, pipelineID string, trigger *TriggerInput) (*Schedule, error) {
 	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
+		return nil, nil
+	}
+	if trigger.Kind == TriggerKindOnce {
+		now := s.now().UTC()
+		if !trigger.FireAt.After(now) || trigger.FireAt.After(now.AddDate(2, 0, 0)) {
+			return nil, fmt.Errorf("%w: one-time date must be in the future within two years", ErrInvalidTrigger)
+		}
+		if trigger.Activation == TriggerActivationDraft || (in.Status != "" && in.Status != "active") {
+			return nil, fmt.Errorf("%w: approve the routine before scheduling a one-time start", ErrInvalidTrigger)
+		}
+		inputs, err := json.Marshal(trigger.Inputs)
+		if err != nil {
+			return nil, err
+		}
+		if string(inputs) == "null" {
+			inputs = []byte("{}")
+		}
+		id := "pnd_once_" + pipelineID
+		// Stable authoring identity makes a repeated save update one pending
+		// start. A consumed/cancelled start is never rearmed by editing a recipe.
+		result, err := tx.ExecContext(ctx, `INSERT INTO pending_runs
+          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,status,created_at,updated_at)
+          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,'pending',datetime('now','subsec'),datetime('now','subsec'))
+          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,updated_at=excluded.updated_at WHERE pending_runs.status='pending'`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id)
+		if err != nil {
+			return nil, err
+		}
+		if n, _ := result.RowsAffected(); n == 0 {
+			return nil, fmt.Errorf("%w: this one-time start has already been consumed; create a new scheduled start", ErrInvalidTrigger)
+		}
 		return nil, nil
 	}
 	if trigger.Kind != TriggerKindSchedule {

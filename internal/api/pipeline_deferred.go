@@ -34,6 +34,19 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 	// fire_at: a debounce trigger fires window-seconds after the latest
 	// trigger (default 30s); a plain delay fires delay-seconds out.
 	fireAt := now.Add(time.Duration(body.DelaySeconds) * time.Second)
+	if body.FireAt != "" {
+		at, err := time.Parse(time.RFC3339, body.FireAt)
+		if err != nil || !at.After(now) || at.After(now.AddDate(2, 0, 0)) {
+			replyError(w, http.StatusBadRequest, "fire_at must be a future RFC3339 timestamp within two years, including timezone offset")
+			return
+		}
+		if body.DelaySeconds != 0 || body.DebounceKey != "" || body.TTLSeconds != 0 {
+			replyError(w, http.StatusBadRequest, "fire_at cannot be combined with delay, debounce or ttl")
+			return
+		}
+		fireAt = at.UTC()
+	}
+
 	if body.DebounceKey != "" {
 		window := body.DebounceWindowSecond
 		if window <= 0 {

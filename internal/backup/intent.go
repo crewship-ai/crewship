@@ -473,6 +473,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// write path — same durability class as pipeline_runs itself (it's
 	// the run-detail waterfall's data), and cascade-deletes with its run.
 	"pipeline_run_step_outputs": IntentInclude,
+	"pipeline_step_executions":  IntentInclude,
+	"pipeline_run_artifacts":    IntentInclude,
 	"pipeline_schedules":        IntentInclude,
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,

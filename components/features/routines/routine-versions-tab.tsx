@@ -1,197 +1,94 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { RotateCcw, GitCommit, History } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
-import { RoutineListSkeleton } from "./routine-skeletons"
-import { Card, EmptyState, Pill } from "./_shared"
-
-// RoutineVersionsTab — immutable version history with rollback.
-// Restyled to match the Stripe-style dashboard: Card container,
-// readable typography, semantic pill for HEAD, and an action button
-// per row that calls /rollback. Each version row shows v# + HEAD +
-// author + change summary + timestamp + parent.
+import { useUrlSelection } from "@/hooks/use-issue-detail"
+import { useAbilities } from "@/hooks/use-abilities"
+import { roleAtLeast } from "@/lib/routine-governance"
+import { DetailCard, Pill } from "@/components/ui/detail"
+import { Button } from "@/components/ui/button"
+import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
+import { RoutineStepDefinition } from "./routine-step-definition"
 
 interface PipelineVersion {
-  version: number
-  is_head?: boolean
-  parent_version: number | null
-  definition_hash: string
-  author_type: string
-  author_id: string
-  change_summary: string
-  created_at: string
+  version: number; is_head?: boolean; parent_version?: number | null
+  definition_hash: string; author_type: string; author_id: string
+  change_summary?: string; created_at: string
 }
-
+interface VersionDetail extends PipelineVersion { definition: Record<string, unknown> }
+interface VersionDiff { from_version: number; to_version: number; identical: boolean; unified_diff: string }
 interface Props {
-  workspaceId: string
-  slug: string
-  onRolledBack: () => void
+  workspaceId: string; slug: string; onRolledBack: () => void
+  onPrepareDraft?: (definition: Record<string, unknown>, version: number) => void
 }
 
-export function RoutineVersionsTab({ workspaceId, slug, onRolledBack }: Props) {
+/** Read-only archives and comparisons. Restoring starts an explicit unsaved draft. */
+export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props) {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [loading, setLoading] = useState(true)
-  const [rollingBack, setRollingBack] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  const fetchVersions = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/versions`)
-      if (!res.ok) throw new Error(`fetch versions: ${res.status}`)
-      const data: PipelineVersion[] = await res.json()
-      setVersions(Array.isArray(data) ? data : [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  const [retry, setRetry] = useState(0)
+  const [selected, setSelected] = useUrlSelection("version")
+  const [detail, setDetail] = useState<VersionDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [diff, setDiff] = useState<VersionDiff | null>(null)
+  const [compare, setCompare] = useState(false)
+  const [step, setStep] = useState<string | null>(null)
+  const { role } = useAbilities()
+  const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`
+  const head = versions.find(v => v.is_head)?.version
   useEffect(() => {
-    fetchVersions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, slug])
-
-  const rollback = async (target: number) => {
-    if (
-      !confirm(
-        `Rollback to v${target}? HEAD repoints at v${target} and its definition goes live. History is preserved.`,
-      )
-    )
-      return
-    setRollingBack(target)
-    try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/rollback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_version: target }),
-      })
-      if (!res.ok) {
-        const t = await res.text().catch(() => "")
-        throw new Error(`${res.status}: ${t || res.statusText}`)
-      }
-      toast.success(`Rolled back to v${target}`)
-      onRolledBack()
-      fetchVersions()
-    } catch (e) {
-      toast.error("Rollback failed", { description: e instanceof Error ? e.message : String(e) })
-    } finally {
-      setRollingBack(null)
-    }
-  }
-
-  if (loading) {
-    return (
-      <Card title="Version history" subtitle="loading…">
-        <div className="p-4">
-          <RoutineListSkeleton rows={3} />
-        </div>
-      </Card>
-    )
-  }
-
-  if (error) {
-    return (
-      <Card title="Version history">
-        <div className="px-4 py-3 text-sm text-destructive">Error: {error}</div>
-      </Card>
-    )
-  }
-
-  if (versions.length === 0) {
-    return (
-      <Card title="Version history">
-        <EmptyState
-          icon={History}
-          title="No version history yet"
-          description="The first save creates v1; subsequent edits append. Every version is immutable — rolling back repoints HEAD at an older definition."
-        />
-      </Card>
-    )
-  }
-
-  // HEAD comes from the server (pipelines.head_version) — after a rollback
-  // it sits on an OLDER row, so versions[0] (max version) is only a
-  // fallback for servers predating the is_head field (#996). On a FULL
-  // page (server default LIMIT 100) a new server's head may live beyond
-  // the page — mark nothing rather than confidently marking the wrong row.
-  const VERSIONS_PAGE_CAP = 100
-  const serverMarksHead = versions.some((v) => v.is_head)
-  const headVersion = serverMarksHead
-    ? versions.find((v) => v.is_head)?.version
-    : versions.length < VERSIONS_PAGE_CAP
-      ? versions[0]?.version
-      : undefined
-
-  return (
-    <Card
-      title="Version history"
-      subtitle={`${versions.length} total${headVersion != null ? ` · head v${headVersion}` : ""}`}
-    >
-      <ol className="divide-y divide-border/40">
-        {versions.map((v) => {
-          const isHead = v.version === headVersion
-          return (
-            <li key={v.version} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3">
-              <div className="flex shrink-0 items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <GitCommit className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="font-mono text-sm font-semibold">v{v.version}</div>
-                  {isHead && (
-                    <Pill tone="blue" className="mt-1">
-                      <span className="h-1 w-1 rounded-full bg-current" />
-                      HEAD
-                    </Pill>
-                  )}
-                </div>
-              </div>
-              <div className="min-w-0 space-y-1">
-                {v.change_summary ? (
-                  <p className="text-sm text-foreground/90">{v.change_summary}</p>
-                ) : (
-                  <p className="text-sm italic text-muted-foreground">No change summary</p>
-                )}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-                  <span>{new Date(v.created_at).toLocaleString()}</span>
-                  <span className="opacity-60">·</span>
-                  <span className="font-mono">{v.definition_hash.slice(0, 12)}…</span>
-                  {v.parent_version != null && (
-                    <>
-                      <span className="opacity-60">·</span>
-                      <span>
-                        parent <span className="font-mono">v{v.parent_version}</span>
-                      </span>
-                    </>
-                  )}
-                  <span className="opacity-60">·</span>
-                  <span className="font-mono">
-                    {v.author_type}/{v.author_id.slice(0, 12)}
-                  </span>
-                </div>
-              </div>
-              {!isHead && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => rollback(v.version)}
-                  disabled={rollingBack !== null}
-                  className="h-8 shrink-0 gap-1.5 px-3 text-xs"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  {rollingBack === v.version ? "Rolling back…" : "Rollback"}
-                </Button>
-              )}
-            </li>
-          )
-        })}
-      </ol>
-    </Card>
-  )
+    const c = new AbortController(); setLoading(true); setError(null); setVersions([])
+    void (async () => {
+      try {
+        const res = await apiFetch(`${base}/versions`, { signal: c.signal })
+        if (!res.ok) throw new Error("Version history could not be loaded.")
+        const rows = await res.json()
+        if (!c.signal.aborted) setVersions(rows)
+      } catch (e) { if (!c.signal.aborted) setError(e instanceof Error ? e.message : String(e)) }
+      finally { if (!c.signal.aborted) setLoading(false) }
+    })()
+    return () => c.abort()
+  }, [base, retry])
+  useEffect(() => {
+    const c = new AbortController(); setDetail(null); setDiff(null); setDetailError(null); setStep(null)
+    if (!selected) return () => c.abort()
+    void (async () => {
+      try {
+        const res = await apiFetch(`${base}/versions/${encodeURIComponent(selected)}`, { signal: c.signal })
+        if (!res.ok) throw new Error("This historical version could not be loaded.")
+        const data = await res.json()
+        if (!c.signal.aborted) setDetail(data)
+        if (compare && head != null) {
+          const d = await apiFetch(`${base}/diff?from=${encodeURIComponent(selected)}&to=${head}`, { signal: c.signal })
+          if (!d.ok) throw new Error("The comparison could not be loaded.")
+          const change = await d.json(); if (!c.signal.aborted) setDiff(change)
+        }
+      } catch (e) { if (!c.signal.aborted) setDetailError(e instanceof Error ? e.message : String(e)) }
+    })()
+    return () => c.abort()
+  }, [base, selected, compare, head, retry])
+  const steps = Array.isArray(detail?.definition.steps) ? detail.definition.steps as Record<string, unknown>[] : []
+  return <div className="space-y-4">
+    <DetailCard title="Version history" subtitle={loading ? "Loading…" : `${versions.length} loaded`}>
+      <p className="mb-4 text-xs text-muted-foreground">Versions record changes to the recipe. History records what happened each time it ran. Inspecting a version does not change the active recipe.</p>
+      {error && <p role="alert" className="text-sm text-destructive">{error} <button onClick={() => setRetry(v => v + 1)}>Retry</button></p>}
+      {!loading && !error && !versions.length && <p className="text-sm text-muted-foreground">No archived versions yet.</p>}
+      <ol className="divide-y divide-border/40">{versions.map(v => <li key={v.version} className="flex flex-wrap items-center gap-3 py-3">
+        <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="font-medium">Version {v.version}</span>{v.is_head && <Pill tone="blue">Current</Pill>}</div><p className="mt-1 text-xs text-muted-foreground">{new Date(v.created_at).toLocaleString("en-GB")} · {v.change_summary || "Saved recipe"}</p><details className="mt-1 text-[11px] text-muted-foreground"><summary className="cursor-pointer">Author and metadata</summary><p className="break-all">{v.author_type} · {v.author_id || "Not recorded"}</p><p className="break-all">{v.definition_hash}</p></details></div>
+        <Button size="sm" variant="outline" onClick={() => { setCompare(false); setSelected(String(v.version)) }}>View version {v.version}</Button>
+        {!v.is_head && head != null && <Button size="sm" variant="ghost" onClick={() => { setCompare(true); setSelected(String(v.version)) }}>Compare with current</Button>}
+      </li>)}</ol>
+      {versions.length >= 100 && <p className="mt-3 text-xs text-muted-foreground">Showing the latest 100 versions. A run’s version link opens its archive directly, including older versions.</p>}
+    </DetailCard>
+    {selected && <DetailCard title={`Version ${selected}`} subtitle="Read-only archive" action={<button className="text-xs text-muted-foreground" onClick={() => setSelected(null)}>Close</button>}>
+      {detailError && <p role="alert" className="mb-3 text-sm text-destructive">{detailError} <button onClick={() => setRetry(v => v + 1)}>Retry</button></p>}
+      {!detail && !detailError && <p role="status">Loading version…</p>}
+      {detail && <><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">Historical runs retain their own version and inputs.</p>{onPrepareDraft && roleAtLeast(role, "ADMIN") && <Button size="sm" variant="outline" onClick={() => onPrepareDraft(detail.definition, detail.version)}>Use as draft</Button>}</div>
+        {diff && <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3"><p className="text-sm">{diff.identical ? "Definitions are identical." : `Changes from version ${diff.from_version} to version ${diff.to_version}`}</p>{!diff.identical && <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs">{diff.unified_diff}</pre>}</div>}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]"><div className="h-[56vh] min-h-[380px]"><RoutineDefinitionCanvas definition={detail.definition} slug={slug} name={typeof detail.definition.display_name === "string" ? detail.definition.display_name : slug} selectedStepId={step} onStepSelect={setStep} /></div><aside className="rounded-xl border border-border/60 bg-card p-4"><RoutineStepDefinition step={steps.find(s => s.id === step)} /></aside></div>
+        <details className="mt-3 text-xs text-muted-foreground"><summary className="cursor-pointer">Full stored definition</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(detail.definition, null, 2)}</pre></details>
+      </>}
+    </DetailCard>}
+  </div>
 }

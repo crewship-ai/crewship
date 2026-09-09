@@ -121,6 +121,14 @@ describe("<RoutinesOverview>", () => {
     expect(screen.getByText("1 of 1")).toBeInTheDocument()
   })
 
+  it("does not count a failed result as success and links to its historical run", () => {
+    h.runs = [run({ outcome: "FAILED" })]
+    render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 1 })]} />)
+    expect(screen.getByText("0%")).toBeInTheDocument()
+    expect(screen.getByText("0 of 1")).toBeInTheDocument()
+    expect(screen.getAllByRole("link").some(link => link.getAttribute("href") === "/routines?slug=nightly&run=r1")).toBe(true)
+  })
+
   it("says how many runs happened today rather than since the beginning of time", () => {
     h.runs = [run({ id: "a", started_at: at(4, 9) }), run({ id: "b", started_at: at(1, 9) })]
     render(<RoutinesOverview {...PROPS} routines={[routine({ invocation_count: 2 })]} />)

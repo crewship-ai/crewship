@@ -140,4 +140,12 @@ describe("routine run inputs dialog", () => {
     expect(onCancel).toHaveBeenCalled()
     expect(onRun).not.toHaveBeenCalled()
   })
+  it("does not dismiss an in-flight start through the dialog close button", () => {
+    render(<RoutineRunInputsDialog inputs={msnInputs} routineName="recipe" submitting onCancel={onCancel} onRun={onRun} />)
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled()
+  })
+
 })

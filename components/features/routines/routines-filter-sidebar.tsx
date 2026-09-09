@@ -19,6 +19,7 @@ export interface RoutineFilters {
   invocations: "all" | "popular" | "fresh"
   authorAgentId: string | null
   showEphemeral: boolean
+  showTestRoutines?: boolean
 }
 
 interface Props {

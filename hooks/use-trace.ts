@@ -10,7 +10,7 @@ import type { PipelineDSL } from "@/lib/trace/types"
 //   - the run row (status, step_outputs, error_message…)
 //   - the pipeline DSL (steps, edges)
 //
-// Both come from the same backend in two requests. We poll instead of
+// Both come from the run endpoint, pinned to its saved version. We poll instead of
 // subscribing to a single SSE stream because the realtime layer already
 // broadcasts pipeline.step.* events that hot-path UI updates, and the run
 // row itself is small.
@@ -27,18 +27,18 @@ import type { PipelineDSL } from "@/lib/trace/types"
 //   - pipeline.run.* event for this run → refetch run
 //   - 3s poll while run is in active states (running/queued/paused)
 
-interface PipelineDetailResponse {
-  id: string
-  slug: string
-  name: string
-  definition?: PipelineDSL
-}
-
 interface RunDetailResponse extends PipelineRun {
   // GET /pipeline-runs/{id} parses step_outputs_json server-side and
   // returns it as `step_outputs` (already in PipelineRun). The
   // response shape is identical to a list-row.
   inputs?: Record<string, unknown>
+  definition?: PipelineDSL | null
+  definition_status?: "available" | "unavailable" | "error"
+  pipeline_version?: number | null
+  definition_hash?: string
+  step_outputs_available?: boolean
+  output?: string
+  outcome?: string
 }
 
 export function useTrace(workspaceId: string | null | undefined, runId: string | null) {
@@ -77,34 +77,17 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
       if (!runRes.ok) {
         // 404 == run not found. Don't treat as transient.
         setError(`run: ${runRes.status}`)
-        setRun(null)
-        setDsl(null)
+        if (runRes.status === 404) { setRun(null); setDsl(null) }
         return
       }
       const runData: RunDetailResponse = await runRes.json()
       if (ctrl.signal.aborted) return
       setRun(runData)
 
-      // 2) Fetch the pipeline DSL by slug — needed to render every
-      //    step, including ones that haven't run yet.
-      if (runData.pipeline_slug) {
-        const dslRes = await apiFetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(runData.pipeline_slug)}`,
-          { signal: ctrl.signal },
-        )
-        if (ctrl.signal.aborted) return
-        if (dslRes.ok) {
-          const dslData: PipelineDetailResponse = await dslRes.json()
-          setDsl(dslData.definition ?? null)
-        } else {
-          // Pipeline gone (e.g. deleted after run completed). Keep the
-          // run loaded so user still sees outputs; canvas falls back
-          // to outputs-only mode.
-          setDsl(null)
-        }
-      } else {
-        setDsl(null)
-      }
+      // The server resolves the immutable definition of THIS run. Never use HEAD
+      // as a fallback: it would redraw historical work using a different recipe.
+      setDsl(runData.definition ?? null)
+
     } catch (e) {
       if (ctrl.signal.aborted) return
       setError(e instanceof Error ? e.message : String(e))
@@ -133,7 +116,7 @@ export function useTrace(workspaceId: string | null | undefined, runId: string |
   // cover the next state change.
   const isActive =
     run !== null &&
-    (run.status === "running" || run.status === "queued" || run.status === "paused")
+    (run.status === "running" || run.status === "queued" || run.status === "paused" || run.status === "waiting")
   useEffect(() => {
     if (!isActive) return
     const t = setInterval(refresh, 3_000)

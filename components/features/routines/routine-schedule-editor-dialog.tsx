@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import { describeCron } from "@/lib/cron-describe"
 import type { PipelineSchedule, SchedulePatchBody, SchedulePreview } from "@/hooks/use-pipeline-schedules"
 
@@ -146,8 +147,7 @@ export function RoutineScheduleEditorDialog({
         <DialogHeader>
           <DialogTitle>Edit schedule</DialogTitle>
           <DialogDescription>
-            Every reliability setting for this trigger — the same fields the
-            backend already accepts on save.
+            Choose when this routine runs and how it handles interruptions.
           </DialogDescription>
         </DialogHeader>
 
@@ -159,21 +159,7 @@ export function RoutineScheduleEditorDialog({
 
           <div className="space-y-2">
             <Label>When</Label>
-            <div className="grid grid-cols-2 gap-2">
-              <Input
-                aria-label="Cron expression"
-                value={cronExpr}
-                onChange={(e) => setCronExpr(e.target.value)}
-                className="font-mono text-sm"
-                placeholder="0 9 * * *"
-              />
-              <Input
-                aria-label="Timezone"
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                placeholder="Europe/Prague"
-              />
-            </div>
+            <RoutineRecurrenceFields cron={cronExpr} timezone={timezone} onCronChange={setCronExpr} onTimezoneChange={setTimezone} />
             <p className="text-[11px] text-muted-foreground">{describeCron(cronExpr)}</p>
             <div className="rounded-md border border-white/[0.08] bg-background/50 p-2.5 text-[12px]" data-testid="schedule-preview">
               {previewLoading && <span className="text-muted-foreground">Computing next fire times…</span>}
@@ -183,7 +169,7 @@ export function RoutineScheduleEditorDialog({
                   <p className="mb-1 text-muted-foreground">Next {preview.occurrences.length} fire times ({preview.timezone}):</p>
                   <ul className="space-y-0.5 font-mono text-[11px]">
                     {preview.occurrences.map((o) => (
-                      <li key={o}>{new Date(o).toLocaleString()}</li>
+                      <li key={o}>{new Date(o).toLocaleString("en-GB", { timeZone: preview.timezone })}</li>
                     ))}
                   </ul>
                 </div>

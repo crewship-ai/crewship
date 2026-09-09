@@ -331,7 +331,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 		// Stamp the transient-retry attempt so a re-entry's container-ready
 		// record is distinguishable from the first attempt's (same step_id).
 		req.Attempt = attempt
-		res, err = e.runner.RunStep(ctx, req)
+		res, err = e.runRecordedAgent(ctx, req)
 		if err != nil {
 			lastErr = err
 			if attempt < perTier && isTransientRunnerError(err) {

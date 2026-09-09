@@ -16,40 +16,26 @@ import {
   CreateSurfaceHeader,
   CreateSurfaceRefusal,
 } from "@/components/layout/create-surface"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
-import { cn } from "@/lib/utils"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
 import { usePipelines } from "@/hooks/use-pipelines"
-import { useIsMobile } from "@/hooks/use-mobile"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
-import { RoutinesOverview } from "./routines-overview"
-import { RoutinesDetailPanel } from "./routines-detail-panel"
-import { type RoutineFilters } from "./routines-filter-sidebar"
+import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { isRoutineTestFixture } from "@/lib/routine-filters"
+import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
+import type { RoutineFilters } from "./routines-filter-sidebar"
 import { RoutinesExplorer } from "./routines-explorer"
+import { RoutineRunDetail } from "./routine-run-detail"
+import { RoutinesWorkspace } from "./routines-workspace"
+import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineCreateDialog } from "./routine-create-dialog"
 import { BottomPanel } from "@/components/features/crews/bottom-panel"
 import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
-// RoutinesLayout — full /routines page. Two states, no tabs: the
-// overview, or the routine you picked.
-//
-// It had three tabs. List rendered a table of every routine, beside a
-// sidebar that was already the catalog — the same list twice, and the
-// copy in the main pane was the one you could not search. Schedules
-// was a read-only table of every cron in the workspace; every action
-// on a schedule (create, pause, delete) lives on the routine's own
-// Triggers card, so the tab held no capability, only a second view of
-// one. Insights was four derived numbers and a "top routines by
-// usage" leaderboard, which is not a question anyone asks.
-//
-// The parts of those two that were load-bearing — what fires next,
-// what runs cost, what is failing — are cards on the overview now.
-// Nothing was deleted that could be done; only places where it could
-// be looked at twice.
-//
-// Graph + Timeline + Activity moved to /activity, which stays the
-// single live observability surface for the whole workspace.
+// Keep the shared explorer mounted across overview, definition and historical
+// run views. The URL identifies the routine and optional execution; filters
+// belong to the explorer and survive navigation inside this workspace.
 
 interface RoutinesLayoutProps {
   workspaceId: string
@@ -76,6 +62,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
+  const visiblePipelines = useMemo(() => filters.showTestRoutines ? pipelines : pipelines.filter(p => !isRoutineTestFixture(p.slug)), [pipelines, filters.showTestRoutines])
   // The selected routine lives in the URL: /routines?slug=<slug>.
   //
   // It used to be read from the URL once and then kept in component state,
@@ -85,6 +72,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // the app (routineHref, entityHref) points here with ?slug=; the dashboard's
   // "Up next" and the issue's routine chip still say ?routine=, which is read
   // as an alias and rewritten on the first pick.
+  const [selectedRun, setSelectedRun] = useUrlSelection("run")
   const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -108,7 +96,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         return
       }
       if (e.key === "Escape" && !isInputContext) {
-        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral) {
+        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral || filters.showTestRoutines) {
           e.preventDefault()
           setSearch("")
           setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
@@ -122,7 +110,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral])
+  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral, filters.showTestRoutines])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -130,7 +118,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   void setBreadcrumbs
 
   const handleSelect = (slug: string) => {
-    setSelectedSlug(selectedSlug === slug ? null : slug)
+    setSelectedRun(null, { replace: true })
+    setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
     // Picking a routine on a phone means "show me that", and the
     // overlay covering it would be the opposite.
     if (isMobile) setLeftCollapsed(true)
@@ -158,7 +147,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // Live sub-bar description — derived from the loaded pipelines list.
   // `pipelines.length` = routines in the workspace; `totalRuns` sums each
   // routine's invocation_count (Pipeline.invocation_count from use-pipelines).
-  const totalRuns = pipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
+  const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
     <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
@@ -172,7 +161,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         title="Routines"
         description={
           <>
-            {pipelines.length} {pipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
+            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
             {totalRuns === 1 ? "run" : "runs"}
           </>
         }
@@ -232,7 +221,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                toggle lives inside the toolbar (next to search), not as a
                floating button. */
             <RoutinesExplorer
-              routines={pipelines}
+              routines={visiblePipelines}
               search={search}
               onSearchChange={setSearch}
               selectedSlug={selectedSlug}
@@ -244,17 +233,12 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           )}
         </aside>
 
-        {/* Main content area — full-width.
-            With selection: breadcrumb back-bar + routine detail
-            (Overview/Editor/Runs/Versions/Schedules/Webhooks/Wait
-            tabs) edge-to-edge instead of cramming it into a 520px
-            right panel. The Editor tab in particular benefits — DSL
-            YAML wants width.
-            Without selection: the existing List / Schedules /
-            Insights tabs that the toolbar above switches between. */}
-        <div className="flex-1 overflow-hidden bg-background relative">
+        {/* Overview, definition or historical run beside the explorer. */}
+        <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
-            {selectedSlug ? (
+            {selectedRun ? (
+              <div key={selectedRun} className="absolute inset-0 overflow-auto"><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
+            ) : selectedSlug ? (
               <motion.div
                 key={`detail-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
@@ -293,6 +277,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     slug={selectedSlug}
                     onClose={() => setSelectedSlug(null)}
                     onChanged={refresh}
+                    onRunStarted={setSelectedRun}
                   />
                 </div>
               </motion.div>
@@ -305,15 +290,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 transition={{ duration: 0.15 }}
                 className="absolute inset-0 overflow-hidden"
               >
-                <RoutinesOverview
+                <RoutinesWorkspace
                   workspaceId={workspaceId}
-                  routines={pipelines}
+                  routines={visiblePipelines}
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
-                  onFilter={(status) =>
-                    setFilters((f) => ({ ...f, status: status as RoutineFilters["status"] }))
-                  }
+                  onFilter={(status) => setFilters(f => ({ ...f, status: status as RoutineFilters["status"] }))}
                 />
               </motion.div>
             )}
@@ -324,7 +307,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
            routine. Appears once a routine is selected, pairing the
            definition above with its run console below. ---- */}
-      {routineCtx && (
+      {routineCtx && !selectedRun && (
         <BottomPanel
           workspaceId={workspaceId}
           context={routineCtx}
@@ -350,6 +333,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         open={createDialogOpen}
         onClose={() => setCreateDialogOpen(false)}
         onCreated={(slug) => {
+          setSelectedRun(null, { replace: true })
           refresh()
           setSelectedSlug(slug)
         }}

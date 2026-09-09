@@ -1,5 +1,7 @@
+vi.mock("../routine-schedules-tab", () => ({ RoutineSchedulesTab: () => <div /> }))
+vi.mock("../routine-webhooks-tab", () => ({ RoutineWebhooksTab: () => <div /> }))
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 
 const h = vi.hoisted(() => ({ role: "MANAGER" as string }))
 
@@ -61,12 +63,36 @@ describe("<RoutineCreateDialog>", () => {
 
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
     expect(screen.getByTestId("graph")).toBeInTheDocument()
 
     // And back, without losing the buffer — it is a look, not a mode.
     fireEvent.click(screen.getByRole("radio", { name: "Code" }))
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
+  })
+
+  it("retains typed code through sections and the graph preview", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    fireEvent.click(screen.getByText("Write it yourself"))
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    const typed = "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n";
+    act(() => lastDocChange?.(typed))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
+    fireEvent.click(screen.getByText("Results", { exact: true }))
+    expect(screen.getByText("report")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Code" }))
+    expect(editorProps.at(-1)?.code).toBe(typed)
+  })
+
+  it("tolerates incomplete output declarations while editing", () => {
+    render(<RoutineCreateDialog {...PROPS} />)
+    fireEvent.click(screen.getByText("Write it yourself"))
+    act(() => lastDocChange?.("dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n"))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
+    expect(screen.getByLabelText("Name")).toBeVisible()
   })
 
   it("hides the test-gate escape hatch from a role the server would refuse", () => {
@@ -77,11 +103,11 @@ describe("<RoutineCreateDialog>", () => {
     expect(screen.queryByText(/Skip test-run gate/i)).not.toBeInTheDocument()
   })
 
-  it("offers it to an ADMIN", () => {
+  it("does not expose a validation bypass even to an ADMIN", () => {
     h.role = "ADMIN"
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    expect(screen.getByText(/Skip test-run gate/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Skip test-run gate/i)).not.toBeInTheDocument()
   })
 
   it("no longer calls the hand-written path step-by-step", () => {
@@ -193,7 +219,7 @@ describe("New routine — every mode offers a Cancel", () => {
     // behaviour the two new footers were measured against.)
     const { onClose } = openDialog()
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.change(screen.getByPlaceholderText("Friendly name"), {
+    fireEvent.change(screen.getByPlaceholderText("Routine name"), {
       target: { value: "nightly sweep" },
     })
 
@@ -292,7 +318,7 @@ describe("New routine — the discard guard follows the draft, not the screen", 
   it("asks about an editor draft carried back to the tiles too", () => {
     const { onClose } = openDialog()
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.change(screen.getByPlaceholderText("Friendly name"), {
+    fireEvent.change(screen.getByPlaceholderText("Routine name"), {
       target: { value: "nightly sweep" },
     })
     back()

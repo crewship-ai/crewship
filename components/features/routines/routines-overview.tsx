@@ -101,7 +101,12 @@ export function RoutinesOverview({
   onSelect,
   onFilter,
 }: Props) {
-  const { runs } = usePipelineRuns(workspaceId, "all")
+  const { runs: recordedRuns } = usePipelineRuns(workspaceId, "all")
+  // A finished engine run may still have a failed or human-review result.
+  const runs = React.useMemo(() => recordedRuns.filter(run => routines.some(r => r.slug === run.pipeline_slug)).map(run => ({
+    ...run,
+    status: run.outcome === "FAILED" ? "failed" : run.outcome === "NEEDS_HUMAN" ? "needs_human" : run.status,
+  })), [recordedRuns, routines])
   const { schedules } = usePipelineSchedules(workspaceId)
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
   const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
@@ -328,7 +333,7 @@ export function RoutinesOverview({
                   return (
                     <Link
                       key={run.id}
-                      href={`/activity?run=${encodeURIComponent(run.id)}`}
+                      href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, run: run.id })}`}
                       className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
                     >
                       <span className="relative shrink-0">
@@ -470,7 +475,7 @@ export function RoutinesOverview({
                   {failures.map((f) => (
                     <Link
                       key={f.runId}
-                      href={`/activity?run=${encodeURIComponent(f.runId)}`}
+                      href={`/routines?run=${encodeURIComponent(f.runId)}`}
                       className="group flex items-start gap-2.5 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03]"
                     >
                       <span
@@ -636,7 +641,7 @@ function WaitpointRow({
           Deny
         </button>
         <Link
-          href={`/activity?run=${encodeURIComponent(item.runId)}`}
+          href={`/routines?run=${encodeURIComponent(item.runId)}`}
           className="ml-auto text-[10px] text-primary hover:underline"
         >
           Open run
