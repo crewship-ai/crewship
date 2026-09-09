@@ -115,13 +115,13 @@ describe("write affordances gated by role", () => {
     expect(screen.queryByRole("button", { name: /reveal/i })).not.toBeInTheDocument()
     expect(screen.getByText("Connection health")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Revoke" })).toBeInTheDocument()
-    expect(screen.getByText("Properties & protection").closest("details")).not.toHaveAttribute("open")
+    expect(screen.getByText("Access & security").closest("details")).not.toHaveAttribute("open")
   })
   it("OWNER sees rotate and delete", () => {
     h.role = "OWNER"
     renderSheet()
 
-    expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /delete credential/i })).toBeInTheDocument()
   })
 
@@ -129,10 +129,10 @@ describe("write affordances gated by role", () => {
     h.role = "MANAGER"
     renderSheet()
 
-    expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
     // ...instead of a silent gap.
-    expect(screen.getByText(/require a workspace admin/i)).toBeInTheDocument()
+    expect(screen.getByText(/requires a workspace admin/i)).toBeInTheDocument()
   })
 
   it("MANAGER does not trigger the rotations-history fetch it can't render", () => {
@@ -151,7 +151,7 @@ describe("write affordances gated by role", () => {
     renderSheet()
     openSettingsTab()
 
-    expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
     expect(screen.getByText(/don't have permission to modify/i)).toBeInTheDocument()
   })
@@ -167,7 +167,7 @@ describe("write affordances gated by role", () => {
     renderSheet()
     // Two now: the header action and the Value card's pointer to it, which
     // exists because replacing a value no longer has its own control here.
-    expect(screen.getAllByRole("button", { name: /^edit$/i })).toHaveLength(2)
+    expect(screen.getAllByRole("button", { name: /^edit credential$/i })).toHaveLength(1)
   })
 
   // #1034 — the backend honors the credential.rotate capability for
@@ -180,7 +180,7 @@ describe("write affordances gated by role", () => {
     renderSheet()
     openSettingsTab()
 
-    expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
     // delete stays OWNER/ADMIN-only — the capability grants rotate, nothing more
     expect(screen.queryByRole("button", { name: /delete credential/i })).not.toBeInTheDocument()
   })
@@ -300,7 +300,7 @@ describe("property rendering", () => {
         onRotate={() => {}}
       />,
     )
-    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^edit credential$/i })).not.toBeInTheDocument()
   })
 
   it("renders nothing when credential is null", () => {
@@ -405,13 +405,13 @@ describe("used by", () => {
   it("lists every assigned agent and carries the count on the section", () => {
     h.role = "OWNER"
     renderSheet({ agent_names: ["agent-a", "agent-b"], _count_agent_credentials: 2 })
-    expect(screen.getByText("agent-a")).toBeInTheDocument()
-    expect(screen.getByText("agent-b")).toBeInTheDocument()
+    expect(screen.getAllByText("agent-a")[0]).toBeInTheDocument()
+    expect(screen.getAllByText("agent-b")[0]).toBeInTheDocument()
     // The count moved from a tab badge to the card's own subtitle, and to the
     // figures band — the tab it used to sit on no longer exists.
     // The count moved from a tab badge to the figures band and the card's own
     // subtitle — the tab it used to sit on no longer exists.
-    expect(screen.getAllByText("Used by").length).toBe(2)
+    expect(screen.getAllByText("Used by").length).toBe(1)
     expect(screen.getAllByText("2").length).toBeGreaterThan(0)
   })
 
@@ -435,7 +435,7 @@ describe("used by", () => {
       : [],
     }))
     renderSheet()
-    expect(await screen.findByText("Worker")).toBeInTheDocument()
+    expect(await screen.findAllByText("Worker").then((rows) => rows[0])).toBeInTheDocument()
     expect(screen.getByTestId("credential-access-summary")).toHaveTextContent("Checked 1 of 1")
     expect(screen.getByText("delivery binding")).toBeInTheDocument()
   })
@@ -579,28 +579,11 @@ describe("Audit tab", () => {
 })
 
 describe("Settings tab — rotation history", () => {
-  it("renders each rotation's status badge and grace-period hours for a rotate-capable role", async () => {
-    h.role = "OWNER"
-    h.apiFetch.mockImplementation((url: unknown) => {
-      if (String(url).includes("/rotations")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: async () => [
-            { id: "r1", credential_id: "cred_1", grace_seconds: 86400, rotated_at: "2026-07-01T00:00:00Z", expires_at: "2026-07-02T00:00:00Z", rotated_by: "u1", status: "ACTIVE", old_value_gone: false },
-            { id: "r2", credential_id: "cred_1", grace_seconds: 3600, rotated_at: "2026-06-01T00:00:00Z", expires_at: "2026-06-01T01:00:00Z", rotated_by: "u1", status: "EXPIRED", old_value_gone: true },
-          ],
-        })
-      }
-      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
-    })
+  it("does not offer or fetch advanced rotation history", () => {
     renderSheet()
     openSettingsTab()
-
-    expect(await screen.findByText("ACTIVE")).toBeInTheDocument()
-    expect(screen.getByText("EXPIRED")).toBeInTheDocument()
-    expect(screen.getByText("24h grace")).toBeInTheDocument()
-    expect(screen.getByText("1h grace")).toBeInTheDocument()
+    expect(screen.queryByText("Rotation")).not.toBeInTheDocument()
+    expect(h.apiFetch.mock.calls.some(([url]) => String(url).includes("/rotations"))).toBe(false)
   })
 
   it("does not render a rotation-history section when there is no history yet", () => {
@@ -638,7 +621,7 @@ describe("Header and settings action callbacks fire with the right credential", 
       />,
     )
     // The header action; the Value card's pointer is covered separately.
-    fireEvent.click(screen.getAllByRole("button", { name: /^edit$/i })[0])
+    fireEvent.click(screen.getAllByRole("button", { name: /^edit credential$/i })[0])
     expect(onEdit).toHaveBeenCalledWith(credential)
   })
 
@@ -657,7 +640,7 @@ describe("Header and settings action callbacks fire with the right credential", 
       />,
     )
     openSettingsTab()
-    fireEvent.click(screen.getByRole("button", { name: /rotate with grace overlap/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^replace value…$/i }))
     expect(onRotate).toHaveBeenCalledWith(credential)
   })
 })
@@ -695,9 +678,9 @@ describe("changing the value", () => {
       />,
     )
     expect(
-      screen.getByText(/leave the field empty there to keep the existing one/i),
+      screen.getByText(/paste a new value from your provider/i),
     ).toBeInTheDocument()
-    fireEvent.click(screen.getAllByRole("button", { name: /^Edit$/ })[1])
+    fireEvent.click(screen.getByRole("button", { name: "Edit credential" }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: credential.id }))
   })
 
@@ -705,7 +688,7 @@ describe("changing the value", () => {
     h.role = "OWNER"
     renderSheet()
     expect(
-      screen.getByRole("button", { name: /replace with grace period/i }),
+      screen.getByRole("button", { name: /^replace value…$/i }),
     ).toBeInTheDocument()
   })
 })
@@ -817,7 +800,7 @@ describe("Capability elevation reaches MEMBER", () => {
     h.capabilities = ["chat", "credential.rotate"]
     renderSheet()
     openSettingsTab()
-    expect(screen.getByRole("button", { name: /rotate with grace overlap/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^replace value…$/i })).toBeInTheDocument()
   })
 
   it("still withholds the value-rewrite flow from that MEMBER — rotate is not update", () => {
@@ -835,7 +818,7 @@ describe("Capability elevation reaches MEMBER", () => {
     h.capabilities = ["chat"]
     renderSheet()
     openSettingsTab()
-    expect(screen.queryByRole("button", { name: /rotate with grace overlap/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^replace value…$/i })).not.toBeInTheDocument()
   })
 })
 
@@ -882,7 +865,7 @@ describe("the Keeper tier", () => {
     renderSheet({ security_level: 4, security_level_label: "L4 · critical" })
     // Two places, on purpose: a chip in the identity card so it is visible
     // without scrolling, and the card that explains what it costs.
-    expect(screen.getAllByText("L4 · critical")).toHaveLength(2)
+    expect(screen.getAllByText("L4 · critical")).toHaveLength(1)
   })
 
   it("spells out on Overview what the tier does, not just what it is called", () => {
@@ -955,7 +938,7 @@ describe("readiness", () => {
         readinessKnown
       />,
     )
-    expect(screen.getAllByText("Tools available").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Tools available")).not.toBeInTheDocument()
     expect(screen.getByTestId("connection-verification")).toHaveTextContent("Connection not verified")
   })
 
@@ -974,8 +957,8 @@ describe("readiness", () => {
       />,
     )
     expect(screen.queryByText("Ready")).not.toBeInTheDocument()
-    expect(screen.getAllByText("Tools not checked").length).toBeGreaterThan(0)
-    expect(screen.getByText(/no crew has reported its tool inventory yet/i)).toBeInTheDocument()
+    expect(screen.queryByText("Tool availability")).not.toBeInTheDocument()
+    expect(screen.queryByText("Tool availability")).not.toBeInTheDocument()
   })
 })
 
@@ -1073,7 +1056,7 @@ describe("why reveal is unavailable", () => {
     // Twice: the Value card explains why the button is missing, and the
     // Classification card explains what SEALED means. Both are true and both
     // are where the reader is looking when the question comes up.
-    expect((await screen.findAllByText(/SEALED can never be revealed/i)).length).toBe(2)
+    expect((await screen.findAllByText(/SEALED values cannot be revealed/i)).length).toBe(2)
     expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
   })
 

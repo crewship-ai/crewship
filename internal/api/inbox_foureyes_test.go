@@ -209,13 +209,10 @@ func TestInboxList_FourEyesMatchesResolve(t *testing.T) {
 		},
 		{
 			// The rule compares the approver against agents.created_by_user_id.
-			// With no recorded owner there is nothing to compare, resolve goes
-			// through, and a row warning about a refusal would be warning about
-			// a refusal that cannot happen. The toggle AND the top tier are both
-			// on here precisely so that is the only thing under test.
-			name:    "no recorded owner: the rule cannot be enforced, so it is not claimed",
+			// With no recorded owner, strict approval fails closed.
+			name:    "no recorded owner: strict policy is reported and enforced",
 			escType: "CREDENTIAL", level: tierFloor, toggleOn: true, ownedAgent: false,
-			wantStatus: http.StatusOK, wantLabel: tierFloor.Label(),
+			wantStatus: http.StatusForbidden, wantWorkspace: true, wantTier: true, wantLabel: tierFloor.Label(),
 		},
 		{
 			name:    "TEXT escalation: out of scope even with the toggle on",

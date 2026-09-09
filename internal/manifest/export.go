@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // ExportOptions controls how Export renders the manifest. Defaults
@@ -54,6 +56,9 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 	}
 	if crew == nil {
 		return "", fmt.Errorf("crew %q not found", slug)
+	}
+	if deref(crew.ServicesJSON) == serviceconfig.Redacted {
+		return "", fmt.Errorf("crew %q: private service configuration cannot be exported; use the original manifest", slug)
 	}
 	agents, err := c.ListAgentsByCrew(ctx, crew.ID)
 	if err != nil {

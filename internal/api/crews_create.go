@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // workspaceAllowsPrivileged reports whether the workspace has opted into
@@ -324,10 +325,19 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		allowPrivateEndpoints = 1
 	}
+	storedServices := req.ServicesJSON
+	if storedServices != nil {
+		sealed, sealErr := serviceconfig.Seal(*storedServices)
+		if sealErr != nil {
+			replyInternalError(w, h.logger, "protect service configuration", sealErr)
+			return
+		}
+		storedServices = &sealed
+	}
 	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, allow_private_endpoints, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, allowPrivateEndpoints, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, req.ServicesJSON, now, now)
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, allowPrivateEndpoints, req.RuntimeImage, req.DevcontainerConfig, req.MiseConfig, storedServices, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert crew", err)
 		return
@@ -363,7 +373,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		RuntimeImage:          req.RuntimeImage,
 		DevcontainerConfig:    req.DevcontainerConfig,
 		MiseConfig:            req.MiseConfig,
-		ServicesJSON:          req.ServicesJSON,
+		ServicesJSON:          (*publicServiceConfig)(req.ServicesJSON),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}

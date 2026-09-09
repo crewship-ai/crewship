@@ -435,14 +435,14 @@ export function extraFieldsFor(
   const out: CredentialFieldPayload[] = []
 
   for (const field of type.extra) {
-    const raw = (values[field.key] ?? "").trim()
-    if (!raw) continue
+    const raw = values[field.key] ?? ""
+    if (!raw.trim()) continue
     out.push({ key: field.key, value: raw, is_secret: field.secret, ordinal: 0 })
   }
   for (const draft of custom) {
     const key = (draft.key ?? "").trim()
-    const value = (draft.value ?? "").trim()
-    if (!key || !value) continue
+    const value = draft.value ?? ""
+    if (!key || !value.trim()) continue
     out.push({ key, value, is_secret: draft.secret, ordinal: 0 })
   }
   return out.map((f, i) => ({ ...f, ordinal: i }))

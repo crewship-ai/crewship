@@ -81,6 +81,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
+	"github.com/crewship-ai/crewship/internal/serviceconfig"
 )
 
 // CrewFile is one local file to deliver into the crew's shared volume.
@@ -858,6 +859,9 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 	// Pre-fix the `len > 0` guard skipped both cases, so a manifest
 	// that deleted every service left the old ones running.
 	if d.Spec.Services != nil {
+		if deref(remote.ServicesJSON) == serviceconfig.Redacted {
+			return nil, fmt.Errorf("private service configuration cannot be diffed or replaced from a redacted snapshot")
+		}
 		if len(d.Spec.Services) == 0 {
 			// Empty array clears the column. server's update handler
 			// stores the literal "[]" string back; matching that
@@ -1064,6 +1068,9 @@ func ExportCrews(ctx context.Context, c internalapi.Client) ([]*CrewDocument, er
 	}
 	out := make([]*CrewDocument, 0, len(rows))
 	for _, r := range rows {
+		if deref(r.ServicesJSON) == serviceconfig.Redacted {
+			return nil, fmt.Errorf("crew %q: private service configuration cannot be exported; use the original manifest", r.Slug)
+		}
 		doc := &CrewDocument{
 			APIVersion: crewAPIVersion,
 			Kind:       crewKind,

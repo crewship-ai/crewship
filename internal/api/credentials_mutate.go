@@ -915,6 +915,32 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// land on the timeline.
 	valueRotated := false
 
+	// A provider re-login replaces its parsed parts atomically, keeping the
+	// credential identity and every existing assignment. Never store a whole
+	// auth.json as an access token or leave its old refresh token behind.
+	var replacementLogin *providerlogin.Login
+	if currentType == CredTypeProviderLogin {
+		if value, ok := body["value"].(string); ok && value != "" {
+			if nextType != currentType || nextProvider != currentProvider {
+				replyError(w, http.StatusBadRequest, "re-login must keep the existing provider and type")
+				return
+			}
+			mode, _ := body["mode"].(string)
+			l, splitErr := providerlogin.Split(currentProvider, mode, value)
+			if splitErr != nil {
+				replyError(w, http.StatusBadRequest, splitErr.Error())
+				return
+			}
+			replacementLogin = &l
+			body["value"] = l.AccessToken
+			if l.ExpiresAt.IsZero() {
+				body["token_expires_at"] = nil
+			} else {
+				body["token_expires_at"] = l.ExpiresAt.UTC().Format(time.RFC3339)
+			}
+		}
+	}
+
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
 		if s, ok := val.(string); ok && s != "" {
@@ -1018,6 +1044,24 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 			tx.Rollback()
 			replyInternalError(w, h.logger, "update credential", err)
+			return
+		}
+	}
+
+	if replacementLogin != nil {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM credential_fields WHERE credential_id = ? AND key IN ('refresh_token','id_token','account_id','plan','expires_at','mode','scope')`, credID); err != nil {
+			tx.Rollback()
+			replyInternalError(w, h.logger, "replace provider login parts", err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM provider_login_refresh WHERE credential_id = ?`, credID); err != nil {
+			tx.Rollback()
+			replyInternalError(w, h.logger, "reset provider login refresh", err)
+			return
+		}
+		if err := storeProviderLoginParts(r.Context(), tx, credID, *replacementLogin, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			tx.Rollback()
+			replyInternalError(w, h.logger, "store replacement provider login", err)
 			return
 		}
 	}

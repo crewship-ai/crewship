@@ -87,7 +87,7 @@ export function EditCredentialDialog({
     if (credential.type === "USERPASS" && values.username !== initial.username) body.username = values.username?.trim()
     // Older API responses may omit the tier. A metadata-only save must not
     // turn an unknown tier into L1 just because the form needs a display default.
-    if (credential.security_level != null || values.securityLevel !== 1) {
+    if (!credential.isProviderLogin && (credential.security_level != null || values.securityLevel !== 1)) {
       body.security_level = values.securityLevel
     }
     if (values.value && !credential.isProviderLogin) body.value = values.value
