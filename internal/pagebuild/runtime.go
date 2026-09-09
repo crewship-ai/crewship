@@ -62,6 +62,12 @@ func ValidateRuntimeOriginForDevelopment(runtime, studio string, sameOriginDemo 
 	if site(r.Hostname()) == site(s.Hostname()) && !(sameOriginDemo && r.Scheme == s.Scheme && strings.EqualFold(r.Host, s.Host)) {
 		return errors.New("Page runtime must use a different site from Studio; another port or sibling subdomain cannot isolate a stuck application")
 	}
+	if r.Scheme == "http" {
+		ip := net.ParseIP(r.Hostname())
+		if ip == nil || !ip.IsLoopback() {
+			return errors.New("Page runtime requires HTTPS except on literal loopback addresses")
+		}
+	}
 	if s.Scheme == "https" && r.Scheme != "https" {
 		return errors.New("HTTPS Studio requires an HTTPS Page runtime")
 	}

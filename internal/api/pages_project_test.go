@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -119,6 +121,7 @@ func TestPageProjectRoundTripAndDraftIsolation(t *testing.T) {
 
 func TestPageProjectRBACAndConcurrentSave(t *testing.T) {
 	h, _, _, ws, user := newPagesFixture(t)
+	h.logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	h.SetProjectStore(&pages.ProjectStore{Directory: t.TempDir()})
 	pagesCreate(t, h, ws, user, "health")
 	p := projectTestSource()
@@ -147,7 +150,14 @@ func TestPageProjectRBACAndConcurrentSave(t *testing.T) {
 	codes := make(chan int, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); codes <- projectPut(t, h, ws, user, "OWNER", "health", 0, p).Code }()
+		go func() {
+			defer wg.Done()
+			response := projectPut(t, h, ws, user, "OWNER", "health", 0, p)
+			if response.Code != 200 && response.Code != 409 {
+				t.Errorf("save HTTP %d: %s", response.Code, response.Body.String())
+			}
+			codes <- response.Code
+		}()
 	}
 	wg.Wait()
 	close(codes)

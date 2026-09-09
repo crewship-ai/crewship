@@ -122,3 +122,10 @@ func TestGitMaintenanceDoesNotBlockArtifactReadersButExcludesCheckpointWrites(t 
 		t.Fatalf("object writer overlapped GC: %v", err)
 	}
 }
+
+func TestGitQuotaEmptyWorkspace(t *testing.T) {
+	store := &ProjectStore{Directory: t.TempDir()}
+	if err := store.CheckGitQuota(context.Background(), "missing"); err != nil {
+		t.Fatal(err)
+	}
+}

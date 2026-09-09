@@ -77,7 +77,7 @@ function request<T>(method: string, params: Record<string, unknown>): Promise<T>
 // The host confirms the declared routine. A receipt means queued, not completed.
 // Supply the same key for an explicit retry; the SDK never retries a write.
 export function runAction(panelId: string, actionId: string, inputs: Record<string, unknown> = {}, options: { idempotencyKey?: string } = {}) {
-  return request<ActionReceipt>('runAction', { panelId, actionId, inputs, idempotencyKey: options.idempotencyKey ?? crypto.randomUUID() })
+  return request<ActionReceipt>('runAction', { panelId, actionId, inputs, idempotencyKey: options.idempotencyKey ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('') })
 }
 export function getActionStatus(pendingId: string) { return request<ActionStatus>('getActionStatus', { pendingId }) }
 

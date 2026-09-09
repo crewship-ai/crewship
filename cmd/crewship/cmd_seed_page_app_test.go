@@ -45,7 +45,7 @@ func TestSeedPageAppLifecycle(t *testing.T) {
 			}
 			opts := []api.RouterOption{api.WithPageProjectsPath(t.TempDir())}
 			if mode == "publish" {
-				opts = append(opts, api.WithPageBuildImage(image), api.WithPageRuntime("http://pages.example.net", "http://studio.example.com"))
+				opts = append(opts, api.WithPageBuildImage(image), api.WithPageRuntime("https://pages.example.net", "https://studio.example.com"))
 			}
 			router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), opts...)
 			if err != nil {

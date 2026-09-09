@@ -199,6 +199,9 @@ func (s *ProjectStore) PinCheckpoint(ctx context.Context, ws, page, commit strin
 // Restore holds an exclusive lease; checkpoint writes reserve their own headroom.
 func (s *ProjectStore) CheckGitQuota(ctx context.Context, ws string) error {
 	root, err := s.root(ws, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

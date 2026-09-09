@@ -13,6 +13,7 @@ func (h *PageHandler) pageLease(w http.ResponseWriter, r *http.Request) (func(),
 	}
 	release, err := h.projectStore.Lease(r.Context(), WorkspaceIDFromContext(r.Context()), false)
 	if err != nil {
+		h.logger.Warn("acquire Page storage lease", "error", err)
 		replyError(w, 503, "Page storage is busy; try again shortly")
 		return nil, false
 	}

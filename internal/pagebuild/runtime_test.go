@@ -95,3 +95,13 @@ func TestDevelopmentRuntimeRequiresExplicitSameOriginAndValidTLS(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeRejectsCleartextRemoteEvenWithHTTPStudio(t *testing.T) {
+	for _, runtime := range []string{"http://pages.example.net", "http://192.0.2.1", "http://localhost"} {
+		t.Run(runtime, func(t *testing.T) {
+			if err := ValidateRuntimeOrigin(runtime, "http://studio.example.com"); err == nil {
+				t.Fatal("remote HTTP runtime accepted")
+			}
+		})
+	}
+}
