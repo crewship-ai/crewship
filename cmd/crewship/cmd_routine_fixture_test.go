@@ -28,3 +28,18 @@ func TestRoutineFixtureCLIReportsEvidenceAndFailsBadOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutineFixtureCLIRuntimeSamples(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "recipe.json")
+	if err := os.WriteFile(file, []byte(`{"name":"fixture-context","steps":[{"id":"sample","type":"transform","transform":{"input":"{{ env.run_id }}|{{ run.metadata.count }}|{{ secrets.example }}","expression":"."}}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := newRoutineFixtureTestCmd()
+	if err := cmd.ParseFlags([]string{"--step", "sample", "--env", `{"run_id":"sample-run"}`, "--metadata", `{"count":0}`, "--secrets", `{"example":"fake"}`}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdoutCovCli10(t, func() error { return cmd.RunE(cmd, []string{file}) })
+	if err != nil || !strings.Contains(out, "sample-run|0|fake") {
+		t.Fatalf("%s: %v", out, err)
+	}
+}

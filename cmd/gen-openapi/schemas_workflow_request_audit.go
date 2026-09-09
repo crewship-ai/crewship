@@ -104,7 +104,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	publishResponse["required"] = []string{"id", "slug", "name", "dsl_version", "definition_hash", "ephemeral", "workspace_visible", "invocation_count", "authored_via", "status", "created_at", "updated_at", "linked_issue_count"}
 	draftListEntry := obj(map[string]any{"slug": str(), "revision": integer(), "updated_at": str()})
 	draftListEntry["required"] = []string{"slug", "revision", "updated_at"}
-	fixtureTest := obj(map[string]any{"definition": anyObject(), "step_id": str(), "inputs": anyObject(), "step_outputs": map[string]any{"type": "object", "additionalProperties": str()}, "fixture_output": str()})
+	fixtureTest := obj(map[string]any{"definition": anyObject(), "step_id": str(), "inputs": anyObject(), "step_outputs": map[string]any{"type": "object", "additionalProperties": str()}, "fixture_output": str(), "env": map[string]any{"type": "object", "additionalProperties": str()}, "metadata": anyObject(), "secrets": map[string]any{"type": "object", "additionalProperties": str()}})
 	fixtureTest["required"] = []string{"definition", "step_id"}
 	fixtureResult := obj(map[string]any{"execution_mode": str(), "step_id": str(), "step_type": str(), "definition_hash": str(), "fixture_hash": str(), "output_source": str(), "output": str(), "valid": boolean(), "validation_declared": boolean(), "validation_reason": str(), "limitations": arr(str())})
 	fixtureResult["required"] = []string{"execution_mode", "step_id", "step_type", "definition_hash", "fixture_hash", "output_source", "output", "valid", "validation_declared", "limitations"}

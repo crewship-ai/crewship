@@ -9,7 +9,7 @@ import (
 )
 
 func newRoutineFixtureTestCmd() *cobra.Command {
-	var stepID, input, outputs, outputFile string
+	var stepID, input, outputs, outputFile, env, metadata, secrets string
 	cmd := &cobra.Command{Use: "fixture-test <recipe.json|recipe.yaml>", Short: "Test one step offline using explicit fixtures, without external actions", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		raw, err := os.ReadFile(args[0])
 		if err != nil {
@@ -28,6 +28,18 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 			return err
 		}
 		in := pipeline.FixtureStepInput{Definition: canonical, StepID: stepID, Inputs: inputs, StepOutputs: upstream}
+		in.Env, err = parseOutputsFixture(env)
+		if err != nil {
+			return fmt.Errorf("env samples: %w", err)
+		}
+		in.Metadata, err = parseInputFixture(metadata)
+		if err != nil {
+			return fmt.Errorf("metadata samples: %w", err)
+		}
+		in.Secrets, err = parseOutputsFixture(secrets)
+		if err != nil {
+			return fmt.Errorf("secret samples: %w", err)
+		}
 		if outputFile != "" {
 			raw, err := os.ReadFile(outputFile)
 			if err != nil {
@@ -61,6 +73,9 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 	cmd.Flags().StringVar(&input, "input", "", "input values: JSON object inline or @file.json")
 	cmd.Flags().StringVar(&outputs, "outputs", "", "captured upstream outputs: JSON object inline or @file.json")
 	cmd.Flags().StringVar(&outputFile, "fixture-output-file", "", "file containing the replacement output for an agent/http/script step")
+	cmd.Flags().StringVar(&env, "env", "", "sample env/run values: string-valued JSON object inline or @file.json")
+	cmd.Flags().StringVar(&metadata, "metadata", "", "sample run metadata: JSON object inline or @file.json")
+	cmd.Flags().StringVar(&secrets, "secrets", "", "fake secret samples: string-valued JSON object inline or @file.json; never real credentials")
 	_ = cmd.MarkFlagRequired("step")
 	return cmd
 }

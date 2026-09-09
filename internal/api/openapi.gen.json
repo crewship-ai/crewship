@@ -12632,11 +12632,27 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "fixture_output": {
             "type": "string"
           },
           "inputs": {
             "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
             "type": "object"
           },
           "step_id": {

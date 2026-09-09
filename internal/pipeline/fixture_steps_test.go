@@ -94,3 +94,34 @@ func TestFixtureProjectedReferencesRequireActualProperty(t *testing.T) {
 		t.Fatal("scalar treated as structured fixture")
 	}
 }
+
+func TestFixtureRuntimeContextUsesOnlyExplicitSamples(t *testing.T) {
+	t.Setenv("run_id", "must-not-read-process")
+	raw := `{"definition":{"name":"context-test","steps":[{"id":"sample","type":"transform","transform":{"input":"{{ env.run_id }}|{{ run.metadata.count }}|{{ secrets.example }}","expression":"."}}]},"step_id":"sample","env":{"run_id":"sample-run"},"metadata":{"count":0},"secrets":{"example":"fake-value"}}`
+	var in FixtureStepInput
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		t.Fatal(err)
+	}
+	result, err := TestStepWithFixtures(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "sample-run|0|fake-value" {
+		t.Fatal(result.Output)
+	}
+	firstHash := result.FixtureHash
+	if err := json.Unmarshal([]byte(strings.Replace(raw, "fake-value", "other-sample", 1)), &in); err != nil {
+		t.Fatal(err)
+	}
+	result, err = TestStepWithFixtures(in)
+	if err != nil || result.FixtureHash == firstHash {
+		t.Fatalf("context absent from evidence: %+v %v", result, err)
+	}
+	var missing FixtureStepInput
+	if err := json.Unmarshal([]byte(strings.Replace(raw, `"env":{"run_id":"sample-run"},`, "", 1)), &missing); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := TestStepWithFixtures(missing); err == nil {
+		t.Fatal("missing env sample read from process or silently accepted")
+	}
+}

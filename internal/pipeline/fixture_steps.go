@@ -17,6 +17,10 @@ type FixtureStepInput struct {
 	Inputs        map[string]any    `json:"inputs,omitempty"`
 	StepOutputs   map[string]string `json:"step_outputs,omitempty"`
 	FixtureOutput *string           `json:"fixture_output,omitempty"`
+	// Runtime context contains explicit samples; no environment or vault is read.
+	Env      map[string]string `json:"env,omitempty"`
+	Metadata map[string]any    `json:"metadata,omitempty"`
+	Secrets  map[string]string `json:"secrets,omitempty"`
 }
 
 type FixtureStepResult struct {
@@ -75,7 +79,7 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 		if in.FixtureOutput != nil {
 			return nil, fmt.Errorf("transform steps compute their output; omit fixture_output")
 		}
-		render := RenderContext{Inputs: inputs, StepOutputs: in.StepOutputs}
+		render := RenderContext{Inputs: inputs, StepOutputs: in.StepOutputs, Env: in.Env, Metadata: in.Metadata, Secrets: in.Secrets}
 		// Unlike live rendering, a fixture test must not silently substitute
 		// missing evidence with an empty string. Existence is separate from a
 		// legitimate empty/null output, including projected JSON properties.
@@ -108,7 +112,10 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 		Inputs         map[string]any    `json:"inputs"`
 		StepOutputs    map[string]string `json:"step_outputs"`
 		FixtureOutput  *string           `json:"fixture_output"`
-	}{result.DefinitionHash, in.StepID, inputs, in.StepOutputs, in.FixtureOutput})
+		Env            map[string]string `json:"env"`
+		Metadata       map[string]any    `json:"metadata"`
+		Secrets        map[string]string `json:"secrets"`
+	}{result.DefinitionHash, in.StepID, inputs, in.StepOutputs, in.FixtureOutput, in.Env, in.Metadata, in.Secrets})
 	if err != nil {
 		return nil, err
 	}

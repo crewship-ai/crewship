@@ -1799,3 +1799,8 @@ inputs and available outputs on request. The source run/hash remain visible.
 The archive and output read must both be available; failures never become empty
 fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
 an explicit replacement choice. Import does not resume the source or run work.
+
+Runtime references in offline step tests use explicit samples: `--env` supplies
+`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
+supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
+secret values must be strings. No server environment or credential vault is read.

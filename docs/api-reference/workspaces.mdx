@@ -1847,8 +1847,12 @@ Transforms compute with the production transform implementation using the
 supplied inputs and step outputs. External steps only check the supplied output;
 the endpoint never calls agents, services or scripts. Only top-level steps are
 supported. Dependencies, conditions, retries and outcome graders are not run;
-external schema references are blocked. References to runtime context or secrets
-are unavailable and cannot silently become empty values.
+external schema references are blocked. Optional `env` and `secrets` objects map names to sample strings; `metadata`
+supplies sample values for `run.metadata.*`. `run.*` aliases use the `env` map,
+as in live rendering. These are explicit test data, never values read from the
+server environment or credential vault. Use fake values for secret samples.
+Missing references cannot silently become empty values. Runtime samples are
+included in the fixture evidence hash.
 
 **Response:** `200 OK`, `RoutineFixtureResult`: `execution_mode`, `step_id`,
 `step_type`, `definition_hash`, `fixture_hash`, `output_source`, `output`, `valid`,
