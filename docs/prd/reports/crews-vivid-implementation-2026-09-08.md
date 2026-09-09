@@ -89,3 +89,9 @@ About me now groups preferences under Communication, Language, Work, Appearance 
 Eleven focused tests cover new titles within a category, unknown/prototype-like keys, current extractor fields, visible grouping, Markdown and confirmed deletion using the original key. Backend sources and stored memory are unchanged.
 
 Deployed and verified on Dev2. Live categories, browser-only new-name fixtures, equal icons within a category, Other fallback, cancel-forget and mobile overflow checks passed with no console/API errors. All 11 focused tests, production build, lint (0 errors, 32 pre-existing warnings), Go memory/usermodel/web tests and full Go vet passed. Existing broad Go baseline is documented above; backend code did not change. No live personal data was mutated for this validation.
+
+## Provider and runner icon colours — 2026-09-09
+
+The shared create/edit AgentModelSettings and ProviderPicker now apply brand accents to the existing marks: Anthropic/Claude clay (#D97757), Google/Gemini blue (#4285F4), and Factory orange (#EF6F2E, used by factory.ai). Monochrome OpenAI, Cursor, Ollama and OpenCode marks retain the theme foreground, consistent with monochrome identity rather than invented hues. Selected-state borders remain the application accent; selection does not replace the mark's colour. No runtime, credential or selection behavior changed. Existing model settings tests (3), targeted ESLint, production build and Go vet passed.
+
+Live Dev2 browser checks passed for Edit and + Agent: provider/runner computed colours, selecting a provider in create, and canceling without saving. No browser/API errors. Web Go test passed after reload. Screenshots: `/tmp/agent-brand-edit.png`, `/tmp/agent-brand-create.png`.

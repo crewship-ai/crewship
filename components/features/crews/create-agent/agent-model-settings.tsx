@@ -13,6 +13,14 @@ import { defaultModelForProvider, isKnownModel } from "./llm-models"
 
 import { PROVIDERS, DEFAULT_RUNNER } from "./provider-options"
 
+// Shared by create/edit and the crew-template provider picker. Monochrome
+// marks inherit the theme foreground; selection does not recolor brand glyphs.
+const BRAND_ICON_COLOR: Record<string, string> = {
+  ANTHROPIC: "#D97757", CLAUDE_CODE: "#D97757",
+  GOOGLE: "#4285F4", GEMINI_CLI: "#4285F4",
+  FACTORY: "#EF6F2E", FACTORY_DROID: "#EF6F2E",
+}
+
 export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfirmed = true, onProviderConfirmed }: { draft: AgentDraft; setDraft: (draft: AgentDraft) => void; workspaceId: string; providerConfirmed?: boolean; onProviderConfirmed?: () => void }) {
   return <CreateSurfaceSection title="Model and execution" icon={Cpu} accent="teal" hint="Choose the AI model and the program that runs it.">
     <CreateSurfaceField label="Model provider">
@@ -28,7 +36,7 @@ export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfi
         return <button key={key} type="button" role="radio" aria-checked={draft.cliAdapter === key} tabIndex={draft.cliAdapter === key ? 0 : -1} onClick={() => {
           const provider = (key === "OPENCODE" ? draft.llmProvider : adapter.provider) as AgentDraft["llmProvider"]
           setDraft({ ...draft, cliAdapter: key as AgentDraft["cliAdapter"], llmProvider: provider, llmModel: isKnownModel(provider, draft.llmModel) ? draft.llmModel : defaultModelForProvider(provider) })
-        }} className={cn("flex items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", draft.cliAdapter === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" /><span><span className="block text-sm">{adapter.label}</span><span className="mt-1 block text-xs text-muted-foreground">{adapter.description}</span></span></button>
+        }} className={cn("flex items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", draft.cliAdapter === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="mt-0.5 h-5 w-5 shrink-0 text-foreground" style={{ color: BRAND_ICON_COLOR[key] }} aria-hidden="true" /><span><span className="block text-sm">{adapter.label}</span><span className="mt-1 block text-xs text-muted-foreground">{adapter.description}</span></span></button>
       })}</div>
     </CreateSurfaceField>
     </>}
@@ -44,7 +52,7 @@ export function ProviderPicker({ value, onChange }: { value: AgentDraft["llmProv
   return <div role="radiogroup" aria-label="Model provider" onKeyDown={moveRadio} className="grid grid-cols-2 gap-2 lg:grid-cols-3">{Object.entries(PROVIDERS).map(([key, label], index) => {
     const provider = key as AgentDraft["llmProvider"]
     const Icon = key === "OLLAMA" ? SiOllama : PROVIDER_ICONS[key]
-    return <button key={key} type="button" role="radio" aria-checked={value === key} tabIndex={value === key || (!value && index === 0) ? 0 : -1} onClick={() => onChange(provider)} className={cn("flex items-center gap-2 rounded-lg border p-3 text-sm focus-visible:ring-2 focus-visible:ring-primary", value === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="h-5 w-5 shrink-0" aria-hidden="true" />{label}</button>
+    return <button key={key} type="button" role="radio" aria-checked={value === key} tabIndex={value === key || (!value && index === 0) ? 0 : -1} onClick={() => onChange(provider)} className={cn("flex items-center gap-2 rounded-lg border p-3 text-sm focus-visible:ring-2 focus-visible:ring-primary", value === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="h-5 w-5 shrink-0 text-foreground" style={{ color: BRAND_ICON_COLOR[key] }} aria-hidden="true" />{label}</button>
   })}</div>
 }
 
