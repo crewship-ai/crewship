@@ -1289,3 +1289,23 @@ data, producedAt, state), `next_before` (0 at the end), and `publication`.
 Responses are bounded to 1 MiB and never contain producer/run metadata. A stale,
 withdrawn or definition-mismatched publication returns 409; an inaccessible panel
 returns 404. The SDK exposes this as `getPanelHistory(panelId, {limit, before})`.
+
+### POST /api/v1/pages/maintenance
+
+**Authentication:** workspace OWNER or ADMIN. **Request:** JSON object; optional
+`discard_history` defaults to false. Setting it to true also requires
+`confirm: true` and discards optional history across the workspace. Current
+drafts, live publication pointers and running builds remain protected.
+**Response 200:** `compacted`, `discarded_optional_history`, and `preserved`.
+**Statuses:** 400 malformed request or missing confirmation; 403 unauthorized;
+503 project storage disabled; 500 storage maintenance failure.
+
+### GET /api/v1/pages/{slug}/project/fsck
+
+**Authentication:** Page edit access. **Request:** Page slug, no body.
+**Response 200:** `healthy`, `checked_sources`, `checked_checkpoints`,
+`checked_artifacts`, `checked_git_objects`, and `failures` (kind, id, error).
+An unhealthy result is still HTTP 200: callers must inspect `healthy`.
+This checks source, checkpoint contents, referenced artifacts and reachable Git
+objects without changing them. **Statuses:** 403 no edit access; 404 unavailable
+Page; 503 storage disabled or maintenance busy; 500 database/read failure.
