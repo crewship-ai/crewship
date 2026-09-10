@@ -897,9 +897,30 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 | `409` | Slug already exists in this workspace |
 | `422` | DSL parse / validate / cycle-detect failure, a `crewship` step needing an acting agent on a routine with no `author_agent_id`, or validation gate not satisfied |
 
-<Note>
-There is **no public `test_run` endpoint.** You cannot run an agent "dry" (its scripts have uninterceptable side effects), so a real run is just [Run](#run-pipeline). Drafts are validated server-side on `/save` (parse + schema + cycle detection), and the sidecar agent-authoring flow validates a draft via the internal dry-run gate (`/api/v1/internal/pipelines/test_run`, X-Internal-Token) before persisting.
-</Note>
+### Test an unpublished definition
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
+```
+
+**Auth:** authenticated workspace `MANAGER`+.
+
+**Request body:** `definition` (object, required), `author_crew_id` (optional
+string belonging to this workspace), and `sample_inputs` (optional object).
+The endpoint checks the definition and applicable resource gates, then produces
+a static execution plan. It does not execute agents, scripts or HTTP steps.
+
+**Response:** `200 OK`, a `RunResult`. A successful `DRY_RUN_OK` result includes
+`save_token` when the server's signing key is configured. Send that token to
+`/publish` or `/save` within five minutes, with the same definition bytes. The
+token is bound to this workspace, authenticated user and definition hash; a
+successful response without a token is insufficient for normal publication.
+`400` means malformed input, `403` includes foreign crew references, `422`
+means an invalid definition, and `503` means the runner is not wired. Resource
+gates can also refuse the test with their specific missing-resource response.
+
+The separate sidecar endpoint `/api/v1/internal/pipelines/test_run` authenticates
+with `X-Internal-Token`. For actual external work, use [Run](#run-pipeline).
 
 ### Dry-run a saved pipeline
 
