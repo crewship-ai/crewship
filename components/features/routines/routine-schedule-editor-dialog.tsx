@@ -151,7 +151,7 @@ export function RoutineScheduleEditorDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
+        <div className="max-h-[70dvh] space-y-5 overflow-y-auto pr-1">
           <div>
             <Label htmlFor="sched-name">Name</Label>
             <Input id="sched-name" value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5" />

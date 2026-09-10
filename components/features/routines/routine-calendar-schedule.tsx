@@ -104,7 +104,7 @@ export function RoutineCalendarSchedule({
         if (!open && !saving) onClose()
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto border-border bg-card sm:max-w-lg">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Schedule a routine</DialogTitle>
           <DialogDescription>

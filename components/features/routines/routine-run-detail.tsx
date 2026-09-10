@@ -280,7 +280,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           </details>
         </>
       ) : (
-        <div className="max-h-[65vh] overflow-auto break-words">
+        <div className="max-h-[65dvh] overflow-auto break-words">
           <RoutineResultContent output={run.output} />
         </div>
       )}

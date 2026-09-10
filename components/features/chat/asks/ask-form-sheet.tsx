@@ -51,7 +51,7 @@ import {
  *     on top of the thing the user was dragging from.
  *   · **Phones.** A centred modal hides the keyboard-adjacent composer, which
  *     is the one piece of UI a phone user needs to stay oriented. On mobile
- *     this becomes a bottom sheet at 90vh instead — same component, different
+ *     this becomes a bottom sheet at 90dvh instead — same component, different
  *     host, per `compact`.
  *
  * Only the *host* differs from the slash modal. The field renderer is the
@@ -120,7 +120,7 @@ export interface AskFormSheetProps {
    *  be tested for wiring rather than for the renderer's own rules. */
   renderTemplate: RenderAskTemplate
   onClose: () => void
-  /** Bottom sheet at 90vh instead of an in-column card. */
+  /** Bottom sheet at 90dvh instead of an in-column card. */
   compact?: boolean
   /** Streaming / disconnected — the composer's own submit is unavailable. */
   disabled?: boolean
@@ -445,7 +445,7 @@ function Sheet({
       onKeyDown={handleKeyDown}
       className={cn(
         "flex flex-col overflow-hidden rounded-xl border bg-background shadow-lg",
-        compact ? "h-[90vh] rounded-b-none" : "max-h-[560px]",
+        compact ? "h-[90dvh] rounded-b-none" : "max-h-[560px]",
       )}
     >
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">

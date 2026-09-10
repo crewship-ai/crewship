@@ -22,7 +22,7 @@ export default function DashboardError({
   }, [error])
 
   return (
-    <div className="flex min-h-[50vh] items-center justify-center p-6">
+    <div className="flex min-h-[50dvh] items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center py-10 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-destructive/10 mb-4">

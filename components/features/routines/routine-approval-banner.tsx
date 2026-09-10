@@ -148,7 +148,7 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
                   {remaining}
                 </DialogDescription>
               </DialogHeader>
-              <div className="max-h-[50vh] overflow-auto rounded-md border border-border/60 bg-background/40 px-3 py-2.5">
+              <div className="max-h-[50dvh] overflow-auto rounded-md border border-border/60 bg-background/40 px-3 py-2.5">
                 <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
                   {waitpoint.prompt}
                 </p>

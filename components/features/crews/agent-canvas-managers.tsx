@@ -389,7 +389,7 @@ function PickerSheet<T>({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="w-[460px] max-w-[90vw] max-h-[70vh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
+        className="w-[460px] max-w-[90vw] max-h-[70dvh] rounded-xl border border-white/10 bg-card shadow-2xl overflow-hidden flex flex-col outline-none"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
