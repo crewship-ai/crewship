@@ -158,11 +158,17 @@ func TestCovWPMWebhookValidHMACTriggerResolveAgentError500(t *testing.T) {
 	}
 }
 
-func TestCovWPMWebhookEnsureCrewRuntimeError500(t *testing.T) {
-	// ResolveAgent succeeds, so trigger proceeds to EnsureCrewRuntime which
-	// errors → "ensure crew runtime: ..." returned synchronously (no
-	// goroutine spawned). Inner handler maps it to 500. This covers the
-	// CreateChat + EnsureCrewRuntime-error span of trigger.
+func TestCovWPMWebhookEnsureCrewRuntimeErrorStillAccepts(t *testing.T) {
+	// A container that will not start is no longer the sender's problem, and
+	// this test used to assert the opposite (500 from a synchronous
+	// EnsureCrewRuntime error, named TestCovWPMWebhookEnsureCrewRuntimeError500).
+	//
+	// The container start now happens after the receipt: an image pull inside
+	// the acceptance path was what made a webhook miss a provider's ten-second
+	// deadline. So the delivery is accepted and recorded, the answer is 202,
+	// and Docker being down shows up as work still queued — not as a status
+	// code that tells GitHub to retry an event we have already taken
+	// responsibility for.
 	body := []byte(`{"event":"deploy"}`)
 	secret := "shared-secret"
 	db := setupTestDB(t)
@@ -178,11 +184,20 @@ func TestCovWPMWebhookEnsureCrewRuntimeError500(t *testing.T) {
 	}
 	container := &covWPMContainerProvider{ensureErr: errors.New("docker down")}
 	h := NewWebhookHandler(db, newTestLogger(), resolver, nil, nil, container, nil)
+	t.Cleanup(func() { _ = h.Close() })
 
 	rr := covWPMServeWebhook(h, "crew-1", "agent-1", body,
 		map[string]string{"X-Signature": webhook.ComputeHMAC(body, secret)})
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500 (EnsureCrewRuntime error)", rr.Code)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (the delivery is recorded before anything is started); body=%s",
+			rr.Code, rr.Body.String())
+	}
+	var queued int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE state = 'queued'`).Scan(&queued); err != nil {
+		t.Fatalf("count work: %v", err)
+	}
+	if queued != 1 {
+		t.Errorf("queued work = %d, want 1 — a delivery whose container failed must stay on the record", queued)
 	}
 }
 

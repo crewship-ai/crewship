@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/webhook"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // generateWebhookSigningSecret returns 32 bytes of urandom encoded as
@@ -559,21 +562,33 @@ func (h *PipelineHandler) alertWebhookFireFailure(ctx context.Context, wh *pipel
 // via GET /pipeline-runs/{runId} (CLI: `crewship routine logs <run_id>`)
 // for the outcome.
 //
+// The 202 is written AFTER the delivery and its work item commit, and before
+// anything outside the database happens. That order is the contract (§5's I1),
+// not an implementation detail: the sender's receipt names rows that exist.
+//
 // Returns:
-//   - 202 with { run_id, status: "PENDING" } on accepted (run runs
-//     in the background under the returned id)
-//   - 202 with { run_id, status: "DEDUPED", deduped: true } on an
-//     idempotency-key replay — run_id is the ORIGINAL run's id
+//   - 202 with { run_id, work_id, delivery_id, status: "PENDING",
+//     deduped: false } on accepted (the run then starts in the background
+//     under the returned run id)
+//   - 202 with { run_id, work_id, delivery_id, status: "DEDUPED",
+//     deduped: true } on a replay inside the retention window — run_id is
+//     the ORIGINAL run's id, and no second attempt is created
+//   - 400 on a body that could not be read
 //   - 401 on HMAC mismatch
 //   - 404 on unknown / disabled / deleted token (deliberate to
 //     avoid leaking which tokens exist)
-//   - 409 when the target routine is 'proposed'/'disabled' (governance)
+//   - 409 when the target routine is 'proposed'/'disabled' (governance),
+//     or "delivery_conflict" when the same source delivery id arrives with a
+//     different body — the original record is kept
+//   - 413 when the body is over the ingress limit. It used to be truncated
+//     silently and rejected as a signature mismatch
 //   - 429 + Retry-After on per-token rate limit hit, or when the
 //     routine's concurrency gate is at capacity — checked
 //     synchronously against the same run registry the executor
-//     enforces, and WITHOUT consuming the idempotency key, so the
-//     sender's retry executes instead of dedupe-ing
-//   - 503 if the runner / webhook store isn't wired
+//     enforces, and BEFORE the delivery is recorded, so the sender's retry
+//     is accepted rather than deduped
+//   - 503 if the runner / webhook store isn't wired, or if the acceptance
+//     transaction did not commit. Never a false 202
 func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if h.webhooks == nil || h.runner == nil {
 		replyError(w, http.StatusServiceUnavailable, "webhook dispatch not wired")
@@ -591,12 +606,26 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read body up to 1 MiB. Webhook bodies that big are nearly
-	// always misuse; if a real sender needs more, the limit can be
-	// raised per-webhook (deferred until we see a use case).
-	const maxBody = 1 << 20
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody))
+	// Read the body under a REAL limit. It used to be
+	// io.ReadAll(io.LimitReader(r.Body, 1<<20)), and a LimitReader does not
+	// fail: it stops at the limit and reports EOF. A 2 MiB delivery was
+	// therefore silently TRUNCATED to its first mebibyte and handed to HMAC
+	// verification, where it failed — so the sender was told 401 "signature
+	// mismatch" when the truth was that we had refused to read its request,
+	// and an operator debugging it had nothing pointing at the size.
+	//
+	// http.MaxBytesReader errors instead, so the oversized case is answerable
+	// with §5's 413, and it counts bytes actually read, so the cap holds for a
+	// chunked upload that declares no Content-Length.
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, webhook.MaxBodyBytes))
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			h.logger.Warn("webhook fire: body over the ingress limit",
+				"webhook_id", wh.ID, "limit_bytes", webhook.MaxBodyBytes)
+			replyError(w, http.StatusRequestEntityTooLarge, "payload too large")
+			return
+		}
 		replyError(w, http.StatusBadRequest, "could not read body")
 		return
 	}
@@ -783,23 +812,41 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// makes the executor journal under the same id.
 	idemKey := webhookIdempotencyKey(r, body, wh.Token)
 	runID := pipeline.NewRunID()
-	idem := pipeline.NewIdempotencyStore(h.db)
-	resolvedRunID, isNew, err := idem.LookupOrReserve(
-		r.Context(), wh.WorkspaceID, idemKey, runID, wh.TargetPipelineID, pipeline.DefaultIdempotencyTTL,
-	)
-	if err != nil {
-		h.logger.Warn("webhook fire: idempotency reserve", "error", err, "webhook_id", wh.ID)
-		replyError(w, http.StatusInternalServerError, "pipeline run failed")
+
+	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, body, targetDefinitionJSON)
+	if acceptErr != nil {
+		switch {
+		case errors.Is(acceptErr, work.ErrDeliveryConflict):
+			// Same source delivery id, different body. §5: keep the original
+			// record and say so; do not guess which of the two is right.
+			h.logger.Warn("webhook fire: delivery conflict", "webhook_id", wh.ID)
+			replyError(w, http.StatusConflict, "delivery_conflict")
+		default:
+			// Budget exceeded, database unavailable, constraint fault: 503 and
+			// no dispatch. Never a false 202 — §5's last row.
+			h.logger.Error("webhook fire: acceptance did not commit; no run started",
+				"error", acceptErr, "webhook_id", wh.ID)
+			w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+			replyError(w, http.StatusServiceUnavailable, "acceptance unavailable")
+		}
 		return
 	}
-	if !isNew {
-		// Duplicate delivery — answer with the original run's id so
-		// retried webhooks see a stable success response. No dispatch.
+	if receipt.Duplicate {
+		// Duplicate delivery — answer with the ORIGINAL run's id so retried
+		// webhooks see a stable success response. No dispatch, and no second
+		// attempt merely because the message arrived twice.
+		resolvedRunID := h.runIDForWork(r.Context(), receipt.WorkID)
+		if resolvedRunID == "" {
+			resolvedRunID = runID
+		}
 		_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, resolvedRunID, "DEDUPED")
 		writeJSON(w, http.StatusAccepted, map[string]any{
-			"run_id":  resolvedRunID,
-			"status":  "DEDUPED",
-			"deduped": true,
+			"run_id":      resolvedRunID,
+			"status":      "DEDUPED",
+			"deduped":     true,
+			"delivery_id": receipt.DeliveryID,
+			"work_id":     receipt.WorkID,
+			"duplicate":   true,
 		})
 		return
 	}
@@ -813,6 +860,22 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// reservation above already maps idemKey → runID, and a second
 	// LookupOrReserve inside exec.Run would see its own reservation as
 	// a duplicate and short-circuit the run to DEDUPED.
+	// The receipt goes out FIRST. The delivery and its work item are already
+	// committed, so this is the answer §5 asks for — after the commit, before
+	// anything outside the database. Nothing below this line runs until the
+	// sender has been told what was accepted.
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"run_id":      runID,
+		"status":      "PENDING",
+		"deduped":     false,
+		"delivery_id": receipt.DeliveryID,
+		"work_id":     receipt.WorkID,
+		"duplicate":   false,
+	})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
 	exec := h.newExecutor()
 	dispatchCtx := h.webhookDispatchContext()
 	h.webhookDispatchWG.Add(1)
@@ -852,11 +915,12 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if runErr != nil {
-			// Free the reservation so the sender can retry the same
-			// key instead of dedupe-ing onto a run that never
-			// happened. Mirrors the executor's own Forget on its
-			// concurrency-rejection path.
-			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
+			// Nothing is deleted here any more. The delivery ledger records
+			// that this delivery was accepted and what it produced, and a
+			// delivery is never removed on failure — a retry becomes another
+			// attempt of the SAME work, not a second piece of work. Deleting
+			// the dedup key was what made a redelivery repeat effects that had
+			// already happened once.
 			reason := "run dispatch failed: " + truncate(runErr.Error(), 200)
 			if errors.Is(runErr, pipeline.ErrConcurrencyLimitReached) {
 				// Residual TOCTOU race: the synchronous pre-check above
@@ -870,8 +934,8 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 				// operator retry executes instead of DEDUPE-ing onto a
 				// run that never happened.
 				reason = "concurrency limit reached (race after the synchronous pre-check)"
-				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, idempotency key released so a retry can execute",
-					"webhook_id", wh.ID, "run_id", runID)
+				h.logger.Warn("webhook fire (async run): concurrency limit reached despite synchronous pre-check (TOCTOU window); fire recorded FAILED, work stays queued in the delivery ledger",
+					"webhook_id", wh.ID, "run_id", runID, "work_id", receipt.WorkID)
 			} else {
 				h.logger.Warn("webhook fire (async run)", "error", runErr,
 					"webhook_id", wh.ID, "run_id", runID)
@@ -887,33 +951,146 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			h.alertWebhookFireFailure(context.Background(), wh, firedRunID, reason)
 			return
 		}
-		if res != nil && res.Status == "FAILED" {
-			// The run executed but FAILED (Run returned no error). Without
-			// releasing the key, the idempotency reservation wedges the failed
-			// run for the full TTL (24h) and every sender redelivery DEDUPES
-			// onto it — the sender never gets a re-fire even though the work
-			// never succeeded (#1429, 2.6). Forget so a redelivery re-executes.
-			// COMPLETED keeps its key (a real success must dedupe); WAITING /
-			// CANCELLED keep theirs too (parked or deliberately stopped, not a
-			// failure to re-fire).
-			//
-			// No fire-failure alert here: the routine genuinely ran and its
-			// own step loop already emitted EntryPipelineRunFailed with the
-			// failed step and error message — this is a routine-quality
-			// problem, not a "the trigger silently didn't fire" problem.
-			_ = idem.Forget(context.Background(), wh.WorkspaceID, wh.TargetPipelineID, idemKey)
-		}
+		// A FAILED run used to DELETE its dedup key here (#1429, 2.6), so the
+		// sender's next redelivery of the same event re-executed the routine.
+		// That contract is inverted, deliberately.
+		//
+		// The argument for deleting was that a wedged key denies a re-fire for
+		// the full 24h TTL. The argument against is stronger and is §4's: a run
+		// that FAILED did not necessarily fail before touching anything. It may
+		// have posted the comment, opened the PR, charged the card, and then
+		// failed on the step after. Re-running it because the delivery arrived
+		// again repeats effects that already happened, and the sender never
+		// asked for that — it asked for its event to be handled once.
+		//
+		// So the delivery stays recorded and a redelivery is a duplicate. A
+		// re-run is an authorized REPLAY: a new work item carrying replay_of,
+		// a reason and a fresh authorization, which is a deliberate act rather
+		// than a consequence of a provider's retry timer. An ambiguous external
+		// effect belongs in needs_reconciliation, not in a blind retry.
+		//
+		// What this costs, plainly: a routine that fails for a transient reason
+		// no longer re-fires by itself on the sender's retry. Until the
+		// dispatcher owns retry_wait, recovering that run is a manual replay.
 		// Bookkeeping on a fresh context: at shutdown dispatchCtx is
 		// already cancelled when the run winds down, and the terminal
 		// record must still land.
 		_, _ = h.webhooks.RecordFire(context.Background(), wh.ID, firedRunID, status)
 	}()
+}
 
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"run_id":  runID,
-		"status":  "PENDING",
-		"deduped": false,
+// acceptRoutineDelivery records the delivery and the work it produces in ONE
+// transaction, and returns the receipt.
+//
+// This is W3. The two writes used to be separate: a reservation in
+// pipeline_run_idempotency, written synchronously, and the run itself created
+// inside a goroutine after the 202 had already gone out. A crash in the window
+// between them left a reservation naming a run that never existed, and because
+// the reservation was what a redelivery matched against, the sender's retry was
+// answered "202 DEDUPED" — pointing at a phantom — for the rest of the 24-hour
+// TTL. Nothing ever ran, and nothing ever said so.
+//
+// The delivery row and the work_items row now commit together or not at all, so
+// there is no state in which one exists without the other, and a redelivery is
+// matched against the ledger rather than against a promise.
+//
+// The transaction is bounded by the request context only. The dedicated
+// acceptance handle in internal/work — the one whose busy_timeout actually
+// bounds a contended SQLite write, which a context deadline does not — needs a
+// database path and an owner that closes it, and PipelineHandler is built
+// elsewhere. Wiring it belongs with the server's database handle; until then
+// this surface gets the atomicity and not the bounded wait.
+func (h *PipelineHandler) acceptRoutineDelivery(
+	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID string, body []byte, targetDefinitionJSON string,
+) (work.Receipt, error) {
+	if h.db == nil {
+		return work.Receipt{}, fmt.Errorf("%w: no database handle", work.ErrAcceptanceBudget)
+	}
+	sum := sha256.Sum256(body)
+	bodySHA := hex.EncodeToString(sum[:])
+
+	// The routine version this delivery was accepted against. §3 wants the
+	// target revision on the record, so a replay against a different version is
+	// an explicit act rather than an accident of head having moved.
+	targetRevision := ""
+	if wh.TargetPipelineVersion != nil {
+		targetRevision = fmt.Sprintf("v%d", *wh.TargetPipelineVersion)
+	} else {
+		vsum := sha256.Sum256([]byte(targetDefinitionJSON))
+		targetRevision = "sha256:" + hex.EncodeToString(vsum[:])
+	}
+
+	// The profile is RECORDED, not chosen. §12 forbids converting an endpoint's
+	// signature behaviour without an explicit configuration change, so
+	// verification stays exactly where it was, above, with exactly the
+	// semantics it had; this only writes down which of the two legacy shapes
+	// the request actually presented.
+	profile := "legacy-routine-hmac"
+	if r.Header.Get("X-Crewship-Timestamp") != "" {
+		profile = "legacy-routine-ts-hmac"
+	}
+
+	d := work.Delivery{
+		WorkspaceID:      wh.WorkspaceID,
+		EndpointID:       wh.ID,
+		EndpointKind:     "routine",
+		Profile:          profile,
+		SourceDeliveryID: sourceDeliveryID,
+		BodySHA256:       bodySHA,
+		BodyBytes:        len(body),
+		RawBody:          body,
+		FilterDecision:   work.FilterAccepted,
+		TargetRevision:   targetRevision,
+	}
+	// The immutable input is a reference, not a copy: the raw body is already
+	// on the delivery row above, and duplicating a mebibyte of it into
+	// work_items.input_json would double the ingress byte budget §6 caps.
+	inputJSON, _ := json.Marshal(map[string]any{
+		"pipeline_id":     wh.TargetPipelineID,
+		"pinned_version":  wh.TargetPipelineVersion,
+		"triggered_via":   string(pipeline.TriggeredViaWebhook),
+		"delivery_source": "routine_webhook",
 	})
+	req := work.AcceptRequest{
+		WorkspaceID:    wh.WorkspaceID,
+		Source:         work.SourceWebhook,
+		DomainKind:     "pipeline_run",
+		DomainID:       runID,
+		Class:          work.ClassBackground,
+		InputJSON:      string(inputJSON),
+		InputSHA256:    bodySHA,
+		TargetRevision: targetRevision,
+	}
+
+	store := work.NewStore(h.db)
+	acceptor := &mainHandleAcceptor{db: h.db, budget: work.DefaultAcceptanceBudget}
+	var receipt work.Receipt
+	err := acceptor.Do(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+		got, err := store.AcceptDeliveryTx(ctx, tx, d, req)
+		if err != nil {
+			return err
+		}
+		receipt = got
+		return nil
+	})
+	if err != nil {
+		return work.Receipt{}, err
+	}
+	return receipt, nil
+}
+
+// runIDForWork reads the run id a work item was accepted for, so a duplicate
+// delivery answers with the ORIGINAL run's id rather than the handle this
+// request happened to mint.
+func (h *PipelineHandler) runIDForWork(ctx context.Context, workID string) string {
+	if workID == "" || h.db == nil {
+		return ""
+	}
+	item, err := work.NewStore(h.db).Get(ctx, workID)
+	if err != nil || item == nil {
+		return ""
+	}
+	return item.DomainID
 }
 
 func (h *PipelineHandler) resolveWebhookPipelineID(r *http.Request, workspaceID string, body *webhookRequestBody) (string, string, error) {
