@@ -36,6 +36,12 @@
     "ui_tests": 581,
     "static_build": "passed"
   },
-  "review": "pending",
+  "review": {
+    "state": "rate_limited",
+    "requested_at": "2026-09-10T11:12:28Z",
+    "rejected_at": "2026-09-10T11:12:34Z",
+    "retry_notice_minutes": 59,
+    "merged": false
+  },
   "safari_decision": "awaiting_user"
 }

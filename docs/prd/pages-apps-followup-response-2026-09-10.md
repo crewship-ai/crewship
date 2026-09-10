@@ -76,4 +76,6 @@ potvrdil viditelné panely, nulový počet aplikačních iframe a absenci spinne
 Nové CI: [source 34469301690](https://github.com/crewship-ai/crewship/actions/runs/34469301690)
 a ručně spuštěný [UI stack 34469677510](https://github.com/crewship-ai/crewship/actions/runs/34469677510).
 Běhy zatím probíhají. Automatické review source bylo opět odmítnuto limitem;
-bot v 11:04 UTC uvedl další slot za 7 minut. Nové skutečné review je stále nutné.
+bot v 11:04 UTC uvedl další slot za 7 minut. Cílený `scripts/review-status.sh --retrigger 2475` byl odeslán v 11:12:28 UTC;
+služba jej v 11:12:34 znovu odmítla (`Review rate limited`) a uvedla dalších
+59 minut. Nové skutečné review je stále nutné. Žádný merge neproběhl.

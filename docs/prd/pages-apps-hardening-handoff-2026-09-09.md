@@ -1,146 +1,102 @@
-# Pages Apps — current handoff, 2026-09-09 16:43 UTC
+# Pages Apps — current delivery handoff, updated 2026-09-10 11:15 UTC
 
-> September 10 CI results, test fixes and current acceptance status:
-> [follow-up validation](pages-apps-validation-2026-09-10.md).
+Issue #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
+`feat/pages-apps-project`. Root clone has another branch and user WIP; preserve it.
+Claim before continuing; release when stopping. No PR has been merged.
 
-Task: independent counter-review, then user “vše oprav a pokračuj”.
-Issue/claim: #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
-`feat/pages-apps-project`. Root clone is a different branch with other WIP;
-do not switch it or overwrite its files.
+Current detailed evidence: [verified follow-up response](pages-apps-followup-response-2026-09-10.md)
+and `reports/pages-apps-followup-2026-09-10.json`.
+Earlier acceptance: [September 10 validation](pages-apps-validation-2026-09-10.md)
+and `reports/pages-apps-hardening-2026-09-09.json`. Historical findings are dated
+reviews, not assertions that every listed defect remains present.
 
-## Current deployed state
+## Deployed and verified
 
-Only dev3 was deployed, through the existing `crewship-ws@3` wrapper.
-Live code commit: `34fd43e5`, clean build. Verified running executable SHA256:
-`98017c717556f2e43811870440f953948e340212ba76c03a2ef58e98517c9782`.
-Compiler image configured in `/srv/crewship/dev3-pages-release/start.sh`:
-`sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b`.
+Only dev3, using the existing `crewship-ws@3` wrapper. Live clean code commit
+`078f3381`, SHA256 `e2e9ec33735e89002038918191a66922f54b2e1aa94e480e897f0385d85fcc7b`.
+Running PID/hash and `/api/health` were verified after reload. Production static
+export and Go build passed. The compiler profile did not change; configured image
+remains `sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b`.
 
-A consistent stopped-service snapshot of database, Pages data and old release
-is at `/srv/crewship/dev3-pages-release/rollback-2472-20260909`. It excludes crew
-volumes. Full live workspace backup API failed on stopped crew containers;
-Engineering was started for the authoring test, but the unrelated credential-lab
-crew was left stopped. Do not describe the snapshot as a full workspace backup.
-Live DB has 300 migrations and integrity `ok`; before deployment its read-only
-copy upgraded from 294 to 300 successfully.
+A real Chromium session against dev3 intercepted only its application response
+to supply a mismatched version. Actual panels remained visible, with zero app
+iframes and no loading spinner. Evidence `/tmp/pages-2472-live-loading/live-mismatch.json`
+and `.png`; screenshot inspected. No server publication was modified for this test.
+Live fsck passed: 3 sources, 3 checkpoints, 3 artifacts, 26 Git objects, no failures.
 
-## Implemented fixes
+Previous binaries are retained as `crewship.pre-followup-20260910` and
+`crewship-sidecar.pre-followup-20260910` in `/srv/crewship/dev3-pages-release`.
+No migrations were added by this follow-up. Earlier consistent stopped-service
+snapshot: `rollback-2472-20260909` in that directory, DB + Pages data + old release,
+excluding crew volumes. Do not call it a complete workspace backup. The live
+backup API encountered stopped crew containers; do not start unrelated crews.
+CLI: `/srv/crewship/dev3-pages-release/crewship --server http://localhost:8083`.
 
-- Workspace-wide retention and pre-write recovery; protected draft/live/running
-  roots survive. Maximum checkpoint benchmark: 256 files, 3 iterations, 0.804s/op.
-- Shared artifact-reader lease is separate from exclusive Git compaction; bounded
-  shallow history preserves retained hashes and round-trips through backup.
-- Explicit maintenance/fsck; historical publish retries expose actual live state.
-- Page detail exposes application presence/version; panel-only Pages skip the
-  app loading barrier; withdrawal/revocation clears executable cache.
-- Compiler errors and persistence failures stay distinct; save validates paths
-  and dependencies against the same profile; image fingerprints prevent drift.
-- Routine-definition provenance is visible and recorded at enqueue. Execution
-  still uses current routine definitions/scripts; this is not revision pinning.
-- Desktop Chromium policy, visible development-origin limitation and navigation
-  stop. Non-loopback runtime requires HTTPS. SDK action keys work without UUID API.
-- Streaming UTF-8 input, isolated TypeScript modules, empty Git quota/boundaries,
-  interrupted-lock retry, exclusive first lock-file creation, canonical SQL timestamps and CI build path filters.
+## Latest fixes and tests
 
-## Measured evidence
+- N2: validate every proposed shallow boundary as an existing commit, in one
+  bounded cat-file batch, before changing shallow/lock. Missing/tree inputs are
+  rejected without changing existing boundaries or readability; fsck still passes.
+- N3: an unopened application's explicit version mismatch immediately shows
+  panels with an explanation. It opens only after the metadata agrees.
+- N4 is not reproduced: save already validates the compiler's ASCII path profile.
+  New real API test proves `src/čísla.tsx` gets 422 without advancing the draft.
+- Earlier credential test flakes were fixed using controlled timer advancement
+  and waiting for the actual passive-effect callback. Full frontend then passed
+  701 files / 8,356 tests, followed by successful complete source/UI CI runs.
+- New follow-up: pages, pagebuild and backup full package tests passed (backup
+  145.498s); changed-core/backup vet passed. N4 API regression passed. UI component
+  tests 7/7; broader selected Pages suite 46 files / 581 tests; changed-file lint
+  and production static build passed. This UI selection differs from the older
+  598-test selection; do not compare their totals as if the filter were identical.
 
-Machine-readable: `reports/pages-apps-hardening-2026-09-09.json`.
-Historical independent findings: `pages-apps-counter-review-2026-09-09.md`.
-Current contract: `pages-apps-v1.md`; install/recovery:
-`../guides/pages-apps-operations.mdx` (experimental).
+Earlier live action acceptance proved UI confirmation → queue → completed routine
+→ both panel writes from exact run `run_cmtua364y000ac5f80683`. Live VIEWER acceptance
+proved grant revocation returns 404 and removes the open iframe; temporary member
+was removed. See the earlier validation and JSON for receipts and timestamps.
 
-- Full Go integration: all code packages passed; only failure was missing MDX
-  stability label. After correction, affected documentation tests passed.
-  Do not claim the original full command exited zero. API took 1419.905s,
-  CLI 258.920s, database 405.060s (`/tmp/pages-2472-main-full-go.log`).
-- Full vet passed, then changed Go packages passed vet after review fixes.
-  Frontend 46 files / 598 tests, zero lint errors / 31 warnings; static build passed.
-  Migrations, agent invariants and final strict docs-inventory passed.
-- Real CLI daemon restart and backup/restore acceptance passed, 35.032s.
-- Final `scripts/test-pages-apps.sh` passed with no skipped required tests:
-  Docker compiler/API/MCP/seed/Node collector, deterministic one-byte UTF-8 input,
-  Chromium process isolation/loop removal and compiled SDK action/status/history.
-  Evidence: `/tmp/pages-2472-verified-final/`, corresponding `.log`.
-- Follow-up first-lock creation passed the lease suite ten times, its race
-  regression five times and the actual API concurrent-save test thirty times
-  (11.223s); vet passed. New macOS CI confirmation remains pending.
-- Final concurrency/publication/lease regressions passed ten repetitions; earlier
-  admission-recovery/concurrent-save regressions passed twenty repetitions.
-- Live Chromium loading/narrow viewport/reduced-motion passed; real WebKit offered
-  panels without an iframe. Browser dependencies came from the existing Playwright
-  Docker image, not host package installation.
-- Live action pending `pnd_cmtua33x1001c0fbdec96` produced completed run
-  `run_cmtua364y000ac5f80683`. Both panels have sequence 342 at 15:53:48Z from that
-  exact run. This proves the real UI → confirmation → queue → routine → data loop.
-- Live fsck: 3 sources, 3 checkpoints, 3 artifacts, 26 Git objects, zero failures.
-- Live VIEWER with only a read grant opened the application. Revoking that grant
-  returned 404 from the application endpoint and removed the open iframe on
-  revalidation. The temporary workspace membership was removed afterwards.
-  Evidence: `/tmp/pages-2472-live-loading/live-reader.json`.
-- Final distribution Docker build passed:
-  https://github.com/crewship-ai/crewship/actions/runs/34375031600
+## CI and review
 
-## Remaining gates — not complete
+N1's claim that stack code never ran CI is false: manual workflow_dispatch runs
+exist and are recorded with exact commits. Complete green runs before N2/N3:
+34378372215 (server), 34378375514 (UI stack), 34459514236 (source after test fixes),
+34459629052 (UI stack after test fixes). These include Go/race/macOS checks.
 
-Actual chat authoring is blocked by Engineering's guided policy. Alex invoked
-Page MCP init/create, but `page_create` returned 403 and no Page/source/build was
-created. The response says `pending_review: true`; no actionable approval-queue
-item exists. User was asked for explicit approval of a separate trusted test
-crew. No existing policy was loosened. Do not substitute transport coverage for
-successful live LLM authoring. Live reader/revocation acceptance now passes,
-as do automated authorization/cache regressions.
+New N2/N3 runs are still in progress, with no failed job observed at this update:
+- source: https://github.com/crewship-ai/crewship/actions/runs/34469301690
+- UI stack, manually dispatched: https://github.com/crewship-ai/crewship/actions/runs/34469677510
 
-User also needs to choose a separately registrable runtime domain outside
-unifylab.cz and DNS/TLS management. Dev3's explicit same-origin exception is an
-internal demonstration, not evidence of production process isolation.
+Actual review remains incomplete. Source's old approval covered `0b7c78df`, not
+the latest changes. Four other PRs have no submitted reviews. At 11:04 the bot
+said the next slot was 7 minutes away. A targeted `--retrigger 2475` at 11:12:28
+was rejected at 11:12:34 with `Review rate limited` and a further 59-minute notice.
+Do not merge on the green CodeRabbit status, or treat its command acknowledgment
+as a review. No override or policy change was made.
 
-## Review delivery
+| PR | Layer | Latest code head |
+|---|---|---|
+| #2475 | source/compiler | 4563f5db |
+| #2477 | API/storage/backup/MCP | f48fd75b |
+| #2479 | CLI/seed/examples | 4ab4b834 |
+| #2480 | UI | 08fcfc60 |
+| #2481 | docs/evidence | see branch (docs-only updates) |
 
-Preserved original 201-file implementation: `1bbae70e`. Integrated main remains
-`1a128896` (checked again 16:02). No giant integration PR and no merges yet.
+All bases follow the previous branch in the stack. After actual review and CI,
+merge from the bottom while preserving ancestry, explicitly check/retarget the
+next base to main, verify its diff remains below 100 files and resolve changelog
+conflicts. CI auto-triggers only for base main; use explicit dispatch when testing
+an unretargeted stack. Do not infer test coverage from labels/surface checks.
 
-| PR | Layer | Files | Current head |
-|---|---|---:|---|
-| #2475 | source/compiler/core CI | 46 | a9ff7ad7 |
-| #2477 | API/storage/backup/MCP/config/contracts | 87 | 70068341 |
-| #2479 | CLI/seed/examples/SDK browser CI | 40 | 916f43c8 |
-| #2480 | UI | 44 | 01c0e9fa |
-| #2481 | design/reviews/operations docs | 31 before this update | see branch |
+## Remaining product acceptance
 
-Each PR is based on its predecessor. Preserve ancestry (merge commits) when
-merging; retarget the next PR to main and verify the diff remains under 100 files.
-CodeRabbit reviewed source at 15:36 and requested changes. Nine actionable
-findings were addressed; response is posted. Second incremental review completed 16:23:11. Its sole new provider-seam
-request was withdrawn after code-based rebuttal; source was approved 16:29:21.
-A subsequent macOS CI failure identified concurrent first lock-file creation
-returning ENOENT; follow-up `a9ff7ad7` still needs CI/review. It uses exclusive creation and
-reopens the winner on EEXIST, with independent-handle first-open regressions.
-It is deployed as `34fd43e5`; health, running hash and fsck verified. The service permits one included
-review per hour: do not burst requests or merge based on green/throttled status.
-Other four PRs have no actual review yet. Earliest next included slot is
-about 17:14 UTC; do not submit a burst. No merge has been attempted. Wait for actual reviews, resolve valid
-findings and verify CI before merging. Release the claim when stopping/finished.
+Live chat authoring still has not passed: Engineering guided policy returned 403
+on page_create, with pending_review but no actionable approval-queue item. A separate
+trusted test crew was proposed; explicit user approval remains unanswered. Do not
+loosen Engineering or use another full-policy crew to evade the hold.
 
-Current follow-up CI: source 34377781669, server 34378372215, UI 34378375514.
-The stacked server/UI runs were dispatched explicitly because CI only
-automatically triggers on PRs targeting main. They are still pending.
-
-Full CI before the lock initialization follow-up: UI 34374672182 passed Go,
-shuffle, macOS, Linux arm64, frontend and browser isolation; race jobs remain
-pending. Server 34374675235 failed macOS concurrent first save (200 + 500):
-`openat .git-maintenance.lock: no such file or directory`. Source run is
-34374044883. Do not treat the UI macOS pass as disproving the server failure.
-Earlier storage teardown, HTTP fixture, timestamp and documentation failures
-were fixed. The earlier EINTR retry did not fix this newly diagnosed open error.
-
-Shared disk also filled while linking the final API test/server. The API test
-passed with stripped symbols; the production build completed using our private
-`/dev/shm` directory for temporary files. Deployment moved the generated
-binaries into the release directory to avoid duplicate copies. Original
-rollback snapshot remains; the temporary previous-executable links were removed
-only after the new running hash, health and fsck passed. No integration binary
-copy remains; use `/srv/crewship/dev3-pages-release/crewship` with port 8083.
-
-Shared disk filled during lint; only our completed `.next` intermediates and
-obsolete test executables were deleted. Keep compiles serialized (`GOGC=30`,
-`GOMAXPROCS=2`, `-p 1`); do not prune shared caches or unrelated worktrees.
+A separately registrable production runtime domain and DNS/TLS management remain
+unspecified. Dev3 is an explicit same-origin internal demo, not production process
+isolation evidence. Safari preference was asked separately; recommendation/default
+remains desktop Chromium applications, other engines panels. Rendering in Safari
+alone does not validate the loop-stop/process-isolation contract. No browser policy
+was broadened during this follow-up.
