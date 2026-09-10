@@ -42,7 +42,7 @@ type BulkImportResult = z.infer<typeof BulkImportResultSchema>
 /** Shared by the three text fields: the shell's phone rule (44px = h-12 here,
  *  because `--spacing` is 0.23rem) applied to a control that is h-8 on a
  *  pointer device. */
-const FIELD_CLASS = "h-8 text-xs max-sm:h-12 max-sm:text-sm"
+const FIELD_CLASS = "h-8 text-xs coarse:h-12 coarse:text-base"
 
 interface ImportSkillDialogProps {
   workspaceId: string
@@ -331,7 +331,7 @@ export function ImportSkillDialog({
                   text is not a tap target — both of which the pair of
                   `<label><Checkbox/>…</label>` rows here had before.
 
-                  `max-sm:min-h-12` on both: `CreateSurfaceToggleRow` is a
+                  `coarse:min-h-12` on both: `CreateSurfaceToggleRow` is a
                   plain flex row with no click handler of its own — measured,
                   the "44px row" a thumb sees is really an 18px label sliver
                   and a 14.7px `size-4` checkbox floating inside it, and a tap
@@ -349,7 +349,7 @@ export function ImportSkillDialog({
                 label={
                   <label
                     htmlFor="repo-dry-run"
-                    className="flex cursor-pointer items-center max-sm:min-h-12"
+                    className="flex cursor-pointer items-center coarse:min-h-12"
                   >
                     Dry run (preview only)
                   </label>
@@ -357,7 +357,7 @@ export function ImportSkillDialog({
                 control={
                   <label
                     htmlFor="repo-dry-run"
-                    className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+                    className="flex cursor-pointer items-center justify-center coarse:min-h-12 coarse:min-w-12"
                   >
                     <Checkbox
                       id="repo-dry-run"
@@ -438,7 +438,7 @@ export function ImportSkillDialog({
               label={
                 <label
                   htmlFor="skill-unsafe-license"
-                  className="flex cursor-pointer items-center text-warn max-sm:min-h-12"
+                  className="flex cursor-pointer items-center text-warn coarse:min-h-12"
                 >
                   Allow unrecognised licences
                 </label>
@@ -447,7 +447,7 @@ export function ImportSkillDialog({
               control={
                 <label
                   htmlFor="skill-unsafe-license"
-                  className="flex cursor-pointer items-center justify-center max-sm:min-h-12 max-sm:min-w-12"
+                  className="flex cursor-pointer items-center justify-center coarse:min-h-12 coarse:min-w-12"
                 >
                   <Checkbox
                     id="skill-unsafe-license"

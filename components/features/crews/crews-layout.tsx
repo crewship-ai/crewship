@@ -238,7 +238,7 @@ export function CrewsLayout({
   }, [selectedAgent, selectedCrew, crews])
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
       <CrewsSubbar
         workspaceId={workspaceId}
         crewSlug={selectedCrewSlug}

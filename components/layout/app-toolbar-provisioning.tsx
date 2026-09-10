@@ -83,7 +83,7 @@ function ProvisioningBadge({
           <span className={`text-micro font-medium ${colors.text}`}>{verbalize()}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="w-[420px] p-0 overflow-hidden">
+      <PopoverContent align="start" sideOffset={8} className="w-[min(420px,calc(100vw-2rem))] p-0 overflow-hidden">
         <div className="px-3 py-2 border-b text-xs font-semibold flex items-center gap-2">
           <Package className="h-3.5 w-3.5 text-muted-foreground" />
           Container builds
