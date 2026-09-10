@@ -28,7 +28,7 @@ const DefaultAcceptanceBudget = 2 * time.Second
 // modernc.org/sqlite passes context.Background() into Commit and Rollback
 // (tx.go:36,50,58), so only statement execution is interruptible. Measured on
 // crewship-dev: a 500 ms context against a write lock held elsewhere for 5 s
-// returned after 5036 ms — an order of magnitude past its budget, with the
+// returned after 5044 ms — an order of magnitude past its budget, with the
 // context dutifully reporting "deadline exceeded" once it was finally let go.
 // The numbers are in docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
 //

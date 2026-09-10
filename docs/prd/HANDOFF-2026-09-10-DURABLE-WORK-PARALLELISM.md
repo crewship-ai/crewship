@@ -22,6 +22,10 @@ runtimes, overlapping in wall-clock time) has not been attempted.
 | `b6fc820` | `internal/work` — the dispatch ledger, state machine, lease/recovery and the generation fence |
 | `77e676f` | `internal/webhook/profiles` — `github` and `standard-webhooks` signature verification |
 | `94826c3` | `internal/memory/memdiff` — the deterministic line diff the removals declaration needs |
+| `adb2184` | `synchronous=FULL` by default, with `WithSynchronous`/`WithBusyTimeout` as explicit opt-outs |
+| `d44a837` | an exhausted item no longer stalls the whole queue (found by self-review) |
+| `fdab316` | the acceptance budget guard: a handle whose `busy_timeout` sits under its budget |
+| `a6cceaf` | `needs_reconciliation` holds capacity; a blocked prefix stops hiding claimable work; §6 aging and round-robin |
 
 ### Stage A is closed
 
@@ -41,14 +45,20 @@ Verdict **reject**, on two measured failures rather than an inconclusive result:
   taken inside an open transaction starves at pool 1 (3001 ms to a deadline) and
   is instant at pool 2 and 5. Ours is 5 and is load-bearing.
 
-Three numbers from that spike bind the default path, because they are SQLite's
-properties and not the library's:
+These numbers bind the default path too, because they are SQLite's properties
+and not the library's.
 
-| Measurement | Value | Consequence |
+Re-measured under the daemon's managed-WAL configuration
+(`wal_autocheckpoint(0)` + a 2 s checkpointer), which the first run of the spike
+did not reproduce. FULL costs about **three times** what that first run reported.
+
+| Measurement (managed WAL) | Value | Consequence |
 |---|---|---|
-| `synchronous=FULL`, bare insert, p50 | 20 µs → **6371 µs** | ~300× the NORMAL cost |
-| `synchronous=FULL`, acceptance transaction, p50 / p95 / p99 | **7901 / 13807 / 21334 µs** | Affordable against a 500 ms budget; ceiling ≈150 commits/s on the single writer |
-| 500 ms context vs a lock held 5 s | returned after **5036 ms** | **A context deadline does not bound an acceptance request.** |
+| `synchronous=FULL`, bare insert, p50 / p95 | 21 µs → **20844 / 47418 µs** | ~1000× the NORMAL cost |
+| `synchronous=FULL`, acceptance transaction, p50 / p95 / p99 | **21488 / 55770 / 95279 µs** | Affordable against a 500 ms budget, with an order of magnitude of headroom; ceiling ≈**42 commits/s** on the single writer, not the ~150/s first reported |
+| Uncontended acceptance, pool 5 | p50 22 ms, p95 52 ms, p99 65 ms | Inside §10's p95 ≤ 500 ms / p99 ≤ 2 s |
+| 500 ms context vs a lock held 5 s | returned after **5044 ms** | **A context deadline does not bound an acceptance request.** Unchanged by the WAL configuration. |
+| The same, through the acceptance guard | refused after **452 ms** | The guard is what bounds it, and it is now in `internal/work`. |
 
 That last one is the important one and it is easy to forget: `modernc.org/sqlite`
 passes `context.Background()` into `Commit` and `Rollback`
@@ -79,6 +89,11 @@ Proven by test against real migrated SQLite (`internal/work/work_test.go`):
 - a stale attempt cannot complete the work, and cannot renew its lease
 - an expired lease **with** a runtime locator → `needs_reconciliation`, and the
   work stays unclaimable while unresolved; **without** one → requeued
+- `needs_reconciliation` **holds** an execution slot and its session, so neither
+  the same agent nor the same session can start while a runtime may still be
+  alive under an unverified locator
+- a prefix of 200 blocked items cannot hide claimable work behind it
+- §6's aging and round-robin across workspaces and agents
 - one chat + one background for the same agent are live simultaneously; a third
   waits `queued`
 - 16 concurrent dispatchers claim exactly the background cap, under `-race`
@@ -86,11 +101,19 @@ Proven by test against real migrated SQLite (`internal/work/work_test.go`):
 - retry exhaustion fails instead of looping; a deadline expires before start,
   and work without one never expires
 
-The fencing test was **mutation-checked**: delete the generation check and it
-fails with a nil error. Its first version would have passed with the fence
-removed, because the state machine refused the write for an unrelated reason —
-it now puts the live attempt into `running` first so only the fence can refuse.
-If you touch that test, keep that property.
+Three tests here were **mutation-checked**, and two of them needed rewriting
+because the first version passed with the guard removed. That is the habit worth
+keeping, not the individual results:
+
+- the fencing test would have passed without the generation term, because the
+  state machine refused the stale write for an unrelated reason. It now puts the
+  live attempt into `running` first, so only the fence can refuse.
+- the blocked-prefix test would have passed without the SQL-side filtering,
+  because the fairness ordering floats a free agent's work to the front on its
+  own. Its blockers are now blocked by their *session*, carry no agent, and share
+  one workspace — every ordering key equal, acceptance order deciding.
+- removing `needs_reconciliation` from the capacity set makes the reconciliation
+  test fail with `claim B while A is unreconciled = <nil>`.
 
 ### Durability
 
@@ -113,7 +136,7 @@ way, and T14's evidence needs a separate harness by design.
 |---|---|
 | **I1** no `202` before a durable commit | Mechanism exists (`work.AcceptTx` takes the caller's `*sql.Tx`); **not yet wired to any handler** |
 | **I2** one delivery → at most one work item | Schema enforces it (`UNIQUE(workspace, endpoint, source_delivery_id)` + a partial unique index on the content key); **no handler writes those rows yet** |
-| **I3** one active turn per session; atomic claim | **Demonstrated** |
+| **I3** one active turn per session; atomic claim | **Demonstrated**, including that an unreconciled turn keeps the session |
 | **I4** state/memory/sidecar changes verify the live run | Demonstrated for **state**. Memory and sidecar: not started |
 | **I5** an old attempt cannot overwrite a newer one | **Demonstrated**, mutation-checked |
 | **I6** memory writes are not lost under concurrency | Not started (diff primitive only) |
@@ -166,10 +189,10 @@ session rediscover them.**
 
 3. **The DSN description is incomplete.** The server always opens with
    `WithManagedWAL()` (`cmd_start.go:197`), i.e. `wal_autocheckpoint(0)` plus a
-   dedicated checkpointer goroutine. Any NORMAL-vs-FULL measurement that ignores
-   the managed checkpointer — **including the one in the ADR** — measures a
-   configuration the server does not run. The stage-A baseline report owes a
-   re-run under managed WAL.
+   dedicated checkpointer goroutine. RESOLVED: the harness now mirrors both and
+   the ADR carries the corrected numbers. It mattered — FULL costs ~3× more under
+   the production shape, because the WAL is allowed to grow between ticks so each
+   fsync flushes more, and the checkpointer competes for the single writer.
 
 4. **§5's "oversized body is refused with 413" describes no current surface.**
    Two paths truncate silently via `io.LimitReader`; the third

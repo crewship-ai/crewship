@@ -40,7 +40,21 @@ import (
 // pragmas the product actually runs with. syncMode is the synchronous pragma; the
 // product ships NORMAL today and the PRD requires FULL for authoritative
 // writes, so both are measurable here.
+// managedWAL mirrors the daemon: SQLite's inline autocheckpoint is OFF and a
+// separate goroutine folds the WAL back on a 2 s tick. The first version of this
+// harness measured with inline autocheckpoint ON, which is a configuration the
+// server never runs — the ADR said so, and this is that gap closed.
+var managedWAL bool
+
 func crewshipDSN(path, syncMode string) string {
+	dsn := crewshipDSNBase(path, syncMode)
+	if managedWAL {
+		dsn += "&_pragma=wal_autocheckpoint(0)"
+	}
+	return dsn
+}
+
+func crewshipDSNBase(path, syncMode string) string {
 	return path +
 		"?_pragma=busy_timeout(30000)" +
 		"&_pragma=journal_mode(WAL)" +
@@ -121,10 +135,11 @@ func (w *mockWorker) count() int {
 }
 
 type env struct {
-	dir    string
-	dbPath string
-	pool   *sql.DB
-	driver *riversqlite.Driver
+	dir              string
+	dbPath           string
+	pool             *sql.DB
+	driver           *riversqlite.Driver
+	stopCheckpointer func()
 }
 
 func newEnv(t testingT, poolSize int, syncMode string) *env {
@@ -138,7 +153,36 @@ func newEnv(t testingT, poolSize int, syncMode string) *env {
 	if _, err := pool.Exec(schemaSQL); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
-	return &env{dir: dir, dbPath: dbPath, pool: pool, driver: riversqlite.New(pool)}
+	e := &env{dir: dir, dbPath: dbPath, pool: pool, driver: riversqlite.New(pool)}
+	if managedWAL {
+		e.stopCheckpointer = startCheckpointer(pool)
+	}
+	return e
+}
+
+// startCheckpointer mirrors internal/database's checkpointer: a 2 s tick
+// running PRAGMA wal_checkpoint, escalating to TRUNCATE once the -wal file
+// grows past the production threshold. With autocheckpoint off this is the only
+// thing reclaiming the WAL, so a harness that sets the pragma without running
+// this measures a configuration nobody ships either.
+func startCheckpointer(pool *sql.DB) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				_, _ = pool.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+				return
+			case <-t.C:
+				_, _ = pool.Exec(`PRAGMA wal_checkpoint(PASSIVE)`)
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
 }
 
 func (e *env) migrateRiver(t testingT) *rivermigrate.MigrateResult {
@@ -166,6 +210,10 @@ func (e *env) client(t testingT, w *mockWorker, maxWorkers int) *river.Client[*s
 }
 
 func (e *env) close() {
+	if e.stopCheckpointer != nil {
+		e.stopCheckpointer()
+		e.stopCheckpointer = nil
+	}
 	if e.pool != nil {
 		_ = e.pool.Close()
 	}
@@ -308,6 +356,7 @@ var errNotImplemented = errors.New("scenario not implemented")
 
 func main() {
 	var (
+		managed  = flag.Bool("managed-wal", true, "mirror the daemon: wal_autocheckpoint(0) plus a 2s checkpointer")
 		scenario = flag.String("scenario", "all", "tx|dup|fencing|pool|contention|durability|all")
 		poolSize = flag.Int("pool", 1, "max open connections on the shared pool")
 		sync     = flag.String("sync", "FULL", "synchronous pragma: NORMAL or FULL")
@@ -317,6 +366,7 @@ func main() {
 		out      = flag.String("json", "", "write the JSON report to this path")
 	)
 	flag.Parse()
+	managedWAL = *managed
 
 	rep := report{
 		RunAt: time.Now().UTC(),
@@ -328,6 +378,7 @@ func main() {
 			"go":             goVersion(),
 			"pool_size":      *poolSize,
 			"synchronous":    *sync,
+			"managed_wal":    managedWAL,
 		},
 	}
 

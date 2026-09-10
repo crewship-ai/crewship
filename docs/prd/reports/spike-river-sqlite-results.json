@@ -1,7 +1,8 @@
 {
-  "run_at": "2026-09-10T19:55:41.052711248Z",
+  "run_at": "2026-09-10T21:14:59.126567021Z",
   "versions": {
     "go": "go1.27.1",
+    "managed_wal": true,
     "modernc_sqlite": "v1.58.0",
     "pool_size": 5,
     "river": "v0.47.0",
@@ -41,18 +42,18 @@
       "scenario": "contention",
       "pass": true,
       "detail": {
-        "baseline_p50_ms": 7,
-        "baseline_p95_ms": 13,
-        "baseline_p99_ms": 14,
+        "baseline_p50_ms": 22,
+        "baseline_p95_ms": 52,
+        "baseline_p99_ms": 65,
         "cancel_budget_ms": 500,
         "cancel_error": "context deadline exceeded",
-        "cancel_returned_after_ms": 5036,
+        "cancel_returned_after_ms": 5044,
         "cancellation_interrupts_busy_wait": false,
         "cancelled_op_left_row": 0,
         "contended_committed": 199,
         "contended_other_error": 1,
-        "contended_p95_ms": 9,
-        "contended_p99_ms": 26,
+        "contended_p95_ms": 52,
+        "contended_p99_ms": 68,
         "contended_rejected_within_budget": 1,
         "contended_sqlite_busy": 0,
         "lock_held": "5s",
@@ -85,7 +86,7 @@
       "pass": true,
       "detail": {
         "pool_1_second_conn_err": "context deadline exceeded",
-        "pool_1_second_conn_ms": 3001,
+        "pool_1_second_conn_ms": 3000,
         "pool_1_second_conn_ok": false,
         "pool_2_second_conn_err": "",
         "pool_2_second_conn_ms": 0,
@@ -104,16 +105,16 @@
       "pass": true,
       "detail": {
         "ops": 200,
-        "sync_FULL_acceptance_p50_us": 7901,
-        "sync_FULL_acceptance_p95_us": 13807,
-        "sync_FULL_acceptance_p99_us": 21334,
-        "sync_FULL_delivery_only_p50_us": 6371,
-        "sync_FULL_delivery_only_p95_us": 12381,
-        "sync_NORMAL_acceptance_p50_us": 261,
-        "sync_NORMAL_acceptance_p95_us": 459,
-        "sync_NORMAL_acceptance_p99_us": 9702,
-        "sync_NORMAL_delivery_only_p50_us": 20,
-        "sync_NORMAL_delivery_only_p95_us": 32
+        "sync_FULL_acceptance_p50_us": 21488,
+        "sync_FULL_acceptance_p95_us": 55770,
+        "sync_FULL_acceptance_p99_us": 95279,
+        "sync_FULL_delivery_only_p50_us": 20844,
+        "sync_FULL_delivery_only_p95_us": 47418,
+        "sync_NORMAL_acceptance_p50_us": 288,
+        "sync_NORMAL_acceptance_p95_us": 539,
+        "sync_NORMAL_acceptance_p99_us": 688,
+        "sync_NORMAL_delivery_only_p50_us": 21,
+        "sync_NORMAL_delivery_only_p95_us": 33
       }
     }
   ]

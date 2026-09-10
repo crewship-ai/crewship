@@ -16,8 +16,15 @@ worker is a mock: no credentials, no external effects.
 
 ```
 go run ./tools/spike-river -scenario all -pool 5 -sync FULL -ops 200 -workers 32 -hold 5s \
-  -json docs/prd/reports/spike-river-sqlite-results.json
+  -managed-wal=true -json docs/prd/reports/spike-river-sqlite-results.json
 ```
+
+**Re-measured 2026-09-10 under managed WAL.** The first run of this spike used
+SQLite's inline autocheckpoint, which the daemon never runs — it opens
+`WithManagedWAL()` (`cmd_start.go:197`), i.e. `wal_autocheckpoint(0)` plus a 2 s
+checkpointer goroutine. The harness now mirrors that, and it changes the FULL
+numbers by roughly 3x. Every figure below is from the production shape; the
+superseded ones are noted where they were quoted.
 
 Raw output: [`reports/spike-river-sqlite-results.json`](reports/spike-river-sqlite-results.json).
 
@@ -31,10 +38,11 @@ Raw output: [`reports/spike-river-sqlite-results.json`](reports/spike-river-sqli
 | DSN | `busy_timeout(30000)`, `journal_mode(WAL)`, `synchronous(<NORMAL\|FULL>)`, `foreign_keys(ON)`, `cache_size(-65536)`, `temp_store(MEMORY)`, `mmap_size(268435456)`, `_txlock=immediate` |
 | River migrations applied | 7 |
 
-Note the harness does **not** reproduce the server's `WithManagedWAL()` +
-dedicated checkpointer (`cmd/crewship/cmd_start.go:197,210`). Every number below is
-therefore an inline-autocheckpoint measurement, and the stage-A baseline report owes a
-re-run under the managed-WAL configuration the server actually runs.
+The harness reproduces the server's `WithManagedWAL()` + dedicated checkpointer
+(`cmd/crewship/cmd_start.go:197,210`): autocheckpoint off, a 2 s tick running
+`PRAGMA wal_checkpoint`, escalating to TRUNCATE past the production threshold.
+Setting the pragma without running the goroutine would measure a configuration
+nobody ships either, so the harness does both.
 
 ## Results against the spike's own success criteria
 
@@ -45,9 +53,9 @@ re-run under the managed-WAL configuration the server actually runs.
 | No second logical job from one delivery | **PASS** | `dup`: 32 concurrent identical deliveries → 1 accepted, 31 reported duplicate, 1 delivery row, 1 river_job, 1 distinct receipt, 0 errors. |
 | Old-attempt completion cannot overwrite the newer result | **FAIL** | `fencing` — see below. |
 | Config must not globally flip the live API to a single connection without measured impact | **FAIL** | `pool` — see below. |
-| Uncontended acceptance p95 ≤ 500 ms, p99 ≤ 2 s | **PASS** | `contention` at pool 5 / FULL: p50 7 ms, p95 9 ms (baseline p95 14 ms). Two orders of magnitude of headroom. |
+| Uncontended acceptance p95 ≤ 500 ms, p99 ≤ 2 s | **PASS** | `contention` at pool 5 / FULL / managed WAL: p50 22 ms, p95 52 ms, p99 65 ms. An order of magnitude of headroom, not two. |
 | Under a held lock: commit inside the 2 s budget, or a retryable error — never a false `202` | **SPLIT** | No false ack (`cancelled_op_left_row = 0`), but the budget is **not** enforceable by context — see below. |
-| Does driver cancellation interrupt the 30 s busy wait? | **NO** | `contention`: a 500 ms context, against a lock held 5 s, returned after **5036 ms**. |
+| Does driver cancellation interrupt the 30 s busy wait? | **NO** | `contention`: a 500 ms context, against a lock held 5 s, returned after **5044 ms**. Unchanged by the WAL configuration. |
 
 ### The two hard failures
 
@@ -105,7 +113,7 @@ so §3's "FULL on every authoritative connection" is affordable at the design lo
 commits/s on a single writer, which the capacity report must state rather than assume.
 
 **A context deadline does not bound an acceptance request.** With a 500 ms context and a
-write lock held elsewhere for 5 s, the acceptance path returned after 5036 ms with
+write lock held elsewhere for 5 s, the acceptance path returned after 5044 ms with
 `context deadline exceeded` — it waited for the lock, then noticed. This matches the driver
 source: `modernc.org/sqlite@v1.58.0/tx.go:36,50,58` passes `context.Background()` into
 `Commit` and `Rollback`, so a busy commit is uncancellable for the full
@@ -117,6 +125,10 @@ admission guard in front of the transaction (a bounded acceptance semaphore, or 
 The one piece of good news: the budget overrun did not produce a false `202`. The
 cancelled operation left no delivery row, and the path recovered cleanly once the lock was
 released (`recovered_after_release: true`, 199/200 contended ops committed, 0 `SQLITE_BUSY`).
+
+This is now enforced rather than merely observed: `internal/work`'s acceptor owns a
+handle whose `busy_timeout` sits under its budget, and measured against a lock held
+6 s with a 600 ms budget it refuses after **452 ms**.
 
 ## Decision
 
@@ -132,8 +144,9 @@ released (`recovered_after_release: true`, 199/200 contended ops committed, 0 `S
    (`internal/api/assignments_lease.go`, `assignments_running_recovery.go`). The real gaps
    there are the absence of `attempts`/`eligible_at` and a recovery pass that *fails*
    orphans instead of re-queueing them — neither of which River would fix for us.
-4. The measured constraints are SQLite's, not the queue library's: 6.4 ms fsync per
-   durable commit and an uncancellable busy wait. Both apply identically to either choice.
+4. The measured constraints are SQLite's, not the queue library's: ~21 ms of fsync
+   per durable acceptance commit and an uncancellable busy wait. Both apply
+   identically to either choice.
 
 This is a **reject**, not an *unresolved*. The two failing criteria are measured and
 reproducible, not inconclusive.
@@ -155,9 +168,9 @@ moot for 1.0.
   is kept so a future re-evaluation starts from a running harness rather than from this
   document, and because four of its scenarios (`tx`, `dup`, `fencing`, `pool`) are the
   correctness bar the in-house implementation must clear too.
-- Stage B inherits three requirements from the measurements above: FULL on authoritative
-  connections with its cost stated in the capacity report; an explicit acceptance budget
-  guard that does not rely on context cancellation; and a generation/fencing term on the
-  work rows.
+- Stage B inherits three requirements from the measurements above, all now
+  implemented: FULL on authoritative connections with its ~42 commits/s ceiling
+  stated in the capacity report; an explicit acceptance budget guard that does not
+  rely on context cancellation; and a generation/fencing term on the work rows.
 - Revisit if a measured single-writer limit appears, or if the driver leaves early testing
   *and* grows attempt-level fencing. Neither is a 1.0 concern.

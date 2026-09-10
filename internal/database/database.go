@@ -67,13 +67,19 @@ func WithManagedWAL() Option {
 // not merely a process crash — and NORMAL in WAL mode explicitly does not
 // promise that (https://www.sqlite.org/pragma.html#pragma_synchronous).
 //
-// Measured cost on crewship-dev (12 vCPU, ext4, non-rotational), 200 commits:
-// a bare single-row insert goes from 20 microseconds at NORMAL to 6371 at FULL,
-// and a two-statement acceptance transaction from 261 to 7901. That is ~6.4 ms
-// of fsync per commit, roughly a 300x multiple on the smallest write, and it
-// puts a ceiling near 150 commits per second on the single writer. In absolute
-// terms it is still 13.8 ms at p95 against a 500 ms acceptance budget. The
-// numbers and the harness are in docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
+// Measured cost on crewship-dev (12 vCPU, ext4, non-rotational), 200 commits,
+// under the managed-WAL configuration the daemon actually runs: a two-statement
+// acceptance transaction goes from 288 microseconds at NORMAL to 21488 at FULL,
+// p95 539 to 55770. That is ~21 ms of fsync per commit and a ceiling near 42
+// commits per second on the single writer — the number the capacity report has
+// to carry. In absolute terms it is 55.8 ms at p95 against a 500 ms acceptance
+// budget, so the headroom is an order of magnitude, not two.
+//
+// An earlier measurement said 6.4 ms and ~150 commits/s. It was taken with
+// SQLite's inline autocheckpoint, which this daemon never uses; with
+// autocheckpoint off the WAL grows between checkpointer ticks, so each commit's
+// fsync flushes more. The numbers and the harness are in
+// docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
 //
 // Pass SynchronousNormal only where losing the last few commits to a power cut
 // is genuinely acceptable — a rebuildable index, a throwaway fixture — and say

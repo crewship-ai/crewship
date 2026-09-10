@@ -87,12 +87,12 @@ var (
 //
 // database.Open defaults to synchronous=FULL, because an accepted piece of work
 // has to survive an OS crash and NORMAL in WAL mode does not promise that. FULL
-// costs ~6.4 ms of fsync per commit on this hardware; measured across the test
-// suite that is ~2% on a read-heavy package and 3.1x on a write-heavy one
-// (internal/work: 4.3s -> 13.4s), and the per-package timeout in CI is 12
-// minutes. Paying that on every fixture buys nothing real: no unit test survives
-// an OS crash either way, and T14's power-loss evidence needs a separate harness
-// by design.
+// costs ~21 ms of fsync per acceptance commit on this hardware under the
+// daemon's managed-WAL configuration; measured across the test suite that is ~2%
+// on a read-heavy package and 3.1x on a write-heavy one (internal/work: 4.3s ->
+// 13.4s), and the per-package timeout in CI is 12 minutes. Paying that on every
+// fixture buys nothing real: no unit test survives an OS crash either way, and
+// T14's power-loss evidence needs a separate harness by design.
 //
 // What keeps this from becoming a silent divergence is that the production
 // setting is asserted directly — see TestOpen_DefaultsToFullSynchronous and
