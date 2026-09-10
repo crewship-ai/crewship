@@ -24,7 +24,17 @@
   "ci": {
     "source": 34469301690,
     "ui": 34469677510,
-    "state": "in_progress"
+    "state": "success",
+    "source_sha": "4563f5db38383f1d0064ea2faf48192438583a29",
+    "ui_sha": "08fcfc60c6bcd85c64806b5338da73d50888623b",
+    "scope": "workflow_dispatch branch snapshots; not current-main merge validation",
+    "pr_bodies_linked": [
+      2475,
+      2477,
+      2479,
+      2480,
+      2481
+    ]
   },
   "tests": {
     "pages": "passed",
@@ -41,7 +51,17 @@
     "requested_at": "2026-09-10T11:12:28Z",
     "rejected_at": "2026-09-10T11:12:34Z",
     "retry_notice_minutes": 59,
-    "merged": false
+    "merged": false,
+    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded"
   },
-  "safari_decision": "awaiting_user"
+  "safari_decision": "confirmed_panel_only_v1_2026-09-10",
+  "integration": {
+    "main_sha": "fa222ad2e1e52ff4a9327f527d5355d8ddb53de8",
+    "check": "git merge-tree --write-tree HEAD origin/main (read-only worktree check)",
+    "conflicts": [
+      "docs/api-reference/openapi.mdx",
+      "internal/api/testdata/route-roles.txt",
+      "internal/sidecar/routine_mcp_test.go"
+    ]
+  }
 }

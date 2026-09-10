@@ -186,3 +186,56 @@ Ale má dva důsledky, které nejsou technické:
 3. N5 potvrdit jako produktové rozhodnutí.
 4. N4 dořešit buď validací při zápisu, nebo vydáním pravidla do profilu.
 5. Zbytek beze změny: živé autorství z chatu a čistá instalace zůstávají otevřené gates.
+
+---
+
+## Oprava oponentury — 10. září, po odpovědi autora
+
+Autor doložil dvě věci, ve kterých se tento dokument mýlil. Ověřil jsem je a potvrzuji.
+
+**N1 byl z poloviny chybný.** Tvrzení „203 z 251 souborů nemá ani jeden test z CI"
+neplatí. Kód je pokrytý ručně spuštěnými `workflow_dispatch` běhy nad hlavou stacku.
+Konkrétně běh
+[34469677510](https://github.com/crewship-ai/crewship/actions/runs/34469677510) nad
+`feat/pages-apps-ui-review@08fcfc60` (10. 9., 11:07 UTC) skončil úspěchem a obsahuje
+18 jobů včetně `Pages compiler and browser isolation`, `Go`, `Go Race`,
+`Go Race (internal/api)`, `Go Shuffle`, `Go Lint`, `Frontend Test`,
+`Go (macos-arm64)`, `Go (linux-arm64)` a `Playwright PR subset`. Ta hlava obsahuje
+hlavy všech tří nižších větví (`ahead_by` 34/20/8, `behind_by` 0), takže pokrývá
+kumulativní obsah čtyř kódových PR. Ověřil jsem i to, že opravy N2, N3 a N4 na těch
+větvích skutečně jsou.
+
+Co z N1 platí dál:
+
+- **Review chybí** — CodeRabbit je na #2475 rate-limited a na #2477–#2481 hlásí
+  „reviews are disabled for this base branch". Autor s tím souhlasí.
+- **Důkaz není připnutý k PR.** Žádné z těl #2477–#2481 neobsahuje odkaz na běh;
+  `gh pr checks` proto ukazuje jen `label` a `surface`. Právě to mě svedlo. Doplnit
+  do každého PR odkaz na běh a SHA, nad kterým proběhl.
+- **`workflow_dispatch` ověřuje hlavu větve, ne merge ref.** `main` se mezitím
+  posunul (`4581b38f` proti základu `676e16e4`) a ve stejném okně se slučují
+  routines PR. Zelená větev tedy není totéž co zelený merge; automaticky to začne
+  hlídat až PR přebázovaný na `main`.
+- **Není to gate, je to snímek.** Běh z 09:15 byl do dvou hodin překonaný. Po každém
+  pushi je nutné spustit znovu ručně.
+
+**N4 byl chybný.** `pageprofile.ValidateSourcePaths` volané z
+`internal/api/pages_project.go` existuje od commitu `3185ee52` (9. 9.), tedy už
+v době psaní tohoto dokumentu. Save vrací 422 dřív, než se pustí Docker, a
+`page_project read` vydává `profile` kontrakt agentovi. Přečetl jsem `validateProjectPath`
+v kodeku, který se skutečně nezměnil, a neověřil jsem volací cestu v handleru.
+Rozvrstvení je správné: přenosový kodek zůstává širší, profil odmítá.
+
+**N2 a N3 potvrzuji jako opravené.** `SetCheckpointBoundaries` ověřuje hranice jednou
+dávkou `cat-file --batch-check=%(objectname) %(objecttype)`, kontroluje typ `commit`
+a dělá to před dotykem `shallow` i jeho zámku, takže odmítnutí zachová původní stav.
+`page-application.tsx` počítá `versionMismatch` a vrací panely s hláškou dřív, než se
+dostane k načítacímu stavu — deterministicky, bez potřeby timeoutu.
+
+**Safari:** souhlasím s doporučením ponechat pro v1 panely. Funkční vykreslení
+neprokazuje zastavení smyčky a to je jediná vlastnost, kvůli které ta politika
+existuje. Patří to ale do dokumentace jako produktová matice podpory, ne jen do kódu.
+
+Otevřené drobnosti beze změny: kurzor v `Compact`, rozsah otisku routine (definice,
+ne volané skripty), publikace vytvořené před touto změnou bez `routine_definitions`,
+a kvótový `WalkDir` na každý `Checkpoint`.

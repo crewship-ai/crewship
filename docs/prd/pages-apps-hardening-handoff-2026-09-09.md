@@ -1,5 +1,30 @@
 # Pages Apps — current delivery handoff, updated 2026-09-10 11:15 UTC
 
+## Delivery correction — 2026-09-10 12:40 UTC
+
+This update supersedes earlier pending-CI and Safari-decision statements below.
+Source run [34469301690](https://github.com/crewship-ai/crewship/actions/runs/34469301690)
+at `4563f5db` and cumulative UI run
+[34469677510](https://github.com/crewship-ai/crewship/actions/runs/34469677510)
+at `08fcfc60` both completed successfully. Exact SHAs and scope are now pinned in
+all five PR bodies. These are branch snapshots, not current-main merge checks.
+The UI head contains the current source, server and CLI heads.
+
+Safari panel-only support for v1 is now explicitly confirmed; the support matrix
+is in `pages-apps-v1.md`. The independent review author's correction is preserved
+in `pages-apps-independent-review-followup-2026-09-10.md`.
+
+CONTRIBUTING.md explicitly permits manual review when CodeRabbit is throttled.
+Quota alone is not a delivery blocker; actual layer review still needs evidence.
+The previous interpretation that we must wait for CodeRabbit was too strict.
+
+Read-only merge simulation against main `fa222ad2` found conflicts in
+`docs/api-reference/openapi.mdx`, `internal/api/testdata/route-roles.txt`, and
+`internal/sidecar/routine_mcp_test.go`. Resolve integration and run current CI
+before merging; the successful historical runs do not cover that result.
+Chat authoring and clean production installation acceptance remain open.
+
+
 Issue #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
 `feat/pages-apps-project`. Root clone has another branch and user WIP; preserve it.
 Claim before continuing; release when stopping. No PR has been merged.

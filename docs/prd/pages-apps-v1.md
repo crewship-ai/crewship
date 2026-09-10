@@ -56,6 +56,10 @@ workspace/crew authorization model.
 | Firefox, Safari/WebKit, iOS and other/mobile engines | Disabled with a clear browser requirement | Available |
 | Explicit same-origin development mode | Reviewed demo only, visible isolation limitation | Available |
 
+Product decision confirmed on 2026-09-10: Safari/WebKit remains panel-only for v1.
+Successful rendering alone does not establish the required stop-loop isolation
+contract; enabling applications on these engines requires separate evidence.
+
 Runtime uses a second **registrable site**, shared by all Pages in the installation;
 not a domain per Page. Both browser-facing origins need reachable DNS and trusted
 TLS. The same Go service serves Studio and the restricted runtime bootstrap route.
