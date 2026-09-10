@@ -199,11 +199,12 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 
 	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
 	res, runErr := d.executor.Run(ctx, RunInput{
-		PipelineID:   pr.PipelineID,
-		WorkspaceID:  pr.WorkspaceID,
-		Inputs:       inputs,
-		Mode:         ModeRun,
-		TierOverride: Complexity(pr.TierOverride),
+		PinnedVersion: pr.PinnedVersion,
+		PipelineID:    pr.PipelineID,
+		WorkspaceID:   pr.WorkspaceID,
+		Inputs:        inputs,
+		Mode:          ModeRun,
+		TierOverride:  Complexity(pr.TierOverride),
 		// Honour what the row says started it. Before pending_runs carried
 		// attribution this was hard-coded to schedule/self, so every
 		// automation-fired run reported a cron.
@@ -223,11 +224,9 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		InvokingUserID: pr.InvokingUserID,
 		Tags:           tags,
 		MetadataJSON:   pr.MetadataJSON,
-		// Each pending row is a one-shot fired once (MarkFired claims it above);
-		// key on the row ID as a second guard so a re-dispatch of the same row
-		// (debounce coalescing, restart) dedupes at the executor rather than
-		// producing a second run.
-		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, "once"),
+		// A one-time authoring row can be rearmed for a different date. The
+		// occurrence identifies the start; redispatch of that occurrence dedupes.
+		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),
 	})
 	if runErr != nil {
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)

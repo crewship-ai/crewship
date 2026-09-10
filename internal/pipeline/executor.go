@@ -2197,20 +2197,9 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		}
 	}
 
-	// Render nested input values against the parent's render context
-	// before handing them to the nested run. String values pass
-	// through Render (templates resolved); non-string values land
-	// verbatim. Maps/slices are not deep-rendered — DSL authors who
-	// need that should use a transform step (Phase 2). Today most
-	// nested-input use cases are scalar pass-through or single-level
-	// templated strings.
-	nestedInputs := make(map[string]any, len(step.NestedInputs))
-	for k, v := range step.NestedInputs {
-		if s, ok := v.(string); ok {
-			nestedInputs[k] = Render(s, parentRender)
-		} else {
-			nestedInputs[k] = v
-		}
+	nestedInputs, err := renderNestedInputs(step.NestedInputs, dsl.Inputs, parentRender)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
 	}
 
 	nestedIn := buildNestedRunInput(parent, target, dsl, nestedInputs, parentRunID,
