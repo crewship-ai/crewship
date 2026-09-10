@@ -5,23 +5,29 @@ import type { RoutineDetail } from "./routines-detail-panel"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { motion, useReducedMotion } from "motion/react"
 import { RoutineRecipeSteps } from "./routine-recipe-steps"
+import { RoutinePublicationReview } from "./routine-publication-review"
+import { RoutineTestWorkspace } from "./routine-test-workspace"
 import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import {
-  Save,
-  ArrowLeft,
-  Sparkles,
-  GitFork,
-  Braces,
-  Search,
-} from "lucide-react"
+import { Save, ArrowLeft, Sparkles, GitFork, Braces, Search } from "lucide-react"
 import { FormField } from "@/components/features/chat/asks/form-field"
-import { slashFieldsFromRoutineInputs, routineInputsFromValues, isMissingRequired, type RoutineInputSpec } from "@/lib/routine-inputs"
+import {
+  slashFieldsFromRoutineInputs,
+  routineInputsFromValues,
+  isMissingRequired,
+  type RoutineInputSpec,
+} from "@/lib/routine-inputs"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -43,6 +49,7 @@ import {
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
+import { loadRoutineDraft, saveRoutineDraft, type RoutineDraft } from "@/lib/routine-drafts"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 // The shared picker, not a second copy of it. The local one was a verbatim
@@ -65,6 +72,7 @@ type EditorPane = "code" | "graph"
 // token; it does not execute work. Code stays mounted while sections change.
 
 interface Props {
+  savedDraftLink?: { slug: string; id?: string; workspaceId?: string }
   routine?: RoutineDetail
   initialDraft?: Record<string, unknown>
   advancedDetails?: ReactNode
@@ -199,7 +207,16 @@ interface RoutineListItem {
   last_invocation_status?: string
 }
 
-export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, routine, initialDraft, advancedDetails }: Props) {
+export function RoutineCreateDialog({
+  workspaceId,
+  open,
+  onClose,
+  onCreated,
+  routine,
+  initialDraft,
+  advancedDetails,
+  savedDraftLink,
+}: Props) {
   const router = useRouter()
   const reduceMotion = useReducedMotion()
   const [mode, setMode] = useState<Mode>("entry")
@@ -208,6 +225,16 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   const [icon, setIcon] = useState(routine ? resolveRoutineIcon(routine) : "workflow")
   const [color, setColor] = useState(routine ? resolveRoutineColor(routine) : "violet")
   const savedRecipe = useRef<string | null>(null)
+  const publicationBusy = useRef(false)
+  const draftRef = useRef<RoutineDraft | null>(null)
+  const draftSelectionController = useRef<AbortController | null>(null)
+  useEffect(() => () => draftSelectionController.current?.abort(), [open, workspaceId])
+  const [draftRevision, setDraftRevision] = useState(0)
+  const [draftLoading, setDraftLoading] = useState(false)
+  const [draftLoadFailed, setDraftLoadFailed] = useState(false)
+  const [approveRisk, setApproveRisk] = useState(false)
+  const [savedDrafts, setSavedDrafts] = useState<{ slug: string; revision: number }[]>([])
+
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [authorCrewId, setAuthorCrewId] = useState("")
@@ -245,13 +272,20 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   const [editorKey, setEditorKey] = useState(0)
   const [parseError, setParseError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"none" | "testing" | "saving">("none")
-  const [trigger, setTrigger] = useState<RoutineTriggerDraft>({ kind: "manual", cron: "0 9 * * 1-5", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", at: "" })
+  const [trigger, setTrigger] = useState<RoutineTriggerDraft>({
+    kind: "manual",
+    cron: "0 9 * * 1-5",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    at: "",
+  })
   const [sourcesAndOutput, setSourcesAndOutput] = useState("")
-  const [scheduledValues, setScheduledValues] = useState<Record<string,string>>({})
+  const [scheduledValues, setScheduledValues] = useState<Record<string, string>>({})
   const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
   const [section, setSection] = useState("Overview")
   const lastRecipeSection = useRef("Overview")
-  useEffect(() => { if (section !== "Code") lastRecipeSection.current = section }, [section])
+  useEffect(() => {
+    if (section !== "Code") lastRecipeSection.current = section
+  }, [section])
   const [forkSource, setForkSource] = useState<string | null>(null)
   // saveToken captured from the most recent successful /test_run.
   // Used by the subsequent /save call so the server can verify via
@@ -263,6 +297,11 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   // only one that used to fade on its own. The toast stays; this is the band
   // between the body and the footer that does not scroll away.
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [scheduleConflict, setScheduleConflict] = useState<{
+    schedule_id: string
+    name: string
+    reason: string
+  } | null>(null)
 
   // The buffer as it was handed to the editor. Anything else means there is
   // input to lose, which is what the shell's discard guard asks about.
@@ -283,25 +322,150 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     savedRecipe.current = null
     if (routine) {
       const text = toYaml(initialDraft ?? routine.definition)
-      setMode("advanced"); setSection("Overview"); setDslFormat("yaml")
-      setName(routine.name); setDescription(routine.description ?? ""); setAuthorCrewId(routine.author_crew_id ?? "")
-      setIcon(resolveRoutineIcon(routine)); setColor(resolveRoutineColor(routine))
-      setDslText(text); setLiveText(text); bufferRef.current = text; pristineText.current = toYaml(routine.definition)
-      setEditorKey(k => k + 1); setTestResult(null); setSaveToken(null); setSaveError(null)
+      setMode("advanced")
+      setSection("Overview")
+      setDslFormat("yaml")
+      setName(routine.name)
+      setDescription(routine.description ?? "")
+      setAuthorCrewId(routine.author_crew_id ?? "")
+      setIcon(resolveRoutineIcon(routine))
+      setColor(resolveRoutineColor(routine))
+      setDslText(text)
+      setLiveText(text)
+      bufferRef.current = text
+      pristineText.current = toYaml(routine.definition)
+      setEditorKey((k) => k + 1)
+      setTestResult(null)
+      setSaveToken(null)
+      setSaveError(null)
     } else {
       setMode("entry")
       if (previouslySaved) {
         const text = toYaml(STARTER_TEMPLATES[0].json)
-        setName(""); setDescription(""); setAuthorCrewId(""); setIcon("workflow"); setColor("violet")
-        setDslFormat("yaml"); setDslText(text); setLiveText(text); bufferRef.current = text; pristineText.current = text
-        setEditorKey(k => k + 1); setSection("Overview"); setForkSource(null)
-        setTrigger(t => ({ ...t, kind: "manual", at: "" })); setScheduledValues({})
-        setGoal(""); setSourcesAndOutput(""); setTestResult(null); setSaveToken(null); setSaveError(null)
+        setName("")
+        setDescription("")
+        setAuthorCrewId("")
+        setIcon("workflow")
+        setColor("violet")
+        setDslFormat("yaml")
+        setDslText(text)
+        setLiveText(text)
+        bufferRef.current = text
+        pristineText.current = text
+        setEditorKey((k) => k + 1)
+        setSection("Overview")
+        setForkSource(null)
+        setTrigger((t) => ({ ...t, kind: "manual", at: "" }))
+        setScheduledValues({})
+        setGoal("")
+        setSourcesAndOutput("")
+        setTestResult(null)
+        setSaveToken(null)
+        setSaveError(null)
       }
     }
-  // Seed once when opening; background refresh must not replace an unsaved draft.
+    // Seed once when opening; background refresh must not replace an unsaved draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  const applyStoredDraft = (draft: RoutineDraft) => {
+    draftRef.current = draft
+    setDraftRevision(draft.revision)
+    const doc = draft.document
+    if (!doc.definition || typeof doc.definition !== "object") return
+    const text = toYaml(doc.definition)
+    setDslFormat("yaml")
+    setDslText(text)
+    setLiveText(text)
+    bufferRef.current = text
+    pristineText.current = text
+    setEditorKey((k) => k + 1)
+    setName(String(doc.name || draft.slug))
+    setDescription(String(doc.description || ""))
+    setAuthorCrewId(String(doc.author_crew_id || ""))
+    if (typeof doc.icon === "string") setIcon(doc.icon)
+    if (typeof doc.color === "string") setColor(doc.color)
+    const start = doc.trigger as Record<string, unknown> | undefined
+    if (start) {
+      setTrigger((current) => ({
+        ...current,
+        kind: start.kind as typeof current.kind,
+        cron: String(start.cron || current.cron),
+        timezone: String(start.timezone || current.timezone),
+        at: String(start.fire_at || ""),
+      }))
+      if (start.inputs && typeof start.inputs === "object")
+        setScheduledValues(
+          Object.fromEntries(
+            Object.entries(start.inputs).map(([key, value]) => [
+              key,
+              typeof value === "string" ? value : JSON.stringify(value),
+            ]),
+          ),
+        )
+    }
+    setMode("advanced")
+    setSection("Overview")
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const controller = new AbortController()
+    draftRef.current = null
+    setDraftRevision(0)
+    setApproveRisk(false)
+    setDraftLoading(false)
+    setSavedDrafts([])
+    setDraftLoadFailed(false)
+    if (routine || savedDraftLink) {
+      setDraftLoading(true)
+      if (savedDraftLink) setMode("advanced")
+      const load = async () => {
+        if (savedDraftLink?.workspaceId && savedDraftLink.workspaceId !== workspaceId)
+          throw new Error(
+            "This draft belongs to another workspace. Switch to its workspace to open this link.",
+          )
+        const draft = await loadRoutineDraft(
+          workspaceId,
+          savedDraftLink?.slug || routine!.slug,
+          controller.signal,
+        )
+        if (savedDraftLink && (!draft.id || (savedDraftLink.id && draft.id !== savedDraftLink.id)))
+          throw new Error(
+            "This draft link is no longer current. Close it and open the saved draft from New routine.",
+          )
+        return draft
+      }
+      void load()
+        .then((draft) => {
+          if (controller.signal.aborted) return
+          draftRef.current = draft
+          setDraftRevision(draft.revision)
+          if (!initialDraft) applyStoredDraft(draft)
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) {
+            setDraftLoadFailed(true)
+            setSaveError(String(error instanceof Error ? error.message : error))
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDraftLoading(false)
+        })
+    } else {
+      void apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/drafts`, {
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          const data = res.ok ? await res.json() : []
+          if (!controller.signal.aborted) setSavedDrafts(Array.isArray(data) ? data : [])
+        })
+        .catch(() => {})
+    }
+    return () => controller.abort()
+    // Opening creates one editor baseline; refreshes must not replace local work.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, workspaceId, savedDraftLink?.slug, savedDraftLink?.id, savedDraftLink?.workspaceId])
 
   // Lazy-load crews + agents on first open. Side effects live in useEffect
   // (not the render body) so React's render pipeline isn't disturbed.
@@ -380,9 +544,22 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
 
   useEffect(() => {
     if (!open) return
-    const changed = liveText !== pristineText.current || name !== (routine?.name ?? "") || description !== (routine?.description ?? "") || authorCrewId !== (routine?.author_crew_id ?? "") || icon !== (routine ? resolveRoutineIcon(routine) : "workflow") || color !== (routine ? resolveRoutineColor(routine) : "violet") || goal.trim() !== "" || trigger.kind !== "manual" || sourcesAndOutput.trim() !== "" || Object.keys(scheduledValues).length > 0
+    const changed =
+      liveText !== pristineText.current ||
+      name !== (routine?.name ?? "") ||
+      description !== (routine?.description ?? "") ||
+      authorCrewId !== (routine?.author_crew_id ?? "") ||
+      icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
+      color !== (routine ? resolveRoutineColor(routine) : "violet") ||
+      goal.trim() !== "" ||
+      trigger.kind !== "manual" ||
+      sourcesAndOutput.trim() !== "" ||
+      Object.keys(scheduledValues).length > 0
     if (!changed) return
-    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = "" }
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
     const onNavigate = (event: MouseEvent) => {
       const link = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null
       // Only guard a click that actually leaves this view. An in-page anchor
@@ -391,22 +568,58 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
       // phase, before React sees it — breaks every anchor-shaped control on
       // the page for as long as the editor stays dirty.
       const href = link?.getAttribute("href") ?? ""
-      const navigates = !!link && !link.hasAttribute("download") && link.target !== "_blank" && href !== "" && !href.startsWith("#")
-      if (navigates && !event.ctrlKey && !event.metaKey && !window.confirm("Discard unsaved recipe changes?")) { event.preventDefault(); event.stopPropagation() }
+      const navigates =
+        !!link &&
+        !link.hasAttribute("download") &&
+        link.target !== "_blank" &&
+        href !== "" &&
+        !href.startsWith("#")
+      if (
+        navigates &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !window.confirm("Discard unsaved recipe changes?")
+      ) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
     }
-    window.addEventListener("beforeunload", beforeUnload); document.addEventListener("click", onNavigate, true)
-    return () => { window.removeEventListener("beforeunload", beforeUnload); document.removeEventListener("click", onNavigate, true) }
-  }, [open, liveText, name, description, authorCrewId, icon, color, routine, goal, trigger.kind, sourcesAndOutput, scheduledValues])
+    window.addEventListener("beforeunload", beforeUnload)
+    document.addEventListener("click", onNavigate, true)
+    return () => {
+      window.removeEventListener("beforeunload", beforeUnload)
+      document.removeEventListener("click", onNavigate, true)
+    }
+  }, [
+    open,
+    liveText,
+    name,
+    description,
+    authorCrewId,
+    icon,
+    color,
+    routine,
+    goal,
+    trigger.kind,
+    sourcesAndOutput,
+    scheduledValues,
+  ])
 
   if (!open) return null
 
-  const scheduledFields = slashFieldsFromRoutineInputs(Array.isArray(parsedDSL?.inputs) ? parsedDSL.inputs as RoutineInputSpec[] : [])
+  const scheduledFields = slashFieldsFromRoutineInputs(
+    Array.isArray(parsedDSL?.inputs) ? (parsedDSL.inputs as RoutineInputSpec[]) : [],
+  )
   const slug = (parsedDSL?.["name"] as string) || "my-routine"
 
   const applyTemplate = (templateId: string) => {
     const tpl = STARTER_TEMPLATES.find((t) => t.id === templateId)
     if (!tpl) return
-    const j = { ...tpl.json, name: name || tpl.json.name, description: description || tpl.json.description }
+    const j = {
+      ...tpl.json,
+      name: name || tpl.json.name,
+      description: description || tpl.json.description,
+    }
     replaceBuffer(dslFormat === "yaml" ? toYaml(j) : JSON.stringify(j, null, 2))
     setParseError(null)
     setTestResult(null)
@@ -457,7 +670,8 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     // DSL at all, so `?? ""` made the first keystroke in the Code pane blank
     // it — and the save path's `description || parsed.description || ""`
     // then wrote that empty string back over the saved routine.
-    if (parsed.ok && parsed.parsed.description !== undefined) setDescription(String(parsed.parsed.description))
+    if (parsed.ok && parsed.parsed.description !== undefined)
+      setDescription(String(parsed.parsed.description))
     setParseError(null)
     setTestResult(null)
     setSaveToken(null)
@@ -526,7 +740,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
         (data.status === undefined && data.passed !== false)
       setTestResult({
         passed,
-        details: passed ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}` : data.error ?? "test_run reported failure",
+        details: passed
+          ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}`
+          : (data.error ?? "test_run reported failure"),
       })
       const token = passed && data.save_token ? data.save_token : null
       if (token) {
@@ -535,7 +751,9 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
       if (passed) {
         toast.success("Definition validated — no work was executed")
       } else {
-        toast.error("Definition validation failed", { description: data.error ?? "see details below" })
+        toast.error("Definition validation failed", {
+          description: data.error ?? "see details below",
+        })
       }
       return { passed, token }
     } catch (e) {
@@ -548,14 +766,53 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     }
   }
 
-  const handleSave = async (tokenOverride?: string | null) => {
+  const discardSavedDraft = async () => {
+    const draft = draftRef.current
+    if (
+      !draft?.id ||
+      !window.confirm(
+        "Discard the saved draft? Your local edits stay in this editor. Review them against the current published recipe before saving again.",
+      )
+    )
+      return
+    setBusy("saving")
+    try {
+      const res = await apiFetch(
+        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(draft.slug)}/draft`,
+        {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: draft.id, revision: draft.revision }),
+        },
+      )
+      if (!res.ok) throw new Error((await res.json()).error || "Could not discard the draft")
+      draftRef.current = await loadRoutineDraft(workspaceId, draft.slug)
+      setDraftRevision(0)
+      setApproveRisk(false)
+      setSaveToken(null)
+      setSaveError(null)
+      toast.success("Saved draft discarded. Local edits are ready for review.")
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy("none")
+    }
+  }
+
+  const handleSave = async (tokenOverride?: string | null, draftOnly = false) => {
+    if (draftLoading || draftLoadFailed || (draftOnly && publicationBusy.current)) return
     const parsed = parseDSLWithError()
     if (!parsed) {
       toast.error("Fix the definition before continuing")
       return
     }
-    if (routine && parsed.name !== routine.slug) {
-      setSaveError("The routine identifier cannot change while editing. Fork the routine to create a separate recipe.")
+    if (
+      (routine || draftRef.current?.base_pipeline_id) &&
+      parsed.name !== (routine?.slug || draftRef.current?.slug)
+    ) {
+      setSaveError(
+        "The routine identifier cannot change while editing. Fork the routine to create a separate recipe.",
+      )
       return
     }
     if (!parsed["name"]) {
@@ -564,6 +821,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
     }
     setBusy("saving")
     setSaveError(null)
+    setScheduleConflict(null)
     try {
       const body: Record<string, unknown> = {
         slug: parsed["name"],
@@ -573,20 +831,40 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
         skip_test_gate: false,
       }
       if (!routine) {
-      const values = Object.fromEntries(scheduledFields.map(f => [f.name, scheduledValues[f.name] ?? f.default ?? ""]))
-      if (trigger.kind === "schedule" || trigger.kind === "once") {
-        const missing = scheduledFields.find(f => isMissingRequired(f, values[f.name]))
-        if (missing) throw new Error(`Fill in ${missing.name} before activating this start.`)
+        const values = Object.fromEntries(
+          scheduledFields.map((f) => [f.name, scheduledValues[f.name] ?? f.default ?? ""]),
+        )
+        if (!draftOnly && (trigger.kind === "schedule" || trigger.kind === "once")) {
+          const missing = scheduledFields.find((f) => isMissingRequired(f, values[f.name]))
+          if (missing) throw new Error(`Fill in ${missing.name} before activating this start.`)
+        }
+        const scheduledInputs = routineInputsFromValues(scheduledFields, values)
+        const previousTrigger = draftRef.current?.document.trigger as
+          | Record<string, unknown>
+          | undefined
+        if (trigger.kind === "schedule")
+          body.trigger = {
+            ...previousTrigger,
+            kind: "schedule",
+            cron: trigger.cron,
+            timezone: trigger.timezone,
+            inputs: scheduledInputs,
+          }
+        if (trigger.kind === "manual") body.trigger = { kind: "manual" }
+        if (trigger.kind === "once") {
+          if (!draftOnly && (!trigger.at || !(Date.parse(trigger.at) > Date.now())))
+            throw new Error("Choose a future date and time")
+          body.trigger = {
+            ...previousTrigger,
+            kind: "once",
+            fire_at: draftOnly ? trigger.at : new Date(trigger.at).toISOString(),
+            inputs: scheduledInputs,
+          }
+        }
       }
-      const scheduledInputs = routineInputsFromValues(scheduledFields, values)
-      if (trigger.kind === "schedule") body.trigger = { kind: "schedule", cron: trigger.cron, timezone: trigger.timezone, inputs: scheduledInputs }
-      if (trigger.kind === "manual") body.trigger = { kind: "manual" }
-      if (trigger.kind === "once") {
-        if (!trigger.at || !(Date.parse(trigger.at) > Date.now())) throw new Error("Choose a future date and time")
-        body.trigger = { kind: "once", fire_at: new Date(trigger.at).toISOString(), inputs: scheduledInputs }
-      }
-      }
-      if (routine) body.author_agent_id = routine.author_crew_id === authorCrewId ? routine.author_agent_id : ""
+      if (routine)
+        body.author_agent_id =
+          routine.author_crew_id === authorCrewId ? routine.author_agent_id : ""
       // The server clears the save test-gate ONLY via the HMAC save_token
       // (minted by /test_run) or the OWNER/ADMIN skip — it no longer trusts a
       // body "it passed" claim. Prefer an explicitly-threaded token (the
@@ -599,21 +877,70 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
       if (authorCrewId) body.author_crew_id = authorCrewId
 
       if (!savedRecipe.current) {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const t = await res.text().catch(() => "")
-        throw new Error(`${res.status}: ${t || res.statusText}`)
+        let draft = draftRef.current
+        if (!draft || (!draft.id && draft.slug !== String(body.slug))) {
+          const baseline = await loadRoutineDraft(workspaceId, String(body.slug))
+          if (baseline.id)
+            throw new Error(
+              "A saved draft already exists. Open it from New routine before replacing its content.",
+            )
+          if (!routine && baseline.base_pipeline_id)
+            throw new Error("This routine already exists. Choose a new identifier or open Edit.")
+          draft = baseline
+        }
+        body.icon = icon
+        body.color = color
+        if (!routine)
+          body.author_agent_id =
+            draft.document.author_crew_id === authorCrewId
+              ? draft.document.author_agent_id || ""
+              : ""
+        const stored = await saveRoutineDraft(
+          workspaceId,
+          { ...draft, slug: String(body.slug) },
+          body,
+        )
+        draftRef.current = stored
+        setDraftRevision(stored.revision)
+        if (draftOnly) {
+          pristineText.current = bufferRef.current
+          toast.success(`Draft saved · revision ${stored.revision}`)
+          return
+        }
+        const res = await apiFetch(
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(stored.slug)}/publish`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: stored.id,
+              revision: stored.revision,
+              save_token: effectiveToken,
+              approve_risk: approveRisk,
+            }),
+          },
+        )
+        const saved = await res.json().catch(() => ({}))
+        if (!res.ok && saved.schedule_conflict?.schedule_id)
+          setScheduleConflict(saved.schedule_conflict)
+        if (!res.ok) throw new Error(saved.error || "Publication failed. The draft is still saved.")
+        if (!saved.slug)
+          throw new Error("Publication could not be confirmed. Reload the recipe before retrying.")
+        savedRecipe.current = saved.slug
       }
-      const saved = (await res.json()) as { slug: string }
-      savedRecipe.current = saved.slug
-      }
-      const appearance = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(savedRecipe.current!)}/appearance`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ icon, color }) })
-      if (!appearance.ok) throw new Error("The recipe was saved, but its icon could not be saved. Retry to finish saving its appearance.")
-      toast.success(`Routine "${savedRecipe.current}" saved`)
+      const appearance = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/pipelines/${encodeURIComponent(savedRecipe.current!)}/appearance`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ icon, color }),
+        },
+      )
+      if (!appearance.ok)
+        throw new Error(
+          "The recipe was saved, but its icon could not be saved. Retry to finish saving its appearance.",
+        )
+      toast.success(`Routine "${savedRecipe.current}" published`)
       onCreated(savedRecipe.current!)
       onClose()
     } catch (e) {
@@ -626,9 +953,13 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   }
 
   const handleTestAndSave = async () => {
-    const { passed, token } = await handleTestRun()
-    if (passed) {
-      await handleSave(token)
+    if (publicationBusy.current || draftLoading || draftLoadFailed) return
+    publicationBusy.current = true
+    try {
+      const { passed, token } = await handleTestRun()
+      if (passed) await handleSave(token)
+    } finally {
+      publicationBusy.current = false
     }
   }
 
@@ -638,7 +969,7 @@ export function RoutineCreateDialog({ workspaceId, open, onClose, onCreated, rou
   const handleDescribe = () => {
     const text = goal.trim()
     if (!describeLead || !text) return
-    const prompt = `Author a routine for me: ${text}
+    const prompt = `Author a routine draft for me using get_routine_draft and save_routine_draft. Return the editor_url so I can review and publish it; do not publish with save_routine. Goal: ${text}
 Sources and expected outputs: ${sourcesAndOutput || "Clarify these with me."}
 Requested start: ${JSON.stringify(trigger.kind === "once" && trigger.at ? { ...trigger, fire_at: new Date(trigger.at).toISOString() } : trigger)}
 Use scripts for deterministic work and agents where judgment is needed. Show a readable recipe and expected outputs before saving. Distinguish static validation from a real trial. Use outcomes.required for checks that must block unverified results.`
@@ -654,7 +985,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     try {
       const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${item.slug}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const detail = (await res.json()) as { definition?: Record<string, unknown>; name?: string; description?: string; author_crew_id?: string; icon?: string; color?: string }
+      const detail = (await res.json()) as {
+        definition?: Record<string, unknown>
+        name?: string
+        description?: string
+        author_crew_id?: string
+        icon?: string
+        color?: string
+      }
       const def = detail.definition ?? {}
       // Rename the fork so it doesn't collide with the source slug on save.
       const forkName = `${item.slug}-copy`
@@ -667,7 +1005,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
         baseline: false,
       })
       setAuthorCrewId(detail.author_crew_id ?? "")
-      setIcon(resolveRoutineIcon({ ...detail, slug: item.slug })); setColor(resolveRoutineColor({ ...detail, slug: item.slug }))
+      setIcon(resolveRoutineIcon({ ...detail, slug: item.slug }))
+      setColor(resolveRoutineColor({ ...detail, slug: item.slug }))
       setForkSource(item.name || item.slug)
       setSection("Overview")
       setName("")
@@ -677,7 +1016,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       setSaveToken(null)
       setMode("advanced")
     } catch (e) {
-      toast.error("Could not load routine", { description: e instanceof Error ? e.message : String(e) })
+      toast.error("Could not load routine", {
+        description: e instanceof Error ? e.message : String(e),
+      })
     } finally {
       setForking(false)
     }
@@ -696,7 +1037,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "Start from an existing routine"
         : mode === "advanced"
-          ? (routine ? "Edit your routine" : "Build your routine")
+          ? routine
+            ? "Edit your routine"
+            : "Build your routine"
           : "New routine"
   const headerSub =
     mode === "describe"
@@ -704,12 +1047,12 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "fork one of your own routines"
         : mode === "advanced"
-          ? "Set up the recipe. Save when ready."
-          // The entry screen had no subtitle, so three tiles appeared with
-          // nothing saying they are three routes to the same place. People
-          // read a picker as "which kind am I making", and the answer is that
-          // it does not matter — pick the one whose inputs you already have.
-          : "Three ways in. All three land on the same routine — pick the one you have inputs for."
+          ? "Set up the recipe, save a draft, then publish when ready."
+          : // The entry screen had no subtitle, so three tiles appeared with
+            // nothing saying they are three routes to the same place. People
+            // read a picker as "which kind am I making", and the answer is that
+            // it does not matter — pick the one whose inputs you already have.
+            "Three ways in. All three land on the same routine — pick the one you have inputs for."
 
   // The shell's discard guard — Esc and an overlay click ask before throwing
   // input away, and the header's × and the footer's Cancel ask too. The
@@ -739,10 +1082,17 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     color !== (routine ? resolveRoutineColor(routine) : "violet") ||
     liveText !== pristineText.current
 
-  const recipeSections = ["Overview", "Steps", "Schedule", "Validate"]
-  const sectionIndex = recipeSections.indexOf(section === "Code" ? lastRecipeSection.current : section)
-  const saveSection = section === "Validate" || savedRecipe.current !== null
-  const continueRecipe = () => setSection(section === "Code" ? lastRecipeSection.current : recipeSections[Math.min(sectionIndex + 1, recipeSections.length - 1)])
+  const recipeSections = ["Overview", "Steps", "Schedule", "Validate", "Publish"]
+  const sectionIndex = recipeSections.indexOf(
+    section === "Code" ? lastRecipeSection.current : section,
+  )
+  const saveSection = section === "Publish" || savedRecipe.current !== null
+  const continueRecipe = () =>
+    setSection(
+      section === "Code"
+        ? lastRecipeSection.current
+        : recipeSections[Math.min(sectionIndex + 1, recipeSections.length - 1)],
+    )
 
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
   // does, and nothing on the two modes whose actions are their list rows.
@@ -756,7 +1106,8 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     }
   }
 
-  const advancedPrimaryLabel = busy === "testing" ? "Validating…" : busy === "saving" ? "Saving…" : "Validate & Save"
+  const advancedPrimaryLabel =
+    busy === "testing" ? "Validating…" : busy === "saving" ? "Saving…" : "Validate & Publish"
 
   return (
     <CreateSurface
@@ -768,7 +1119,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       dirty={dirty}
       discardLabel="this routine"
       onSubmit={handleKeyboardSubmit}
-      className={mode === "advanced" ? "sm:h-[min(85vh,760px)] sm:max-h-[90vh] sm:max-w-[800px]" : undefined}
+      className={
+        mode === "advanced" ? "sm:h-[min(85vh,760px)] sm:max-h-[90vh] sm:max-w-[800px]" : undefined
+      }
     >
       <CreateSurfaceHeader
         concept="routines"
@@ -780,41 +1133,71 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       />
 
       {/* ── ENTRY — three cards ───────────────────────────────────────── */}
+      {mode === "entry" && savedDrafts.length > 0 && (
+        <div className="border-b border-hairline p-4">
+          <p className="mb-2 text-xs text-muted-foreground">Continue a saved draft</p>
+          {savedDrafts.map((d) => (
+            <button
+              key={d.slug}
+              type="button"
+              className="mr-2 rounded-md border px-3 py-2 text-sm"
+              onClick={() => {
+                draftSelectionController.current?.abort()
+                const controller = new AbortController()
+                draftSelectionController.current = controller
+                setDraftLoading(true)
+                void loadRoutineDraft(workspaceId, d.slug, controller.signal)
+                  .then((draft) => {
+                    if (!controller.signal.aborted) applyStoredDraft(draft)
+                  })
+                  .catch((e) => {
+                    if (!controller.signal.aborted) setSaveError(String(e.message))
+                  })
+                  .finally(() => {
+                    if (!controller.signal.aborted) setDraftLoading(false)
+                  })
+              }}
+            >
+              {d.slug} · r{d.revision}
+            </button>
+          ))}
+        </div>
+      )}
       {mode === "entry" && (
         <>
-        <CreateSurfaceBody className="flex flex-col gap-2.5">
-          {/* Three routes, three colours.
-           *  Two of these were accent="slate", which made the picker read as
-           *  one recommended option and two afterthoughts. The meta says in a
-           *  word what each route trades — the sparkle glyph that used to
-           *  mark the first one said "special" without saying why. */}
-          <CreateSurfaceTile
-            icon={Sparkles}
-            accent="gold"
-            title="Describe it"
-            description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
-            meta="fastest"
-            className="border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
-            onClick={() => setMode("describe")}
-          />
-          <CreateSurfaceTile
-            icon={GitFork}
-            accent="purple"
-            title="Fork an existing routine"
-            description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
-            onClick={() => setMode("fork")}
-          />
-          <CreateSurfaceTile
-            icon={Braces}
-            accent="teal"
-            title="Write it yourself"
-            description="Build a recipe with a clear overview of inputs, steps and outputs. Edit YAML or JSON, preview the graph, then validate and save."
-            meta="full control"
-            onClick={() => setMode("advanced")}
-          />
-        </CreateSurfaceBody>
+          <CreateSurfaceBody className="flex flex-col gap-2.5">
+            {/* Three routes, three colours.
+             *  Two of these were accent="slate", which made the picker read as
+             *  one recommended option and two afterthoughts. The meta says in a
+             *  word what each route trades — the sparkle glyph that used to
+             *  mark the first one said "special" without saying why. */}
+            <CreateSurfaceTile
+              icon={Sparkles}
+              accent="gold"
+              title="Describe it"
+              description="Tell a Lead agent your goal in plain words. It drafts the routine with you in chat, asks a couple of questions, and shows a readable preview before anything is saved."
+              meta="fastest"
+              className="border-primary/40 bg-primary/[0.06] hover:border-primary/60 hover:bg-primary/10"
+              onClick={() => setMode("describe")}
+            />
+            <CreateSurfaceTile
+              icon={GitFork}
+              accent="purple"
+              title="Fork an existing routine"
+              description="Start from one of your workspace's own routines and tweak it. No curated catalog — the library grows from what you and your agents actually build."
+              onClick={() => setMode("fork")}
+            />
+            <CreateSurfaceTile
+              icon={Braces}
+              accent="teal"
+              title="Write it yourself"
+              description="Build a recipe with a clear overview of inputs, steps and outputs. Edit YAML or JSON, preview the graph, then validate and save."
+              meta="full control"
+              onClick={() => setMode("advanced")}
+            />
+          </CreateSurfaceBody>
 
-        {/* No primary: the three tiles ARE the action, which is the case the
+          {/* No primary: the three tiles ARE the action, which is the case the
             shell made `primaryLabel`/`onPrimary` optional for. What is not
             optional is the Cancel — this screen used to render a body and
             nothing else, so the one surface-wide rule the shell states
@@ -836,14 +1219,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             to confirm — `handleKeyboardSubmit` returns without doing anything
             in this mode — and a footer that prints a keystroke which does
             nothing is worse than one that prints nothing. */}
-        <CreateSurfaceFooter
-          hint={
-            <>
-              <kbd className="font-mono">Esc</kbd> to cancel
-            </>
-          }
-          onCancel={onClose}
-        />
+          <CreateSurfaceFooter
+            hint={
+              <>
+                <kbd className="font-mono">Esc</kbd> to cancel
+              </>
+            }
+            onCancel={onClose}
+          />
         </>
       )}
 
@@ -902,19 +1285,38 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               </CreateSurfaceField>
             </CreateSurfaceSection>
 
-            <CreateSurfaceField label="Sources and expected outputs (optional)" htmlFor="routine-sources-output"><textarea id="routine-sources-output" value={sourcesAndOutput} onChange={e => setSourcesAndOutput(e.target.value)} className="min-h-20 w-full rounded-md border bg-background p-2 text-sm" placeholder="What should it work with, and what should you receive?" /></CreateSurfaceField>
+            <CreateSurfaceField
+              label="Sources and expected outputs (optional)"
+              htmlFor="routine-sources-output"
+            >
+              <textarea
+                id="routine-sources-output"
+                value={sourcesAndOutput}
+                onChange={(e) => setSourcesAndOutput(e.target.value)}
+                className="min-h-20 w-full rounded-md border bg-background p-2 text-sm"
+                placeholder="What should it work with, and what should you receive?"
+              />
+            </CreateSurfaceField>
             <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then show a
-              readable preview — nothing is saved without you. It grounds the draft in your crew's connected
-              integrations, your existing routines, and the routine schema.
+              {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then
+              show a readable preview — nothing is saved without you. It grounds the draft in your
+              crew's connected integrations, your existing routines, and the routine schema.
             </p>
 
             <div className="flex gap-3 text-[11px] text-muted-foreground">
-              <button type="button" className="hover:text-foreground" onClick={() => setMode("fork")}>
+              <button
+                type="button"
+                className="hover:text-foreground"
+                onClick={() => setMode("fork")}
+              >
                 fork a routine
               </button>
-              <button type="button" className="hover:text-foreground" onClick={() => setMode("advanced")}>
+              <button
+                type="button"
+                className="hover:text-foreground"
+                onClick={() => setMode("advanced")}
+              >
                 Build your routine
               </button>
             </div>
@@ -924,7 +1326,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             onCancel={onClose}
             primaryLabel={`Draft with ${describeLead?.name ?? "a Lead"}`}
             primaryIcon={Sparkles}
-            primaryDisabled={!describeLead || !goal.trim() || (trigger.kind === "once" && !(Date.parse(trigger.at) > Date.now()))}
+            primaryDisabled={
+              !describeLead ||
+              !goal.trim() ||
+              (trigger.kind === "once" && !(Date.parse(trigger.at) > Date.now()))
+            }
             onPrimary={handleDescribe}
           />
         </>
@@ -933,72 +1339,76 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       {/* ── FORK ──────────────────────────────────────────────────────── */}
       {mode === "fork" && (
         <>
-        <CreateSurfaceBody className="flex flex-col gap-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={forkSearch}
-              onChange={(e) => setForkSearch(e.target.value)}
-              placeholder="Search your routines…"
-              className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
-            />
-          </div>
-          {routinesLoading ? (
-            <CreateSurfaceLoading rows={3} />
-          ) : filteredRoutines.length === 0 ? (
-            <div className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-xs text-muted-foreground">
-              {routines.length === 0
-                ? "No routines yet. Describe one, or write the first yourself."
-                : "No routines match your search."}
+          <CreateSurfaceBody className="flex flex-col gap-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={forkSearch}
+                onChange={(e) => setForkSearch(e.target.value)}
+                placeholder="Search your routines…"
+                className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
+              />
             </div>
-          ) : (
-            <div className="flex flex-col gap-1.5">
-              {filteredRoutines.map((r) => (
-                <CreateSurfaceTile
-                  key={r.id}
-                  disabled={forking}
-                  onClick={() => handleForkPick(r)}
-                  // The routine's own icon and colour, with the last run's
-                  // verdict on it. Same identity the sidebar and the detail
-                  // header derive — you are choosing something to copy, and a
-                  // column of slugs is not a thing you can recognise.
-                  leading={
-                    <span className="relative shrink-0">
-                      <CrewIcon
-                        icon={resolveRoutineIcon(r)}
-                        color={resolveRoutineColor(r)}
-                        size="sm"
-                        className="!h-6 !w-6 !rounded-md"
-                      />
-                      <span
-                        aria-hidden
-                        title={r.last_invocation_status ?? "never invoked"}
-                        className={cn(
-                          "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                          forkStatusDot(r),
+            {routinesLoading ? (
+              <CreateSurfaceLoading rows={3} />
+            ) : filteredRoutines.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-xs text-muted-foreground">
+                {routines.length === 0
+                  ? "No routines yet. Describe one, or write the first yourself."
+                  : "No routines match your search."}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {filteredRoutines.map((r) => (
+                  <CreateSurfaceTile
+                    key={r.id}
+                    disabled={forking}
+                    onClick={() => handleForkPick(r)}
+                    // The routine's own icon and colour, with the last run's
+                    // verdict on it. Same identity the sidebar and the detail
+                    // header derive — you are choosing something to copy, and a
+                    // column of slugs is not a thing you can recognise.
+                    leading={
+                      <span className="relative shrink-0">
+                        <CrewIcon
+                          icon={resolveRoutineIcon(r)}
+                          color={resolveRoutineColor(r)}
+                          size="sm"
+                          className="!h-6 !w-6 !rounded-md"
+                        />
+                        <span
+                          aria-hidden
+                          title={r.last_invocation_status ?? "never invoked"}
+                          className={cn(
+                            "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                            forkStatusDot(r),
+                          )}
+                        />
+                      </span>
+                    }
+                    title={r.name || r.slug}
+                    description={
+                      <>
+                        <span className="block truncate font-mono text-[10px] text-muted-foreground-soft">
+                          {r.slug}
+                        </span>
+                        {r.description && (
+                          <span className="mt-0.5 block line-clamp-1">{r.description}</span>
                         )}
-                      />
-                    </span>
-                  }
-                  title={r.name || r.slug}
-                  description={
-                    <>
-                      <span className="block truncate font-mono text-[10px] text-muted-foreground-soft">{r.slug}</span>
-                      {r.description && <span className="mt-0.5 block line-clamp-1">{r.description}</span>}
-                    </>
-                  }
-                  meta={r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
-                />
-              ))}
-            </div>
-          )}
-          <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-            Forking copies a routine&apos;s definition into the editor so you can adapt it — the original is
-            untouched. Save creates a new routine.
-          </p>
-        </CreateSurfaceBody>
+                      </>
+                    }
+                    meta={r.invocation_count > 0 ? `ran ${r.invocation_count}×` : "never run"}
+                  />
+                ))}
+              </div>
+            )}
+            <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+              Forking copies a routine&apos;s definition into the editor so you can adapt it — the
+              original is untouched. Publish creates a new routine.
+            </p>
+          </CreateSurfaceBody>
 
-        {/* Same shape, same reasons: the rows are the action, so no primary
+          {/* Same shape, same reasons: the rows are the action, so no primary
             and no ⌘↵ to promise, and Cancel leaves the dialog rather than the
             screen. The header's arrow already goes BACK to the entry tiles —
             without this footer the only way OUT of the fork list was the ×,
@@ -1015,94 +1425,455 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             the tiles because picking a second routine mid-load races the
             first, but a person who changes their mind during a fetch is
             entitled to leave. */}
-        <CreateSurfaceFooter
-          hint={
-            <>
-              <kbd className="font-mono">Esc</kbd> to cancel
-            </>
-          }
-          onCancel={onClose}
-        />
+          <CreateSurfaceFooter
+            hint={
+              <>
+                <kbd className="font-mono">Esc</kbd> to cancel
+              </>
+            }
+            onCancel={onClose}
+          />
         </>
       )}
 
       {/* ── ADVANCED (the DSL editor) ─────────────────────────────────── */}
       {mode === "advanced" && (
         <>
-          <div inert={savedRecipe.current !== null} className="relative shrink-0 border-b border-hairline pr-20 [&>nav]:border-b-0">
+          <div
+            inert={savedRecipe.current !== null || draftLoading}
+            className="relative shrink-0 border-b border-hairline pr-20 [&>nav]:border-b-0"
+          >
             <CreateSurfaceSteps
               ariaLabel="Recipe sections"
-              steps={recipeSections.map(label => ({ id: label, label }))}
-              current={sectionIndex}
+              steps={["Recipe", "Test", "Publish"].map((label) => ({ id: label, label }))}
+              current={sectionIndex < 3 ? 0 : sectionIndex - 2}
               allowJumpAhead
-              onJump={i => setSection(recipeSections[i])}
+              onJump={(i) => setSection(i === 0 ? "Overview" : i === 1 ? "Validate" : "Publish")}
             />
-            <button type="button" aria-pressed={section === "Code"} onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")} className={cn("absolute right-4 top-2 inline-flex h-7 max-sm:top-1 max-sm:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted", section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground")}><Braces className="h-3 w-3" />Code</button>
+            <button
+              type="button"
+              aria-pressed={section === "Code"}
+              onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")}
+              className={cn(
+                "absolute right-4 top-2 inline-flex h-7 max-sm:top-1 max-sm:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted",
+                section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground",
+              )}
+            >
+              <Braces className="h-3 w-3" />
+              Code
+            </button>
           </div>
-          {/* Keep the code buffer and overview mounted while navigating. */}
-          <CreateSurfaceBody inert={savedRecipe.current !== null} className={cn("flex overflow-y-hidden p-0 sm:p-0", savedRecipe.current && "opacity-60")}>
-            <div className={cn("min-w-0 flex-1 overflow-y-auto p-4 sm:p-5", section === "Code" && "hidden")}>
-              {section !== "Overview" && <motion.header key={section} initial={reduceMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16 }} className="mb-4"><h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{section === "Steps" ? "Workflow" : section === "Validate" ? "Ready to save?" : "When it runs"}</h2></motion.header>}
-              <div hidden={section !== "Overview"} className="space-y-4">
-                {forkSource && <p className="rounded-xl border p-3 text-sm">Based on {forkSource}. Saving creates a separate routine.</p>}
-              <CreateSurfaceSection title="Identity" concept="routines">
-                <div className="flex items-center gap-3"><CrewIconPopover modal icon={icon} color={color} size="lg" ariaLabel="Choose routine icon and color" onIconChange={setIcon} onColorChange={setColor} /><CreateSurfaceTitleInput id="routine-name" aria-label="Name" value={name} onChange={e => setName(e.target.value)} placeholder="Routine name" /></div>
-                <CreateSurfaceField label="Description" htmlFor="routine-description">
-                  <CreateSurfaceDescriptionInput
-                    id="routine-description"
-                    value={description || String(parsedDSL?.description ?? "")}
-                    onChange={(e) => { setDescription(e.target.value); if (parsedDSL) replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, description: e.target.value }) : JSON.stringify({ ...parsedDSL, description: e.target.value }, null, 2), { baseline: false }) }}
-                    rows={3}
-                    placeholder="One-line summary"
-                    className="min-h-20 resize-y"
-                  />
-                </CreateSurfaceField>
-
-                <CreateSurfaceField
-                  label="Team"
-                  htmlFor="routine-author-crew"
-
+          {sectionIndex < 3 && (
+            <nav
+              aria-label="Recipe details"
+              className="flex gap-2 border-b border-hairline px-4 py-2"
+            >
+              {recipeSections.slice(0, 3).map((label, i) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-label={`Step ${i + 1}: ${label}`}
+                  aria-current={section === label ? "step" : undefined}
+                  disabled={draftLoading || busy !== "none"}
+                  onClick={() => setSection(label)}
+                  className={cn(
+                    "rounded-md px-3 py-2 text-xs",
+                    section === label ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
                 >
-                  <CrewPicker
-                    id="routine-author-crew"
-                    ariaLabel="Select author crew"
-                    crews={crews}
-                    value={authorCrewId}
-                    onChange={setAuthorCrewId}
-                    placeholder="— choose at runtime —"
-                    clearLabel="— choose at runtime —"
-                  />
-                </CreateSurfaceField>
+                  {label}
+                </button>
+              ))}
+            </nav>
+          )}
+          {/* Keep the code buffer and overview mounted while navigating. */}
+          <CreateSurfaceBody
+            inert={savedRecipe.current !== null || draftLoading}
+            className={cn("flex overflow-y-hidden p-0 sm:p-0", savedRecipe.current && "opacity-60")}
+          >
+            <div
+              className={cn(
+                "min-w-0 flex-1 overflow-y-auto p-4 sm:p-5",
+                section === "Code" && "hidden",
+              )}
+            >
+              {section !== "Overview" && (
+                <motion.header
+                  key={section}
+                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.16 }}
+                  className="mb-4"
+                >
+                  <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {section === "Steps"
+                      ? "Workflow"
+                      : section === "Publish"
+                        ? "Ready to publish?"
+                        : section === "Validate"
+                          ? "Check your recipe"
+                          : "When it runs"}
+                  </h2>
+                </motion.header>
+              )}
+              <div hidden={section !== "Overview"} className="space-y-4">
+                {forkSource && (
+                  <p className="rounded-xl border p-3 text-sm">
+                    Based on {forkSource}. Publishing creates a separate routine.
+                  </p>
+                )}
+                <CreateSurfaceSection title="Identity" concept="routines">
+                  <div className="flex items-center gap-3">
+                    <CrewIconPopover
+                      modal
+                      icon={icon}
+                      color={color}
+                      size="lg"
+                      ariaLabel="Choose routine icon and color"
+                      onIconChange={setIcon}
+                      onColorChange={setColor}
+                    />
+                    <CreateSurfaceTitleInput
+                      id="routine-name"
+                      aria-label="Name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Routine name"
+                    />
+                  </div>
+                  <CreateSurfaceField label="Description" htmlFor="routine-description">
+                    <CreateSurfaceDescriptionInput
+                      id="routine-description"
+                      value={description || String(parsedDSL?.description ?? "")}
+                      onChange={(e) => {
+                        setDescription(e.target.value)
+                        if (parsedDSL)
+                          replaceBuffer(
+                            dslFormat === "yaml"
+                              ? toYaml({ ...parsedDSL, description: e.target.value })
+                              : JSON.stringify(
+                                  { ...parsedDSL, description: e.target.value },
+                                  null,
+                                  2,
+                                ),
+                            { baseline: false },
+                          )
+                      }}
+                      rows={3}
+                      placeholder="One-line summary"
+                      className="min-h-20 resize-y"
+                    />
+                  </CreateSurfaceField>
 
-              </CreateSurfaceSection>
+                  <CreateSurfaceField label="Team" htmlFor="routine-author-crew">
+                    <CrewPicker
+                      id="routine-author-crew"
+                      ariaLabel="Select author crew"
+                      crews={crews}
+                      value={authorCrewId}
+                      onChange={setAuthorCrewId}
+                      placeholder="— choose at runtime —"
+                      clearLabel="— choose at runtime —"
+                    />
+                  </CreateSurfaceField>
+                </CreateSurfaceSection>
 
-                {definitionRows(parsedDSL?.steps).some(s => s.type === "agent_run") && <section className="space-y-3 border-t border-hairline pt-4"><h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Agents</h3>{definitionRows(parsedDSL?.steps).map((step, index) => step.type === "agent_run" ? <div key={index} className="space-y-2"><label id={`agent-step-label-${index}`} className="text-sm">{String(step.name || step.id)}</label><Select value={String(step.agent_slug || "")} onValueChange={agent_slug => { if (!parsedDSL) return; const steps = definitionRows(parsedDSL.steps).map((s, i) => i === index ? { ...s, agent_slug } : s); replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, steps }) : JSON.stringify({ ...parsedDSL, steps }, null, 2), { baseline: false }) }} disabled={!authorCrewId}><SelectTrigger aria-labelledby={`agent-step-label-${index}`} className="h-11 w-full rounded-xl bg-muted/30"><SelectValue placeholder="Choose an agent" /></SelectTrigger><SelectContent>{!agents.some(a => a.crew_id === authorCrewId && a.slug === step.agent_slug) && step.agent_slug ? <SelectItem value={String(step.agent_slug)} disabled>{String(step.agent_slug)} · choose an agent from this crew</SelectItem> : null}{agents.filter(a => a.crew_id === authorCrewId).map(a => <SelectItem key={a.id} value={a.slug}><span className="inline-flex items-center gap-2"><AgentAvatar seed={a.avatar_seed || a.name} style={a.avatar_style || describeCrew?.avatar_style} avatarUrl={a.avatar_url} className="h-6 w-6" alt="" /><span>{a.name}</span><span className="text-xs text-muted-foreground">{a.role_title || a.agent_role.toLowerCase()}</span></span></SelectItem>)}</SelectContent></Select></div> : null)}{!authorCrewId && <p className="text-xs text-muted-foreground">Choose a crew above to see its agents.</p>}</section>}
-                <details className="group border-t border-hairline"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3"><span className="text-sm font-medium">Start form</span><span className="text-xs text-muted-foreground">{definitionRows(parsedDSL?.inputs).length ? `${definitionRows(parsedDSL?.inputs).length} questions` : "No questions"} · Edit</span></summary><div className="pb-3">                {parsedDSL && (parsedDSL.inputs == null || (Array.isArray(parsedDSL.inputs) && parsedDSL.inputs.every(i => i != null && typeof i === "object" && typeof i.name === "string"))) ? <RoutineInputFormBuilder inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]} onChange={inputs => replaceBuffer(dslFormat === "yaml" ? toYaml({ ...parsedDSL, inputs }) : JSON.stringify({ ...parsedDSL, inputs }, null, 2), { baseline: false })} /> : <p className="text-sm text-destructive">Fix the input declarations in Code to edit the start form.</p>}
-</div></details>
-                <details className="border-t border-hairline"><summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3"><span className="text-sm font-medium">Results</span><span className="text-xs text-muted-foreground">{definitionRows(parsedDSL?.outputs).length} declared · View</span></summary><div className="space-y-3 pb-3">{definitionRows(parsedDSL?.outputs).map((output, i) => <div key={i}><p className="text-sm">{String(output.label || output.name || "Result")}</p><p className="text-sm text-muted-foreground">{String(output.description || "No description supplied by the author.")}</p></div>)}{!definitionRows(parsedDSL?.outputs).length && <p className="text-sm text-muted-foreground">No outputs declared yet.</p>}<button type="button" className="text-sm text-primary" onClick={() => setSection("Code")}>Edit expected results in Code →</button></div></details>
-                <details className="border-t border-hairline pt-3"><summary className="cursor-pointer text-xs text-muted-foreground">Technical identity</summary><div className="mt-4">                <CreateSurfaceField label="Routine identifier" htmlFor="routine-slug" hint={routine ? "Permanent identifier. Editing saves a new version of this routine." : "Unique name used in links and code. Edit it in Code."}><Input id="routine-slug" value={slug} readOnly className={CREATE_SURFACE_INPUT} /></CreateSurfaceField></div></details>
-                {advancedDetails && <details className="border-t border-hairline pt-3"><summary className="cursor-pointer text-sm">Access, budget and technical details</summary><div className="mt-4 space-y-4"><p className="text-xs text-muted-foreground">Budget and connection changes apply immediately.</p>{advancedDetails}</div></details>}
-                {!routine && <details className="border-t border-hairline pt-3"><summary className="cursor-pointer text-sm">Choose a starter template</summary><div className="mt-4 grid gap-3 sm:grid-cols-3">
-
-                {STARTER_TEMPLATES.map((t) => (
-                  <CreateSurfaceTile
-                    key={t.id}
-                    onClick={() => applyTemplate(t.id)}
-                    title={t.label}
-                    description={t.description}
-                  />
-                ))}
-                </div></details>}
+                {definitionRows(parsedDSL?.steps).some((s) => s.type === "agent_run") && (
+                  <section className="space-y-3 border-t border-hairline pt-4">
+                    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Agents
+                    </h3>
+                    {definitionRows(parsedDSL?.steps).map((step, index) =>
+                      step.type === "agent_run" ? (
+                        <div key={index} className="space-y-2">
+                          <label id={`agent-step-label-${index}`} className="text-sm">
+                            {String(step.name || step.id)}
+                          </label>
+                          <Select
+                            value={String(step.agent_slug || "")}
+                            onValueChange={(agent_slug) => {
+                              if (!parsedDSL) return
+                              const steps = definitionRows(parsedDSL.steps).map((s, i) =>
+                                i === index ? { ...s, agent_slug } : s,
+                              )
+                              replaceBuffer(
+                                dslFormat === "yaml"
+                                  ? toYaml({ ...parsedDSL, steps })
+                                  : JSON.stringify({ ...parsedDSL, steps }, null, 2),
+                                { baseline: false },
+                              )
+                            }}
+                            disabled={!authorCrewId}
+                          >
+                            <SelectTrigger
+                              aria-labelledby={`agent-step-label-${index}`}
+                              className="h-11 w-full rounded-xl bg-muted/30"
+                            >
+                              <SelectValue placeholder="Choose an agent" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {!agents.some(
+                                (a) => a.crew_id === authorCrewId && a.slug === step.agent_slug,
+                              ) && step.agent_slug ? (
+                                <SelectItem value={String(step.agent_slug)} disabled>
+                                  {String(step.agent_slug)} · choose an agent from this crew
+                                </SelectItem>
+                              ) : null}
+                              {agents
+                                .filter((a) => a.crew_id === authorCrewId)
+                                .map((a) => (
+                                  <SelectItem key={a.id} value={a.slug}>
+                                    <span className="inline-flex items-center gap-2">
+                                      <AgentAvatar
+                                        seed={a.avatar_seed || a.name}
+                                        style={a.avatar_style || describeCrew?.avatar_style}
+                                        avatarUrl={a.avatar_url}
+                                        className="h-6 w-6"
+                                        alt=""
+                                      />
+                                      <span>{a.name}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        {a.role_title || a.agent_role.toLowerCase()}
+                                      </span>
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null,
+                    )}
+                    {!authorCrewId && (
+                      <p className="text-xs text-muted-foreground">
+                        Choose a crew above to see its agents.
+                      </p>
+                    )}
+                  </section>
+                )}
+                <details className="group border-t border-hairline">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
+                    <span className="text-sm font-medium">Start form</span>
+                    <span className="text-xs text-muted-foreground">
+                      {definitionRows(parsedDSL?.inputs).length
+                        ? `${definitionRows(parsedDSL?.inputs).length} questions`
+                        : "No questions"}{" "}
+                      · Edit
+                    </span>
+                  </summary>
+                  <div className="pb-3">
+                    {" "}
+                    {parsedDSL &&
+                    (parsedDSL.inputs == null ||
+                      (Array.isArray(parsedDSL.inputs) &&
+                        parsedDSL.inputs.every(
+                          (i) => i != null && typeof i === "object" && typeof i.name === "string",
+                        ))) ? (
+                      <RoutineInputFormBuilder
+                        inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]}
+                        onChange={(inputs) =>
+                          replaceBuffer(
+                            dslFormat === "yaml"
+                              ? toYaml({ ...parsedDSL, inputs })
+                              : JSON.stringify({ ...parsedDSL, inputs }, null, 2),
+                            { baseline: false },
+                          )
+                        }
+                      />
+                    ) : (
+                      <p className="text-sm text-destructive">
+                        Fix the input declarations in Code to edit the start form.
+                      </p>
+                    )}
+                  </div>
+                </details>
+                <details className="border-t border-hairline">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
+                    <span className="text-sm font-medium">Results</span>
+                    <span className="text-xs text-muted-foreground">
+                      {definitionRows(parsedDSL?.outputs).length} declared · View
+                    </span>
+                  </summary>
+                  <div className="space-y-3 pb-3">
+                    {definitionRows(parsedDSL?.outputs).map((output, i) => (
+                      <div key={i}>
+                        <p className="text-sm">{String(output.label || output.name || "Result")}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {String(output.description || "No description supplied by the author.")}
+                        </p>
+                      </div>
+                    ))}
+                    {!definitionRows(parsedDSL?.outputs).length && (
+                      <p className="text-sm text-muted-foreground">No outputs declared yet.</p>
+                    )}
+                    <button
+                      type="button"
+                      className="text-sm text-primary"
+                      onClick={() => setSection("Code")}
+                    >
+                      Edit expected results in Code →
+                    </button>
+                  </div>
+                </details>
+                <details className="border-t border-hairline pt-3">
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    Technical identity
+                  </summary>
+                  <div className="mt-4">
+                    {" "}
+                    <CreateSurfaceField
+                      label="Routine identifier"
+                      htmlFor="routine-slug"
+                      hint={
+                        routine
+                          ? "Permanent identifier. Editing saves a new version of this routine."
+                          : "Unique name used in links and code. Edit it in Code."
+                      }
+                    >
+                      <Input
+                        id="routine-slug"
+                        value={slug}
+                        readOnly
+                        className={CREATE_SURFACE_INPUT}
+                      />
+                    </CreateSurfaceField>
+                  </div>
+                </details>
+                {advancedDetails && (
+                  <details className="border-t border-hairline pt-3">
+                    <summary className="cursor-pointer text-sm">
+                      Access, budget and technical details
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      <p className="text-xs text-muted-foreground">
+                        Budget and connection changes apply immediately.
+                      </p>
+                      {advancedDetails}
+                    </div>
+                  </details>
+                )}
+                {!routine && (
+                  <details className="border-t border-hairline pt-3">
+                    <summary className="cursor-pointer text-sm">Choose a starter template</summary>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      {STARTER_TEMPLATES.map((t) => (
+                        <CreateSurfaceTile
+                          key={t.id}
+                          onClick={() => applyTemplate(t.id)}
+                          title={t.label}
+                          description={t.description}
+                        />
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
-              {section === "Steps" && (parsedDSL ? <RoutineRecipeSteps definition={parsedDSL} slug={slug} name={name || slug} onChange={next => replaceBuffer(dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2), { baseline: false })} onOpenCode={() => setSection("Code")} /> : <p className="text-sm text-destructive">Fix the definition in Code to see its steps.</p>)}
-              {section === "Schedule" && routine && <div className="space-y-5"><p className="text-sm text-muted-foreground">Schedule changes apply immediately.</p><RoutineSchedulesTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /><details className="rounded-xl border border-hairline p-4"><summary className="cursor-pointer text-xs text-muted-foreground">Event triggers · Webhooks</summary><div className="mt-4"><RoutineWebhooksTab workspaceId={workspaceId} pipelineId={routine.id} slug={routine.slug} /></div></details></div>}
-              {section === "Schedule" && !routine && <div className="space-y-5">              <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
-              {(trigger.kind === "schedule" || trigger.kind === "once") && scheduledFields.length > 0 && <section className="space-y-3"><h3 className="text-sm font-medium">Inputs for scheduled runs</h3>{scheduledFields.map(field => <FormField key={field.name} field={field} value={scheduledValues[field.name] ?? field.default ?? ""} onChange={e => setScheduledValues(values => ({ ...values, [field.name]: e.target.value }))} idPrefix="scheduled-input-" />)}</section>}
-<p className="text-sm text-muted-foreground">Saving activates the selected schedule. Leave “When I start it” selected to save without an automatic start.</p></div>}
-              {section === "Validate" && <div className="space-y-4"><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Definition check</h3><p className="mt-2 text-sm text-muted-foreground">Checks the recipe and its configuration. A successful check does not mean a real run has succeeded.</p><button type="button" disabled={busy !== "none"} onClick={handleTestRun} className="mt-4 rounded-full border px-4 py-2 text-sm">{busy === "testing" ? "Validating…" : "Check definition"}</button></div><div className="rounded-2xl border border-hairline p-5"><h3 className="font-medium">Real execution</h3><p className="mt-2 text-sm text-muted-foreground">After saving, use Run to review inputs and start real work. Follow its steps and outputs in History and Activity.</p></div>{parseError && <button type="button" className="text-sm text-destructive" onClick={() => setSection("Code")}>{parseError} · Open Code →</button>}</div>}
-
+              {section === "Steps" &&
+                (parsedDSL ? (
+                  <RoutineRecipeSteps
+                    definition={parsedDSL}
+                    slug={slug}
+                    name={name || slug}
+                    onChange={(next) =>
+                      replaceBuffer(
+                        dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2),
+                        { baseline: false },
+                      )
+                    }
+                    onOpenCode={() => setSection("Code")}
+                  />
+                ) : (
+                  <p className="text-sm text-destructive">
+                    Fix the definition in Code to see its steps.
+                  </p>
+                ))}
+              {section === "Schedule" && routine && (
+                <div className="space-y-5">
+                  <p className="text-sm text-muted-foreground">
+                    Schedule changes apply immediately.
+                  </p>
+                  <RoutineSchedulesTab
+                    workspaceId={workspaceId}
+                    pipelineId={routine.id}
+                    slug={routine.slug}
+                  />
+                  <details className="rounded-xl border border-hairline p-4">
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      Event triggers · Webhooks
+                    </summary>
+                    <div className="mt-4">
+                      <RoutineWebhooksTab
+                        workspaceId={workspaceId}
+                        pipelineId={routine.id}
+                        slug={routine.slug}
+                      />
+                    </div>
+                  </details>
+                </div>
+              )}
+              {section === "Schedule" && !routine && (
+                <div className="space-y-5">
+                  {" "}
+                  <RoutineTriggerFields
+                    workspaceId={workspaceId}
+                    value={trigger}
+                    onChange={setTrigger}
+                  />
+                  {(trigger.kind === "schedule" || trigger.kind === "once") &&
+                    scheduledFields.length > 0 && (
+                      <section className="space-y-3">
+                        <h3 className="text-sm font-medium">Inputs for scheduled runs</h3>
+                        {scheduledFields.map((field) => (
+                          <FormField
+                            key={field.name}
+                            field={field}
+                            value={scheduledValues[field.name] ?? field.default ?? ""}
+                            onChange={(e) =>
+                              setScheduledValues((values) => ({
+                                ...values,
+                                [field.name]: e.target.value,
+                              }))
+                            }
+                            idPrefix="scheduled-input-"
+                          />
+                        ))}
+                      </section>
+                    )}
+                  <p className="text-sm text-muted-foreground">
+                    Publishing activates the selected schedule. Save draft leaves automatic starts
+                    unchanged.
+                  </p>
+                </div>
+              )}
+              {section === "Publish" && (
+                <RoutinePublicationReview
+                  draft={parsedDSL}
+                  published={routine?.definition}
+                  existing={!!draftRef.current?.base_pipeline_id || !!routine}
+                  name={name || slug}
+                  validated={!!testResult?.passed}
+                />
+              )}
+              {section === "Validate" && (
+                <RoutineTestWorkspace
+                  published={!!routine || !!draftRef.current?.base_pipeline_id}
+                  workspaceId={workspaceId}
+                  slug={slug}
+                  definition={parsedDSL}
+                  busy={busy !== "none"}
+                  result={testResult}
+                  onValidate={handleTestRun}
+                  onPublish={() => setSection("Publish")}
+                  onOpenCode={() => setSection("Code")}
+                  parseError={parseError}
+                />
+              )}
             </div>
-            <div className={cn("flex min-w-0 flex-1 flex-col overflow-hidden", section !== "Code" && "hidden")}>
+            <div
+              className={cn(
+                "flex min-w-0 flex-1 flex-col overflow-hidden",
+                section !== "Code" && "hidden",
+              )}
+            >
               {/* The bar the routine editor has, because this is the
                   same job: format toggle, the slug the DSL will save
                   under, and the parse error WITH its line — the old
@@ -1139,14 +1910,20 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   <CreateSurfaceChoice
                     ariaLabel="Editor pane"
                     value={editorPane}
-                    onChange={(pane) => { if (pane === "code") setDslText(bufferRef.current); setEditorPane(pane) }}
+                    onChange={(pane) => {
+                      if (pane === "code") setDslText(bufferRef.current)
+                      setEditorPane(pane)
+                    }}
                     options={[
                       { value: "code" as EditorPane, label: "Code" },
                       { value: "graph" as EditorPane, label: "Preview" },
                     ]}
                   />
                   {!parsedDSL ? (
-                    <span className="truncate text-[10px] text-destructive" title={parseError ?? "Open Validate for details"}>
+                    <span
+                      className="truncate text-[10px] text-destructive"
+                      title={parseError ?? "Open Validate for details"}
+                    >
                       Definition needs attention
                     </span>
                   ) : (
@@ -1205,7 +1982,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               <div className="flex items-center gap-1.5 font-medium">
                 {testResult.passed ? "Definition valid" : "Definition invalid"}
               </div>
-              <p className="mt-0.5 max-h-24 overflow-y-auto break-words font-mono text-[10px] opacity-80">{testResult.details}</p>
+              <p className="mt-0.5 max-h-24 overflow-y-auto break-words font-mono text-[10px] opacity-80">
+                {testResult.details}
+              </p>
             </div>
           )}
 
@@ -1214,15 +1993,83 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             onDismiss={() => setSaveError(null)}
           />
 
+          {saveError && scheduleConflict && (
+            <p className="px-4 py-2 text-sm">
+              <a
+                className="underline underline-offset-4"
+                target="_blank"
+                rel="noopener noreferrer"
+                href={`/routines?slug=${encodeURIComponent(draftRef.current?.slug || routine?.slug || "")}&view=plan#schedule-${encodeURIComponent(scheduleConflict.schedule_id)}`}
+              >
+                Review schedule: {scheduleConflict.name}
+              </a>
+              <span className="ml-2 text-muted-foreground">
+                Opens in another tab. Your draft stays here; update the preset, then retry
+                publication.
+              </span>
+            </p>
+          )}
+
+          <div className="flex items-center gap-3 border-t border-hairline px-4 py-2 text-xs">
+            <button
+              type="button"
+              disabled={busy !== "none" || draftLoading || draftLoadFailed || !!savedRecipe.current}
+              onClick={() => void handleSave(undefined, true)}
+              className="rounded-md border px-3 py-2 disabled:opacity-50"
+            >
+              Save draft
+            </button>
+            {draftRevision > 0 && (
+              <button
+                type="button"
+                disabled={busy !== "none"}
+                onClick={() => void discardSavedDraft()}
+                className="rounded-md border px-3 py-2 disabled:opacity-50"
+              >
+                Discard saved draft
+              </button>
+            )}
+            {saveSection && (
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={approveRisk}
+                  onChange={(e) => setApproveRisk(e.target.checked)}
+                />
+                Approve capability changes for this publication
+              </label>
+            )}
+          </div>
           <CreateSurfaceFooter
-            hint={routine ? `Editing v${routine.head_version ?? 1} · Save creates a new version` : "Draft · Work starts only when you run it"}
+            hint={
+              draftLoading
+                ? "Loading saved draft…"
+                : draftRevision
+                  ? `Saved draft · revision ${draftRevision} · Publish updates the live recipe`
+                  : "Unsaved draft · Save draft does not change live work"
+            }
             onCancel={onClose}
-            secondary={sectionIndex > 0 && section !== "Code" && !savedRecipe.current ? (
-              <CreateSurfaceSecondaryAction icon={ArrowLeft} disabled={busy !== "none"} onClick={() => setSection(recipeSections[sectionIndex - 1])}>Back</CreateSurfaceSecondaryAction>
-            ) : undefined}
-            primaryLabel={saveSection ? advancedPrimaryLabel : section === "Code" ? "Back to recipe" : "Continue"}
+            secondary={
+              sectionIndex > 0 && section !== "Code" && !savedRecipe.current ? (
+                <CreateSurfaceSecondaryAction
+                  icon={ArrowLeft}
+                  disabled={busy !== "none"}
+                  onClick={() => setSection(recipeSections[sectionIndex - 1])}
+                >
+                  Back
+                </CreateSurfaceSecondaryAction>
+              ) : undefined
+            }
+            primaryLabel={
+              saveSection
+                ? advancedPrimaryLabel
+                : section === "Code"
+                  ? "Back to recipe"
+                  : "Continue"
+            }
             primaryIcon={saveSection ? Save : undefined}
             onPrimary={saveSection ? handleTestAndSave : continueRecipe}
+            primaryDisabled={draftLoading || draftLoadFailed}
             busy={busy !== "none"}
           />
         </>
@@ -1230,7 +2077,6 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     </CreateSurface>
   )
 }
-
 
 /** Status dot for a fork candidate — same vocabulary as the sidebar. */
 function forkStatusDot(r: RoutineListItem): string {
@@ -1248,5 +2094,10 @@ function truncate(s: string, n: number): string {
 
 /** A partially authored definition must not crash its readable preview. */
 function definitionRows(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter((row): row is Record<string, unknown> => row != null && typeof row === "object" && !Array.isArray(row)) : []
+  return Array.isArray(value)
+    ? value.filter(
+        (row): row is Record<string, unknown> =>
+          row != null && typeof row === "object" && !Array.isArray(row),
+      )
+    : []
 }

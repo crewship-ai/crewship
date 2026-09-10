@@ -227,6 +227,19 @@ Output text identity is NOT asserted — two LLM runs are rarely identical at th
 
 ---
 
+Both sides now pin the same archived recipe version, resolved once before either
+run. `--version N` selects an explicit archive; otherwise the server's `is_head`
+marker selects the published version, including after rollback. Missing archive
+evidence stops the comparison before any run. Publication between A and B does
+not change the selected version.
+
+This is **live execution**, with real effects and costs. JSON/YAML/NDJSON reports
+include `execution_mode`, `pipeline_version`, `definition_hash`, and
+`agreement_basis: execution_status`. Agreement is about execution status, not
+proof of semantic quality or identical model behavior. WAITING/RUNNING/QUEUED
+results are `AMBIGUOUS`; finish the underlying run before drawing conclusions.
+
+
 ## `crewship eval baseline`
 
 File-local snapshots of the eval matrix (`~/.crewship/eval-baselines/<name>.json`) plus regression diff. Per-developer / per-CI-run state — no server-side migration, no RBAC surface. Designed to be the CI gate that fails the build when a model swap or DSL refactor changes gate-pass behaviour.
@@ -318,3 +331,22 @@ crewship eval baseline delete main
 - [Routines cookbook](/guides/routines-cookbook) — recipe 6 walks the eval-driven promotion workflow end-to-end.
 - [Routine CLI](/cli/routine) — `routine bench`, `routine doctor` (per-routine variance + preflight).
 - [Eval API](/api-reference/eval).
+
+
+## Comparing from the routine editor
+
+The Test view also offers a live comparison over published recipe versions.
+Load the archive list, select a version and worker tier for each side, and
+provide a JSON dataset of 1–20 `{id, inputs, expected_output?}` cases. Import
+and export preserve typed values. Draft edits are not used until published.
+
+Each accepted run uses the regular execution engine and appears in History.
+The comparison shows cost, duration, run links and an exact text check when
+`expected_output` is supplied; otherwise it explicitly leaves quality ungraded.
+Results export includes the pinned versions/hashes and input snapshots.
+
+If a run waits for a human, resolve it in the run detail or Inbox, then Continue.
+Continue reads the accepted run instead of starting it again. After an unclear
+start response it retains the same request key within the server's idempotency
+window. Leaving the Test view stops future client-side starts, while accepted
+runs continue independently. The comparison queue itself is not a durable job.

@@ -79,6 +79,49 @@ func TestRoutineArtifacts_SnapshotAndSharedBlobOwnership(t *testing.T) {
 	}
 }
 
+func TestN12ArtifactPromotionPreservesFailedAttemptsAndSiblingItems(t *testing.T) {
+	_, db, _, ws := runsHandlerRig(t)
+	crew := seedTestCrew(t, db, ws)
+	seedRunsPipeline(t, db, ws, "promotion-pipeline", "promotion")
+	seedRunRow(t, db, ws, "promotion-pipeline", "promotion", "promotion-run", "completed")
+	for _, row := range []struct {
+		id, parent, path, kind, status string
+		attempt                        int
+	}{
+		{"parent", "", "/work", "agent_run", "completed", 2},
+		{"old-parent", "", "/work", "agent_run", "failed", 1},
+		{"other-parent", "parent", "/work/items/1", "foreach", "completed", 1},
+		{"failed", "old-parent", "/work/agent", "agent_attempt", "failed", 1},
+		{"accepted", "parent", "/work/agent", "agent_attempt", "completed", 2},
+		{"sibling", "other-parent", "/work/items/1/write", "script", "completed", 1},
+	} {
+		if _, err := db.Exec(`INSERT INTO pipeline_step_executions(id,run_id,parent_execution_id,step_id,execution_path,attempt,kind,status,started_at) VALUES(?,'promotion-run',NULLIF(?,''),'write',?,?,?,?,'2026-09-09T00:00:00Z')`, row.id, row.parent, row.path, row.attempt, row.kind, row.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publisher := NewRoutineArtifactPublisher(db, t.TempDir())
+	ctx := context.Background()
+	for _, id := range []string{"failed", "accepted", "sibling", "parent"} {
+		state := "draft"
+		if id == "parent" {
+			state = "available"
+		}
+		output := `{"artifacts":[{"kind":"text","label":"same","content":"` + id + `"}]}`
+		if err := publisher.PublishRunArtifacts(ctx, ws, crew, "promotion-run", id, output, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"failed", "sibling"} {
+		var content, state string
+		if err := db.QueryRow(`SELECT content,state FROM pipeline_run_artifacts WHERE step_execution_id=?`, id).Scan(&content, &state); err != nil {
+			t.Fatal(err)
+		}
+		if content != `"`+id+`"` || state != "draft" {
+			t.Fatalf("%s evidence overwritten: %s %s", id, content, state)
+		}
+	}
+}
+
 func TestRoutineArtifacts_PaginationAndLazyContent(t *testing.T) {
 	h, db, user, ws := runsHandlerRig(t)
 	seedRunsPipeline(t, db, ws, "artifact_pages", "pages")

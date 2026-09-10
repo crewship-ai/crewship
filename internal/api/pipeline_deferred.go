@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -79,8 +81,24 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	if body.FireAt != "" && body.PinnedVersion == nil {
+		var version int
+		// Pin the definition that passed preflight, not a concurrently changed HEAD.
+		err := h.db.QueryRowContext(r.Context(), `SELECT version FROM pipeline_versions WHERE pipeline_id=? AND definition_hash=?`, p.ID, p.DefinitionHash).Scan(&version)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Error("schedule one-time start: load archive", "error", err, "slug", p.Slug)
+			replyError(w, http.StatusInternalServerError, "Could not load the published recipe archive.")
+			return
+		}
+		if errors.Is(err, sql.ErrNoRows) || version < 1 {
+			replyError(w, http.StatusConflict, "Published recipe archive is unavailable. Publish a version before scheduling a one-time start.")
+			return
+		}
+		body.PinnedVersion = &version
+	}
 	store := pipeline.NewPendingRunStore(h.db)
 	id, coalesced, err := store.Enqueue(r.Context(), pipeline.PendingRun{
+		PinnedVersion: body.PinnedVersion,
 		ID:            "pnd_" + generateCUID(),
 		WorkspaceID:   workspaceID,
 		PipelineID:    p.ID,
@@ -105,11 +123,12 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status":     "SCHEDULED",
-		"pending_id": id,
-		"fire_at":    fireAt.Format(time.RFC3339Nano),
-		"coalesced":  coalesced,
-		"priority":   body.Priority,
+		"status":         "SCHEDULED",
+		"pending_id":     id,
+		"fire_at":        fireAt.Format(time.RFC3339Nano),
+		"coalesced":      coalesced,
+		"pinned_version": body.PinnedVersion,
+		"priority":       body.Priority,
 	})
 }
 
@@ -128,20 +147,22 @@ func (h *PipelineHandler) ListPendingRuns(w http.ResponseWriter, r *http.Request
 		return
 	}
 	type dto struct {
-		ID           string `json:"id"`
-		PipelineSlug string `json:"pipeline_slug"`
-		DebounceKey  string `json:"debounce_key,omitempty"`
-		Priority     int    `json:"priority"`
-		FireAt       string `json:"fire_at"`
+		PinnedVersion *int   `json:"pinned_version"`
+		ID            string `json:"id"`
+		PipelineSlug  string `json:"pipeline_slug"`
+		DebounceKey   string `json:"debounce_key,omitempty"`
+		Priority      int    `json:"priority"`
+		FireAt        string `json:"fire_at"`
 	}
 	out := make([]dto, 0, len(rows))
 	for _, pr := range rows {
 		out = append(out, dto{
-			ID:           pr.ID,
-			PipelineSlug: pr.PipelineSlug,
-			DebounceKey:  pr.DebounceKey,
-			Priority:     pr.Priority,
-			FireAt:       pr.FireAt.Format(time.RFC3339Nano),
+			PinnedVersion: pr.PinnedVersion,
+			ID:            pr.ID,
+			PipelineSlug:  pr.PipelineSlug,
+			DebounceKey:   pr.DebounceKey,
+			Priority:      pr.Priority,
+			FireAt:        pr.FireAt.Format(time.RFC3339Nano),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -137,8 +137,8 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "pinned_version must be positive")
 			return
 		}
-		if body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "" {
-			replyError(w, http.StatusBadRequest, "pinned_version is supported for immediate manual starts; configure the version on a schedule for planned starts")
+		if body.DelaySeconds > 0 || body.DebounceKey != "" {
+			replyError(w, http.StatusBadRequest, "pinned_version is supported for immediate or one-time starts; delay and debounce retain their existing version policy")
 			return
 		}
 		v, verr := h.store.GetVersion(r.Context(), p.ID, *body.PinnedVersion)
