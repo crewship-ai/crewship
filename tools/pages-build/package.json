@@ -1,0 +1,8 @@
+{
+  "name": "crewship-page-profile",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "dependencies": {"react": "19.2.8", "react-dom": "19.2.8"},
+  "devDependencies": {"vite": "8.2.2", "typescript": "7.0.2", "@types/react": "19.2.14", "@types/react-dom": "19.2.3"}
+}
