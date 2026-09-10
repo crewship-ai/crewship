@@ -13,10 +13,17 @@ import (
 )
 
 type pageProjectRevision struct {
-	Revision   int64  `json:"revision" yaml:"revision"`
-	Digest     string `json:"digest"`
-	GitCommit  string `json:"git_commit"`
-	Actor      string `json:"actor,omitempty"`
+	Revision  int64  `json:"revision" yaml:"revision"`
+	Digest    string `json:"digest"`
+	GitCommit string `json:"git_commit"`
+	// Actor is the historical opaque string: a user id OR an agent id, with
+	// nothing in it that says which. Kept verbatim for existing callers.
+	Actor string `json:"actor,omitempty"`
+	// ActorKind is what Actor could never carry: "user", "agent", "crew" or
+	// "unknown", read from the same actor_json the review snapshot reads. A
+	// list that flattens a person and a container into one string cannot be
+	// rendered honestly, and guessing from the id's shape is guessing.
+	ActorKind  string `json:"actor_kind"`
 	CreatedAt  string `json:"created_at"`
 	Restorable bool   `json:"restorable"`
 }
@@ -40,19 +47,22 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,source_digest,git_commit,COALESCE(actor_user_id,json_extract(actor_json,'$.agent_id'),''),created_at,spec_json!='' FROM page_project_revisions WHERE page_id=? AND (?=0 OR revision<?) ORDER BY revision DESC LIMIT 51`, rec.ID, before, before)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,source_digest,git_commit,COALESCE(actor_user_id,json_extract(actor_json,'$.agent_id'),''),COALESCE(actor_user_id,''),actor_json,created_at,spec_json!='' FROM page_project_revisions WHERE page_id=? AND (?=0 OR revision<?) ORDER BY revision DESC LIMIT 51`, rec.ID, before, before)
 	if err != nil {
 		replyInternalError(w, h.logger, "read project history", err)
 		return
 	}
 	defer rows.Close()
 	result := make([]pageProjectRevision, 0)
+	ws := WorkspaceIDFromContext(r.Context())
 	for rows.Next() {
 		var v pageProjectRevision
-		if err := rows.Scan(&v.Revision, &v.Digest, &v.GitCommit, &v.Actor, &v.CreatedAt, &v.Restorable); err != nil {
+		var actorUser, actorJSON string
+		if err := rows.Scan(&v.Revision, &v.Digest, &v.GitCommit, &v.Actor, &actorUser, &actorJSON, &v.CreatedAt, &v.Restorable); err != nil {
 			replyInternalError(w, h.logger, "read project revision", err)
 			return
 		}
+		v.ActorKind = h.reviewActor(r.Context(), ws, actorUser, actorJSON).Kind
 		result = append(result, v)
 	}
 	if err := rows.Err(); err != nil {

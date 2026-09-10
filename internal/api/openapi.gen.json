@@ -85793,6 +85793,15 @@
                           "actor": {
                             "type": "string"
                           },
+                          "actor_kind": {
+                            "enum": [
+                              "user",
+                              "agent",
+                              "crew",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -86663,6 +86672,11 @@
                   "build_id": {
                     "type": "string"
                   },
+                  "expected_definition_digest": {
+                    "description": "sha256 of the Page definition the publisher reviewed; a 409 with conflict:\"definition\" means it moved.",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
                   "expected_publication": {
                     "minimum": 0,
                     "type": "integer"
@@ -86670,6 +86684,14 @@
                   "expected_revision": {
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "expected_routine_digests": {
+                    "additionalProperties": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "description": "Reviewed routine definition digests keyed by routine slug; {} when the candidate declares no call actions. A 409 with conflict:\"routines\" names the ones that moved.",
+                    "type": "object"
                   },
                   "reviewed_code": {
                     "enum": [
@@ -86684,7 +86706,9 @@
                 },
                 "required": [
                   "expected_publication",
-                  "reviewed_code"
+                  "reviewed_code",
+                  "expected_definition_digest",
+                  "expected_routine_digests"
                 ],
                 "type": "object"
               }
@@ -87190,6 +87214,394 @@
               }
             },
             "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/review": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publication",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "baseline": {
+                      "properties": {
+                        "definition_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "git_commit": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "publication_version": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "published": {
+                          "type": "boolean"
+                        },
+                        "source_available": {
+                          "type": "boolean"
+                        },
+                        "source_revision": {
+                          "minimum": 1,
+                          "nullable": true,
+                          "type": "integer"
+                        },
+                        "source_unavailable_reason": {
+                          "description": "A sentence shown where the comparison would have been. Unavailable is never the same as unchanged.",
+                          "nullable": true,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "publication_version",
+                        "published",
+                        "definition_digest",
+                        "source_revision",
+                        "git_commit",
+                        "source_available",
+                        "source_unavailable_reason"
+                      ],
+                      "type": "object"
+                    },
+                    "blockers": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "enum": [
+                              "no_candidate",
+                              "candidate_matches_live",
+                              "build_missing",
+                              "build_failed",
+                              "build_stale",
+                              "baseline_unavailable",
+                              "definition_moved",
+                              "not_permitted",
+                              "storage_unavailable"
+                            ],
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "candidate": {
+                      "description": "The current draft, or — with ?publication=N — retained publication N as a rollback candidate.",
+                      "nullable": true,
+                      "properties": {
+                        "actor": {
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "user",
+                                "agent",
+                                "crew",
+                                "unknown"
+                              ],
+                              "type": "string"
+                            },
+                            "label": {
+                              "description": "Resolved at read time from the current directory; absent when the id no longer resolves.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "build": {
+                          "nullable": true,
+                          "properties": {
+                            "artifact_digest": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "running",
+                                "ready",
+                                "failed",
+                                "interrupted"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "state",
+                            "artifact_digest"
+                          ],
+                          "type": "object"
+                        },
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "git_commit": {
+                          "pattern": "^([0-9a-f]{40})?$",
+                          "type": "string"
+                        },
+                        "revision": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "source_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "git_commit",
+                        "source_digest",
+                        "created_at",
+                        "actor",
+                        "build"
+                      ],
+                      "type": "object"
+                    },
+                    "capabilities": {
+                      "properties": {
+                        "may_edit_spec": {
+                          "type": "boolean"
+                        },
+                        "may_publish": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "may_edit_spec",
+                        "may_publish"
+                      ],
+                      "type": "object"
+                    },
+                    "initial_publication": {
+                      "type": "boolean"
+                    },
+                    "issued_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "routines": {
+                      "items": {
+                        "properties": {
+                          "current_digest": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "published_digest": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "routine": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "unchanged",
+                              "changed",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "routine",
+                          "published_digest",
+                          "current_digest",
+                          "state"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "issued_at",
+                    "candidate",
+                    "baseline",
+                    "routines",
+                    "capabilities",
+                    "blockers",
+                    "initial_publication"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

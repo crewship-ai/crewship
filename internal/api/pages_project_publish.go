@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,7 +22,97 @@ type pageProjectPublishRequest struct {
 	ExpectedPublication *int64 `json:"expected_publication" yaml:"expected_publication"`
 	ReviewedCode        bool   `json:"reviewed_code" yaml:"reviewed_code"`
 	RollbackVersion     int64  `json:"rollback_version,omitempty" yaml:"rollback_version,omitempty"`
+	// The fence: the two bases the human actually reviewed.
+	//
+	// expected_publication already fences the publication counter and the
+	// draft CAS already fences the source revision, but neither says anything
+	// about the DECLARATION the reviewer read. Another writer restoring a
+	// panel version, or a routine definition changing under a `call` action,
+	// moves what this publication will bind to without moving either counter.
+	// Both are required: an optional fence is a fence the caller forgets, and
+	// the point of the review snapshot is that a refetch at publish time
+	// cannot supply this property.
+	ExpectedDefinitionDigest string            `json:"expected_definition_digest" yaml:"expected_definition_digest"`
+	ExpectedRoutineDigests   map[string]string `json:"expected_routine_digests" yaml:"expected_routine_digests"`
 }
+
+// replyPublishConflict writes a 409 that names WHICH base moved.
+//
+// "Something changed; reload" leaves the reviewer to guess whether to re-read
+// the diff, the declaration or the routine scripts. The four kinds mirror
+// PublishConflictKind in lib/pages/editor-contract.ts.
+func replyPublishConflict(w http.ResponseWriter, msg, kind string, routines []string) {
+	body := map[string]any{"error": msg, "conflict": kind}
+	if len(routines) > 0 {
+		body["routines"] = routines
+	}
+	writeJSON(w, 409, body)
+}
+
+// validHexDigest accepts exactly what sha256 hex output is: 64 lowercase hex
+// bytes. An uppercase or truncated digest is a caller bug, not a conflict, so
+// it is a 400 and never a silent pass.
+func validHexDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// pageRoutineDigestsIn records the routine definitions observed during review.
+// These hashes are provenance, not a promise to freeze routine scripts or
+// execution.
+//
+// It takes an explicit querier so the publish fence can recompute the
+// candidate's digests INSIDE its transaction rather than from a snapshot taken
+// before the transaction opened — which is the difference between fencing the
+// publication and describing it. The pre-publication check passes h.db and
+// gets the same answer through the same code, so the two can never drift.
+func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc *pages.Document) (map[string]string, error) {
+	result := map[string]string{}
+	for _, panel := range doc.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind != pages.ActionCall || result[action.Routine] != "" {
+				continue
+			}
+			var definition string
+			if err := q.QueryRowContext(ctx, `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, action.Routine).Scan(&definition); err != nil {
+				return nil, fmt.Errorf("read action routine %q: %w", action.Routine, err)
+			}
+			result[action.Routine] = pageRoutineDigest(definition)
+		}
+	}
+	return result, nil
+}
+
+type pageRowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// movedRoutines names every routine whose digest the reviewer would not
+// recognise: added, removed, or changed. Sorted so the message is stable.
+func movedRoutines(expected, current map[string]string) []string {
+	moved := []string{}
+	for name, digest := range current {
+		if expected[name] != digest {
+			moved = append(moved, name)
+		}
+	}
+	for name := range expected {
+		if _, ok := current[name]; !ok {
+			moved = append(moved, name)
+		}
+	}
+	sort.Strings(moved)
+	return moved
+}
+
 type pagePublication struct {
 	Version        int64  `json:"version"`
 	BuildID        string `json:"build_id"`
@@ -96,7 +188,7 @@ func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return nil, false
 	}
-	routines, err := h.pageRoutineDigests(r.Context(), WorkspaceIDFromContext(r.Context()), &doc)
+	routines, err := pageRoutineDigestsIn(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), &doc)
 	if err != nil {
 		replyError(w, 422, err.Error())
 		return nil, false
@@ -149,7 +241,11 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "Publishing requires Page ownership or workspace administration")
 		return
 	}
-	raw, ok := readCapped(w, r, 2048, "Page publication")
+	// 32 KiB, not the previous 2 KiB: expected_routine_digests carries one
+	// 64-hex digest per distinct `call` routine, and a Page may declare
+	// MaxPanelsPerPage (24) x MaxActionsPerPanel (6) = 144 of them with
+	// 64-byte slugs — about 19 KiB of map alone, before the fixed fields.
+	raw, ok := readCapped(w, r, 32<<10, "Page publication")
 	if !ok {
 		return
 	}
@@ -157,6 +253,21 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	if err := pages.DecodeProjectJSON(raw, &req); err != nil || req.ExpectedPublication == nil || *req.ExpectedPublication < 0 || !req.ReviewedCode || req.RollbackVersion < 0 {
 		replyError(w, 400, "expected_publication and reviewed_code=true are required")
 		return
+	}
+	// Shape only. The comparison itself happens inside the transaction below.
+	if !validHexDigest(req.ExpectedDefinitionDigest) {
+		replyError(w, 400, "expected_definition_digest must be the 64-character lowercase sha256 of the reviewed Page definition")
+		return
+	}
+	if req.ExpectedRoutineDigests == nil {
+		replyError(w, 400, "expected_routine_digests is required; send {} when the reviewed candidate declares no call actions")
+		return
+	}
+	for routine, digest := range req.ExpectedRoutineDigests {
+		if !validHexDigest(digest) {
+			replyError(w, 400, "expected_routine_digests["+routine+"] must be a 64-character lowercase sha256 digest")
+			return
+		}
 	}
 	if req.RollbackVersion > 0 {
 		if req.BuildID != "" || req.ExpectedRevision != 0 {
@@ -199,11 +310,6 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var before string
-	if err := h.db.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&before); err != nil {
-		replyInternalError(w, h.logger, "read current publication definition", err)
-		return
-	}
 	shapes, err := h.livePanelShapes(r.Context(), rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read live panel shapes", err)
@@ -218,6 +324,38 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	// The fence, before any write and inside the transaction that will do the
+	// writing. Reading `before` here rather than earlier in the request is the
+	// point: the pre-existing `WHERE spec_json=?` CAS only fenced the window
+	// between this read and its own write, never the window since review.
+	//
+	// It runs AFTER the idempotent-retry short-circuit above, deliberately. An
+	// exact retry is re-delivery of a request that already committed; failing
+	// it because the world moved on afterwards would turn a delivered success
+	// into a phantom 409 and invite a second publication of the same code. The
+	// receipt records what happened, and the fence guards what is about to.
+	var before string
+	if err := tx.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&before); err != nil {
+		replyInternalError(w, h.logger, "read current publication definition", err)
+		return
+	}
+	if digest := pageDefinitionDigest(before); digest != req.ExpectedDefinitionDigest {
+		replyPublishConflict(w, "The live Page definition changed since this candidate was reviewed; review the current definition before publishing", "definition", nil)
+		return
+	}
+	// Rollback publishes a retained artifact over the SAME live definition, so
+	// it is fenced identically: restoring old code against a declaration the
+	// reviewer never saw binds it to panels, producers and routines nobody
+	// approved for it.
+	currentRoutines, err := pageRoutineDigestsIn(r.Context(), tx, ws, candidate.document)
+	if err != nil {
+		replyError(w, 422, err.Error())
+		return
+	}
+	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
+		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
+		return
+	}
 	if req.RollbackVersion == 0 {
 		var revision int64
 		var commit string
@@ -226,14 +364,14 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if revision != req.ExpectedRevision || commit != candidate.record.GitCommit {
-			replyError(w, 409, "Draft changed; build and review the current revision")
+			replyPublishConflict(w, "Draft changed; build and review the current revision", "draft", nil)
 			return
 		}
 	}
 	version := *req.ExpectedPublication + 1
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_publications(page_id,version,build_id,source_revision,source_digest,git_commit,artifact_digest,spec_json,checks_json,actor_user_id,created_at,rollback_of) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,0))`, rec.ID, version, candidate.record.BuildID, candidate.record.SourceRevision, candidate.record.SourceDigest, candidate.record.GitCommit, candidate.record.ArtifactDigest, candidate.spec, string(report), user.ID, now, req.RollbackVersion); err != nil {
 		if isUniqueViolation(err) {
-			replyError(w, 409, "Publication changed; reload before publishing")
+			replyPublishConflict(w, "Publication changed; reload before publishing", "publication", nil)
 		} else {
 			replyInternalError(w, h.logger, "record Page publication", err)
 		}
@@ -246,13 +384,13 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := res.RowsAffected()
 	if err != nil || n != 1 {
-		replyError(w, 409, "Publication changed; reload before publishing")
+		replyPublishConflict(w, "Publication changed; reload before publishing", "publication", nil)
 		return
 	}
 	if *req.ExpectedPublication > 0 {
 		var prior int
 		if err := tx.QueryRowContext(r.Context(), `SELECT count(*) FROM page_project_publications WHERE page_id=? AND version=?`, rec.ID, *req.ExpectedPublication).Scan(&prior); err != nil || prior != 1 {
-			replyError(w, 409, "Expected publication does not exist")
+			replyPublishConflict(w, "Expected publication does not exist", "publication", nil)
 			return
 		}
 	}
@@ -263,7 +401,7 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err = res.RowsAffected()
 	if err != nil || n != 1 {
-		replyError(w, 409, "Page definition changed; review again")
+		replyPublishConflict(w, "Page definition changed; review again", "definition", nil)
 		return
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, candidate.document, candidate.resolved, now); err != nil {

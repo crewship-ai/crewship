@@ -1150,8 +1150,11 @@ permit SDK actions against the published application.
 
 **Request:** authenticated Page editor; optional positive `before` revision.
 **Response 200:** `{revisions, next_before}` with at most 50 entries. Each entry
-contains `revision`, `digest`, `git_commit`, `actor`, `created_at`, `restorable`.
+contains `revision`, `digest`, `git_commit`, `actor`, `actor_kind`,
+`created_at`, `restorable`.
 An agent-authored entry uses the agent ID as `actor`; it is not a user ID.
+`actor_kind` is `user`, `agent`, `crew` or `unknown` and is the only field that
+says which of those the opaque `actor` string holds.
 `next_before: 0` means no further page. Metadata is `no-store`.
 **Statuses:** `400` invalid cursor, plus common errors.
 
@@ -1190,24 +1193,77 @@ automatic safety certification and does not publish or invoke actions.
 integrity checks, `413` oversized body, `422` invalid current bindings, plus
 common errors.
 
+### Review a publication candidate
+
+`GET /api/v1/pages/{slug}/project/review`
+
+**Request:** authenticated Page editor; path `slug`, optional positive
+`publication` query parameter, no body.
+**Response 200:** `{issued_at, candidate, baseline, routines, capabilities,
+blockers, initial_publication}`. `candidate` is the current draft revision with
+its actor and the build of exactly that revision, and is `null` when there is
+no draft or the draft is already live.
+
+Pass `publication=<version>` to ask what publishing that retained version
+would be fenced on instead. `candidate` then describes that publication's
+archived source — its source revision, checkpoint, digest, the publisher it
+recorded and when — with the build it recorded, and `routines` is computed
+from its archived Page definition. That is exactly the key set a
+`rollback_version` publication must send as `expected_routine_digests`; the
+draft's routines are a different document's routines, and no client can
+recompute the current digest of each one. `baseline` is identical in both
+modes, because restoring a version replaces the same live definition. A
+version that is not retained is reported as `no_candidate` and one that is
+already running as `candidate_matches_live`; both keep the rest of the
+snapshot, and a retained candidate stays populated so the refusal can name
+which version it is about. `baseline.definition_digest` is the
+sha256 of the live Page definition and is the value a publication is fenced on.
+`baseline.source_available:false` means the retained source for the live
+publication cannot be read back — a missing comparison, never "no changes" —
+and `source_unavailable_reason` says why in a sentence.
+`routines[].state` is `unchanged`, `changed` or `unknown`; `unknown` covers a
+publication that recorded no digest for a routine and a routine that no longer
+resolves, and is never rendered as agreement. `blockers[].code` is one of
+`no_candidate`, `candidate_matches_live`, `build_missing`, `build_failed`,
+`build_stale`, `baseline_unavailable`, `definition_moved`, `not_permitted` and
+`storage_unavailable`. Missing build storage or a missing runtime origin is a
+blocker, not a 503: a reviewer who cannot publish can still read the snapshot.
+**Statuses:** `400` non-positive or malformed `publication`, plus common
+errors. Responses are `no-store`.
+
 ### Publish or roll back an application
 
 `POST /api/v1/pages/{slug}/project/publish`
 
 **Authentication:** Page owner or workspace administrator; edit grant alone
 is insufficient. **Request:** `{build_id, expected_revision,
-expected_publication, reviewed_code:true}`. Use publication `0` for the first
+expected_publication, reviewed_code:true, expected_definition_digest,
+expected_routine_digests}`. Use publication `0` for the first
 publication. For rollback, send `{rollback_version, expected_publication,
-reviewed_code:true}` and omit `build_id` and `expected_revision`.
+reviewed_code:true}` with both fence fields, and omit `build_id` and
+`expected_revision`.
+
+`expected_definition_digest` and `expected_routine_digests` are required on
+both paths and are the values the reviewer was shown — read them from the
+review snapshot above. The digest is 64 lowercase hex characters; the map is
+keyed by routine slug and is `{}` when the candidate declares no `call`
+actions. Both are compared inside the publishing transaction, before any
+write, so a Page definition or a routine script that moved between review and
+publication refuses the publication instead of shipping it. An exact retry
+short-circuits to its original receipt before the comparison runs: the receipt
+records what already happened, and the fence guards what is about to.
 **Response 200:** immutable receipt `{version, build_id, source_revision,
 source_digest, git_commit, artifact_digest, created_at}`. The live pointer and
 Page declaration change atomically. An exact retry returns its original
 receipt without rewinding a newer live publication. Rollback creates a new
 publication from the old artifact and declaration; it preserves the draft and
 does not undo completed routine effects.
-**Statuses:** `400` invalid or conflicting fields/missing review confirmation,
-`409` changed draft, publication or declaration, `413` oversized body,
-`422` invalid bindings, `507` publication quota, plus common errors.
+**Statuses:** `400` invalid or conflicting fields, missing review confirmation
+or a malformed fence, `409` changed draft, publication or declaration, `413`
+oversized body, `422` invalid bindings, `507` publication quota, plus common
+errors. A `409` body carries `conflict` — `definition`, `routines`,
+`publication` or `draft` — naming which base moved, and a `routines` conflict
+also lists the routines that moved.
 
 ### Read the live application
 
