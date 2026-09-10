@@ -184,3 +184,38 @@ func BenchmarkProjectCheckpointMaximumFiles(b *testing.B) {
 		parent = commit
 	}
 }
+
+func TestCheckpointBoundariesRejectMissingAndNonCommitWithoutMutation(t *testing.T) {
+	ctx := t.Context()
+	store := &ProjectStore{Directory: t.TempDir()}
+	commit, err := store.Checkpoint(ctx, "ws", "page", "", "{}", "actor", 1, testSourceProject())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCheckpointBoundaries(ctx, "ws", "page", []string{commit}); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := store.gitPath(ctx, "ws", "page", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := runProjectGit(ctx, repo, nil, "rev-parse", commit+"^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{strings.Repeat("0", 40), strings.TrimSpace(string(tree))} {
+		if err := store.SetCheckpointBoundaries(ctx, "ws", "page", []string{commit, bad}); err == nil {
+			t.Fatalf("accepted boundary %s", bad)
+		}
+		boundaries, err := store.CheckpointBoundaries(ctx, "ws", "page")
+		if err != nil || len(boundaries) != 1 || boundaries[0] != commit {
+			t.Fatalf("changed boundaries: %v %v", boundaries, err)
+		}
+		if _, _, err := store.ReadCheckpoint(ctx, "ws", "page", commit); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := runProjectGit(ctx, repo, nil, "fsck", "--full"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
