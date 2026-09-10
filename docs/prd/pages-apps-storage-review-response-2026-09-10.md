@@ -25,10 +25,21 @@ Router manifest, MCP list and OpenAPI prose checks passed. The docs-layer change
 
 [Automatic source PR CI](https://github.com/crewship-ai/crewship/actions/runs/34483084330) tests source head `6cc3e2d6e8190bec4682427d8a50e03f7237f449`.
 [New cumulative UI dispatch](https://github.com/crewship-ai/crewship/actions/runs/34483523993) tests `c68722da3d8c5d45ef11f19609614b5b0373e5ae`.
-Both were started after the integration; their final results must be checked. Historical successful runs at `08fcfc60` do not validate these changes. PR bodies carry the new links and this distinction.
+The cumulative UI run completed successfully: 18 executed jobs passed and the conditional Binary Build job was skipped. The source PR run also completed successfully. Both runs were started after the integration. Historical successful runs at `08fcfc60` do not validate these changes. PR bodies carry the new links and this distinction.
 
 ## Operations and remaining acceptance
 
 The regeneratable Go build cache was cleared after confirming the disk pressure. Available space rose from approximately 1.5 GB to 84 GB (then about 80 GB as builds resumed). No application data was removed. `crewship-ws@3` remained active and its health endpoint returned 200. This work does not claim a new deployed binary.
 
-UI lint passed (zero errors) and the production static build passed after generating the worktree's missing Prisma types with `pnpm exec prisma generate`. Full repository Go tests/vet are running. Layer review remains separate from CI. CodeRabbit was re-requested for #2475; throttling permits the documented manual fallback. Authoring from chat and clean production installation remain open acceptance gates. Safari remains panel-only for v1 as explicitly approved.
+UI lint passed (zero errors) and the production static build passed after generating the worktree's missing Prisma types with `pnpm exec prisma generate`. Local `go vet ./...` passed. The local full Go attempt hit the default 10-minute
+API timeout (no failed assertion), then continued into other packages. The
+separate API retry and remaining local full run were stopped after both fresh CI
+Go jobs passed, avoiding duplicate long suites with a cold cache. These local
+attempts are not recorded as passing full runs; full-suite evidence is the CI
+Go jobs on the exact source/UI heads above. All configured race jobs passed in the cumulative UI run; the source PR's separate general race job also passed. Layer review remains separate from CI. CodeRabbit was re-requested for #2475; throttling permits the documented manual fallback. Authoring from chat and clean production installation remain open acceptance gates. Safari remains panel-only for v1 as explicitly approved.
+
+## Base moved before merge
+
+Before merging #2475, main advanced to `6a9857f5` via #2482 (92 files).
+The two successful runs above do not cover that newer base. No PR was merged.
+The newer main is being propagated through the stack and fresh CI is required.

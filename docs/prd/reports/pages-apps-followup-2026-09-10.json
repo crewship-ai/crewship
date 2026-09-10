@@ -24,7 +24,7 @@
   "ci": {
     "source": 34483084330,
     "ui": 34483523993,
-    "state": "in_progress",
+    "state": "success",
     "source_sha": "6cc3e2d6e8190bec4682427d8a50e03f7237f449",
     "ui_sha": "c68722da3d8c5d45ef11f19609614b5b0373e5ae",
     "scope": "source automatic PR CI; cumulative UI dispatch after main integration",
@@ -35,7 +35,13 @@
       2480,
       2481
     ],
-    "historical_state": "success"
+    "historical_state": "success",
+    "ui_state": "success",
+    "ui_successful_jobs": 18,
+    "ui_skipped_jobs": [
+      "Binary Build"
+    ],
+    "source_state": "success"
   },
   "tests": {
     "pages": "passed",
@@ -45,7 +51,12 @@
     "api_unicode_save": "422; no revision advanced",
     "ui_files": 46,
     "ui_tests": 581,
-    "static_build": "passed"
+    "static_build": "passed after pnpm exec prisma generate",
+    "local_full_go": "API default timeout; remaining duplicate run stopped after current CI Go success",
+    "local_api_retry": "stopped after current CI Go success",
+    "local_full_vet": "passed",
+    "ui_lint": "passed; zero errors",
+    "current_ci_go_jobs": "source and cumulative UI passed"
   },
   "review": {
     "state": "rate_limited",
@@ -63,7 +74,8 @@
     "ui_sha": "c68722da3d8c5d45ef11f19609614b5b0373e5ae",
     "conflicts": [],
     "openapi_operations": 654,
-    "mcp_tools": 10
+    "mcp_tools": 10,
+    "superseded_by_main": "6a9857f5da4558fca082223eafba750de0d76b48"
   },
   "storage_review": {
     "reviewed_sha": "4563f5db",
