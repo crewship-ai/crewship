@@ -1,6 +1,8 @@
 # Pages editor — návrh v2 po oponentuře a ověření
 
-Stav: návrh k rozhodnutí, nikoli implementace ani splněná akceptace produktu.
+Stav: návrh k rozhodnutí. **P0 je implementováno** — co bylo postaveno, co
+změřeno a co zůstává otevřené, je v [implementační evidenci](pages-settings-editor-implementation.md).
+Akceptace produktu (§7, měření s pěti lidmi) splněná není a evidence to říká.
 Revize 2 zapracovává [nezávislou oponenturu](pages-settings-editor-independent-review-2026-09-10.md).
 Oponentura zůstává beze změny jako nezávislý dokument; její popis v1 je historický.
 Podklad ověření: main `01d4849cd8f61b70b64a290accf52617dbc7fac4`, screenshot
