@@ -297,12 +297,26 @@ export interface ReviewCandidateWire {
   readonly revision: number
   readonly git_commit: string
   readonly source_digest: string
+  /**
+   * From the draft's revision row. Empty only when a draft has no matching
+   * revision, which hand-edited data can produce; render it as unknown rather
+   * than as an epoch.
+   */
   readonly created_at: string
   readonly actor: ReviewActorWire
-  /** The build of exactly this revision, when one exists. */
+  /**
+   * The build of exactly this revision, when one exists.
+   *
+   * The states are the ones the database actually allows
+   * (`page_project_builds`' CHECK): there is no `queued`, and `interrupted`
+   * is real — `recoverPageBuilds` sets it after a restart, and so does a
+   * build whose artifact could not be persisted. It is treated as a failure
+   * to publish from, but it is not the same message as a compiler error and
+   * must not be shown as one.
+   */
   readonly build: {
     readonly id: string
-    readonly state: "queued" | "running" | "ready" | "failed"
+    readonly state: "running" | "ready" | "failed" | "interrupted"
     readonly artifact_digest: string
     readonly error?: string
   } | null
