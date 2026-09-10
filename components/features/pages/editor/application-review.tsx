@@ -106,7 +106,6 @@ export function EditorApplicationReview(props: EditorSectionProps) {
 
   const [consent, setConsent] = useState(false)
   const [resetReason, setResetReason] = useState<string | null>(null)
-  const [closed, setClosed] = useState(false)
   const heading = useRef<HTMLHeadingElement>(null)
 
   // This screen holds a decision, not unsaved edits. Saying so keeps the
@@ -240,31 +239,6 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     )
   }
 
-  if (closed) {
-    return (
-      <section className="flex flex-col gap-3" aria-labelledby="application-review-heading">
-        <h2 id="application-review-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
-          Review closed without publishing
-        </h2>
-        <p role="status" className="text-sm">
-          The draft is retained and the live application did not change. No message was sent to its author. To disagree, tell the agent in chat.
-        </p>
-        <div>
-          <Button
-            variant="outline"
-            className="min-h-11"
-            onClick={() => {
-              setClosed(false)
-              review.refresh()
-            }}
-          >
-            Reopen review
-          </Button>
-        </div>
-      </section>
-    )
-  }
-
   const candidate = snapshot.candidate
   const baseline = snapshot.baseline
   const withdrawn = !initial && !baseline.published && baseline.publication_version > 0
@@ -326,7 +300,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         <h3 className="text-base font-semibold">Definition changes</h3>
         {definitionDiff === null ? (
           <p className="mt-2 text-sm text-muted-foreground">Reading the candidate&apos;s definition…</p>
-        ) : definitionDiff.identical && definitionDiff.unmodelled.length === 0 ? (
+        ) : definitionDiff.identical && !definitionDiff.baselineMissing && definitionDiff.unmodelled.length === 0 ? (
           <p className="mt-2 text-sm">This candidate declares the same panels, producers and actions as the live Page.</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-2">
@@ -349,6 +323,12 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         <p className="mt-3 text-xs text-muted-foreground">
           Derived from comparing the two definitions. Source code may change behaviour this list cannot see.
         </p>
+        {definitionDiff !== null && definitionDiff.baselineMissing && (
+          <p role="note" className="mt-2 rounded-md border border-dashed p-3 text-sm">
+            <strong>There was no live definition to compare against.</strong> Every panel and action above therefore reads as added. That is true of a first publication; it
+            is not a statement that nothing else changed.
+          </p>
+        )}
         {hidden.length > 0 && (
           <p role="note" className="mt-2 text-sm">
             {hidden.length} panel{hidden.length === 1 ? "" : "s"} on this Page {hidden.length === 1 ? "is" : "are"} not visible to you and {hidden.length === 1 ? "is" : "are"}{" "}
@@ -505,14 +485,16 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         {/* No Reject button. A rejection needs a recipient, and this screen has
             none: there is no verified channel from a review back to the agent
             that wrote the revision. Naming a button "Reject" would promise one. */}
+        {/* The sentence above is the whole message, and it is on screen
+            *before* the click: leaving the editor is the last thing that
+            happens, so there is no panel afterwards left to read it in. */}
         <Button
           variant="outline"
           className="mt-3 min-h-11"
           onClick={() => {
             setConsent(false)
             setResetReason(null)
-            setClosed(true)
-            props.onNavigate("content")
+            props.onLeaveEditor()
           }}
         >
           Close without publishing
@@ -522,12 +504,37 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   )
 }
 
+/**
+ * One execution dependency.
+ *
+ * Two separate facts live on this row and they are not the same fact:
+ *
+ *   - whether the routine's DEFINITION moved since the live publication
+ *     (`state`), which is what the reviewer is being asked to look at, and
+ *   - whether the publish fence COVERS it, which is decided by whether the
+ *     snapshot carried a current hash at all.
+ *
+ * A routine with no current hash cannot be fenced — `usePageReview` leaves it
+ * out of `expected_routine_digests` rather than inventing an empty string to
+ * fence against — so publishing will not fail if that routine changes between
+ * this screen and the transaction. That is the honest handling of a missing
+ * hash, and it is also a gap in the guarantee, so the row says so in words
+ * instead of leaving it in a design note nobody reading this screen can see.
+ */
 function RoutineRow({ routine }: { routine: ReviewRoutineWire }) {
+  const fenced = typeof routine.current_digest === "string" && routine.current_digest !== ""
+  const gap = fenced ? null : (
+    <p className="mt-1">
+      This dependency is not covered by the publish check: no current hash was recorded for it, so publishing will not be refused if this routine changes between now and
+      the publication.
+    </p>
+  )
   if (routine.state === "changed") {
     return (
       <li className="rounded-md border border-dashed p-3 text-sm" data-routine-state="changed">
         <strong>Routine definition changed: {routine.routine}</strong>
         <p className="mt-1">The application does not pin the scripts a routine calls. Review this dependency before publishing — publishing pins the interface and the declaration, not the routine&apos;s implementation.</p>
+        {gap}
       </li>
     )
   }
@@ -536,12 +543,14 @@ function RoutineRow({ routine }: { routine: ReviewRoutineWire }) {
       <li className="rounded-md border border-dashed p-3 text-sm" data-routine-state="unknown">
         <strong>Routine {routine.routine}: earlier definition hash unavailable</strong>
         <p className="mt-1">The hash recorded for the live publication could not be read, so this dependency could not be compared. Treat it as not reviewed.</p>
+        {gap}
       </li>
     )
   }
   return (
     <li className="text-sm" data-routine-state="unchanged">
       Routine {routine.routine}: definition unchanged since the live publication. The scripts it calls are still not pinned by this application.
+      {gap}
     </li>
   )
 }
@@ -549,6 +558,12 @@ function RoutineRow({ routine }: { routine: ReviewRoutineWire }) {
 function SourceChanges({ diff, initial }: { diff: SourceDiff; initial: boolean }) {
   const [selected, setSelected] = useState(0)
   const files = diff.files
+  // `truncated` means a body was CUT. A binary file is not cut — nothing of it
+  // was ever renderable — so `compareSources` leaves it `truncated: false`.
+  // A screen that reads only `truncated` therefore shows a changed binary as
+  // fully reviewed, which is the exact false "everything reviewed" this
+  // section exists to avoid. Binary is counted and stated on its own.
+  const binaryCount = files.filter(file => file.binary).length
   // A file list can be replaced under a stale index by a realtime refetch.
   const active: SourceFileChange | undefined = files[selected] ?? files[0]
 
@@ -571,6 +586,12 @@ function SourceChanges({ diff, initial }: { diff: SourceDiff; initial: boolean }
         {diff.filesAdded} added · {diff.filesModified} modified · {diff.filesRemoved} removed. A rename is reported as a removal plus an addition, because guessing at a rename
         hides a rewrite inside what reads as a move.
       </p>
+      {binaryCount > 0 && (
+        <p role="note" className="rounded-md border border-dashed p-3 text-sm">
+          {binaryCount} changed file{binaryCount === 1 ? " is" : "s are"} binary or undecodable. {binaryCount === 1 ? "Its" : "Their"} bytes were not shown here and have not
+          been reviewed — the change is described, never rendered and never executed.
+        </p>
+      )}
       {diff.truncated && (
         <p role="note" className="rounded-md border border-dashed p-3 text-sm">
           This comparison is shortened: not every change is rendered here. Reviewing what is shown is not the same as reviewing the whole change.
@@ -594,9 +615,13 @@ function SourceChanges({ diff, initial }: { diff: SourceDiff; initial: boolean }
                 </span>
                 <span className="sr-only">{STATUS_WORD[file.status]}</span>
                 <span className="min-w-0 flex-1 truncate">{file.path}</span>
-                <span className="whitespace-nowrap font-mono text-xs">
-                  +{file.added} −{file.removed}
-                </span>
+                {file.binary ? (
+                  <span className="whitespace-nowrap text-xs">Binary · not shown</span>
+                ) : (
+                  <span className="whitespace-nowrap font-mono text-xs">
+                    +{file.added} −{file.removed}
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -626,7 +651,7 @@ function FileDiff({ file }: { file: SourceFileChange }) {
       </p>
       {file.binary ? (
         <p className="mt-2 text-sm">
-          {STATUS_WORD[file.status]}: binary or undecodable file, {file.added} lines added and {file.removed} removed are not meaningful here. Its content is described, never
+          {STATUS_WORD[file.status]}: binary or undecodable file. Its bytes were not shown and have not been reviewed. Line counts do not apply, and the content is never
           rendered and never executed.
         </p>
       ) : (

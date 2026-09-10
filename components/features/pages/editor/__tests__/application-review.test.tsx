@@ -91,10 +91,13 @@ const props: EditorSectionProps = {
   onNavigate: vi.fn(),
   pane: "section",
   onPaneChange: vi.fn(),
+  onLeaveEditor: vi.fn(),
+  onPageDeleted: vi.fn(),
   onDirtyChange: vi.fn(),
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   state.frameProps = []
   state.hidden = []
   state.definitionDiff = {
@@ -105,6 +108,7 @@ beforeEach(() => {
     unmodelled: [],
     raw: "--- live\n+++ candidate\n",
     identical: false,
+    baselineMissing: false,
   }
   state.sourceDiff = {
     files: [
@@ -289,6 +293,24 @@ describe("EditorApplicationReview", () => {
     expect(unknown.textContent).toMatch(/not reviewed/)
   })
 
+  it("says on the row when a routine is not covered by the publish check", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.routines = [
+      { routine: "ops-collect", published_digest: null, current_digest: null, state: "unknown" },
+      { routine: "ops-restart", published_digest: null, current_digest: "sha256:new", state: "unknown" },
+    ]
+    setReview(snapshot)
+    const { container } = render(<EditorApplicationReview {...props} />)
+    const rows = container.querySelectorAll('[data-routine-state="unknown"]')
+    expect(rows).toHaveLength(2)
+    // No current hash: the fence cannot carry it, and the row says exactly that.
+    expect(rows[0].textContent).toMatch(/not covered by the publish check/)
+    expect(rows[0].textContent).toMatch(/publishing will not be refused if this routine changes/)
+    // A hash exists, so this one IS fenced — claiming otherwise would be a
+    // second untruth in the opposite direction.
+    expect(rows[1].textContent).not.toMatch(/not covered by the publish check/)
+  })
+
   it("warns about a changed routine here, at the moment of approval", () => {
     render(<EditorApplicationReview {...props} />)
     const changed = screen.getByText("Routine definition changed: ops-restart")
@@ -302,12 +324,15 @@ describe("EditorApplicationReview", () => {
     expect(screen.getByText(/No message is sent to its author\. To disagree, tell the agent in chat\./)).toBeTruthy()
   })
 
-  it("retains the draft and says so when the review is closed without publishing", () => {
+  it("leaves the editor on Close without publishing, having already said no message reaches the author", () => {
     render(<EditorApplicationReview {...props} />)
-    fireEvent.click(screen.getByRole("button", { name: "Close without publishing" }))
-    expect(screen.getByRole("heading", { name: "Review closed without publishing" })).toBeTruthy()
-    expect(screen.getByRole("status").textContent).toMatch(/No message was sent to its author/)
-    expect(screen.queryByRole("button", { name: "Publish application" })).toBeNull()
+    const close = screen.getByRole("button", { name: "Close without publishing" })
+    // The promise is on screen at the moment of the click, not in a panel that
+    // replaces the review afterwards — there is no afterwards, the editor closes.
+    const section = close.closest("div")!
+    expect(section.textContent).toMatch(/The draft is retained and the live application does not change\. No message is sent to its author\. To disagree, tell the agent in chat\./)
+    fireEvent.click(close)
+    expect(props.onLeaveEditor).toHaveBeenCalledTimes(1)
   })
 
   it("names the routines from a publish 409 and clears the consent", () => {
@@ -335,12 +360,38 @@ describe("EditorApplicationReview", () => {
     expect(screen.getByText(/This review does not cover it\./)).toBeTruthy()
   })
 
+  it("says when there was no live definition to compare against, rather than listing additions alone", () => {
+    state.definitionDiff = { ...state.definitionDiff, baselineMissing: true }
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getByText(/There was no live definition to compare against\./)).toBeTruthy()
+    expect(screen.getByText(/not a statement that nothing else changed/)).toBeTruthy()
+  })
+
   it("names unmodelled definition fields and shows the raw diff instead of implying they are unchanged", () => {
     state.definitionDiff = { ...state.definitionDiff, unmodelled: ["spec.panels[0].experimental"], raw: "@@ raw @@" }
     render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/Fields this comparison does not model: spec\.panels\[0\]\.experimental/)).toBeTruthy()
     expect(screen.getByText(/must not be read as unchanged/)).toBeTruthy()
     expect(screen.getByText("@@ raw @@")).toBeTruthy()
+  })
+
+  it("never reads a changed binary file as fully reviewed, even though nothing was truncated", () => {
+    state.sourceDiff = {
+      // Exactly what `compareSources` produces for a changed binary: nothing
+      // was cut, so `truncated` is false on both the file and the diff.
+      files: [{ path: "assets/logo.png", status: "modified", added: 0, removed: 0, binary: true, truncated: false, lines: [] }],
+      filesAdded: 0,
+      filesModified: 1,
+      filesRemoved: 0,
+      truncated: false,
+    }
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getByText(/1 changed file is binary or undecodable/)).toBeTruthy()
+    expect(screen.getByText(/bytes were not shown here and have not been reviewed/)).toBeTruthy()
+    // The list row itself must not read as a reviewed zero-line change.
+    expect(screen.getByText("Binary · not shown")).toBeTruthy()
+    expect(screen.queryByText("+0 −0")).toBeNull()
+    expect(screen.getByText(/Its bytes were not shown and have not been reviewed/)).toBeTruthy()
   })
 
   it("describes a binary file rather than rendering it, and admits a truncated diff", () => {
