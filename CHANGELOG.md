@@ -9,6 +9,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- **One owner for durable dispatch, and work that survives a crash.** An accepted webhook is now recorded together with the work it produces in a single transaction, so a process that dies between the commit and its response leaves the work queued and the sender's resend finds the same work instead of creating a second. A delivery ledger records every inbound webhook — including the ones a filter ignored, so a decision nobody can look up afterwards stops being indistinguishable from a dropped request. Duplicates return the original receipt with the work's current state; the same identifier arriving with a different body is a conflict rather than a guess.
+- **Every agent run has its own runtime identity.** Two runs of one agent shared a tmux session name and every path derived from it, so starting the second killed the first, and could hand it the first run's environment. Session, arguments, environment, script, FIFO, exit file and signal channel are all per-run now, and cancel and terminal attach target a run rather than an agent.
+- **A memory mutation contract.** `replace` had no expected revision, so a passage deleted between an agent's read and its write came back, and one nobody meant to touch disappeared. Supported writes now go through one path with declared removals, idempotent retries and crash recovery. The guarantee is a stated profile: a write that cannot be revision-checked is refused rather than performed and labelled.
+- **GitHub and Standard Webhooks signature verification**, with GitHub's replay gap closed — it signs the body and not the delivery identifier, so identical verified bytes are treated as one delivery whatever identifier they arrive under.
+- Webhook retention and ingress limits: a payload is kept while its work is unfinished however old it is, a duplicate of already-accepted work is admitted however full the queue is, and an expired payload is distinguishable from one that never existed so the interface can explain why a replay is unavailable.
+
+### Changed
+
+- **The database now commits with `synchronous=FULL`.** Work we have answered `202` for has to survive a power cut, and the previous setting only promised to survive a process crash. Measured cost is about 21 ms of fsync per acceptance commit, against a 500 ms budget.
+
 ### Fixed
 - **Phones and tablets can reach the whole product.** The phone menu was built from its own copy of the navigation and had lost seven destinations — Inbox, Issues, Routines, Pages, Activity, Journal and Integrations. Both surfaces now read one definition, and the phone menu carries the Inbox unread count, which previously had no mobile home at all. The Admin Console gained the navigation sheet Settings already had, instead of a fixed 280px column that left a 390px screen 109px to render into. The Pages, Routines, Integrations and Credentials drawers now seal the page behind them rather than leaving the top bar live and the content scrolling underneath.
 - **Touch sizing follows the pointer, not the window width.** Touch targets were written to apply below 640px while the app treats anything under 768px as a phone, so large phones and small tablets ran the mobile layout with desktop-sized controls. Sizing now keys on a coarse pointer, which also gives tablets real 44px targets in the desktop layout, including the collapsed navigation rail. Create-flow inputs grow to 16px on touch, so focusing one no longer zooms the page on iOS.
