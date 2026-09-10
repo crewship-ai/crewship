@@ -785,7 +785,10 @@ export function RoutineCreateDialog({
           body: JSON.stringify({ id: draft.id, revision: draft.revision }),
         },
       )
-      if (!res.ok) throw new Error((await res.json()).error || "Could not discard the draft")
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error || "Could not discard the draft")
+      }
       draftRef.current = await loadRoutineDraft(workspaceId, draft.slug)
       setDraftRevision(0)
       setApproveRisk(false)

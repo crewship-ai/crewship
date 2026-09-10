@@ -409,7 +409,7 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		}
 		var pinnedVersion int
 		if err := tx.QueryRowContext(ctx, `SELECT head_version FROM pipelines WHERE id=?`, pipelineID).Scan(&pinnedVersion); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("pipeline: read head version: %w", err)
 		}
 		if pinnedVersion < 1 {
 			return nil, fmt.Errorf("%w: publish an archived version before scheduling", ErrInvalidTrigger)

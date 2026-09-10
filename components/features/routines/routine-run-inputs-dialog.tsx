@@ -72,7 +72,7 @@ export function RoutineRunInputsDialog({
             {submitLabel} {routineName}
           </DialogTitle>
           <DialogDescription>
-            Review the inputs for this run. Saved defaults are filled in below.
+            Review the inputs for this run. Saved defaults are filled in below.{" "}
             {submitLabel === "Schedule"
               ? "The routine will start at the selected date and time."
               : "Starting creates a new run in this routine’s history."}

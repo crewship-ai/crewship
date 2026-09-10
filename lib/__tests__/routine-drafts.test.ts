@@ -20,6 +20,6 @@ describe("draft HTTP errors", () => {
             },
             {},
           )
-    await expect(result).rejects.toThrow("Could not save the routine draft")
+    await expect(result).rejects.toThrow(`Could not ${operation} the routine draft`)
   })
 })

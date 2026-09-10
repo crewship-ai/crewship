@@ -148,14 +148,6 @@ export function RoutinePresetForm({
           Cancel
         </button>
       )}
-      {initialInputs && Object.keys(initialInputs).length > 0 && (
-        <details className="text-xs text-muted-foreground">
-          <summary>Stored preset · JSON</summary>
-          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap">
-            {JSON.stringify(initialInputs, null, 2)}
-          </pre>
-        </details>
-      )}
     </div>
   )
 }

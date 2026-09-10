@@ -160,7 +160,7 @@ describe("routine run detail — run again", () => {
   })
 })
 
-it("Run again retries an uncertain start with the same key and selected version", async () => {
+it.each(["current", "3"])("Run again retries an uncertain start with the same key and selected version %s", async (selectedVersion) => {
   h.run = baseRun({ pipeline_version: 3, inputs: { month: "2026-08" } })
   const post = vi
     .fn()
@@ -179,7 +179,7 @@ it("Run again retries an uncertain start with the same key and selected version"
   render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
   fireEvent.click(screen.getByRole("button", { name: "Run again" }))
   await screen.findByDisplayValue("2026-08")
-  fireEvent.change(screen.getByLabelText("Recipe version"), { target: { value: "3" } })
+  fireEvent.change(screen.getByLabelText("Recipe version"), { target: { value: selectedVersion } })
   await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
   fireEvent.click(screen.getByRole("button", { name: "Run" }))
   await screen.findByText("Response lost")
@@ -196,5 +196,8 @@ it("Run again retries an uncertain start with the same key and selected version"
   expect(new Headers(retry.headers).get("Idempotency-Key")).toBe(
     new Headers(first.headers).get("Idempotency-Key"),
   )
-  expect(JSON.parse(retry.body)).toEqual({ inputs: { month: "2026-08" }, pinned_version: 3 })
+  expect(JSON.parse(retry.body)).toEqual({
+    inputs: { month: "2026-08" },
+    ...(selectedVersion === "current" ? {} : { pinned_version: 3 }),
+  })
 })

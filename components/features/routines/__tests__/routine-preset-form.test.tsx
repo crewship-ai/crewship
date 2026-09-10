@@ -24,18 +24,19 @@ describe("recurring preset inputs", () => {
       <RoutinePresetForm
         workspaceId="ws"
         slug="daily"
-        initialInputs={{ count: 0, enabled: false, opaque: { id: "stored" } }}
+        initialInputs={{ count: 0, enabled: false, opaque: { id: "legacy-private-value" } }}
         onCancel={vi.fn()}
         onSave={save}
       />,
     )
     await screen.findByRole("button", { name: "Save inputs" })
+    expect(document.body.textContent).not.toContain("legacy-private-value")
     fireEvent.click(screen.getByRole("button", { name: "Save inputs" }))
     expect(save).toHaveBeenCalledWith({
       count: 0,
       enabled: false,
       region: "EU",
-      opaque: { id: "stored" },
+      opaque: { id: "legacy-private-value" },
     })
   })
   it("does not load HEAD or allow submission when a pinned archive is unavailable", async () => {

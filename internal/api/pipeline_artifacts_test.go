@@ -120,6 +120,14 @@ func TestN12ArtifactPromotionPreservesFailedAttemptsAndSiblingItems(t *testing.T
 			t.Fatalf("%s evidence overwritten: %s %s", id, content, state)
 		}
 	}
+	var state string
+	if err := db.QueryRowContext(ctx, `SELECT state FROM pipeline_run_artifacts WHERE step_execution_id='accepted'`).Scan(&state); err != nil || state != "available" {
+		t.Fatalf("accepted child was not promoted: %s %v", state, err)
+	}
+	var duplicates int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_run_artifacts WHERE step_execution_id='parent'`).Scan(&duplicates); err != nil || duplicates != 0 {
+		t.Fatalf("parent inserted duplicate artifact: %d %v", duplicates, err)
+	}
 }
 
 func TestRoutineArtifacts_PaginationAndLazyContent(t *testing.T) {

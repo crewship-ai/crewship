@@ -861,7 +861,7 @@ function RunsCard({
           <RoutineRunsTab workspaceId={workspaceId} slug={slug} />
         </div>
       ) : (
-        <RunsList key={slug} slug={slug} records={records} workspaceId={workspaceId} />
+        <RunsList key={slug} slug={slug} workspaceId={workspaceId} />
       )}
     </DetailCard>
   )
@@ -872,7 +872,6 @@ function RunsList({
   workspaceId,
 }: {
   slug: string
-  records: PipelineRunRecord[]
   workspaceId: string
 }) {
   const [pages, setPages] = React.useState<string[]>([])

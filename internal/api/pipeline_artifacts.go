@@ -120,7 +120,7 @@ func NewRoutineArtifactPublisher(db *sql.DB, storageRoot string) pipeline.Artifa
 				artifactState, contentType, sha, content, reason, state, runID, kind, label, source, executionID)
 			if err != nil {
 				unlock()
-				return err
+				return fmt.Errorf("promote child artifact: %w", err)
 			}
 			if replaced, _ := promoted.RowsAffected(); replaced > 0 {
 				unlock()

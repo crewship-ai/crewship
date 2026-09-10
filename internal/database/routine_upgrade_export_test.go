@@ -1,7 +1,6 @@
 package database
 
 import (
-	"context"
 	"database/sql"
 	"io"
 	"log/slog"
@@ -18,7 +17,7 @@ func RoutineUpgradeTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	db.SetMaxOpenConns(1)
-	ctx := context.Background()
+	ctx := t.Context()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if err := applyMigrationsUpTo(ctx, db, 20260908223756, logger); err != nil {
 		t.Fatal(err)
@@ -44,17 +43,17 @@ func RoutineUpgradeTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM pipelines WHERE id IN ('one','two') AND publication_revision=1`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipelines WHERE id IN ('one','two') AND publication_revision=1`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("base revisions: %d %v", count, err)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM pending_runs WHERE id IN ('pending','cancelled') AND pinned_version IS NULL AND status=id`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pending_runs WHERE id IN ('pending','cancelled') AND pinned_version IS NULL AND status=id`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("legacy start semantics: %d %v", count, err)
 	}
-	if err := db.QueryRow(`SELECT count(*) FROM pipeline_waitpoints WHERE token IN ('pending','approved') AND decision_form_json='' AND status=token AND decision_payload='{"legacy":true}'`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_waitpoints WHERE token IN ('pending','approved') AND decision_form_json='' AND status=token AND decision_payload='{"legacy":true}'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("legacy decisions: %d %v", count, err)
 	}
 	must(`UPDATE pipelines SET description='edited after upgrade' WHERE id='one'`)
-	if err := db.QueryRow(`SELECT publication_revision FROM pipelines WHERE id='one'`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRowContext(ctx, `SELECT publication_revision FROM pipelines WHERE id='one'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("revision trigger: %d %v", count, err)
 	}
 	return db

@@ -388,10 +388,9 @@ export function RoutineCalendar({
           ref={timeGrid}
           className="max-h-[65vh] overflow-auto rounded-xl border border-border/60"
         >
-          <div style={{ minWidth: days.length === 7 ? 840 : days.length === 3 ? 570 : 260 }}>
+          <div className={days.length === 7 ? "min-w-[840px]" : days.length === 3 ? "min-w-[570px]" : "min-w-[260px]"}>
             <div
-              className="sticky top-0 z-10 grid bg-card"
-              style={{ gridTemplateColumns: `54px repeat(${days.length}, minmax(0, 1fr))` }}
+              className={`sticky top-0 z-10 grid bg-card ${days.length === 7 ? "grid-cols-[54px_repeat(7,minmax(0,1fr))]" : days.length === 3 ? "grid-cols-[54px_repeat(3,minmax(0,1fr))]" : "grid-cols-[54px_minmax(0,1fr)]"}`}
             >
               <div />
               {days.map((day) => (
@@ -413,8 +412,7 @@ export function RoutineCalendar({
               <div
                 key={hour}
                 data-calendar-hour={hour}
-                className="grid border-t border-border/50"
-                style={{ gridTemplateColumns: `54px repeat(${days.length}, minmax(0, 1fr))` }}
+                className={`grid border-t border-border/50 ${days.length === 7 ? "grid-cols-[54px_repeat(7,minmax(0,1fr))]" : days.length === 3 ? "grid-cols-[54px_repeat(3,minmax(0,1fr))]" : "grid-cols-[54px_minmax(0,1fr)]"}`}
               >
                 <span className="p-2 text-[11px] text-muted-foreground">
                   {String(hour).padStart(2, "0")}:00

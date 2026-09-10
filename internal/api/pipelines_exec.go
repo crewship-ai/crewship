@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -122,8 +123,11 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body runRequestBody
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+	if r.Body != nil {
+		// Chunked requests have unknown length. An absent/empty body still
+		// means the legacy default inputs; malformed JSON remains an error.
+		err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body)
+		if err != nil && !(errors.Is(err, io.EOF) && r.ContentLength <= 0) {
 			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}

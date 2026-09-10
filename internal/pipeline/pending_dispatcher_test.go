@@ -114,7 +114,7 @@ func TestN4RearmedPendingStartHasNewIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	first := PendingRun{ID: "pa", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s", FireAt: time.Now().Add(-time.Hour).UTC()}
 	d.fireOne(ctx, first)
-	if _, err := s.db.Exec(`UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
 		t.Fatal(err)
 	}
 	second := first
@@ -126,7 +126,7 @@ func TestN4RearmedPendingStartHasNewIdempotencyKey(t *testing.T) {
 	if exec.seen[0].IdempotencyKey == exec.seen[1].IdempotencyKey {
 		t.Fatal("new scheduled start reuses consumed start identity")
 	}
-	if _, err := s.db.Exec(`UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
 		t.Fatal(err)
 	}
 	d.fireOne(ctx, second)

@@ -113,3 +113,22 @@ func TestExecutorCallPipelineTypedInputsBeforeDispatch(t *testing.T) {
 		cleanup()
 	}
 }
+
+func TestNestedInputsWholeStepOutputsRemainTyped(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, kind string
+		want            any
+	}{
+		{"zero", "0", "integer", float64(0)},
+		{"false", "false", "boolean", false},
+		{"object", `{"literal":"{{ inputs.private }}"}`, "object", map[string]any{"literal": "{{ inputs.private }}"}},
+		{"array", "[0,false]", "array", []any{float64(0), false}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := renderNestedInputs(map[string]any{"target": "{{ steps.fetch.output }}"}, []InputSpec{{Name: "target", Type: tc.kind, Required: true}}, RenderContext{StepOutputs: map[string]string{"fetch": tc.raw}})
+			if err != nil || !reflect.DeepEqual(got["target"], tc.want) {
+				t.Fatalf("whole output: %#v %v", got, err)
+			}
+		})
+	}
+}

@@ -76,19 +76,21 @@ function ContractRow({
   )
 }
 
+interface RoutineWorkOverviewProps {
+  workspaceId?: string
+  definition: unknown
+  /** The recipe graph, shown when the reader switches the step block to Map. */
+  map?: RoutineStepSpineProps["map"]
+  onEdit?: () => void
+}
+
 /** Read the saved definition without inventing execution order, checks or effects. */
 export function RoutineWorkOverview({
   definition,
   map,
   onEdit,
   workspaceId,
-}: {
-  workspaceId?: string
-  definition: unknown
-  /** The recipe graph, shown when the reader switches the step block to Map. */
-  map?: RoutineStepSpineProps["map"]
-  onEdit?: () => void
-}) {
+}: RoutineWorkOverviewProps) {
   const dsl = isRecord(definition) ? definition : {}
   const inputs = routineInputSpecs(dsl)
   const outputs = Array.isArray(dsl.outputs) ? dsl.outputs.filter(isRecord) : []

@@ -5,6 +5,7 @@ import type { RoutineDetail } from "../routines-detail-panel"
 const h = vi.hoisted(() => ({
   calls: [] as { url: string; body: Record<string, unknown> }[],
   appearanceFails: false,
+  discardFails: false,
   draftConflict: false,
   scheduleConflict: false,
   linked: false,
@@ -36,6 +37,7 @@ vi.mock("@/components/features/crews/crew-picker", () => ({
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: vi.fn(async (url: string, init?: RequestInit) => {
     h.calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} })
+    if (init?.method === "DELETE" && h.discardFails) return new Response("<html>Bad gateway</html>", { status: 502 })
     if (h.savedDrafts && url.endsWith("/drafts") && !init?.method)
       return new Response(
         JSON.stringify([
@@ -139,6 +141,7 @@ beforeEach(() => {
   cleanup()
   h.calls = []
   h.appearanceFails = false
+  h.discardFails = false
   h.draftConflict = false
   h.scheduleConflict = false
   h.linked = false
@@ -336,4 +339,18 @@ it("keeps the latest selected draft when an earlier read finishes last", async (
   })
   expect(screen.getByLabelText("Name")).toHaveValue("second")
   expect(h.draftReads.get("first")!.signal?.aborted).toBe(true)
+})
+
+it("explains a non-JSON discard failure without losing the draft", async () => {
+  h.linked = true
+  h.discardFails = true
+  const confirm = window.confirm
+  window.confirm = vi.fn(() => true)
+  try {
+    render(<RoutineCreateDialog {...props} routine={undefined} savedDraftLink={{ slug: "existing", id: "ai-draft-1" }} />)
+    await screen.findByDisplayValue("Draft from Chat")
+    fireEvent.click(screen.getByRole("button", { name: "Discard saved draft" }))
+    await screen.findByText(/Could not discard the draft/)
+    expect(screen.getByDisplayValue("Draft from Chat")).toBeInTheDocument()
+  } finally { window.confirm = confirm }
 })

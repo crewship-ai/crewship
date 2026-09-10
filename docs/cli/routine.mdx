@@ -479,7 +479,7 @@ Output reports total / mean / p95 / max cost; p50 / p95 / max duration; fail-rea
 
 ## `crewship routine backtest <slug>`
 
-Replay a corpus of recent, successful runs against a **candidate version** and diff the outputs — validate a routine change before rollout, without creating a new version or touching which version is live. Read-only: `--against` names an immutable [`versions`](#crewship-routine-versions-slug) row; the backtest never bumps `head_version` and never changes what `run`/schedules/webhooks execute.
+Replay a corpus of recent, successful runs against a **candidate version** and diff the outputs — validate a routine change before rollout, without creating a new version or touching which version is live. The live version is unchanged: `--against` names an immutable [`versions`](#crewship-routine-versions-slug) row; the backtest never bumps `head_version` and never changes what `run`/schedules/webhooks execute. Replayed runs still execute real work and may make external writes or incur model costs.
 
 ```bash
 # Backtest v9 against the last 7 days of successful runs
@@ -964,7 +964,8 @@ crewship routine schema -o routine.schema.json
 Test a selected top-level step without contacting Crewship or executing external
 work. This is separate from `validate` (no step computation) and `step-run`
 (real execution). The editor exposes the same implementation under **Test →
-Test with fixtures**.
+Test with fixtures**. The HTTP API exposes the same implementation at
+`POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test`.
 
 ```bash
 crewship routine fixture-test invoice.json --step normalize \
@@ -1003,6 +1004,12 @@ inputs and available outputs on request. The source run/hash remain visible.
 The archive and output read must both be available; failures never become empty
 fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
 an explicit replacement choice. Import does not resume the source or run work.
+
+
+Runtime references in offline step tests use explicit samples: `--env` supplies
+`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
+supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
+secret values must be strings. No server environment or credential vault is read.
 
 
 ## `crewship routine step-run <slug> <step>`
@@ -1876,55 +1883,6 @@ All routine subcommands accept these global flags:
 - [Routines guide](/guides/routines) — concepts, DSL spec, two-tier execution, troubleshooting
 - [CLI overview](/cli/overview) — global flags + auth
 - [Scheduling guide](/guides/scheduling) — recurring background work primitives
-
-## `crewship routine fixture-test <recipe.json|recipe.yaml>`
-
-Test a selected top-level step without contacting Crewship or executing external
-work. This is separate from `validate` (no step computation) and `step-run`
-(real execution). The HTTP API exposes the same implementation at `POST /workspaces/{workspaceId}/pipelines/fixture_test`. Editor integration follows separately.
-
-```bash
-crewship routine fixture-test invoice.json --step normalize \
-  --input @sample-inputs.json --outputs @captured-outputs.json
-crewship routine fixture-test invoice.json --step fetch \
-  --fixture-output-file sample-response.json
-```
-
-| Option | Meaning |
-| --- | --- |
-| `--step` | Required top-level step ID. |
-| `--input` | Typed JSON object, inline or `@file`; recipe defaults apply. |
-| `--outputs` | JSON object keyed by upstream step ID, inline or `@file`. |
-| `--fixture-output-file` | Explicit replacement output for an agent, HTTP or script step. An empty file is an empty fixture. |
-
-Transforms use the same pure Go transform implementation as a live run and
-refuse missing template values. Agent/HTTP/script steps only validate the
-supplied replacement; without it they fail closed. Other types are not
-supported. Output schema validation blocks file and remote schema references;
-local fragment references remain supported.
-
-The report includes `execution_mode: fixtures`, `output_source`, exact
-`definition_hash`, `fixture_hash`, output, `valid`, `validation_declared`, and
-limitations. No declared checks is explicitly distinguished from passing a
-real output contract. A failed output check returns a nonzero CLI exit code.
-
-This does not run the DAG, conditions, retries, outcome graders or real model
-calls, does not prove credentials/service behavior, and does not mint a
-publication token. Test data is supplied per request/file; there is no shared
-production fixture cache or persistent fixture store. Editing a definition or
-input changes its evidence hash. Existing run exports can be used as input
-files subject to their normal workspace access.
-
-In the editor's Test section, **Load captured data** copies a run's recorded
-inputs and available outputs on request. The source run/hash remain visible.
-The archive and output read must both be available; failures never become empty
-fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
-an explicit replacement choice. Import does not resume the source or run work.
-
-Runtime references in offline step tests use explicit samples: `--env` supplies
-`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
-supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
-secret values must be strings. No server environment or credential vault is read.
 
 ### Answer a typed waitpoint
 
