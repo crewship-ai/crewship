@@ -385,7 +385,8 @@
               "cli/chain",
               "cli/logs",
               "cli/metrics",
-              "cli/presence"
+              "cli/presence",
+              "cli/work"
             ]
           },
           {
@@ -501,6 +502,7 @@
               "api-reference/notification-channels",
               "api-reference/inbox",
               "api-reference/webhooks",
+              "api-reference/work-items",
               "api-reference/websocket",
               "api-reference/admin",
               "api-reference/keeper",

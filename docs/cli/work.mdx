@@ -1,0 +1,180 @@
+---
+title: "Work Commands"
+description: "Read the durable work ledger — what Crewship accepted, which attempt ran, and why it ended — then cancel or replay one item."
+icon: "list-todo"
+stability: experimental
+tag: Experimental
+---
+
+# crewship work
+
+Every piece of agent work is recorded before anything starts running. `crewship
+work` reads that ledger, so "we never received it", "we received it and
+filtered it out", and "it ran and failed" are three different answers instead
+of one shrug.
+
+The full API contract is in the [Work Items reference](/api-reference/work-items).
+
+```bash
+crewship work list --state running
+crewship work get cwk0000000000000
+crewship work cancel cwk0000000000000
+```
+
+Three identifiers, routinely confused:
+
+| Identifier | Names | Changes |
+|---|---|---|
+| work id | one accepted unit of work | never — a replay mints a new one |
+| run id | one attempt at it | every retry |
+| session id | the conversation | when the conversation does |
+
+Nothing these commands print contains the accepted input, a webhook payload,
+or model output. A work item's input is, for a chat source, the conversation
+itself — you get its `input_sha256` instead.
+
+---
+
+## `crewship work list`
+
+List work items in the current workspace, at most 100 per page.
+
+```bash
+crewship work list
+crewship work list --state needs_reconciliation
+crewship work list --source webhook --class background
+crewship work list --agent research-agent -f json
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--state` | (unset) | Filter by state: `queued`, `starting`, `running`, `waiting`, `retry_wait`, `succeeded`, `failed`, `expired`, `cancelled`, `needs_reconciliation` |
+| `--class` | (unset) | Filter by capacity class: `chat` or `background` |
+| `--source` | (unset) | Filter by producer: `webhook`, `chat`, `assignment`, `schedule`, `pipeline_step`, `manual` |
+| `--agent` | (unset) | Filter by the agent the work runs as |
+| `--after` | (unset) | Resume from a previous page's cursor |
+
+**Output columns:** ID, STATE, CLASS, SOURCE, AGENT, ATTEMPTS, CREATED
+
+A misspelt `--state` is refused rather than answered with an empty page —
+"nothing is running" is the wrong answer to a typo. When more rows remain the
+command prints the exact `--after` invocation that continues.
+
+`needs_reconciliation` deserves a look whenever it appears: it means a runtime
+may still be alive under a locator nobody has verified, and it keeps holding
+its capacity until somebody resolves it.
+
+---
+
+## `crewship work get <work-id>`
+
+Show one work item, every attempt, and its whole history.
+
+```bash
+crewship work get cwk0000000000000
+crewship work get cwk0000000000000 -f json | jq '.events[-1]'
+```
+
+The attempt rows carry the run id (the same identifier the journal indexes),
+the lease and its owner, the runtime locator recovery consults before deciding
+a process is gone, the cost, and how the attempt ended. The history is
+append-only, in sequence order, and includes any recorded cancel request.
+
+---
+
+## `crewship work cancel <work-id>`
+
+Ask for a work item to stop. Safe to repeat.
+
+```bash
+crewship work cancel cwk0000000000000
+crewship work cancel cwk0000000000000 -f json | jq -r .outcome
+```
+
+Cancelling is a **request**, not an immediate result. The command reports
+which of three things happened:
+
+| `outcome` | Meaning |
+|---|---|
+| `cancelled` | The work had not started. It was stopped atomically and the stop is confirmed. |
+| `requested` | The work holds a runtime. It has been signalled; it becomes `cancelled` only once the stop is **confirmed**, and `needs_reconciliation` if it cannot be. |
+| `already_terminal` | It finished first. The state shown is the real one — the command never claims a cancel it did not perform. |
+
+Cancelling does not undo external effects that already happened.
+
+---
+
+## `crewship work replay <work-id>`
+
+Create a **new** work item from a finished one.
+
+```bash
+crewship work replay cwk0000000000000 --reason "provider outage"
+crewship work replay cwk0000000000000 --target-revision 7
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--reason` | (unset) | Why this is being replayed; recorded on the new work item |
+| `--target-revision` | the original's | Replay against a different target revision |
+
+This is not a retry. A retry keeps the work id and mints a new run id, and the
+queue does that on its own for a repeatable failure. A replay is a new
+authorization: the new item runs under **your** identity, carries `replay_of`
+and your reason, and re-uses the original input. Terminal history is never
+rewritten.
+
+Two refusals, each with an explanation rather than an opaque failure:
+
+- Replaying work that has not finished. Cancel it first.
+- Replaying webhook-sourced work whose raw payload has passed its retention.
+  The delivery record survives the payload, so "we received it, we can no
+  longer replay it" stays distinguishable from "we never saw it" — but only
+  the sender can produce the bytes again.
+
+---
+
+## `crewship work deliveries list`
+
+List recorded inbound webhooks, at most 100 per page.
+
+```bash
+crewship work deliveries list
+crewship work deliveries list --decision ignored
+crewship work deliveries list --endpoint ep_123 --source-id 8f4c1a2e
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--endpoint` | (unset) | Filter by endpoint id |
+| `--source-id` | (unset) | The sender's own delivery id; requires `--endpoint` |
+| `--decision` | (unset) | Filter by filter decision: `accepted` or `ignored` |
+| `--event-type` | (unset) | Filter by event type, e.g. `issues` or `push` |
+| `--after` | (unset) | Resume from a previous page's cursor |
+
+**Output columns:** ID, ENDPOINT, PROFILE, EVENT, DECISION, WORK, PAYLOAD, RECEIVED
+
+Deliveries the filter rejected are listed too, with their reason and no work
+id: a ping or a filtered event is auditable rather than invisible.
+
+`--endpoint` together with `--source-id` asks the identity question — "did you
+receive this one" — and answers with zero or one row. A sender's delivery id
+is only unique within an endpoint, so `--source-id` on its own is refused.
+
+The PAYLOAD column is `held` or `dropped`, which is what decides whether
+`crewship work replay` can work on the item this delivery produced.
+
+---
+
+## `crewship work deliveries get <delivery-id>`
+
+Show one delivery: which endpoint and signature profile accepted it, what the
+filter decided and why, the work it produced, and whether its payload is still
+held.
+
+```bash
+crewship work deliveries get cdl0000000000000
+```
+
+The payload itself is never printed. `body_sha256` and the byte count identify
+it without publishing whatever the sender put inside.

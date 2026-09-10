@@ -94,6 +94,7 @@ func init() {
 	rootCmd.AddCommand(whoamiCmd)
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(workspaceCmd)
+	rootCmd.AddCommand(workCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(crewCmd)
 	rootCmd.AddCommand(runCmd)

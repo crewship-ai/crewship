@@ -1,0 +1,160 @@
+---
+title: "Work Items"
+description: "Read the durable work ledger — what was accepted, which attempt is running, and why it ended — then cancel or replay one item."
+icon: "list-todo"
+stability: experimental
+tag: Experimental
+---
+
+Every piece of agent work Crewship accepts is recorded as a **work item**
+before anything starts running. The item is the durable answer to "did you
+take this, and what happened to it" — it survives a restart, it keeps its
+identity across every retry, and it carries the authorization it was admitted
+under.
+
+Three identifiers get conflated constantly, so they are worth separating once:
+
+| Identifier | What it names | When it changes |
+|---|---|---|
+| `work_id` | one accepted unit of work | never — a manual replay mints a **new** work item carrying `replay_of` |
+| `run_id` | one attempt at that work | every retry |
+| `session_id` | the conversation | when the conversation does |
+
+A fourth value, `generation`, is bumped on every claim. It is the fence: a
+worker whose lease was taken over cannot report a result for the attempt that
+replaced it.
+
+## States
+
+| State | Meaning |
+|---|---|
+| `queued` | accepted and durable, waiting for capacity |
+| `starting` | claimed — capacity reserved, runtime not yet confirmed |
+| `running` | a confirmed live runtime |
+| `waiting` | parked on a waitpoint or on a child; the execution slot is released once the process is confirmed parked, but the session stays occupied |
+| `retry_wait` | a safely repeatable failure; eligible again at `eligible_at` |
+| `succeeded` `failed` `expired` `cancelled` | terminal |
+| `needs_reconciliation` | an unclear external effect, or a live runtime whose ownership cannot be safely recovered |
+
+`needs_reconciliation` is **not** a failure and **not** an automatic retry. It
+means a process may still be alive under a locator nobody has verified, so it
+keeps holding its capacity until a person or a reconciler resolves it. A timer
+never clears it.
+
+`cancelled` means a **confirmed** stop. Work whose process could not be
+stopped, or whose outcome is unclear, goes to `needs_reconciliation` instead —
+never to `cancelled`.
+
+## What these responses never contain
+
+The ledger stores the accepted input (`input_json`), each transition's
+free-form detail, and — for a webhook — the raw payload. None of it is served
+here. A work item's input is, for a chat or assignment source, the
+conversation itself, so the API returns its fingerprint (`input_sha256`) and
+the revision it was accepted against instead. No response on this page carries
+conversation text, credentials or model output.
+
+A receipt is an identifier, not a capability. Holding a `work_id` or a
+`delivery_id` grants nothing: every route below requires an authenticated
+session or CLI token, membership of `{workspaceId}`, and — for the two `POST`
+routes — MANAGER or above. **A webhook token is permission to deliver, and
+never permission to read the work a delivery produced.**
+
+## Reading work items
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/work-items` | member (`read`) | No body; optional `?state=`, `?class=`, `?source=`, `?agent_id=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}` | member (`read`) | No body | One work item plus its `attempts[]` and `events[]` | `200`, `400`, `401`, `403`, `404`, `500` |
+
+The list is keyset paginated: at most 100 rows, with `next_cursor` set when
+more remain, passed back as `?after=`. Filters are validated against the
+vocabularies above — `?state=runnign` is a `400`, not an empty page, because
+"nothing is running" is the wrong answer to a typo.
+
+A work item belonging to another workspace answers `404`, not `403`: a `403`
+would confirm the id exists to someone who has no business knowing it.
+
+The detail adds two lists. `attempts[]` carries one entry per attempt —
+`run_id` (the same namespace as the journal's run id), the lease and its
+heartbeat, the `runtime_locator` recovery consults before deciding a process
+is gone, and `cost_usd`. `events[]` is the append-only history in sequence
+order.
+
+## Cancelling
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| POST | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel` | `create` (MANAGER+) | No body | `{ id, state, outcome, detail }` | `200`, `400`, `401`, `403`, `404`, `500` |
+
+Cancel is an **idempotent request, not an immediate terminal value**. The
+`outcome` field says what actually happened, and a client must not treat the
+three cases as the same `200`:
+
+| `outcome` | What it means |
+|---|---|
+| `cancelled` | The work was `queued` or `retry_wait`. Nothing was executing, so the stop was taken atomically and is confirmed. |
+| `requested` | The work holds a runtime. The request is recorded durably; the process is signalled, with escalation after a grace period. It becomes `cancelled` only once the stop is confirmed — and `needs_reconciliation` if it cannot be. |
+| `already_terminal` | A completion won the race. `state` is the real finished state. |
+
+`state` is always the item's true state after the call. Cancelling does not
+undo external effects that already happened.
+
+Repeating the call is safe. A cancel request against a live attempt is
+recorded once per `generation`, so polling does not grow the history.
+
+## Replaying
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| POST | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay` | `create` (MANAGER+) | Optional JSON body: `reason`, `target_revision` | The **new** work item, carrying `replay_of` | `201`, `400`, `401`, `403`, `404`, `409`, `500` |
+
+A replay is not a retry. A retry keeps the work id and mints a new run id, and
+the queue does that on its own for a repeatable failure. A replay is a new
+authorization: it creates a new work item carrying `replay_of`, your reason,
+**your** identity rather than the original requester's, and the original
+input. Terminal history is never rewritten.
+
+`target_revision` is inherited from the original unless you name one. Running
+against a different revision has to be explicit, and an unrecognised field in
+the body is a `400` rather than a silently ignored typo.
+
+Two refusals, both `409` with an explanation rather than an opaque failure:
+
+- **The original has not finished.** Replaying live work would start a second
+  run of the same input. Cancel it first.
+- **The payload is gone.** A webhook-sourced replay needs the raw body the
+  delivery ledger kept, and that body has its own retention. Once it expires
+  the delivery record remains — so "we received it, we can no longer replay
+  it" stays distinguishable from "we never saw it" — but the replay is
+  unavailable and the response says so, naming the expiry. Ask the sender to
+  deliver it again.
+
+Check `raw_body_available` on the delivery before offering a replay control.
+
+## Webhook deliveries
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries` | member (`read`) | No body; optional `?endpoint_id=`, `?source_delivery_id=`, `?decision=`, `?event_type=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}` | member (`read`) | No body | One delivery record | `200`, `400`, `401`, `403`, `404`, `500` |
+
+Every inbound webhook is recorded before anything is dispatched, including the
+ones the filter rejected: an ignored delivery keeps its `filter_reason` and a
+null `work_id`, so a ping or a filtered event is auditable rather than
+invisible.
+
+Delivery identity is `(workspace, endpoint, source delivery id)` — never the
+signature, which changes with a fresh timestamp for the same logical delivery.
+Passing `?endpoint_id=` **and** `?source_delivery_id=` asks that identity
+question and answers with a page of zero or one. `?source_delivery_id=` on its
+own is a `400`: a sender's delivery id is only unique within an endpoint.
+
+The raw payload is never returned. `raw_body_available` says whether it is
+still held (and therefore whether a replay can work), `raw_body_expires_at`
+says until when, and `body_sha256` plus `body_bytes` identify it without
+publishing whatever the sender put inside.
+
+## CLI
+
+Everything above has a command: see [`crewship work`](/cli/work).
