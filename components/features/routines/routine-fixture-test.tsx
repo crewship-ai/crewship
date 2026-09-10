@@ -113,7 +113,7 @@ export function RoutineFixtureTest({
       )
       const result = await response.json()
       if (scope.current !== epoch) return
-      if (!response.ok) throw new Error(result.error || "Fixture test failed")
+      if (!response.ok) throw new Error(result.error || "Sample test failed")
       if (result.execution_mode !== "fixtures" || typeof result.valid !== "boolean")
         throw new Error("The server did not confirm a test with sample data.")
       setLast({ definition: snapshot, result })

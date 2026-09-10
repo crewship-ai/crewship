@@ -393,12 +393,15 @@ export function RoutineRunDetail({
             {run.failed_at_step && (
               <p className="font-medium text-destructive">
                 Failed step:{" "}
-                {
-                  describeStep(
-                    dsl?.steps?.find((step) => step.id === run.failed_at_step),
-                    1,
-                  ).title
-                }
+                {dsl?.steps?.some((step) => step.id === run.failed_at_step)
+                  ? describeStep(
+                      dsl.steps.find((step) => step.id === run.failed_at_step),
+                      1,
+                    ).title
+                  : "Name unavailable"}
+                <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
+                  {run.failed_at_step}
+                </span>
               </p>
             )}
             {run.error_message && (

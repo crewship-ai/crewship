@@ -72,6 +72,21 @@ beforeEach(() => {
 })
 
 describe("client routine workspace", () => {
+  it("retains the failed step identifier when its historical recipe cannot be read", () => {
+    h.run = {
+      ...h.run,
+      status: "failed",
+      failed_at_step: "original_step",
+      error_message: "Connection lost",
+    }
+    h.dsl = null
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    expect(screen.getByText("Connection lost").parentElement).toHaveTextContent(
+      "Name unavailable",
+    )
+    expect(screen.getByText("original_step")).toBeVisible()
+    expect(screen.queryByText("new-head")).not.toBeInTheDocument()
+  })
   it("shows the error and named failed step together without opening technical details", () => {
     h.run = {
       ...h.run,

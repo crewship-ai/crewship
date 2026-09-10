@@ -815,7 +815,7 @@ export function RoutineCreateDialog({
       return
     }
     if (!parsed["name"]) {
-      toast.error("DSL must include a 'name' (used as slug)")
+      toast.error("The recipe needs a name in Code to identify it")
       return
     }
     setBusy("saving")
@@ -1845,7 +1845,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                       other surfaces make with CreateSurfaceChoice, drawn
                       differently and, at that size, barely tappable. */}
                   <CreateSurfaceChoice
-                    ariaLabel="DSL format"
+                    ariaLabel="Code format"
                     value={dslFormat}
                     onChange={switchDslFormat}
                     options={[
