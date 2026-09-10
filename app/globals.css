@@ -36,6 +36,28 @@
  * State changes stay instant rather than being removed: the overlay still
  * appears, it just does not travel. Motion-driven components read the same
  * preference through `prefersReducedMotion()` in lib/motion.ts. */
+/* The 16px floor for anything you type into.
+ *
+ * iOS zooms the whole page when a focused field renders under 16px, and it does
+ * not zoom back out on blur — the page comes back magnified and scrolled
+ * sideways, which reads as "the screen is broken" rather than "that text was
+ * small". Reported on Settings, where focusing the section search did exactly
+ * that (#2483).
+ *
+ * This is a floor, not a size: `max(16px, 1em)` leaves anything already larger
+ * alone. It is `!important` because it has to beat the ~80 call sites that set
+ * `text-xs` on an input directly, and a class selector outranks an element one
+ * — a rule without it would silently lose to the very markup it exists to
+ * correct. Checkboxes, radios, ranges and colour swatches are excluded: they
+ * render no text and their box is sized by other means. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-slot$="-content"],
   [data-slot$="-overlay"],

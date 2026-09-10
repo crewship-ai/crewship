@@ -233,7 +233,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
             leftCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
+            isMobile && !leftCollapsed && "fixed inset-y-0 left-0 z-50 shadow-2xl",
           )}
         >
           {leftCollapsed ? (

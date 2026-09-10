@@ -599,7 +599,7 @@ export default function CredentialsPage() {
               sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
               // The collapsed rail stays in flow at both sizes, so the expand
               // button never moves.
-              isMobile && !sidebarCollapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
+              isMobile && !sidebarCollapsed && "fixed inset-y-0 left-0 z-50 shadow-2xl",
             )}
           >
             {sidebarCollapsed ? (
