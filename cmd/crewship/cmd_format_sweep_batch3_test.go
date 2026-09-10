@@ -263,6 +263,7 @@ func TestEvalBaselineDiffRunE_DefaultStaysHuman(t *testing.T) {
 
 func TestEvalCompareRunE_DefaultStaysHuman(t *testing.T) {
 	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/workspaces/"+covWSCli5+"/pipelines/eval-x/versions", clitest.JSONResponse(200, []pipelineVersionRow{{Version: 1, IsHead: true, DefinitionHash: "hash"}}))
 	// tier-a=fast / tier-b=smart both POST the same /run path (differ only in
 	// the request body's tier_override), so one stub serves both sides.
 	stub.OnPost("/api/v1/workspaces/"+covWSCli5+"/pipelines/eval-x/run",
@@ -290,6 +291,7 @@ func TestEvalCompareRunE_DefaultStaysHuman(t *testing.T) {
 // the table/markdown renderers.
 func TestEvalCompareRunE_YAMLAndNDJSON(t *testing.T) {
 	stub := covSetupCli5(t)
+	stub.OnGet("/api/v1/workspaces/"+covWSCli5+"/pipelines/eval-x/versions", clitest.JSONResponse(200, []pipelineVersionRow{{Version: 1, IsHead: true, DefinitionHash: "hash"}}))
 	stub.OnPost("/api/v1/workspaces/"+covWSCli5+"/pipelines/eval-x/run",
 		clitest.JSONResponse(200, map[string]any{
 			"run_id": "run_a", "status": "COMPLETED", "output": "hello world",
