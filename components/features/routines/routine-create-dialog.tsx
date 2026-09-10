@@ -1103,6 +1103,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
   return (
     <CreateSurface
       open={open}
+      restoreOpenerFocus
       onOpenChange={(next) => {
         if (!next) onClose()
       }}
