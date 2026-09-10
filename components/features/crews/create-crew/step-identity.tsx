@@ -109,7 +109,7 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
             value={state.slug}
             onChange={(e) => setState({ slug: normalizeSlug(e.target.value), slugTouched: true })}
             placeholder="engineering"
-            className="h-8 w-full rounded-md border border-hairline bg-background px-3 font-mono text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12 max-sm:text-sm"
+            className="h-8 w-full rounded-md border border-hairline bg-background px-3 font-mono text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-12 coarse:text-sm"
           />
         </CreateSurfaceField>
       </CreateSurfaceSection>

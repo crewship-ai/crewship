@@ -780,7 +780,7 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const filterChips = chips.filter((c) => !c.position)
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
       <SubBar
         icon={Activity}
         title="Activity"

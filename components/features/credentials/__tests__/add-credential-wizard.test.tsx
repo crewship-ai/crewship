@@ -155,7 +155,7 @@ describe("the step bar", () => {
 // 390×844. The dialog is the whole screen there, so the three things that
 // decide whether it is usable are: the tiles reflow, the body scrolls without
 // taking the actions with it, and the actions are big enough to hit.
-describe("layout on a phone", () => {
+describe("layout on a touch device", () => {
   it("reflows the shapes two-up, and three-up once there is room", () => {
     renderWizard()
     const grid = screen.getByTestId("shape-grid")
@@ -183,7 +183,7 @@ describe("layout on a phone", () => {
     renderWizard()
     pickShape(/^token/i)
     const cont = screen.getByRole("button", { name: /^continue$/i })
-    expect(cont.className).toContain("max-sm:h-12")
+    expect(cont.className).toContain("coarse:h-12")
     expect(cont.className).toContain("max-sm:flex-[2]")
     expect(screen.getByRole("button", { name: /^cancel$/i }).className).toContain("max-sm:flex-1")
   })
@@ -193,8 +193,10 @@ describe("layout on a phone", () => {
     pickShape(/^ssh key/i)
     // iOS Safari zooms whenever a focused field is under 16px. A plain field
     // inherits the ui kit's text-base and is fine; one that opts down to 12px
-    // mono has to opt back up below sm, and both were 12–14px flat before.
-    expect(screen.getByLabelText(/private key/i).className).toContain("max-sm:text-base")
+    // mono has to opt back up on a touch device, and both were 12–14px flat
+    // before. Keyed on the pointer rather than the width since #2483, so a
+    // tablet gets it too.
+    expect(screen.getByLabelText(/private key/i).className).toContain("coarse:text-base")
     expect(screen.getByLabelText(/^passphrase/i).className).not.toMatch(/(^|\s)text-(xs|sm)(\s|$)/)
   })
 

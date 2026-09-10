@@ -79,7 +79,7 @@ export function ProviderForm({ provider, values, onChange, onTest }: ProviderFor
           type="button"
           variant="soft"
           size="sm"
-          className="h-8 px-2.5 text-xs max-sm:h-12 max-sm:text-sm"
+          className="h-8 px-2.5 text-xs coarse:h-12 coarse:text-sm"
           disabled={testing || missingRequired}
           onClick={handleTest}
           title={missingRequired ? "Fill in the required fields first" : undefined}
