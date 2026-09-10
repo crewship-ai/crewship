@@ -21,6 +21,11 @@
  * phone breakpoint, so `bottom-[var(--mobile-tab-bar-h)]` is a no-op wherever
  * the bar is not rendered. 3.5rem is the bar itself; the safe-area inset is
  * padding inside it, not part of this number. */
+/* The app header's real height, inset included. The header pads for the status
+ * bar in standalone mode, so a page that subtracts a flat 48px is exactly that
+ * inset too tall — visible only once installed, which is where `display:
+ * standalone` in app/manifest.ts now puts it. */
+:root { --app-header-h: calc(12 * var(--spacing) + env(safe-area-inset-top)); }
 :root { --mobile-tab-bar-h: 0px; }
 @media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(3.5rem + env(safe-area-inset-bottom)); } }
 

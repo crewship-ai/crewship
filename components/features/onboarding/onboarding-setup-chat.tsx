@@ -232,7 +232,7 @@ export function OnboardingSetupChat({
     // from a dashed placeholder to a full-height card when the Guide answers.
     return (
       <div
-        className="flex h-[calc(100dvh-3rem-var(--mobile-tab-bar-h))] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
+        className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none"
         role="status"
       >
         <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
@@ -657,7 +657,7 @@ function ConnectedSetupChat({
   }, [proposal, workspaceId, onProposalApplied])
 
   return (
-    <div className="flex h-[calc(100dvh-3rem-var(--mobile-tab-bar-h))] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
+    <div className="flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[760px] w-full flex-col overflow-hidden rounded-[20px] border border-border bg-card shadow-lg lg:h-full lg:min-h-0 lg:max-h-none">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3 shrink-0">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-primary/30 bg-primary/15">
           {/* workspaceId is passed explicitly: this route never mounts the

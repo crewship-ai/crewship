@@ -215,7 +215,7 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-[calc(12*var(--spacing)+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
+    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
       {/* Left: breadcrumb only */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {renderBreadcrumbs()}

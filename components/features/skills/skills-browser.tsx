@@ -457,7 +457,7 @@ export function SkillsBrowser() {
   const bundledCount = skills.filter((s) => s.source === "BUNDLED").length
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
       {/* ---- Sub-bar: identity + tab lenses + Import action. Uses the
            shared <SubBar> so the chrome reads consistent across pages.
            Tabs are lenses over the same skill list; Import is a neutral

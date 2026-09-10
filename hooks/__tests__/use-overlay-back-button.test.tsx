@@ -78,6 +78,27 @@ describe("back closes an overlay instead of leaving the page", () => {
     expect(seen.filter((k) => k === "Escape"), "both layers answered one back").toHaveLength(1)
   })
 
+  it("stays out of history until the sheet is actually open", async () => {
+    // The hook used to be called in SheetContent's body, which mounts as soon
+    // as its parent renders it — Radix's Portal returns null inside the tree
+    // it returns, so the body and its effects run for a closed sheet too. The
+    // toolbar and the sidebar each keep one mounted on every dashboard page,
+    // so this pushed two dead entries per page load and back stopped working
+    // entirely: the top closed sheet swallowed the press with a no-op Escape.
+    const { Sheet, SheetContent, SheetHeader, SheetTitle } = await import("@/components/ui/sheet")
+    render(
+      <Sheet open={false}>
+        <SheetContent>
+          <SheetHeader><SheetTitle>closed</SheetTitle></SheetHeader>
+        </SheetContent>
+      </Sheet>,
+    )
+    expect(
+      pushSpy.mock.calls.length,
+      `a closed sheet pushed ${pushSpy.mock.calls.length} history entries`,
+    ).toBe(0)
+  })
+
   it("does not touch history when it is switched off", () => {
     render(<Probe enabled={false} />)
     expect(pushSpy).not.toHaveBeenCalled()

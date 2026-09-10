@@ -584,7 +584,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const toolCount = composioStatus.counts.accounts
 
   return (
-    <div className="flex h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar<IntegrationsTab>
         icon={Plug}
         title="Integrations"

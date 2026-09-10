@@ -338,7 +338,7 @@ export function InboxV2() {
   }
 
   return (
-    <div className="relative flex h-[calc(100dvh-3rem-var(--mobile-tab-bar-h))] min-h-0 flex-col overflow-hidden bg-background">
+    <div className="relative flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col overflow-hidden bg-background">
       {/* The page header every other page has (README §2): what this is, the
           counts and whether it is live. The top bar
           used to read only "Crewship" on this route. */}

@@ -603,7 +603,7 @@ export function OrchestrationLayout({
   const showToolbar = visibleTabs.length > 0 || showCreateButtons
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       {showToolbar && (
         <SubBar

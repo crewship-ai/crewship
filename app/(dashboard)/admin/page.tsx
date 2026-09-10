@@ -417,7 +417,7 @@ export default function AdminPage() {
   )
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))]">
+    <div className="flex flex-col h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
       {/* Identity lives in the sub-bar (not repeated in the sidebar). */}
       <SubBar
         icon={Shield}

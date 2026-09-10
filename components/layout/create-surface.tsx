@@ -393,7 +393,9 @@ export function CreateSurfaceFrame({
         className,
       )}
     >
-      {mobile && <SheetGrabber />}
+      {/* No grabber here: this frame is the chrome without a Dialog around
+          it, so there is nothing for the drag to move and nothing to dismiss.
+          A bar that cannot be dragged is the affordance this stopped being. */}
       <InDialog.Provider value={false}>{children}</InDialog.Provider>
     </div>
   )
@@ -424,8 +426,18 @@ function SheetGrabber() {
   const drag = React.useRef<{ startY: number; startedAt: number; sheet: HTMLElement } | null>(null)
 
   const setOffset = (sheet: HTMLElement, dy: number | null) => {
-    sheet.style.transition = dy === null ? "transform 180ms ease-out" : "none"
-    sheet.style.transform = dy === null ? "" : `translateY(${dy}px)`
+    if (dy === null) {
+      // Spring back, then hand styling back to the class: an inline transition
+      // left behind would override it on every later state change.
+      sheet.style.transition = "transform 180ms ease-out"
+      sheet.style.transform = ""
+      window.setTimeout(() => {
+        sheet.style.transition = ""
+      }, 200)
+      return
+    }
+    sheet.style.transition = "none"
+    sheet.style.transform = `translateY(${dy}px)`
   }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {

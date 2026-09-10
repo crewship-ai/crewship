@@ -148,7 +148,7 @@ export function BottomPanel({
       if (!dragRef.current) return
       const delta = dragRef.current.startY - clientY
       const next = Math.min(
-        PANEL_HEIGHT_MAX,
+        ceiling,
         Math.max(PANEL_HEIGHT_MIN, dragRef.current.startH + delta),
       )
       setHeight(next)
@@ -177,7 +177,9 @@ export function BottomPanel({
 
   const startDrag = (clientY: number) => {
     if (!open) return
-    dragRef.current = { startY: clientY, startH: height }
+    // Start from what is on screen, not from the stored preference: they
+    // differ whenever a desktop-sized height meets a phone ceiling.
+    dragRef.current = { startY: clientY, startH: clampedHeight }
     setDragging(true)
     document.body.style.userSelect = "none"
     document.body.style.cursor = "ns-resize"
@@ -208,7 +210,7 @@ export function BottomPanel({
           aria-label="Resize bottom panel"
           aria-valuenow={clampedHeight}
           aria-valuemin={PANEL_HEIGHT_MIN}
-          aria-valuemax={PANEL_HEIGHT_MAX}
+          aria-valuemax={ceiling}
           tabIndex={0}
           onMouseDown={(e) => {
             e.preventDefault()

@@ -45,6 +45,12 @@ function SheetOverlay({
   )
 }
 
+/** Nothing rendered; it exists so the hook's lifetime is the sheet's. */
+function OverlayBackButton() {
+  useOverlayBackButton()
+  return null
+}
+
 function SheetContent({
   className,
   children,
@@ -55,9 +61,6 @@ function SheetContent({
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
-  // Back closes the overlay instead of leaving the page under it.
-  useOverlayBackButton()
-
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -82,6 +85,14 @@ function SheetContent({
         )}
         {...props}
       >
+        {/* Back closes the sheet instead of leaving the page under it.
+            Rendered here, not called in this component's body: SheetContent
+            mounts as soon as its parent renders it, so a hook up there fires
+            for a CLOSED sheet too — and the toolbar and sidebar each keep one
+            mounted on every page, which turned "back closes the drawer" into
+            "back does nothing, twice". Inside Content it mounts only when the
+            portal does, which is when the sheet is open. */}
+        <OverlayBackButton />
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">

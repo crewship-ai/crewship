@@ -79,7 +79,7 @@ export default function ApprovalsPage() {
   // "not admin" reading of a still-unknown role.
   if (workspaceLoading) {
     return (
-      <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100dvh-48px-var(--mobile-tab-bar-h))]">
+      <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
         <aside className="w-full lg:w-56 shrink-0 space-y-3">
           <Skeleton className="h-5 w-24" />
           <Skeleton className="h-28 w-full" />
@@ -136,7 +136,7 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100dvh-48px-var(--mobile-tab-bar-h))]">
+    <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6 min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))]">
       <aside className="w-full lg:w-56 shrink-0 space-y-3">
         <div className="flex items-center gap-2">
           <Gavel className="h-4 w-4 text-foreground/60" />

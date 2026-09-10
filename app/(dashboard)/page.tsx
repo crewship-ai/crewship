@@ -269,7 +269,7 @@ export default function DashboardPage() {
   if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
 
   return (
-    <div className="flex min-h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
         icon={LayoutDashboard}
         title="Dashboard"
@@ -371,7 +371,7 @@ export default function DashboardPage() {
 
 function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
   return (
-    <div className="flex min-h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col">
+    <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
         <Skeleton className="h-[52px] rounded-xl" />

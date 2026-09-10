@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, useRef, useEffect } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, X } from "lucide-react"
 import {
   Table,
@@ -226,6 +226,20 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
     )
   }, [sortKey, sortDir])
 
+  /**
+   * `@md` on a container is 28rem. Measured, not guessed at from the viewport:
+   * this view also renders in a narrowed pane beside an open issue.
+   */
+  const scopeRef = useRef<HTMLDivElement>(null)
+  const [wide, setWide] = useState<boolean | undefined>(undefined)
+  useEffect(() => {
+    const el = scopeRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(([entry]) => setWide(entry.contentRect.width >= 448))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   if (issues.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-16 text-center">
@@ -238,7 +252,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   }
 
   return (
-    <div className="@container/issues rounded-lg border border-border overflow-hidden">
+    <div ref={scopeRef} className="@container/issues rounded-lg border border-border overflow-hidden">
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
@@ -481,13 +495,21 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
       </Table>
       </div>
 
-      <ul className="flex flex-col gap-2 p-2 @md/issues:hidden">
-        {sorted.map((issue) => (
-          <li key={issue.id}>
-            <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
-          </li>
-        ))}
-      </ul>
+      {/* The container query still decides what is SEEN — that is what keeps
+          the switch flash-free and correct inside a narrowed pane. This only
+          decides what is BUILT: once we have measured a wide container, the
+          cards are not rendered at all, because `display:none` still costs a
+          React render and a DOM node per row. Before the first measurement
+          both exist, so the first paint is never wrong. */}
+      {wide !== true && (
+        <ul className="flex flex-col gap-2 p-2 @md/issues:hidden">
+          {sorted.map((issue) => (
+            <li key={issue.id}>
+              <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

@@ -260,7 +260,7 @@ export function InboxList() {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-3rem-var(--mobile-tab-bar-h))] overflow-hidden">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] overflow-hidden">
       <InboxListPanel
         rows={rows}
         total={items.length}

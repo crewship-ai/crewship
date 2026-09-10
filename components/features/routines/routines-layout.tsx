@@ -176,7 +176,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
-    <div className="flex h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       {/* ---- Sub-bar: identity + actions ----
           Row 1 carries global context (Import / New routine); the
           page-specific 'Back to routines / <name>' breadcrumb lives one level
