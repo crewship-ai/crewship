@@ -105,9 +105,19 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		s.statsCollector.Register(containerID, req.CrewID, req.WorkspaceID)
 	}
 
+	// E0 run identity. This is the ONE dispatch path that mints no run id of
+	// its own and writes no run row anywhere — unlike the webhook, chatbridge,
+	// scheduler, assignment and peer-query paths, which all already create one
+	// for the journal and now hand it to the orchestrator. Mint it in the same
+	// shape here so the run still gets its own tmux session and /tmp file set
+	// rather than sharing the agent's; orchestrator.NewRunID is the single
+	// greppable place a run id is invented rather than inherited.
+	runID := orchestrator.NewRunID()
+
 	runReq := orchestrator.AgentRunRequest{
 		AgentID:        agentID,
 		AgentSlug:      req.AgentSlug,
+		RunID:          runID,
 		CrewID:         req.CrewID,
 		CrewSlug:       req.CrewSlug,
 		WorkspaceID:    req.WorkspaceID,

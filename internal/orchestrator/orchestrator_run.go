@@ -88,6 +88,15 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// read site) keeps a future third consumer safe by construction.
 	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints)
 
+	// E0 run identity. Normalised HERE, once, ahead of everything that derives
+	// a runtime name from it — the RunState key, the tmux session and its six
+	// /tmp files, the scratch dir. Doing it at the read sites instead would
+	// leave the next one to remember, which is the defect this whole change is
+	// undoing for the agent slug.
+	if err := o.ensureRunID(&req); err != nil {
+		return fmt.Errorf("run agent: %w", err)
+	}
+
 	// Open the outermost OTel span for this agent invocation. Every
 	// downstream LLM call, tool execution, and sub-agent fan-out becomes
 	// a child of this span via context propagation. We capture the
@@ -340,8 +349,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		defer o.RetainCrewContainer(req.CrewID, req.ContainerID)()
 	}
 
+	// E0: keyed by RunID, not ChatID. ChatID is not per-run on three dispatch
+	// paths — the agent webhook used one constant chat id per agent while
+	// allowing 8 concurrent runs of it, and the peer-query and assignment
+	// paths reuse the CALLER's chat id — so two live runs of one agent shared
+	// this row and each terminal status overwrote the other's. RunState keeps
+	// ChatID as its own field, so nothing is lost by the change.
 	runState := RunState{
-		ID:          req.ChatID,
+		ID:          req.RunID,
 		AgentID:     req.AgentID,
 		ChatID:      req.ChatID,
 		Status:      "running",
@@ -657,9 +672,21 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			o.dispatchToolCallObservers(req, event)
 			// Loop guard: extract (tool_name, input) from the event metadata
 			// and abort the exec if the same call repeats past the threshold.
-			// Cancelling execCtx closes the stream reader and kills the CLI
-			// process; the post-stream check below turns that into a distinct
-			// loop_detected failure instead of a generic non-zero exit.
+			//
+			// What cancel() actually does: it ends OUR side. The stream reader
+			// closes, streamOutput returns, and the post-stream check below
+			// turns that into a distinct loop_detected failure instead of a
+			// generic non-zero exit. It does NOT kill the CLI process — this
+			// comment used to claim it did. The agent runs inside a DETACHED
+			// tmux session (setupTmuxExec: `tmux new-session -d`), so the
+			// process it started has no parent left to signal it; the very next
+			// block's `agentExecStillRunning = true` path (see the `if running`
+			// branch after ExecInspect) exists precisely because the exec
+			// routinely outlives this call. Ending the run's process tree for
+			// real needs the session name — provider.TmuxKillSessionCmd against
+			// TmuxSessionName(slug, runID) — which is what Tier 2 hard stop
+			// does (internal/api/issue_handler_hard_stop.go); the loop guard
+			// deliberately does not, it only stops paying for the output.
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				name, _ := m["tool_name"].(string)
 				if guard.observe(name, m["input"]) {
@@ -1338,7 +1365,21 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 // fail-loud paths (agent dirs, credential files, MCP config) are checked
 // against the flush result rather than against a per-step exec error.
 func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, keeperEnabled bool, runID string) ([]string, string, error) {
-	scratchDir := path.Join("/workspace", req.AgentSlug)
+	// E0: scratch is per-RUN, not per-agent. Verified before changing it that
+	// this path has no reader anywhere: `scratchDir` is referenced exactly
+	// twice in the tree (here and the mkdir below), no other Go code, CLI
+	// command, API handler or frontend route names /workspace/<slug>, and the
+	// backup/restore paths deal with the /workspace volume as a whole. So
+	// deepening it costs nothing.
+	//
+	// It also buys nothing yet, and that is worth saying plainly: the system
+	// prompt (exec.go's FILESYSTEM block) advertises scratch as "/workspace/",
+	// unscoped, so agents write to the volume root and never into this
+	// directory at all. Naming the run dir to the model is a prompt change
+	// with real behavioural blast radius (it is the same block that teaches
+	// HOME, output and secrets), so it is left for the E0 design decision that
+	// owns HOME and /output rather than smuggled in here.
+	scratchDir := path.Join("/workspace", req.AgentSlug, req.RunID)
 	outputDir := path.Join("/output", req.AgentSlug)
 	workDir := outputDir // CWD = output dir so files are immediately visible to user
 
@@ -1590,7 +1631,7 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 				req.CLIAdapter, n, maxArgStrLen)
 		}
 		var tmuxErr error
-		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, req.RunID, env)
 		if tmuxErr != nil {
 			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
 				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)

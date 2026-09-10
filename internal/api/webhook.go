@@ -377,10 +377,20 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		releaseSlot = release
 	}
 
-	// 2. Create a chat session for this webhook if it doesn't exist
-	// We use a deterministic chat ID based on the agent ID so we don't spam sessions,
-	// or we could create a new one every time. Let's use a "webhook" suffix.
-	chatID := fmt.Sprintf("webhook-%s", agentID)
+	// 2. Create a chat session for THIS DELIVERY.
+	//
+	// It used to be fmt.Sprintf("webhook-%s", agentID) — one constant chat id
+	// per agent, "so we don't spam sessions". But h.agentMaxConcurrent (8)
+	// permits eight simultaneous runs of that same agent, so eight deliveries
+	// in flight all published on `session:webhook-<agentID>` and all appended
+	// to one conversation: two run streams merged on nothing but the agent id,
+	// which is exactly what the E0 contract forbids ("Dva run streams se nikdy
+	// nesloučí jen podle agent slug/ChatID" — IMPLEMENTATION §9).
+	//
+	// Keyed by runID, which is already unique per delivery AND already
+	// deduplicated: a re-delivery short-circuits at the idempotency check well
+	// above this line, so a retried webhook does not create a second chat.
+	chatID := fmt.Sprintf("webhook-%s-%s", agentID, runID)
 	if err := h.resolver.CreateChat(ctx, chatbridge.CreateChatRequest{
 		ChatID:      chatID,
 		AgentID:     agentID,
@@ -483,6 +493,13 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 			MemoryMB:    info.MemoryMB,
 			CPUs:        info.CPUs,
 		})
+		// E0: hand the orchestrator the run id minted at the top of trigger()
+		// — the same one reserved in the idempotency table, written to the run
+		// record and stamped on every journal entry beneath this run. Without
+		// it the orchestrator would derive this run's tmux session and /tmp
+		// files from the agent slug alone, and the eight concurrent webhook
+		// runs this handler explicitly allows would overwrite each other.
+		req.RunID = runID
 		// Externally-triggered runs are forced to restricted egress regardless
 		// of the crew's own mode: the payload comes from outside, so it must
 		// not be able to drive a `free` crew's agent to arbitrary hosts. The

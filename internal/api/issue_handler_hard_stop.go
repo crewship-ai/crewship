@@ -216,11 +216,11 @@ func (h *IssueHandler) awaitExecID(ctx context.Context, t cancelTarget) (contain
 }
 
 // assignmentAgentSlug resolves the slug of the agent assigned to
-// assignmentID — the container-visible identity Tier 2 needs to build the
-// run's tmux session name (orchestrator.TmuxSessionName). Every agent run
-// dispatches through setupTmuxExec (internal/orchestrator/
-// orchestrator_exec_env.go) under a session named exactly that, so the slug
-// is all a hard stop needs to find it — no pid, host or container, involved.
+// assignmentID — half of the container-visible identity Tier 2 needs to build
+// the run's tmux session name (orchestrator.TmuxSessionName). The other half
+// is the run id, which resolveRunSession supplies: since E0 the session is
+// "agent-<slug>-<runID>", so the slug alone no longer finds a run. Still no
+// pid, host or container, involved.
 // A miss (the assignee is not an agent, or the agent row is gone) returns
 // "", nil: the caller treats an empty slug as "no session name to build",
 // never as an error worth surfacing on its own.
@@ -282,9 +282,114 @@ func (h *IssueHandler) hardStopOne(ctx context.Context, wsID, assignmentID, cont
 		return
 	}
 
-	session := orchestrator.TmuxSessionName(agentSlug)
+	// E0: a tmux session names one RUN ("agent-<slug>-<runID>"), not an agent,
+	// so a slug alone no longer builds a session name. Resolve THIS
+	// assignment's run explicitly — killing whichever run of the agent happens
+	// to be up is precisely what E0 exists to stop.
+	session, resolveResult := h.resolveRunSession(ctx, wsID, assignmentID, containerID, agentSlug)
+	if session == "" {
+		h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, "", resolveResult)
+		return
+	}
 	result := h.killTmuxSession(ctx, containerID, execID, session)
 	h.recordHardStopResult(ctx, wsID, assignmentID, containerID, execID, session, result)
+}
+
+// resolveRunSession returns the tmux session name of the run behind
+// assignmentID, or "" plus the hard_stop_result to record instead.
+//
+// Two ways in, in order of confidence:
+//
+//  1. The run id the dispatch path already minted. assignments has no run_id
+//     column and E0 adds no migration, but the journal has carried it since
+//     Phase J: the ASSIGNMENT dispatch writes a run.started entry whose
+//     trace_id IS the run id and whose payload names the assignment
+//     (internal/api/assignments_run.go). issue_execution_detail.go already
+//     reads the run id back this exact way.
+//
+//  2. Failing that (a run predating this, or a journal write that lost its
+//     race with a very fast stop), enumerate the agent's live sessions in the
+//     container. Exactly one live run is the ordinary case and is safe to act
+//     on; SEVERAL is a real choice this function must not make silently, so it
+//     refuses, records ERROR, and logs the candidates. Tier 1's
+//     cancel_requested_at has already landed either way, so a refusal here
+//     costs the run its immediacy, not its cancellation.
+func (h *IssueHandler) resolveRunSession(ctx context.Context, wsID, assignmentID, containerID, agentSlug string) (string, string) {
+	if runID, err := h.assignmentRunID(ctx, wsID, assignmentID); err != nil {
+		h.logger.Warn("hard stop: resolve run id from journal", "error", err, "assignment_id", assignmentID)
+	} else if runID != "" {
+		return orchestrator.TmuxSessionName(agentSlug, runID), ""
+	}
+
+	live, listErr := h.tmuxRunIDs(ctx, containerID, agentSlug)
+	if listErr != nil {
+		h.logger.Warn("hard stop: could not list the agent's tmux sessions",
+			"error", listErr, "assignment_id", assignmentID, "agent_slug", agentSlug)
+		return "", hardStopError
+	}
+	switch len(live) {
+	case 0:
+		h.logger.Warn("hard stop: no live tmux session for this agent, nothing to signal",
+			"assignment_id", assignmentID, "agent_slug", agentSlug)
+		return "", hardStopNotFound
+	case 1:
+		return orchestrator.TmuxSessionName(agentSlug, live[0]), ""
+	default:
+		// ERROR, not UNSUPPORTED: the capability exists, we simply refuse to
+		// guess which of the agent's runs this assignment is. (The
+		// hard_stop_result vocabulary is fixed by the CHECK constraint in
+		// 20260905030812_assignments_hard_stop.sql; ERROR is its honest
+		// member for "we did not stop it".)
+		h.logger.Error("hard stop: several live runs for this agent and no run id on the assignment — refusing to guess",
+			"assignment_id", assignmentID, "agent_slug", agentSlug,
+			"live_run_ids", strings.Join(live, ","))
+		return "", hardStopError
+	}
+}
+
+// assignmentRunID reads the run id (journal trace_id) of the run dispatched
+// for assignmentID. "" with a nil error means "no such entry", which is not by
+// itself a failure — see resolveRunSession's fallback.
+//
+// Scoped by workspace_id and entry_type so it rides idx_journal_ws_type_ts
+// rather than scanning the journal; the json_extract only filters the handful
+// of run.started rows that survive those two.
+func (h *IssueHandler) assignmentRunID(ctx context.Context, wsID, assignmentID string) (string, error) {
+	var traceID sql.NullString
+	err := h.db.QueryRowContext(ctx, `
+		SELECT trace_id FROM journal_entries
+		 WHERE workspace_id = ? AND entry_type = 'run.started'
+		   AND json_extract(payload, '$.assignment_id') = ?
+		 ORDER BY ts DESC LIMIT 1`, wsID, assignmentID).Scan(&traceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	if !traceID.Valid || !orchestrator.ValidRunID(traceID.String) {
+		return "", nil
+	}
+	return traceID.String, nil
+}
+
+// tmuxRunIDs lists the run ids of agentSlug's live sessions inside
+// containerID. A non-zero tmux exit is an empty result, not an error: `tmux
+// list-sessions` exits non-zero with "no server running" in a container where
+// no agent has run yet.
+func (h *IssueHandler) tmuxRunIDs(ctx context.Context, containerID, agentSlug string) ([]string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, hardStopProbeTimeout)
+	defer cancel()
+	res, err := h.container.Exec(probeCtx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         provider.TmuxListSessionsCmd(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list tmux sessions: %w", err)
+	}
+	out, _ := io.ReadAll(res.Reader)
+	_ = res.Reader.Close()
+	return orchestrator.RunIDsFromSessionNames(string(out), agentSlug), nil
 }
 
 // killTmuxSession is the container-visible-identity TERM-then-KILL
