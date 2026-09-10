@@ -24,11 +24,12 @@
   "ci": {
     "source": 34488138789,
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
-    "ui": 34488992444,
-    "ui_sha": "0bba090e8008aa1e2f9222b9435c38c8fab1aa18",
+    "ui": 34490656928,
+    "ui_sha": "aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad",
     "state": "in_progress",
     "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration",
-    "superseded_ui": 34488234440
+    "superseded_ui": 34488992444,
+    "superseded_ui_reason": "Go Lint timestamp guard failed; fixed in 187ed2f9"
   },
   "tests": {
     "pages": "passed",
@@ -57,8 +58,8 @@
   "integration": {
     "main_sha": "6a9857f5da4558fca082223eafba750de0d76b48",
     "state": "resolved_in_review_stack",
-    "server_sha": "4b33e6efc3dd29cacabd8bbf1f16abb23ed0cda8",
-    "ui_sha": "0bba090e8008aa1e2f9222b9435c38c8fab1aa18",
+    "server_sha": "187ed2f9a5bb6f6d30f676e2d68583809d3e7976",
+    "ui_sha": "aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad",
     "conflicts": [],
     "openapi_operations": 654,
     "mcp_tools": 10
@@ -105,6 +106,18 @@
     "regression": "rearming a row preserves its new occurrence and dispatch identity",
     "pipeline_full_tests": "passed (12.129s)",
     "pipeline_vet": "passed",
-    "integrated_pages_api_tests": "passed (8.683s)"
+    "integrated_pages_api_tests": "passed again after occurrence fix; OpenAPI generation and prose gate passed"
+  },
+  "cache_maintenance": {
+    "script": "/srv/crewship/maintenance/cleanup.py",
+    "timer": "crewship-cache-cleanup.timer",
+    "enabled": true,
+    "interval_minutes": 15,
+    "max_cache_gib": 32,
+    "target_cache_gib": 24,
+    "min_free_gib": 30,
+    "target_free_gib": 40,
+    "minimum_age_hours": 25,
+    "tests": "3 passed; real service and dry run passed (within_limits)"
   }
 }

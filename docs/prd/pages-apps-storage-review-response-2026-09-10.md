@@ -64,3 +64,28 @@ Current code heads after this fix: source `39146cdb`, server `4b33e6ef`, CLI
 [fresh cumulative CI 34488992444](https://github.com/crewship-ai/crewship/actions/runs/34488992444)
 at `0bba090e8008aa1e2f9222b9435c38c8fab1aa18`. It is running; source run
 34488138789 remains the applicable source PR check. No PR has been merged.
+
+## Current CI and automatic cache maintenance (14:41 UTC)
+
+Run 34488992444 failed the Go Lint timestamp guard. Commit `187ed2f9`
+uses the repository SQL timestamp formatter in the regression fixture and
+documents the non-SQL parsing/identity serialization exceptions. The guard and
+focused regression pass locally. Current server head is `187ed2f9a5bb6f6d30f676e2d68583809d3e7976`,
+cumulative UI head `aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad`.
+[Replacement cumulative CI](https://github.com/crewship-ai/crewship/actions/runs/34490656928)
+is running; source CI 34488138789 still has race tests running. No new green
+merge claim is made. Pages API tests after the occurrence fix, regenerated
+OpenAPI and its prose gate passed.
+
+At the user's request, server maintenance is installed at
+`/srv/crewship/maintenance/cleanup.py` with enabled
+`crewship-cache-cleanup.timer` (every 15 minutes, up to one minute jitter).
+It only removes recognized Go cache entries unused for more than 25 hours,
+deferring while Go builds/tests run. Above 32 GiB of cache it targets 24 GiB;
+below 30 GiB filesystem free space it targets 40 GiB. Recent entries remain
+protected even if this prevents reaching the target. No databases, projects,
+Docker volumes or backups are in scope. Three synthetic safety tests passed;
+the installed service and dry run both succeeded with `within_limits`.
+The first run saw about 4.5 GiB cache and 72 GiB free and removed nothing.
+Configuration, tests, service/timer sources and operating instructions are
+kept in `/srv/crewship/maintenance/`; the journal records each result.
