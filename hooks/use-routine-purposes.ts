@@ -24,14 +24,18 @@ export function useRoutinePurposes(workspaceId: string, routines: Pipeline[]): P
   useEffect(() => {
     const controller = new AbortController()
     const missing: [string, string][] = JSON.parse(missingKey)
-    for (const [slug, hash] of missing) {
-      const key = JSON.stringify([workspaceId, slug, hash])
-      if (cache.current.has(key)) continue
-      void apiFetch(
-        `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`,
-        { signal: controller.signal },
-      )
-        .then(async (response) => {
+    const queue = missing.filter(
+      ([slug, hash]) => !cache.current.has(JSON.stringify([workspaceId, slug, hash])),
+    )
+    const worker = async () => {
+      while (!controller.signal.aborted && queue.length) {
+        const [slug, hash] = queue.shift()!
+        const key = JSON.stringify([workspaceId, slug, hash])
+        try {
+          const response = await apiFetch(
+            `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`,
+            { signal: controller.signal },
+          )
           if (!response.ok) throw new Error("Purpose unavailable")
           const routine = await response.json()
           if (controller.signal.aborted) return
@@ -40,12 +44,13 @@ export function useRoutinePurposes(workspaceId: string, routines: Pipeline[]): P
           const purpose = deriveRoutinePurpose(routine.definition)
           cache.current.set(key, purpose)
           setSummaries((current) => ({ ...current, [key]: purpose }))
-        })
-        .catch(() => {
+        } catch {
           if (!controller.signal.aborted)
             setSummaries((current) => ({ ...current, [key]: "Purpose unavailable." }))
-        })
+        }
+      }
     }
+    for (let i = 0; i < Math.min(4, missing.length); i++) void worker()
     return () => controller.abort()
   }, [workspaceId, missingKey])
   return useMemo(

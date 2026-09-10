@@ -28,7 +28,7 @@ export function routineRunLabel(run: { status?: string; outcome?: string }) {
         : run.status || "Recorded"
 }
 
-export function RoutinesWorkspace(props: {
+interface RoutinesWorkspaceProps {
   workspaceId: string
   routines: Pipeline[]
   loading: boolean
@@ -37,7 +37,9 @@ export function RoutinesWorkspace(props: {
   onFilter?: (status: string) => void
   search?: string
   filters?: RoutineFilterState
-}) {
+}
+
+export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const [selectedTab, setTab] = useUrlSelection("tab")
   const tab =
     selectedTab === "overview"

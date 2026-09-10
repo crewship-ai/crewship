@@ -1833,7 +1833,7 @@ The estimate is intentionally labelled "estimated" everywhere it surfaces — it
 
 ## Versioning + rollback
 
-Every save creates a new immutable row in `pipeline_versions` (v79 migration). The `pipelines.head_version` column points at the current. Rollback repoints HEAD at the target version and makes its definition live — no new row is created (versions are deduped by content hash), and `routine versions` marks the new HEAD:
+Publishing a changed definition creates a new immutable row in `pipeline_versions` (v79 migration); saving a draft does not. The `pipelines.head_version` column points at the current. Rollback repoints HEAD at the target version and makes its definition live — no new row is created (versions are deduped by content hash), and `routine versions` marks the new HEAD:
 
 ```bash
 crewship routine versions email-fetch

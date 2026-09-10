@@ -141,7 +141,7 @@ Vše používá data, která už existují, není-li uvedeno jinak.
 
 ### (a) Řádek seznamu
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────┐
 │ 🌐  Audit a public web page                        ● hotovo · 2d    │
 │     Načte veřejnou stránku a vrátí audit obsahu a navigace.        │
@@ -158,7 +158,7 @@ bez migrace, bez změny schématu.
 
 ### (b) Detail rutiny
 
-```
+```text
 ┌── 🌐  Audit a public web page ─────────────────── [Spustit] [⋯] ───┐
 │  Načte veřejnou stránku a vrátí audit obsahu a navigace.           │
 │  ručně · v3 · naposledy před 2 dny: hotovo (12 s)                  │
@@ -187,7 +187,7 @@ Prázdné karty degradovat na sbalený řádek. Spodní dok na detailu vypnout.
 
 ### (c) Detail běhu
 
-```
+```text
 ┌── ✗ Běh selhal ────────────────────────────────────────────────────┐
 │  Audit a public web page · 5. 9. 18:40 · 3 s · ručně · v3          │
 │  Krok 1 „Stáhne stránku" skončil chybou:                          │

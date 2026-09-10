@@ -16,7 +16,7 @@ const response = (name: string, hash = "v1") =>
       },
     }),
   )
-beforeEach(() => fetch.mockReset())
+beforeEach(() => { fetch.mockReset() })
 
 it("loads only missing descriptions and reuses summaries across list polling", async () => {
   fetch.mockResolvedValue(response("Prepare report"))
@@ -75,4 +75,23 @@ it("derives only from actual actions and distinguishes absent from empty definit
       ],
     }),
   ).toBe("Ask sam. Wait for approval.")
+})
+
+it("bounds concurrent reads while eventually enriching every missing purpose", async () => {
+  const pending: ((r: Response) => void)[] = []
+  fetch.mockImplementation(() => new Promise<Response>((resolve) => pending.push(resolve)))
+  const rows = Array.from({ length: 9 }, (_, i) => routine(`missing-${i}`))
+  const view = renderHook(() => useRoutinePurposes("ws", rows))
+  expect(fetch).toHaveBeenCalledTimes(4)
+  for (let i = 0; i < rows.length; i++) {
+    await act(async () => {
+      pending[i](response(`Purpose ${i}`))
+    })
+    expect(fetch.mock.calls.length).toBeLessThanOrEqual(Math.min(i + 5, rows.length))
+  }
+  await waitFor(() =>
+    expect(view.result.current.map((r) => r.description)).toEqual(
+      rows.map((_, i) => `Purpose ${i}.`),
+    ),
+  )
 })

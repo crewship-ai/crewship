@@ -16,19 +16,21 @@ interface Artifact {
   attempt: number
   sha256: string
 }
+interface RoutineRunArtifactsProps {
+  workspaceId: string
+  runId: string
+  active: boolean
+  compact?: boolean
+  noFinalResult?: boolean
+}
+
 export function RoutineRunArtifacts({
   workspaceId,
   runId,
   active,
   compact = false,
   noFinalResult = false,
-}: {
-  workspaceId: string
-  runId: string
-  active: boolean
-  compact?: boolean
-  noFinalResult?: boolean
-}) {
+}: RoutineRunArtifactsProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)

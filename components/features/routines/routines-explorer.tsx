@@ -534,12 +534,10 @@ export function RoutinesExplorer({
                           </span>
                         )}
                         {routine.author_agent_id && (
-                          <span
-                            aria-hidden
-                            className="h-4 w-4 rounded-full bg-cover bg-center shrink-0"
-                            style={{
-                              backgroundImage: `url(${getAgentAvatarUrl(routine.author_agent_id)})`,
-                            }}
+                          <img
+                            alt=""
+                            src={getAgentAvatarUrl(routine.author_agent_id)}
+                            className="h-4 w-4 shrink-0 rounded-full object-cover"
                           />
                         )}
                       </SidebarRow>

@@ -584,6 +584,10 @@ udržet ji a nedoplňovat vedle ní sdílené odkazy.
       Přesné heady, skutečné pokrytí review a ruční fallback při kvótě jsou
       v [živém PRD §12](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md#12-důkazy-oprav-a-stav-přejímky-10-září).
 
+Sloučený kód výše neuzavírá celý Blok 1. Nezaškrtnuté položky vyžadují
+doplnění příslušných důkazů; nasazení, živá přejímka a potvrzení uživatele
+zůstávají samostatné otevřené brány v živém PRD.
+
 ### Blok 2 — čitelnost
 
 - [ ] F1 hotovo: **žádný krok v UI se nejmenuje technickým ID.** Ověřit na

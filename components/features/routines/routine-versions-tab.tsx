@@ -115,7 +115,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
         </p>
         {error && (
           <p role="alert" className="text-sm text-destructive">
-            {error} <button onClick={() => setRetry((v) => v + 1)}>Retry</button>
+            {error} <Button variant="ghost" size="sm" onClick={() => setRetry((v) => v + 1)}>Retry</Button>
           </p>
         )}
         {!loading && !error && !versions.length && (
@@ -178,14 +178,14 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
           title={`Version ${selected}`}
           subtitle="Read-only archive"
           action={
-            <button className="text-xs text-muted-foreground" onClick={() => setSelected(null)}>
+            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => setSelected(null)}>
               Close
-            </button>
+            </Button>
           }
         >
           {detailError && (
             <p role="alert" className="mb-3 text-sm text-destructive">
-              {detailError} <button onClick={() => setRetry((v) => v + 1)}>Retry</button>
+              {detailError} <Button variant="ghost" size="sm" onClick={() => setRetry((v) => v + 1)}>Retry</Button>
             </p>
           )}
           {!detail && !detailError && <p role="status">Loading version…</p>}

@@ -160,8 +160,8 @@ export function RoutineCardDetail({
   const { automations } = useAutomations(workspaceId)
 
   const mine = React.useMemo(
-    () => schedules.filter((s) => s.target_pipeline_id === routine.id),
-    [schedules, routine.id],
+    () => schedules.filter((s) => s.target_pipeline_id === routine.id || s.target_pipeline_slug === routine.slug),
+    [schedules, routine.id, routine.slug],
   )
   // The rules that can start THIS routine. A routine a rule can fire, on a
   // page listing only cron schedules, reads as manual-or-cron — and the reader

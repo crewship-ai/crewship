@@ -724,7 +724,7 @@ export function RoutineCreateDialog({
       if (!res.ok) {
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
-        toast.error("Test passedation failed", { description: msg })
+        toast.error("Test failed", { description: msg })
         return { passed: false, token: null }
       }
       // DRY_RUN_OK is the dry-run validation's pass status; COMPLETED is
@@ -745,9 +745,9 @@ export function RoutineCreateDialog({
         setSaveToken(token)
       }
       if (passed) {
-        toast.success("Test passedated — no work was executed")
+        toast.success("Test passed")
       } else {
-        toast.error("Test passedation failed", {
+        toast.error("Test failed", {
           description: data.error ?? "see details below",
         })
       }
@@ -755,7 +755,7 @@ export function RoutineCreateDialog({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setTestResult({ passed: false, details: msg })
-      toast.error("Test passedation unavailable", { description: msg })
+      toast.error("Test unavailable", { description: msg })
       return { passed: false, token: null }
     } finally {
       setBusy("none")

@@ -55,13 +55,15 @@ import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 const EMPTY = new Map()
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
+interface RoutineRunDetailProps {
+  workspaceId: string
+  runId: string
+}
+
 export function RoutineRunDetail({
   workspaceId,
   runId,
-}: {
-  workspaceId: string
-  runId: string
-}) {
+}: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
