@@ -12,6 +12,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
 
 ### Fixed
+- **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
+- **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
 - **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
 - Routines: comparison starts survive closing the page and recognize interrupted runs. One-time starts pin their accepted version and new start times no longer reuse an earlier run. Optional nested inputs remain optional; failed artifact capture no longer fails successful work or overwrites another attempt's evidence. Execution pagination remains available during polling, and schedule cancellation works while presets load.

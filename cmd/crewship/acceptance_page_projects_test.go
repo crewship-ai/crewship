@@ -214,6 +214,8 @@ func TestAcceptance_PageProjectGitHistoryRestore(t *testing.T) {
 		t.Fatal("CLI withdrawal left application live", out)
 	}
 	srv.Close()
-	exercisePageDaemonRestart(t, db, binary, projectsPath, ws, token, job.ID)
+	t.Run("restart", func(t *testing.T) {
+		exercisePageDaemonRestart(t, db, binary, projectsPath, ws, token, job.ID)
+	})
 
 }

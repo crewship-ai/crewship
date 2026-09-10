@@ -75,7 +75,8 @@ func (h *PageHandler) ApplicationPanelHistory(w http.ResponseWriter, r *http.Req
 		ProducedAt string          `json:"producedAt"`
 		State      string          `json:"state"`
 	}
-	items := make([]item, 0, limit)
+	// Allocation stays fixed even if request validation changes later.
+	items := make([]item, 0, 20)
 	used := 128 // envelope, cursors and array delimiters
 	next := int64(0)
 	for rows.Next() {
