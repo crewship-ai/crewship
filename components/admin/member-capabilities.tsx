@@ -469,7 +469,7 @@ function PresetDiffDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[80dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             Apply preset &quot;{preset}&quot; ({CAPABILITY_BUNDLES[preset].length} cap

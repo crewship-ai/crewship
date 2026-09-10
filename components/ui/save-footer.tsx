@@ -83,9 +83,12 @@ export function SaveFooter({
             : "border-primary/25 bg-primary/[0.05]",
         // Docked on phones: full-bleed above the home indicator, lifted over
         // the content it belongs to.
-        "max-sm:fixed max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:z-40",
+        "max-sm:fixed max-sm:bottom-[var(--mobile-tab-bar-h)] max-sm:left-0 max-sm:right-0 max-sm:z-40",
         "max-sm:border-t max-sm:bg-card max-sm:shadow-[0_-8px_24px_rgba(0,0,0,.45)]",
-        "max-sm:pb-[max(0.625rem,env(safe-area-inset-bottom))]",
+        // No safe-area padding of its own: below `sm` this docks on top of
+        // the phone tab bar, which already clears the home indicator, and
+        // adding it here again floated the buttons ~34px above their border.
+        "max-sm:pb-2.5",
         className,
       )}
     >

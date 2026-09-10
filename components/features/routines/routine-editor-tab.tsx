@@ -489,7 +489,7 @@ export function RoutineEditorTab({ routine, workspaceId, onSaved, onStepAtCaret,
         onClick={toggleExpanded}
         className="absolute inset-0 bg-background/70 backdrop-blur-md"
       />
-      <div className="relative flex h-full max-h-[92vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
+      <div className="relative flex h-full max-h-[92dvh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl">
         {body}
       </div>
     </div>

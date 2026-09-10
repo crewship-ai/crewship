@@ -386,7 +386,7 @@ export function RoutineCalendar({
       ) : (
         <div
           ref={timeGrid}
-          className="max-h-[65vh] overflow-auto rounded-xl border border-border/60"
+          className="max-h-[65dvh] overflow-auto rounded-xl border border-border/60"
         >
           <div className={days.length === 7 ? "min-w-[840px]" : days.length === 3 ? "min-w-[570px]" : "min-w-[260px]"}>
             <div

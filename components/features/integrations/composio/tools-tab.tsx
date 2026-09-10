@@ -116,6 +116,9 @@ export function ToolsTab({
         <EmptyHint text={`No tools found for “${toolkit.trim()}”.`} />
       ) : (
         <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
+          {/* The columns do not fit a phone; without this they were clipped
+              by the rounded wrapper rather than reachable. */}
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
@@ -139,6 +142,7 @@ export function ToolsTab({
               ))}
             </tbody>
           </table>
+          </div>
           {total > tools.length && (
             <div className="border-t border-white/[0.06] px-3 py-2 text-[11px] text-muted-foreground">
               Showing {tools.length} of {total} tools — narrow with search.

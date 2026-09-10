@@ -485,7 +485,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       description="Search agents, crews, skills, and more..."
       // Dropped from the top rather than centred: it belongs to the search
       // field in the bar, and the bar is where the eye already is.
-      className="top-[12vh] translate-y-0 gap-0 rounded-lg border-white/[0.1] bg-card p-0 shadow-xl sm:max-w-[600px]"
+      className="top-[12dvh] translate-y-0 gap-0 rounded-lg border-white/[0.1] bg-card p-0 shadow-xl sm:max-w-[600px]"
       commandClassName={PALETTE_COMMAND_CLASS}
       filter={paletteFilter}
       showCloseButton={false}

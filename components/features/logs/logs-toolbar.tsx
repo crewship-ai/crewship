@@ -1,12 +1,14 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { entityHref } from "@/lib/entity-links"
 
 import Image from "next/image"
 import { AnimatePresence, motion } from "motion/react"
-import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User } from "lucide-react"
+import { Search, Pause, Play, WrapText, ArrowDownUp, Filter, Download, RefreshCw, Users, User, SlidersHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -152,6 +154,8 @@ export function LogsToolbar({
 }: LogsToolbarProps) {
   // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   useAvatarStylesVersion()
+  const isMobile = useIsMobile()
+  const [filtersOpen, setFiltersOpen] = useState(false)
   return (
     <div className="px-3 py-2 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-2 sticky top-0 z-10 backdrop-blur supports-[backdrop-filter]:bg-card/70">
       {/* search */}
@@ -177,6 +181,23 @@ export function LogsToolbar({
         )}
       </div>
 
+      {isMobile && (
+        <ToolbarToggle
+          on={filtersOpen}
+          onClick={() => setFiltersOpen((v) => !v)}
+          title={filtersOpen ? "Hide filters" : "Show filters"}
+        >
+          <SlidersHorizontal className="h-3 w-3" /> Filters
+        </ToolbarToggle>
+      )}
+
+      {/* Everything but the search box and the live state folds away on a
+          phone. `contents` keeps the flex row intact when it is open —
+          the wrapper lays out as if it were not there — and `hidden`
+          beats it when it is closed. Nothing is removed: the same
+          controls, one tap further away, instead of six rows of them
+          ahead of the first log line. */}
+      <div className={cn("contents", isMobile && !filtersOpen && "hidden")}>
       {/* time range */}
       {timeRange && onTimeRangeChange && (
         <TimeRangePicker
@@ -247,6 +268,7 @@ export function LogsToolbar({
       </div>
 
       <span className="opacity-30">│</span>
+      </div>
 
       <ToolbarToggle on={live} onClick={onLiveToggle} title={live ? "Pause live tail" : "Resume live tail"}>
         {live ? (
@@ -259,6 +281,13 @@ export function LogsToolbar({
           </>
         )}
       </ToolbarToggle>
+      {/* Everything but the search box and the live state folds away on a
+          phone. `contents` keeps the flex row intact when it is open —
+          the wrapper lays out as if it were not there — and `hidden`
+          beats it when it is closed. Nothing is removed: the same
+          controls, one tap further away, instead of six rows of them
+          ahead of the first log line. */}
+      <div className={cn("contents", isMobile && !filtersOpen && "hidden")}>
       <ToolbarToggle on={wrap} onClick={onWrapToggle} title="Wrap long lines">
         <WrapText className="h-3 w-3" /> Wrap
       </ToolbarToggle>
@@ -375,6 +404,7 @@ export function LogsToolbar({
           <Play className="h-3 w-3" /> Resume
         </button>
       )}
+      </div>
     </div>
   )
 }

@@ -89,7 +89,10 @@ describe("SaveFooter", () => {
     const root = container.firstElementChild as HTMLElement
     // Same component, different anchoring — no second mobile implementation.
     expect(root.className).toContain("max-sm:fixed")
-    expect(root.className).toContain("max-sm:bottom-0")
+    // Docked to the bottom of the content, not to zero: the phone tab bar
+    // occupies that edge, and `--mobile-tab-bar-h` is 0 wherever the bar is
+    // not rendered, so this is still flush on every other viewport.
+    expect(root.className).toContain("max-sm:bottom-[var(--mobile-tab-bar-h)]")
   })
 
   it("is safe to drop inside a <form>", () => {

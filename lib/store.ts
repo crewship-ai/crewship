@@ -16,6 +16,13 @@ interface AppState {
   currentWorkspaceId: string | null
   sidebarOpen: boolean
   breadcrumbs: BreadcrumbItem[]
+  /**
+   * The phone navigation sheet. It lives here rather than in AppToolbar
+   * because two surfaces open it — the toolbar on a tablet and the phone tab
+   * bar's "More" — and they are siblings, not parent and child.
+   */
+  mobileNavOpen: boolean
+  setMobileNavOpen: (open: boolean) => void
   setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
@@ -26,7 +33,9 @@ export const useAppStore = create<AppState>((set) => ({
   currentWorkspaceId: null,
   sidebarOpen: true,
   breadcrumbs: [],
+  mobileNavOpen: false,
   setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setBreadcrumbs: (items) => set({ breadcrumbs: items }),
+  setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
 }))

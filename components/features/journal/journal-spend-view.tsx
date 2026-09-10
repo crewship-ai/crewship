@@ -171,6 +171,7 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
         ) : byAgentSorted.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-muted-foreground">No agent spend recorded in this window.</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] text-muted-foreground">
@@ -191,6 +192,7 @@ export function JournalSpendView({ workspaceId, workspaceLoading }: Props) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

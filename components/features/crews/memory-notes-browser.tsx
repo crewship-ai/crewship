@@ -30,7 +30,7 @@ export function MemoryNotesBrowser({ documents, children }: { documents: MemoryD
   return <div className="grid items-start gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
     <nav aria-label="Saved notes" className="min-w-0 overflow-hidden rounded-2xl border border-border bg-card md:sticky md:top-4">
       <div className="border-b border-border p-3"><div className="mb-3 flex items-center justify-between px-1"><h3 className="text-sm font-medium">Notes</h3><span className="text-xs text-muted-foreground">{query ? `${filtered.length} / ` : ""}{documents.length}</span></div><div className="relative"><Search aria-hidden="true" className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><Input aria-label="Search notes" placeholder="Search notes…" value={query} onChange={e => setQuery(e.target.value)} className="pl-9" /></div></div>
-      <div className="max-h-64 overflow-y-auto p-2 md:max-h-[65vh]">
+      <div className="max-h-64 overflow-y-auto p-2 md:max-h-[65dvh]">
         {["Pinned", "Knowledge", "Daily journal"].map(label => {
           const notes = ordered.filter(note => group(note) === label)
           const Icon = label === "Pinned" ? Pin : label === "Daily journal" ? CalendarDays : BookOpen

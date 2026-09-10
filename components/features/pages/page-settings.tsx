@@ -1506,7 +1506,7 @@ export function PageSettings({ workspaceId, slug, page, onClose }: PageSettingsP
       <div
         role="dialog"
         aria-label={title}
-        className="relative flex h-full max-h-[92vh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
+        className="relative flex h-full max-h-[92dvh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
       >
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
           <div className="type-page-meta flex min-w-0 items-center gap-2.5 text-muted-foreground">

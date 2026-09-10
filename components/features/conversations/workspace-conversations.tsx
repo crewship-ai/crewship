@@ -60,7 +60,7 @@ function ConversationWorkspace({ workspaceId, userId }: { workspaceId: string; u
     setStartingDirect(false)
     refresh()
   }
-  return <div className="flex h-[calc(100dvh-3rem)] min-h-0 overflow-hidden">
+  return <div className="flex h-[calc(100dvh-3rem-var(--mobile-tab-bar-h))] min-h-0 overflow-hidden">
     <aside aria-label="Workspace conversations" className={cn("w-full shrink-0 flex-col border-r bg-muted/10 md:flex md:w-72", selectedId ? "hidden" : "flex")}>
       <div className="space-y-3 border-b p-4">
         <a href="/chat" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" />Agent chats</a>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { duration, panel } from "@/lib/motion"
 import { CrewsExplorer } from "@/components/features/crews/crews-explorer"
 import { CrewsSubbar } from "@/components/features/crews/crews-subbar"
 import type { AgentRecord } from "./agent-canvas-tabs/types"
@@ -238,7 +239,7 @@ export function CrewsLayout({
   }, [selectedAgent, selectedCrew, crews])
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] bg-background">
       <CrewsSubbar
         workspaceId={workspaceId}
         crewSlug={selectedCrewSlug}
@@ -275,6 +276,7 @@ export function CrewsLayout({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
+                    transition={{ duration: duration.short }}
                   onClick={() => setExplorerOverlayOpen(false)}
                 />
                 <motion.div
@@ -282,7 +284,7 @@ export function CrewsLayout({
                   initial={{ x: -280 }}
                   animate={{ x: 0 }}
                   exit={{ x: -280 }}
-                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                  transition={panel.sideLeft.transition}
                 >
                   <CrewsExplorer
               workspaceId={workspaceId}
