@@ -20,6 +20,7 @@ func covCompareRunPath(slug string) string {
 // the tier_override in the request body so side A and side B can get
 // different results from the same route.
 func covCompareStub(t *testing.T, s *clitest.StubServer, slug string, byTier map[string]clitest.Handler) {
+	s.OnGet("/api/v1/workspaces/"+covWSCli9+"/pipelines/"+slug+"/versions", clitest.JSONResponse(200, []pipelineVersionRow{{Version: 7, IsHead: true, DefinitionHash: "frozen-hash"}}))
 	t.Helper()
 	s.OnPost(covCompareRunPath(slug), func(r *http.Request, body []byte) (int, []byte, string) {
 		var req struct {
@@ -72,6 +73,9 @@ func TestRunEvalCompare_TableDiverge(t *testing.T) {
 		t.Fatalf("expected 2 run POSTs, got %d", len(calls))
 	}
 	for i, c := range calls {
+		if !strings.Contains(string(c.Body), `"pinned_version":7`) {
+			t.Errorf("call %d not pinned: %s", i, c.Body)
+		}
 		if !strings.Contains(string(c.Body), `"inputs":{"k":"v"}`) {
 			t.Errorf("call %d missing inputs: %s", i, c.Body)
 		}
@@ -238,5 +242,72 @@ func TestLabelTier(t *testing.T) {
 	}
 	if got := labelTier("smart"); got != "smart" {
 		t.Errorf("named tier label = %q, want smart", got)
+	}
+}
+
+func TestComparisonPinsVersionAcrossPublication(t *testing.T) {
+	s := covStubCli9(t)
+	versionPath := "/api/v1/workspaces/" + covWSCli9 + "/pipelines/eval-pin/versions"
+	s.OnGet(versionPath, clitest.JSONResponse(200, []pipelineVersionRow{{Version: 9, DefinitionHash: "new"}, {Version: 7, IsHead: true, DefinitionHash: "rolled-back"}}))
+	calls := 0
+	s.OnPost(covCompareRunPath("eval-pin"), func(r *http.Request, raw []byte) (int, []byte, string) {
+		calls++
+		var body map[string]any
+		json.Unmarshal(raw, &body)
+		if body["pinned_version"] != float64(7) {
+			t.Errorf("side %d used %v", calls, body)
+		}
+		s.OnGet(versionPath, clitest.JSONResponse(200, []pipelineVersionRow{{Version: 10, IsHead: true, DefinitionHash: "published-during-a"}}))
+		return clitest.JSONResponse(200, map[string]any{"run_id": "run", "status": "COMPLETED"})(r, raw)
+	})
+	if err := runEvalCompare(evalCompareCmd, []string{"eval-pin"}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || len(s.CallsFor("GET", versionPath)) != 1 {
+		t.Fatal("version was not fixed before both sides")
+	}
+}
+
+func TestComparisonMissingArchiveRunsNothing(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnGet("/api/v1/workspaces/"+covWSCli9+"/pipelines/missing/versions", clitest.JSONResponse(200, []pipelineVersionRow{{Version: 1, DefinitionHash: "hash"}}))
+	if err := runEvalCompare(evalCompareCmd, []string{"missing"}); err == nil {
+		t.Fatal("missing head accepted")
+	}
+	if len(s.CallsFor("POST", covCompareRunPath("missing"))) != 0 {
+		t.Fatal("started work without archive evidence")
+	}
+}
+
+func TestComparisonPendingIsAmbiguous(t *testing.T) {
+	for _, status := range []string{"WAITING", "RUNNING", "QUEUED"} {
+		if got := semanticAgreementVerdict(compareSide{Status: status}, compareSide{Status: "COMPLETED"}); got != "AMBIGUOUS" {
+			t.Fatalf("%s: %s", status, got)
+		}
+	}
+}
+
+func TestComparisonResolvesHeadOutsideFirstArchivePage(t *testing.T) {
+	s := covStubCli9(t)
+	path := "/api/v1/workspaces/" + covWSCli9 + "/pipelines/old-head"
+	rows := make([]pipelineVersionRow, 100)
+	for i := range rows {
+		rows[i] = pipelineVersionRow{Version: 200 - i, DefinitionHash: "new"}
+	}
+	s.OnGet(path+"/versions", clitest.JSONResponse(200, rows))
+	s.OnGet(path, clitest.JSONResponse(200, map[string]any{"head_version": 7}))
+	s.OnGet(path+"/versions/7", clitest.JSONResponse(200, pipelineVersionRow{Version: 7, DefinitionHash: "old-head-hash"}))
+	s.OnPost(covCompareRunPath("old-head"), clitest.JSONResponse(200, map[string]any{"status": "COMPLETED", "output": "ok"}))
+	if err := runEvalCompare(evalCompareCmd, []string{"old-head"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := s.CallsFor("POST", covCompareRunPath("old-head"))
+	if len(calls) != 2 {
+		t.Fatal(len(calls))
+	}
+	for _, call := range calls {
+		if !strings.Contains(string(call.Body), `"pinned_version":7`) {
+			t.Fatal(string(call.Body))
+		}
 	}
 }

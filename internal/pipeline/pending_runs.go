@@ -13,6 +13,7 @@ import (
 // due rows (FireAt <= now), highest Priority first, and expires rows
 // past ExpiresAt.
 type PendingRun struct {
+	PinnedVersion *int // nil is the legacy live-at-dispatch policy
 	ID            string
 	WorkspaceID   string
 	PipelineID    string
@@ -112,15 +113,15 @@ func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, b
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
-    invoking_user_id, triggered_via, triggered_by_id, chain_depth, chain_origin, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
+    invoking_user_id, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
 		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
 		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
 		nullableStr(pr.InvokingUserID),
 		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
-		nullableStr(pr.ChainOrigin))
+		nullableStr(pr.ChainOrigin), pr.PinnedVersion)
 	if err != nil {
 		// Debounce race: a concurrent trigger with the same key inserted
 		// first, so the partial-unique index rejects this one. Both
@@ -181,7 +182,7 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
-    triggered_via = ?, triggered_by_id = ?,
+    triggered_via = ?, triggered_by_id = ?, pinned_version = ?,
     chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
     chain_depth  = MAX(COALESCE(chain_depth,0), ?),
     updated_at = datetime('now','subsec')
@@ -189,7 +190,7 @@ WHERE id = ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
 		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
-		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID),
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.PinnedVersion,
 		pr.ChainDepth, nullableStr(pr.ChainOrigin), pr.ChainDepth,
 		existingID); err != nil {
 		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
@@ -222,7 +223,7 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
        COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
        COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
-       COALESCE(chain_origin,'')
+       COALESCE(chain_origin,''), pinned_version
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -237,7 +238,7 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
 			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
-			&pr.ChainOrigin); err != nil {
+			&pr.ChainOrigin, &pr.PinnedVersion); err != nil {
 			return nil, err
 		}
 		out = append(out, pr)
@@ -286,7 +287,7 @@ func (s *PendingRunStore) ListPending(ctx context.Context, workspaceID string, l
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, pipeline_id, pipeline_slug, COALESCE(debounce_key,''), priority, fire_at
+SELECT id, workspace_id, pipeline_id, pipeline_slug, COALESCE(debounce_key,''), priority, fire_at, pinned_version
 FROM pending_runs WHERE workspace_id = ? AND status = 'pending'
 ORDER BY fire_at ASC LIMIT ?`, workspaceID, limit)
 	if err != nil {
@@ -298,7 +299,7 @@ ORDER BY fire_at ASC LIMIT ?`, workspaceID, limit)
 		var pr PendingRun
 		var fireAt string
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
-			&pr.DebounceKey, &pr.Priority, &fireAt); err != nil {
+			&pr.DebounceKey, &pr.Priority, &fireAt, &pr.PinnedVersion); err != nil {
 			return nil, err
 		}
 		pr.FireAt, _ = time.Parse(time.RFC3339Nano, fireAt)

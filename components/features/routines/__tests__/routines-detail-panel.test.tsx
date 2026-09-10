@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutinesDetailPanel } from "../routines-detail-panel"
@@ -267,9 +267,7 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
 
   it("closes the form when the selection moves to another routine", async () => {
     mockFor(WITH_INPUTS)
-    const { rerender } = render(
-      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
-    )
+    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
@@ -284,9 +282,7 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
 
   it("never posts a run for a routine the form was not built from", async () => {
     mockFor(WITH_INPUTS)
-    const { rerender } = render(
-      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
-    )
+    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
@@ -361,9 +357,99 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
         .mock.calls.find(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
       expect(post).toBeTruthy()
       expect(String(post![0])).toContain("/pipelines/routine-a/run")
+      expect(new Headers(post![1]?.headers).get("Prefer")).toBe("respond-async")
+      expect(new Headers(post![1]?.headers).get("Idempotency-Key")).toBeTruthy()
       expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({
         inputs: { obdobi: "2026-07" },
       })
     })
   })
 })
+
+describe("routine start delivery", () => {
+  it("reuses the start key after a lost response and renews it after confirmation", async () => {
+    vi.clearAllMocks()
+    h.records = []
+    const post = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Response lost"))
+      .mockResolvedValue(okJSON({ run_id: "recovered-run", status: "running" }))
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (init?.method === "POST" && String(url).endsWith("/run")) return post(url, init)
+      return okJSON(ROUTINE)
+    })
+    await renderPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    const key = (i: number) => new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
+    expect(key(0)).toBeTruthy()
+    expect(key(1)).toBe(key(0))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(3))
+    expect(key(2)).not.toBe(key(0))
+  })
+
+  it("sends one request for two submissions before React rerenders", async () => {
+    vi.clearAllMocks()
+    h.records = []
+    let finish!: (r: Response) => void
+    const post = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
+    )
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (init?.method === "POST" && String(url).endsWith("/run")) return post()
+      return okJSON(ROUTINE)
+    })
+    await renderPanel()
+    const run = screen.getByRole("button", { name: "Run" })
+    act(() => {
+      run.click()
+      run.click()
+    })
+    expect(post).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      finish(okJSON({ run_id: "one-run" }))
+    })
+  })
+})
+
+it.each(["missing run ID", "unreadable JSON"])(
+  "does not confirm a start with %s",
+  async (failure) => {
+    vi.clearAllMocks()
+    h.records = []
+    const invalid =
+      failure === "missing run ID"
+        ? okJSON({})
+        : ({
+            ok: true,
+            json: async () => {
+              throw new SyntaxError("Unreadable response")
+            },
+          } as Response)
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce(invalid)
+      .mockResolvedValue(okJSON({ run_id: "recovered" }))
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (init?.method === "POST" && String(url).endsWith("/run")) return post(url, init)
+      return okJSON(ROUTINE)
+    })
+    await renderPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(toast.success).not.toHaveBeenCalled()
+    expect(defaultProps.onChanged).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    const key = (i: number) => new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
+    expect(key(1)).toBe(key(0))
+  },
+)

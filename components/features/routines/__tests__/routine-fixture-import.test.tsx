@@ -42,12 +42,10 @@ describe("fixture import", () => {
     expect(imported).not.toHaveBeenCalled()
   })
   it("surfaces failed reads without overwriting the current fixture", async () => {
-    h.fetch
-      .mockReset()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ ...run, step_outputs_available: false }),
-      })
+    h.fetch.mockReset().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...run, step_outputs_available: false }),
+    })
     const imported = vi.fn()
     render(<RoutineFixtureImport workspaceId="ws" onImport={imported} />)
     load()
@@ -84,9 +82,16 @@ describe("fixture import", () => {
     )
     load()
     const requestedPath = h.fetch.mock.calls[0][0] as string
-    const route = requestedPath.replace("/workspaces/ws/", "/workspaces/{workspaceId}/").replace(/\/r$/, "/{runId}")
-    const spec = JSON.parse(readFileSync(resolve(process.cwd(), "internal/api/openapi.gen.json"), "utf8"))
-    expect(spec.paths[route]?.get, `GET ${requestedPath} must exist in the server contract`).toBeDefined()
+    const route = requestedPath
+      .replace("/workspaces/ws/", "/workspaces/{workspaceId}/")
+      .replace(/\/r$/, "/{runId}")
+    const spec = JSON.parse(
+      readFileSync(resolve(process.cwd(), "internal/api/openapi.gen.json"), "utf8"),
+    )
+    expect(
+      spec.paths[route]?.get,
+      `GET ${requestedPath} must exist in the server contract`,
+    ).toBeDefined()
     await screen.findByText(/Source run r/)
     fireEvent.change(screen.getByLabelText("Step to test"), { target: { value: "send" } })
     expect(screen.getByRole("button", { name: "Test with fixtures" })).toBeDisabled()

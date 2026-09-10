@@ -48,7 +48,9 @@ vi.mock("next/link", () => ({
   ),
 }))
 
-vi.mock("@/hooks/use-workspace-agent-directory", () => ({ useWorkspaceAgentDirectory: () => ({ agents: [], error: false }) }))
+vi.mock("@/hooks/use-workspace-agent-directory", () => ({
+  useWorkspaceAgentDirectory: () => ({ agents: [], error: false }),
+}))
 
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 
@@ -63,7 +65,11 @@ vi.mock("../routine-webhooks-tab", () => ({ RoutineWebhooksTab: () => <div /> })
 vi.mock("../routine-versions-tab", () => ({ RoutineVersionsTab: () => <div /> }))
 vi.mock("../routine-runs-tab", () => ({ RoutineRunsTab: () => <div /> }))
 vi.mock("../routine-budget-card", () => ({ RoutineBudgetCard: () => <div /> }))
-vi.mock("../routine-reach-card", () => ({ RoutineReachCard: () => <div /> }))
+// The reach rows are the Access card's agent list now, so the card itself is
+// real here and only its network call is stubbed.
+vi.mock("@/hooks/use-agent-reach", () => ({
+  useAgentReach: () => ({ toolkits: [], channels: [], loading: false }),
+}))
 
 vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/use-pipeline-run-records")>()),
@@ -278,7 +284,6 @@ describe("what a routine writes back to Crewship", () => {
   })
 })
 
-
 describe("routine access and starting points", () => {
   it("distinguishes timed starts from webhook starts and opens their management", () => {
     renderCard()
@@ -288,16 +293,34 @@ describe("routine access and starting points", () => {
     expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
     fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))
-    expect(screen.getByText(/Let another service start/)).toBeInTheDocument()
+    expect(screen.getByText(/Open Manage webhooks/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Manage webhooks", exact: true }))
     expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
   })
   it("links credential requirements to accounts without inventing an assigned credential", () => {
-    renderCard(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "CLI_TOKEN", scope: "github" }, { type: "AI_CLI_TOKEN", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
-    expect(screen.getAllByRole("link", { name: /github|gitlab/i }).filter(link => link.getAttribute("href") === "/credentials")).toHaveLength(2)
+    renderCard(
+      routine({
+        manifest: {
+          agents: ["morgan"],
+          credentials: [
+            { type: "CLI_TOKEN", scope: "github" },
+            { type: "AI_CLI_TOKEN", scope: "gitlab" },
+          ],
+          egress: ["api.github.com"],
+        },
+      } as Partial<RoutineDetail>),
+    )
+    expect(
+      screen
+        .getAllByRole("link", { name: /github|gitlab/i })
+        .filter((link) => link.getAttribute("href") === "/credentials"),
+    ).toHaveLength(2)
     expect(screen.getByRole("link", { name: /AI CLI token/ })).toBeInTheDocument()
-    expect(screen.getByText(/Accounts are resolved when the run starts/)).toBeInTheDocument()
-    expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute("href", "/crews?agent=morgan")
+    expect(screen.getByText(/accounts are resolved when the run starts/)).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute(
+      "href",
+      "/crews?agent=morgan",
+    )
     const host = screen.getByText("api.github.com")
     expect(host.closest("details")).not.toHaveAttribute("open")
     fireEvent.click(screen.getByText("Allowed network hosts"))

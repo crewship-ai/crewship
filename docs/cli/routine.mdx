@@ -34,7 +34,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Governance | `enable <slug>` | Re-enable a disabled routine (OWNER/ADMIN) |
 | Diagnostics | `doctor <slug>` | Preflight checklist — catches blind alleys before `run` |
 | Diagnostics | `bench <slug>` | Variance characterisation — N runs, pass-rate + cost/latency stats |
-| Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (read-only) |
+| Diagnostics | `backtest <slug> --against <version>` | Replay recent successful runs against a candidate version and diff outputs (live execution) |
 | Diagnostics | `budget get/set/summary` | Monthly spend cap vs actual — budget-vs-actual view, not an enforcement gate |
 | Diagnostics | `state list/set/rm/clear <slug>` | Inspect and repair durable cross-run state (watermarks) |
 | Diagnostics | `capabilities <crew>` | Dump the schema and resources needed to author a routine for a crew |
@@ -62,7 +62,8 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Authoring | `validate [file.json]` | Validate DSL offline (no server call) |
 | Authoring | `init` | Scaffold a routine DSL |
 | Authoring | `schema` | Print the routine DSL JSON Schema |
-| Authoring | `step-run <slug> <step>` | Execute one step against fixtures without a full run |
+| Authoring | `fixture-test <recipe.json> --step <id>` | Test one step offline with explicit replacement data; no external actions |
+| Authoring | `step-run <slug> <step>` | Execute one step live using supplied inputs without a full run |
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Authoring | `iterate <slug>` | Scored improvement loop: run → grade → optimize → save new version |
@@ -218,6 +219,19 @@ saved draft ID. Open it in Routines to review Recipe / Test / Publish.
 A discarded-and-recreated draft rejects the old link. Neither agent draft
 tool publishes or activates a trigger; legacy `save_routine` still publishes
 directly. Crew/workspace/acting-agent identity is checked by the server.
+
+A publication blocked by a recurring preset includes `schedule_conflict`
+with its `schedule_id`, `name`, and `reason`. In the editor, **Review schedule**
+opens that preset without losing the draft. **Edit inputs** uses the same
+typed form as a manual start; pinned schedules load their archived schema.
+For an unpinned schedule, select **Saved draft** to prepare its new fields,
+then retry publication. Preset changes take effect before publication, so
+pause a schedule first when the new values cannot serve its current recipe.
+
+New one-time starts using `fire_at` pin the preflighted published version.
+`routine pending list` shows that version. Older or delayed/debounced entries
+with no pin keep the existing live-at-dispatch policy. Missing archived
+versions fail explicitly instead of silently falling back to the current recipe.
 
 ## `crewship routine delete <slug>`
 
@@ -465,7 +479,7 @@ Output reports total / mean / p95 / max cost; p50 / p95 / max duration; fail-rea
 
 ## `crewship routine backtest <slug>`
 
-Replay a corpus of recent, successful runs against a **candidate version** and diff the outputs — validate a routine change before rollout, without creating a new version or touching which version is live. Read-only: `--against` names an immutable [`versions`](#crewship-routine-versions-slug) row; the backtest never bumps `head_version` and never changes what `run`/schedules/webhooks execute.
+Replay a corpus of recent, successful runs against a **candidate version** and diff the outputs — validate a routine change before rollout, without creating a new version or touching which version is live. The live version is unchanged: `--against` names an immutable [`versions`](#crewship-routine-versions-slug) row; the backtest never bumps `head_version` and never changes what `run`/schedules/webhooks execute. Replayed runs still execute real work and may make external writes or incur model costs.
 
 ```bash
 # Backtest v9 against the last 7 days of successful runs
@@ -945,7 +959,65 @@ crewship routine schema -o routine.schema.json
 |------|------|-------------|
 | `--output`, `-o` | `string` | Write the schema to a file instead of stdout. |
 
+## `crewship routine fixture-test <recipe.json|recipe.yaml>`
+
+Test a selected top-level step without contacting Crewship or executing external
+work. This is separate from `validate` (no step computation) and `step-run`
+(real execution). The editor exposes the same implementation under **Test →
+Test with fixtures**. The HTTP API exposes the same implementation at
+`POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test`.
+
+```bash
+crewship routine fixture-test invoice.json --step normalize \
+  --input @sample-inputs.json --outputs @captured-outputs.json
+crewship routine fixture-test invoice.json --step fetch \
+  --fixture-output-file sample-response.json
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--step` | Required top-level step ID. |
+| `--input` | Typed JSON object, inline or `@file`; recipe defaults apply. |
+| `--outputs` | JSON object keyed by upstream step ID, inline or `@file`. |
+| `--fixture-output-file` | Explicit replacement output for an agent, HTTP or script step. An empty file is an empty fixture. |
+
+Transforms use the same pure Go transform implementation as a live run and
+refuse missing template values. Agent/HTTP/script steps only validate the
+supplied replacement; without it they fail closed. Other types are not
+supported. Output schema validation blocks file and remote schema references;
+local fragment references remain supported.
+
+The report includes `execution_mode: fixtures`, `output_source`, exact
+`definition_hash`, `fixture_hash`, output, `valid`, `validation_declared`, and
+limitations. No declared checks is explicitly distinguished from passing a
+real output contract. A failed output check returns a nonzero CLI exit code.
+
+This does not run the DAG, conditions, retries, outcome graders or real model
+calls, does not prove credentials/service behavior, and does not mint a
+publication token. Test data is supplied per request/file; there is no shared
+production fixture cache or persistent fixture store. Editing a definition or
+input changes its evidence hash. Existing run exports can be used as input
+files subject to their normal workspace access.
+
+In the editor's Test section, **Load captured data** copies a run's recorded
+inputs and available outputs on request. The source run/hash remain visible.
+The archive and output read must both be available; failures never become empty
+fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
+an explicit replacement choice. Import does not resume the source or run work.
+
+
+Runtime references in offline step tests use explicit samples: `--env` supplies
+`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
+supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
+secret values must be strings. No server environment or credential vault is read.
+
+
 ## `crewship routine step-run <slug> <step>`
+
+This executes real work and can make external writes or incur model costs.
+`--input` and `--outputs` supply data; they do not isolate the executed step.
+The response includes `execution_mode: live`. The legacy `simulated: true`
+means only that no pipeline run record is created.
 
 Execute one `agent_run`, `http`, `script`, or `transform` step in isolation,
 without a DAG or persisted run record. `wait`, `notify`, `call_pipeline`, and
@@ -1656,6 +1728,57 @@ The decision is attributed to the person whose CLI token made it. An agent canno
 
 ---
 
+### Typed decisions and named actions
+
+An approval wait can declare `decision_form`. Its fields use the same typed input
+contract as Run and Schedule. The schema is frozen when the waitpoint is created;
+editing or publishing the recipe does not change an outstanding question.
+
+```json
+{
+  "id": "review",
+  "type": "wait",
+  "wait": {
+    "kind": "approval",
+    "approval_prompt": "Review the proposed delivery.",
+    "decision_form": {
+      "fields": [{"name": "copies", "type": "integer", "required": true, "default": 0}],
+      "actions": [
+        {"id": "ship", "label": "Ship", "approved": true},
+        {"id": "revise", "label": "Request revision", "approved": true},
+        {"id": "stop", "label": "Stop", "approved": false}
+      ]
+    }
+  }
+}
+```
+
+Inspect the pending schema with `routine waitpoints show <token> -f json`, then
+submit the chosen action and typed values:
+
+```bash
+crewship routine waitpoints approve <token> --action ship --input '{"copies":0}'
+crewship routine waitpoints approve <token> --action revise --input @decision.json
+crewship routine waitpoints reject <token> --action stop --comment "Cancelled"
+```
+
+`--action` must match a declared ID, and approve/reject must match that action's
+`approved` flag. Continuing actions require all required fields; rejection may
+omit them. Provided values still undergo type and choice validation. Unknown
+fields are rejected. Defaults preserve `false` and `0`.
+
+The successful wait step returns JSON containing `action_id`, `data`, and an
+optional `comment`. Downstream transforms or conditions can route on these
+values using the existing workflow engine. An action with `approved: false`
+uses the existing denial/OnFail path; use `approved: true` for an alternate
+continuing branch such as revision. Legacy waits keep `waited:approval:approved`.
+
+The same form is available in the run detail and Inbox. A rich decision never
+uses standing trust and cannot be completed by a legacy body-only approval.
+External token callbacks use their existing `payload` object, containing
+`action_id` and `data`; they undergo the same validation. Expiry and the first
+accepted verdict are enforced by the waitpoint store.
+
 ## `crewship routine trust`
 
 Manage standing approval grants — the answer to "I have approved this same gate twenty times".
@@ -1761,54 +1884,6 @@ All routine subcommands accept these global flags:
 - [CLI overview](/cli/overview) — global flags + auth
 - [Scheduling guide](/guides/scheduling) — recurring background work primitives
 
-## `crewship routine fixture-test <recipe.json|recipe.yaml>`
-
-Test a selected top-level step without contacting Crewship or executing external
-work. This is separate from `validate` (no step computation) and `step-run`
-(real execution). The HTTP API exposes the same implementation at `POST /workspaces/{workspaceId}/pipelines/fixture_test`. Editor integration follows separately.
-
-```bash
-crewship routine fixture-test invoice.json --step normalize \
-  --input @sample-inputs.json --outputs @captured-outputs.json
-crewship routine fixture-test invoice.json --step fetch \
-  --fixture-output-file sample-response.json
-```
-
-| Option | Meaning |
-| --- | --- |
-| `--step` | Required top-level step ID. |
-| `--input` | Typed JSON object, inline or `@file`; recipe defaults apply. |
-| `--outputs` | JSON object keyed by upstream step ID, inline or `@file`. |
-| `--fixture-output-file` | Explicit replacement output for an agent, HTTP or script step. An empty file is an empty fixture. |
-
-Transforms use the same pure Go transform implementation as a live run and
-refuse missing template values. Agent/HTTP/script steps only validate the
-supplied replacement; without it they fail closed. Other types are not
-supported. Output schema validation blocks file and remote schema references;
-local fragment references remain supported.
-
-The report includes `execution_mode: fixtures`, `output_source`, exact
-`definition_hash`, `fixture_hash`, output, `valid`, `validation_declared`, and
-limitations. No declared checks is explicitly distinguished from passing a
-real output contract. A failed output check returns a nonzero CLI exit code.
-
-This does not run the DAG, conditions, retries, outcome graders or real model
-calls, does not prove credentials/service behavior, and does not mint a
-publication token. Test data is supplied per request/file; there is no shared
-production fixture cache or persistent fixture store. Editing a definition or
-input changes its evidence hash. Existing run exports can be used as input
-files subject to their normal workspace access.
-
-In the editor's Test section, **Load captured data** copies a run's recorded
-inputs and available outputs on request. The source run/hash remain visible.
-The archive and output read must both be available; failures never become empty
-fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
-an explicit replacement choice. Import does not resume the source or run work.
-
-Runtime references in offline step tests use explicit samples: `--env` supplies
-`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
-supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
-secret values must be strings. No server environment or credential vault is read.
 ### Answer a typed waitpoint
 
 `crewship routine waitpoints approve <token> --action <id> --input '{"count":0,"enabled":false}'`
