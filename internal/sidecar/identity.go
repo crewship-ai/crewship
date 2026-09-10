@@ -62,11 +62,6 @@ func (s *Server) actingRunIdentity(r *http.Request) (agentID, slug, runID string
 	return s.identityForRunToken(tok)
 }
 
-func (s *Server) identityForToken(tok string) (agentID, slug string, present, ok bool) {
-	agentID, slug, _, present, ok = s.identityForRunToken(tok)
-	return agentID, slug, present, ok
-}
-
 // identityForRunToken resolves a bearer token to an identity by TWO different
 // mechanisms, in order:
 //
