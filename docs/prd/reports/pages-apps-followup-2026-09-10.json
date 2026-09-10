@@ -27,7 +27,7 @@
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
     "ui": 34522534989,
     "ui_sha": "2cab42ef483e3b2112a161b36d1c050442d322b6",
-    "state": "in_progress",
+    "state": "success",
     "scope": "both CLI and UI now have automatic pull_request CI targeting main; redundant dispatch 34522442403 cancelled",
     "superseded_ui": 34495835090,
     "superseded_ui_reason": "cancelled by newer UI dispatch; not recorded as passed",
@@ -63,7 +63,7 @@
     "current_main_integration_go": "Page action receipt isolation, MCP policy/CAS and routine resume tests passed; API 2.761s, pipeline 0.635s"
   },
   "review": {
-    "state": "CLI CodeRabbit requested changes on ce5f1b9; both actionable findings fixed in 64fb85e1; new review requested; current CI pending",
+    "state": "all code layers merged; documentation review pending; product acceptance incomplete",
     "requested_at": "2026-09-10T11:12:28Z",
     "rejected_at": "2026-09-10T11:12:34Z",
     "retry_notice_minutes": 59,
@@ -71,15 +71,22 @@
     "manual_fallback": "server review scope and mutation evidence recorded in PR 2477; CodeRabbit retry refused due to rate limit",
     "merged_prs": [
       2475,
-      2477
+      2477,
+      2479,
+      2480
     ],
     "ui": "targets main with 83 files including pending CLI layer; manual review recorded, CodeRabbit request rate-limited",
-    "cli_fix_review": "CodeRabbit comment 5622546162 verified ce5f1b9..64fb85e1 with no actionable findings; formal review still old changes_requested"
+    "cli_fix_review": "CodeRabbit comment 5622546162 verified ce5f1b9..64fb85e1 with no actionable findings; formal review still old changes_requested",
+    "merge_commits": {
+      "2479": "2adea5afacfab091a4561cb08135d45464c8dbca",
+      "2480": "a4cb3b82828140f1fdeaf5a0e14ca00253e35555"
+    },
+    "documentation_links": "all relative Markdown targets in changed docs exist"
   },
   "safari_decision": "confirmed_panel_only_v1_2026-09-10",
   "integration": {
-    "main_sha": "812ea8eff1a232b2720cd1ba7bf36a06b5b6f8e8",
-    "state": "current routines main integrated without conflicts",
+    "main_sha": "a4cb3b82828140f1fdeaf5a0e14ca00253e35555",
+    "state": "all code layers merged; UI merge tree exactly matched tested tree bd900a3e9c9c215e24497824b311b3edc320b658",
     "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
     "ui_sha": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
     "conflicts": [],

@@ -1,6 +1,7 @@
 # Pages Apps v1 — current contract
 
-Status: implementation and hardening in progress under #2472. The existing dev3
+Status: all four code layers are merged into main under #2472; product acceptance
+remains incomplete. The existing dev3
 Operations Lab is a reviewed development demonstration. It uses the explicit
 same-origin exception and is not evidence of production process isolation.
 
