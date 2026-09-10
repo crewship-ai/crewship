@@ -105,7 +105,7 @@ export function MissionTimelineClient() {
   }
 
   return (
-    <div className="h-[calc(100vh-48px)] flex flex-col bg-background">
+    <div className="h-[calc(100dvh-48px)] flex flex-col bg-background">
       {/* ---- Breadcrumb top bar (h-9, matches orchestration detail pages) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-border/60 px-2 sm:px-3 gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         <Button

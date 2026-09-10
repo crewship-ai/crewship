@@ -1349,7 +1349,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 value={forkSearch}
                 onChange={(e) => setForkSearch(e.target.value)}
                 placeholder="Search your routines…"
-                className="h-8 pl-8 text-xs max-sm:h-12 max-sm:text-sm"
+                className="h-8 pl-8 text-xs coarse:h-12 coarse:text-sm"
               />
             </div>
             {routinesLoading ? (
@@ -1449,7 +1449,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               aria-pressed={section === "Code"}
               disabled={draftLoading || busy !== "none"}
               onClick={() => setSection(section === "Code" ? "Recipe" : "Code")}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-muted"
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-muted coarse:min-h-12"
             >
               <Braces className="size-3.5" />
               {section === "Code" ? "Back to recipe" : "Code"}

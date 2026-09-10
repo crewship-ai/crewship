@@ -509,7 +509,7 @@ export default function JournalPage() {
   )
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
       {/* ---- Sub-bar: identity + status + tabs ---- */}
       <SubBar<JournalTab>
         icon={BookOpen}

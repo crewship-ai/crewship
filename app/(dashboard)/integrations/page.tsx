@@ -75,7 +75,7 @@ function IntegrationsWorkspaceGate() {
   const { workspaceId, loading } = useWorkspace()
   if (loading) {
     return (
-      <div className="flex h-[calc(100vh-48px)] flex-col gap-4 bg-background p-4 md:p-6">
+      <div className="flex h-[calc(100dvh-48px)] flex-col gap-4 bg-background p-4 md:p-6">
         <Skeleton className="h-9 rounded-lg" />
         <Skeleton className="flex-1 rounded-xl" />
       </div>
@@ -83,7 +83,7 @@ function IntegrationsWorkspaceGate() {
   }
   if (!workspaceId) {
     return (
-      <div className="flex h-[calc(100vh-48px)] items-center justify-center bg-background">
+      <div className="flex h-[calc(100dvh-48px)] items-center justify-center bg-background">
         <p className="text-xs text-muted-foreground">
           Pick a workspace to see its integrations.
         </p>
@@ -502,7 +502,7 @@ function LegacyIntegrationsPage() {
 
   if (wsLoading || loading) {
     return (
-      <div className="p-4 md:p-6 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+      <div className="p-4 md:p-6 space-y-4 bg-background min-h-[calc(100dvh-48px)]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Plug className="h-3.5 w-3.5 text-foreground/50" />
@@ -523,7 +523,7 @@ function LegacyIntegrationsPage() {
   // -------------------------------------------------------------------------
 
   return (
-    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100dvh-48px)]">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">

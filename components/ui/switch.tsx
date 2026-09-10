@@ -22,7 +22,7 @@ function Switch({
         // it would change how it looks. On a phone that leaves a 13px target
         // for `size="sm"`, so the hit area grows instead of the switch: an
         // invisible pseudo-element takes it past 44px in both directions.
-        "max-sm:relative max-sm:after:absolute max-sm:after:-inset-x-3 max-sm:after:-inset-y-5 max-sm:after:content-['']",
+        "coarse:relative coarse:after:absolute coarse:after:-inset-x-3 coarse:after:-inset-y-5 coarse:after:content-['']",
         className
       )}
       {...props}

@@ -101,7 +101,7 @@ const TYPE_ICON: Record<ItemTypeKey, React.ComponentType<{ className?: string }>
  */
 const FIELD = "h-10 sm:h-9"
 /** …and a field that opts down to 12px mono has to opt back up below sm. */
-const MONO_AREA = "font-mono text-xs max-sm:text-base"
+const MONO_AREA = "font-mono text-xs coarse:text-base"
 
 interface Crew { id: string; name: string }
 
@@ -771,7 +771,7 @@ export function AddCredentialWizard({
                         setTagDraft("")
                       }}
                       placeholder={tags.length === 0 ? "prod, billing…" : ""}
-                      className="min-w-[80px] flex-1 bg-transparent type-meta outline-none max-sm:text-base placeholder:text-muted-foreground"
+                      className="min-w-[80px] flex-1 bg-transparent type-meta outline-none coarse:text-base placeholder:text-muted-foreground"
                     />
                     {knownTags && knownTags.length > 0 && (
                       <datalist id="cred-wizard-tags">

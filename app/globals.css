@@ -3,6 +3,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Touch sizing belongs to the input device, not to the window width.
+ *
+ * The repo's touch-target rules were written as `max-sm:` (below 640px), while
+ * `useIsMobile` calls anything under 768px a phone. That leaves 640–767px —
+ * a large phone in landscape, an iPad mini in portrait — running the mobile
+ * layout with desktop-sized 32px controls (#2483). Widening the breakpoint
+ * only moves the seam; the honest axis is the pointer, which is what
+ * `.kit-tap` below already uses.
+ *
+ * `coarse:` is that axis as a variant, so a control can ask for a real 44px
+ * target on every touch device including tablets, at any width. */
+@custom-variant coarse (@media (pointer: coarse));
+
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */

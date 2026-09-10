@@ -120,7 +120,7 @@ export function ImportCrewPanel({ onApply }: Props) {
           <button
             type="button"
             onClick={() => onApply(result.patch)}
-            className="h-9 self-start rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover max-sm:h-12 max-sm:w-full"
+            className="h-9 self-start rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-hover coarse:h-12 max-sm:w-full"
           >
             Fill the form from this file
           </button>
