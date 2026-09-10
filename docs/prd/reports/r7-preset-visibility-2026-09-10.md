@@ -16,8 +16,8 @@ historie představuje skutečné běhy. Detail při 390 px nepřetékal přes vi
 Žádná JavaScript pageerror. Všechny testovací plány byly zrušeny/odstraněny
 ve finally; žádný nebyl spuštěn.
 
-Lokální reprodukční skript: `/tmp/r7-browser.cjs`.
-Výsledky a ID: `/tmp/r7-browser-report.json`.
+Aktuální reprodukční skript (rozšířen po review, viz níže): `/tmp/r7-browser.cjs`.
+Poslední výsledky a ID: `/tmp/r7-browser-report.json`.
 Prohlédnuté snímky: `/tmp/r7-detail.png`, `/tmp/r7-calendar.png`, `/tmp/r7-mobile.png`.
 
 ## Identita nasazení
@@ -46,3 +46,27 @@ kalendářních výskytů; není přidána migrace ani měněn CLI.
 §9 (DST, souběžná rozhodnutí s run ID, restart u waitpointu) a lidské potvrzení
 Edit/Test/Run zůstávají mimo toto ověření. PR/CI výsledek je nutné číst na
 aktuálním headu PR; tento protokol dokládá pouze uvedené lokální a živé kontroly.
+
+## Ověření po zapracování review
+
+CodeRabbit skutečně zkontroloval `0383ac298` a vznesl čtyři připomínky.
+V `ab5d7e240` je obnoven samostatný test plánu bez opakování a nové API vrací
+read-only projekci: běžné primitivní hodnoty, typová označení credential/file/
+redacted a prázdné kontejnery místo strukturovaného obsahu. Uložené vstupy pro
+spuštění se nemění. Existující Go scrubber zachytává známé tokeny i pod neutrálním
+klíčem; frontend je maskuje před zkrácením textu. Všechny čtyři připomínky mají
+odpověď s důkazy a vyřešené vlákno. Finální head tím není automaticky nově
+strojově zkontrolován; další review bylo vyžádáno.
+
+325 testů rutin prošlo; Go regrese pro VIEWER ověřuje, že citlivé hodnoty nejsou
+ani v JSON odpovědi. Původní redakční regrese nejprve spadly v UI i API.
+
+Opakované živé ověření ab5d7e24063a17ce7648848e014f6799e848acbd zahrnulo
+pět dočasných plánů. Tokenový vzor pod `message` vrátil pending endpoint jako
+`{type: "redacted"}` a detail i kalendář zobrazily `Hidden`. Ostatní přejímací
+kroky výše znovu prošly, bez JavaScript pageerror; všech pět plánů bylo uklizeno.
+
+Finální lokální důkazy: `/tmp/r7-final-evidence.json` a
+`/tmp/r7-browser-reviewed.log`. Chunk `web/out/_next/static/chunks/1jzb0u_44iwx-.js`
+obsahuje nový string a má SHA-256 `533c8d9890cf7b1438b9de33971237ce3edab154461383d668f87aa93d2f9a41`;
+bajty stažené z portu 8081 souhlasí se statickým exportem.
