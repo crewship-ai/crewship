@@ -10,14 +10,16 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, jso
   { id: "repeat", kind: "planned", at: "2028-01-02T09:00:00Z", slug: "recipe", inputs: { message: "Daily summary" } },
   { id: "once", kind: "pending", at: "2028-01-02T10:00:00Z", slug: "recipe", inputs: {} },
   { id: "long", kind: "pending", at: "2028-01-02T11:00:00Z", slug: "recipe", inputs: { message: "x".repeat(1000) } },
+  { id: "secret", kind: "pending", at: "2028-01-02T12:00:00Z", slug: "recipe", inputs: { message: "ghp_" + "x".repeat(36) } },
   { id: "actual", kind: "run", at: "2028-01-02T08:00:00Z", slug: "recipe", status: "completed" },
 ], truncated: false }) })) }))
 it("shows bounded presets for both plan kinds without presenting history as a preset", async () => {
   render(<RoutineCalendar workspaceId="ws" routines={[{ slug: "recipe", name: "Recipe" }] as Pipeline[]} />)
   expect(await screen.findByText("Inputs: message: Daily summary")).toBeInTheDocument()
+  expect(screen.getByText("Inputs: message: Hidden")).toBeInTheDocument()
   expect(screen.getByText("No inputs")).toBeInTheDocument()
   expect(screen.getByText(/^Inputs: message: x/).textContent!.length).toBeLessThan(100)
   expect(screen.getByText(/Planned ·/)).toBeInTheDocument()
-  expect(screen.getAllByText(/Scheduled once ·/)).toHaveLength(2)
+  expect(screen.getAllByText(/Scheduled once ·/)).toHaveLength(3)
   expect(screen.queryByText("Inputs unavailable")).not.toBeInTheDocument()
 })

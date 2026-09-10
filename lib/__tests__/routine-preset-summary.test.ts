@@ -19,9 +19,13 @@ describe("routine preset summary", () => {
   it("does not mistake profile text for file contents", () => {
     expect(routinePresetSummary({ profile: "public", inputFile: "private bytes" })).toBe("Inputs: profile: public · inputFile: File")
   })
+  it("hides credential-like text even under neutral keys and accepts redacted projections", () => {
+    expect(routinePresetSummary({ message: "ghp_" + "x".repeat(36) })).toBe("Inputs: message: Hidden")
+    expect(routinePresetSummary({ message: { type: "redacted" } })).toBe("Inputs: message: Hidden")
+  })
   it("hides secrets and summarizes credentials and files by type", () => {
     expect(routinePresetSummary({ api_key: "secret-value", credential: "vault-private-id" })).toBe("Inputs: api_key: Hidden · credential: Credential reference")
-    expect(routinePresetSummary({ file: { name: "invoice.pdf", content: "private-content" } })).toBe("Inputs: file: File (invoice.pdf)")
+    expect(routinePresetSummary({ file: { name: "invoice.pdf", content: "private-content" } })).toBe("Inputs: file: File")
     expect(routinePresetSummary({ attachment: "data:text/plain;base64,c2VjcmV0" })).not.toContain("c2VjcmV0")
   })
 })

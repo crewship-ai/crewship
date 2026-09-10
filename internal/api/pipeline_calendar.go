@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // RoutineCalendar derives future occurrences from schedules. Past entries are
@@ -139,8 +142,14 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, routineCalendarResponse{Events: events, Truncated: truncated})
 }
 
-// Stored legacy empty/null presets mean no overrides; malformed JSON is an
-// error, never an apparently empty plan.
+var planPresetScrubber = scrubber.New()
+var planSensitiveKey = regexp.MustCompile(`(?i)password|secret|token|api.?key|authorization|private.?key`)
+var planFileKey = regexp.MustCompile(`(?i)(?:^|[_-])(?:files?|attachments?|documents?)(?:$|[_-])`)
+var planCamelKey = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+
+// Read-only display projection: preserve safe primitives and field counts,
+// never structured contents or recognizable credentials. It cannot be used
+// to replay a run. Legacy empty/null means no overrides; malformed JSON errors.
 func planPresetInputs(raw string) (map[string]any, error) {
 	var inputs map[string]any
 	if raw != "" {
@@ -150,6 +159,38 @@ func planPresetInputs(raw string) (map[string]any, error) {
 	}
 	if inputs == nil {
 		inputs = map[string]any{}
+	}
+
+	for key, value := range inputs {
+		record, _ := value.(map[string]any)
+		kind, _ := record["type"].(string)
+		_, credentialRef := record["credential_ref"]
+		_, filename := record["filename"]
+		text, isText := value.(string)
+		lowerText := strings.ToLower(text)
+		marker := ""
+		switch {
+		case strings.Contains(strings.ToLower(key), "credential") || credentialRef || kind == "credential":
+			marker = "credential"
+		case planSensitiveKey.MatchString(key) || kind == "redacted":
+			marker = "redacted"
+		case planFileKey.MatchString(planCamelKey.ReplaceAllString(key, "${1}_${2}")) || kind == "file" || filename || strings.HasPrefix(lowerText, "data:") || strings.HasPrefix(lowerText, "file:") || strings.HasPrefix(lowerText, "blob:"):
+			marker = "file"
+		case isText && (strings.HasPrefix(lowerText, "credential:") || strings.HasPrefix(lowerText, "vault:")):
+			marker = "credential"
+		case isText && planPresetScrubber.ContainsSecret(text):
+			marker = "redacted"
+		}
+		if marker != "" {
+			inputs[key] = map[string]any{"type": marker}
+			continue
+		}
+		switch value.(type) {
+		case map[string]any:
+			inputs[key] = map[string]any{}
+		case []any:
+			inputs[key] = []any{}
+		}
 	}
 	return inputs, nil
 }

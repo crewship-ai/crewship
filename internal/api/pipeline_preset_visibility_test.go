@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,12 +14,12 @@ func TestPlanPresetVisibility(t *testing.T) {
 	h, db, user, ws := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, ws, "preset_pipeline", "preset-pipeline")
 	at := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Hour)
-	for _, tc := range []struct{ id, inputs string }{{"with_inputs", `{"message":"captured","count":0}`}, {"empty_inputs", `{}`}} {
-		if _, err := db.Exec(`INSERT INTO pending_runs (id,workspace_id,pipeline_id,pipeline_slug,fire_at,inputs_json) VALUES (?,?,'preset_pipeline','preset-pipeline',?,?)`, tc.id, ws, at.Format(time.RFC3339), tc.inputs); err != nil {
+	for _, tc := range []struct{ id, inputs string }{{"with_inputs", `{"message":"captured","count":0}`}, {"empty_inputs", `{}`}, {"sensitive_inputs", `{"api_key":"private","file":{"name":"invoice.pdf","content":"private bytes"},"nested":{"secret":"private"},"message":"ghp_` + strings.Repeat("x", 36) + `"}`}} {
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO pending_runs (id,workspace_id,pipeline_id,pipeline_slug,fire_at,inputs_json) VALUES (?,?,'preset_pipeline','preset-pipeline',?,?)`, tc.id, ws, at.Format(time.RFC3339), tc.inputs); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := pipeline.NewScheduleStore(db).Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Daily", TargetPipelineID: "preset_pipeline", CronExpr: "0 * * * *", Timezone: "UTC", Enabled: true, Inputs: map[string]any{"message": "recurring"}}); err != nil {
+	if _, err := pipeline.NewScheduleStore(db).Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Daily", TargetPipelineID: "preset_pipeline", CronExpr: "0 * * * *", Timezone: "UTC", Enabled: true, Inputs: map[string]any{"message": "recurring", "api_key": "private", "nested": map[string]any{"secret": "private"}, "file": map[string]any{"content": "private bytes"}}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, calendar := range []bool{false, true} {
@@ -27,7 +28,7 @@ func TestPlanPresetVisibility(t *testing.T) {
 			if calendar {
 				url = "/calendar?from=" + at.Add(-time.Hour).Format(time.RFC3339) + "&to=" + at.Add(time.Hour).Format(time.RFC3339)
 			}
-			req := withWorkspaceUser(httptest.NewRequest("GET", url, nil), user, ws, "OWNER")
+			req := withWorkspaceUser(httptest.NewRequest("GET", url, nil), user, ws, "VIEWER")
 			rr := httptest.NewRecorder()
 			if calendar {
 				h.RoutineCalendar(rr, req)
@@ -36,6 +37,9 @@ func TestPlanPresetVisibility(t *testing.T) {
 			}
 			if rr.Code != 200 {
 				t.Fatal(rr.Code, rr.Body)
+			}
+			if strings.Contains(rr.Body.String(), "private") || strings.Contains(rr.Body.String(), "ghp_") {
+				t.Fatal("sensitive content exposed on the wire")
 			}
 			var rows []map[string]any
 			if calendar {
@@ -57,6 +61,19 @@ func TestPlanPresetVisibility(t *testing.T) {
 				}
 				id := row["id"].(string)
 				found[id] = true
+				if id == "sensitive_inputs" {
+					for _, key := range []string{"api_key", "message"} {
+						if v, ok := inputs[key].(map[string]any); !ok || v["type"] != "redacted" {
+							t.Fatalf("unredacted %s", key)
+						}
+					}
+					if v, ok := inputs["file"].(map[string]any); !ok || v["type"] != "file" || len(v) != 1 {
+						t.Fatal("file content exposed")
+					}
+					if v, ok := inputs["nested"].(map[string]any); !ok || len(v) != 0 {
+						t.Fatal("nested content exposed")
+					}
+				}
 				if id == "with_inputs" && (inputs["message"] != "captured" || inputs["count"] != float64(0)) {
 					t.Fatalf("lost accepted inputs: %v", inputs)
 				}
