@@ -161,6 +161,17 @@ describe("EditorApplicationReview", () => {
     expect(screen.queryByRole("link")).toBeNull()
   })
 
+  it("shows an absent timestamp as unknown rather than as an epoch", () => {
+    const snapshot = clone(baseSnapshot)
+    // A draft with no matching revision row sends "". Rendering it raw leaves a
+    // dangling separator; parsing it would produce 1970 or "Invalid Date".
+    snapshot.candidate!.created_at = ""
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getByText(/saved at an unknown time/)).toBeTruthy()
+    expect(screen.queryByText(/1970|Invalid Date/)).toBeNull()
+  })
+
   it("makes consent impossible while a blocker is present and lists the blockers as sentences", () => {
     const snapshot = clone(baseSnapshot)
     snapshot.blockers = [{ code: "build_failed", message: "This candidate did not build, so there is nothing to publish." }]
@@ -418,6 +429,30 @@ describe("EditorApplicationReview", () => {
     const { container } = render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/onerror=alert\(1\)/)).toBeTruthy()
     expect(container.querySelector("img")).toBeNull()
+  })
+
+  it("renders an interrupted build as its own state, never as a compiler error", () => {
+    const snapshot = clone(baseSnapshot)
+    // `recoverPageBuilds` sets this after a restart, and so does a build whose
+    // artifact could not be persisted. The server blocks publishing on it the
+    // same way it blocks a failure (pages_project_review.go:249) — but there is
+    // no verdict and no log, so the screen must not send anyone looking for one.
+    snapshot.candidate!.build = { id: "build-7", state: "interrupted", artifact_digest: "" }
+    snapshot.blockers = [{ code: "build_failed", message: "The build of this draft revision did not complete; build the revision again before publishing." }]
+    setReview(snapshot)
+    const { container } = render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText(/Interrupted — this build stopped before it finished, so there is no result and no build log\. Build the candidate again\./)).toBeTruthy()
+    // Not the failure branch's wording, and no compiler log presentation.
+    expect(screen.queryByText(/^Failed —/)).toBeNull()
+    expect(screen.queryByText(/the compiler gave no reason/)).toBeNull()
+    expect(container.querySelector("pre[role='alert']")).toBeNull()
+    // Nothing to preview, and no consent to give.
+    expect((screen.getByRole("button", { name: "Open preview" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(consentBox().disabled).toBe(true)
+    expect(publishButton().disabled).toBe(true)
+    // Building again is the honest instruction, so that control stays live.
+    expect((screen.getByRole("button", { name: "Build preview" }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it("shows the four build states and does not call Ready a verification", () => {

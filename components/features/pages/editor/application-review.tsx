@@ -255,7 +255,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           {page?.name ?? slug}
           {candidate ? ` · Draft ${candidate.revision}` : " · No candidate"}
           {candidate ? ` · saved by ${reviewAuthorLabel(candidate.actor)}` : ""}
-          {candidate ? ` · ${candidate.created_at}` : ""}
+          {candidate ? ` · ${candidate.created_at === "" ? "saved at an unknown time" : candidate.created_at}` : ""}
         </p>
         {/* The two bases are different series and are stated separately: a
             source revision number and a publication number never line up. */}
@@ -380,13 +380,20 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           <div className="min-w-0">
             <h3 className="text-base font-semibold">Candidate build</h3>
             <p className="mt-1 text-sm">
+              {/* The states the database actually allows. `interrupted` is not
+                  a compiler error: the build never reached a verdict, there is
+                  no log to print, and the only honest instruction is to run it
+                  again. Folding it into `failed` would send the reviewer
+                  hunting for a reason that was never written. */}
               {build === null
                 ? "Not built"
-                : build.state === "queued" || build.state === "running"
+                : build.state === "running"
                   ? "Building…"
                   : build.state === "failed"
                     ? `Failed — ${build.error ?? "the compiler gave no reason."}`
-                    : `Ready — a build of draft ${candidate?.revision} exists`}
+                    : build.state === "interrupted"
+                      ? "Interrupted — this build stopped before it finished, so there is no result and no build log. Build the candidate again."
+                      : `Ready — a build of draft ${candidate?.revision} exists`}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               &quot;Ready&quot; means a build of this candidate exists. It is not automated verification of the actions. {SAVE_EFFECT_NOTE.build}
@@ -396,7 +403,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             <Button
               variant="outline"
               className="min-h-11"
-              disabled={!candidate || previewBuild.build.isPending || build?.state === "running" || build?.state === "queued"}
+              disabled={!candidate || previewBuild.build.isPending || build?.state === "running"}
               onClick={() => candidate && previewBuild.build.mutate(candidate.revision)}
             >
               Build preview

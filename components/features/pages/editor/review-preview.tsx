@@ -132,7 +132,9 @@ export function ReviewPreview({
                     ? "This Page's data is not available, so nothing is running here."
                     : job?.state === "failed"
                       ? "This candidate did not build. Its preview cannot be shown."
-                      : "Build this candidate to preview it."}
+                      : job?.state === "interrupted"
+                        ? "This build stopped before it finished, so there is nothing to preview. Build the candidate again."
+                        : "Build this candidate to preview it."}
           </div>
         )}
       </div>
