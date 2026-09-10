@@ -241,14 +241,14 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             type="button"
             aria-label="Close page list"
             onClick={() => setCollapsed(true)}
-            className="absolute inset-0 z-20 bg-black/50"
+            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
         <aside
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
-            isMobile && !collapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
+            isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
           )}
         >
           {collapsed ? (
