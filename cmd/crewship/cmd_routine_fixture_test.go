@@ -16,6 +16,7 @@ func TestRoutineFixtureCLIReportsEvidenceAndFailsBadOutput(t *testing.T) {
 	}
 	for _, value := range []string{"0", "7"} {
 		cmd := newRoutineFixtureTestCmd()
+		cmd.SetContext(t.Context())
 		if err := cmd.ParseFlags([]string{"--step", "a", "--input", `{"count":` + value + `}`}); err != nil {
 			t.Fatal(err)
 		}
@@ -35,6 +36,7 @@ func TestRoutineFixtureCLIRuntimeSamples(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd := newRoutineFixtureTestCmd()
+	cmd.SetContext(t.Context())
 	if err := cmd.ParseFlags([]string{"--step", "sample", "--env", `{"run_id":"sample-run"}`, "--metadata", `{"count":0}`, "--secrets", `{"example":"fake"}`}); err != nil {
 		t.Fatal(err)
 	}

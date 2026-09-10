@@ -48,7 +48,7 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 			value := string(raw)
 			in.FixtureOutput = &value
 		}
-		result, err := pipeline.TestStepWithFixtures(in)
+		result, err := pipeline.TestStepWithFixtures(cmd.Context(), in)
 		if err != nil {
 			return err
 		}

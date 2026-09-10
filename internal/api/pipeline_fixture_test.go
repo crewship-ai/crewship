@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -29,6 +30,14 @@ func TestFixtureAPICannotPublishOrProduceValidationToken(t *testing.T) {
 		if result["execution_mode"] != "fixtures" || result["save_token"] != nil || result["run_id"] != nil {
 			t.Fatal(result)
 		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/fixture_test", bytes.NewReader(body)).WithContext(ctx), ws), user, "MANAGER")
+	w := httptest.NewRecorder()
+	h.FixtureTest(w, r)
+	if w.Code != http.StatusBadRequest || !bytes.Contains(w.Body.Bytes(), []byte("context canceled")) {
+		t.Fatalf("cancelled request executed: %d %s", w.Code, w.Body)
 	}
 	var count int
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM pipelines WHERE workspace_id=? AND slug='fixture-api'`, ws).Scan(&count); err != nil || count != 0 {

@@ -219,7 +219,7 @@ export function RoutineFixtureTest({
           )}
           <fieldset disabled={busy || !!(needsFixture && !replaceConfirmed)}>
             <InputsForm
-              key={`${stepId}:${captureRevision}`}
+              key={`${stepId}:${captureRevision}:${JSON.stringify(routineInputSpecs(definition))}`}
               inputs={routineInputSpecs(definition).map((field) =>
                 captured && Object.hasOwn(captured.inputs, field.name)
                   ? { ...field, default: captured.inputs[field.name] }

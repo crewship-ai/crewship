@@ -83,3 +83,26 @@ describe("fixture test editor", () => {
     ).not.toBeInTheDocument()
   })
 })
+
+it("submits current defaults after the recipe input schema changes", async () => {
+  const view = render(<RoutineFixtureTest workspaceId="ws" definition={recipe} />)
+  fireEvent.change(screen.getByLabelText("Step to test"), { target: { value: "extract" } })
+  fireEvent.click(screen.getByRole("button", { name: "Test with fixtures" }))
+  await screen.findByText("Fixture output passed structural validation.")
+  expect(JSON.parse(h.fetch.mock.calls[0][1].body).inputs).toEqual({ count: 0 })
+  view.rerender(
+    <RoutineFixtureTest
+      workspaceId="ws"
+      definition={{
+        ...recipe,
+        inputs: [
+          { name: "count", type: "integer", default: 7 },
+          { name: "enabled", type: "boolean", default: false },
+        ],
+      }}
+    />,
+  )
+  fireEvent.click(screen.getByRole("button", { name: "Test with fixtures" }))
+  await waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(2))
+  expect(JSON.parse(h.fetch.mock.calls[1][1].body).inputs).toEqual({ count: 7, enabled: false })
+})
