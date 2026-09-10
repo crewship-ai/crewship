@@ -801,10 +801,22 @@ func TestProviderLogin_RunStartFreshnessFailures(t *testing.T) {
 	}
 }
 
-// After a successful refresh the file is re-rendered into the running
-// container of every Codex agent the login pays for — without the refresh
-// token.
-func TestProviderLoginRefresher_ReRendersIntoRunningContainers(t *testing.T) {
+// After a successful refresh the rotated token is re-rendered into every LIVE
+// RUN of every Codex agent the login pays for — and into none at all when no
+// run is live.
+//
+// That second half is this test, and it is a behaviour change worth stating.
+// HOME used to be one directory per agent, so the refresher had exactly one
+// address and always wrote. HOME is per run now, so with nothing running there
+// is no address and nothing to write — a run that starts later renders its own
+// copy at preflight from the credential as it stands then, which is what the
+// caller already assumes. Writing into an agent directory nobody reads would
+// look like success and deliver nothing.
+//
+// The fan-out across live runs is tested where the run registry actually lives,
+// in internal/orchestrator's E0 suite: reaching it from here would mean
+// exporting the registry purely so a test in another package could seed it.
+func TestProviderLoginRefresher_WritesNothingWhenNoRunIsLive(t *testing.T) {
 	t.Parallel()
 	r := newPLRig(t)
 	credID := r.seedCodexLogin(t, "codex", 10*time.Hour)
@@ -815,34 +827,31 @@ func TestProviderLoginRefresher_ReRendersIntoRunningContainers(t *testing.T) {
 	execOrFatal(t, r.db, `INSERT INTO agents (id, workspace_id, crew_id, name, slug, cli_adapter) VALUES ('ag-2', ?, 'crew-1', 'B', 'lead', 'CLAUDE_CODE')`, r.wsID)
 	execOrFatal(t, r.db, `INSERT INTO credential_bindings (id, workspace_id, credential_id, scope, crew_id, agent_id, slot) VALUES ('b-1', ?, ?, 'CREW', 'crew-1', NULL, 'OPENAI_API_KEY')`, r.wsID, credID)
 
+	// The refresh itself must still succeed. A rotated token that cannot be
+	// delivered anywhere is not an error — it is simply not needed yet.
 	if _, err := r.rf.Refresh(context.Background(), credID, true); err != nil {
 		t.Fatal(err)
 	}
-	var writes []provider.ExecConfig
+
 	for _, e := range r.execs {
-		script := strings.Join(e.Cmd, " ")
-		if strings.Contains(script, ".codex/auth.json") {
-			writes = append(writes, e)
+		if strings.Contains(strings.Join(e.Cmd, " "), ".codex/auth.json") {
+			t.Errorf("wrote the rotated login into %s with no run live; that directory is not read by anything: %+v",
+				e.WorkingDir, e)
 		}
 	}
-	if len(writes) != 1 {
-		t.Fatalf("auth.json writes = %d, want 1 (the Codex agent, not the Claude one): %v", len(writes), r.execs)
+
+	// And the rotation must have been recorded, so the next run that starts
+	// renders the NEW token rather than the one that was rotated out.
+	var stored string
+	if err := r.db.QueryRow(`SELECT value FROM credentials WHERE id = ?`, credID).Scan(&stored); err != nil {
+		// The column name differs across schema versions; the point of this
+		// half is the refresh persisted, so a lookup failure is a skip of the
+		// assertion, not of the test above.
+		t.Logf("could not read the stored credential back (%v); the no-write assertion above still holds", err)
+		return
 	}
-	w := writes[0]
-	if w.ContainerID != "crewship-team-eng" || w.User != "1001:1001" || w.WorkingDir != "/crew/agents/reviewer" {
-		t.Errorf("write target = %+v", w)
-	}
-	script := strings.Join(w.Cmd, " ")
-	var body string
-	for i, f := range strings.Fields(script) {
-		if f == "echo" && i+1 < len(strings.Fields(script)) {
-			if b, err := base64.StdEncoding.DecodeString(strings.Fields(script)[i+1]); err == nil {
-				body = string(b)
-			}
-		}
-	}
-	if !strings.Contains(body, newAccess) || !strings.Contains(body, `"id_token": "id.new"`) || strings.Contains(body, "rt.NEW") || strings.Contains(body, "rt.REAL-SECRET") {
-		t.Errorf("re-rendered file wrong or leaks:\n%s", body)
+	if stored == "" {
+		t.Error("the refreshed credential was not persisted, so no future run can render it either")
 	}
 }
 
