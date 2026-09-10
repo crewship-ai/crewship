@@ -139,8 +139,21 @@ export interface PageCapabilities {
   readonly documentRefusal: string | null
   /** Grants, producer tokens and public links (`mayAdministerGrants` server-side). */
   readonly mayManageAccess: boolean
-  /** This Page has a custom application project at all. */
+  /**
+   * This Page has a **published** application. `has_application` on the wire
+   * is `EXISTS(page_project_live WHERE published=1)`, so it is false for a
+   * Page whose application has only ever been a draft.
+   */
   readonly hasApplication: boolean
+  /**
+   * This Page has application source at all — a draft, published or not.
+   *
+   * The review has to open for a first publication, which is the one case
+   * `hasApplication` cannot see: there is no live publication yet, and the
+   * whole candidate is what needs reading. Gating the review on the
+   * published flag hid exactly that screen.
+   */
+  readonly hasApplicationDraft: boolean
   /** A publication may be switched (owner or workspace admin). */
   readonly mayPublishApplication: boolean
   /** Source revisions and publications may be listed (`mayEditSpec` server-side). */
@@ -154,6 +167,7 @@ export const NO_PAGE_CAPABILITIES: PageCapabilities = {
   documentRefusal: null,
   mayManageAccess: false,
   hasApplication: false,
+  hasApplicationDraft: false,
   mayPublishApplication: false,
   mayViewSourceHistory: false,
 }

@@ -51,6 +51,10 @@ export function derivePageCapabilities(
   // back to panels — but here an absent field would route an ordinary panel
   // Page into the application surface, which is a much worse guess to make.
   const hasApplication = page.has_application === true
+  // A draft with no publication yet is the first-publication case, and it is
+  // the one the review exists for: nothing is live, so the whole candidate is
+  // what has to be read. `has_application` cannot see it.
+  const hasApplicationDraft = hasApplication || page.has_project === true
   return {
     loaded: true,
     // Name and description go through PATCH /pages/{slug}, which does not
@@ -65,7 +69,8 @@ export function derivePageCapabilities(
           : `This Page carries ${sealed} panels you may not see. Editing it as a document would delete them, so the document editor is closed here. Its name, description and access can still be changed.`,
     mayManageAccess: overrides.mayManageAccess ?? true,
     hasApplication,
-    mayPublishApplication: hasApplication && (overrides.mayPublishApplication ?? true),
+    hasApplicationDraft,
+    mayPublishApplication: hasApplicationDraft && (overrides.mayPublishApplication ?? true),
     mayViewSourceHistory: overrides.mayViewSourceHistory ?? true,
   }
 }
