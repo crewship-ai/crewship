@@ -37,7 +37,7 @@ func exercisePageDaemonRestart(t *testing.T, db *sql.DB, binary, projects, ws, t
 	listener.Close()
 	endpoint := fmt.Sprintf("http://127.0.0.1:%d", port)
 	cfg := filepath.Join(dir, "server.yaml")
-	config := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\nipc:\n  socket_path: %s/ipc.sock\nstorage:\n  base_path: %s/storage\n  log_path: %s/logs\n  page_projects_path: %s\n  page_runtime_origin: http://pages.example.net\nstate:\n  bolt_path: %s/state.db\nauth:\n  nextjs_url: %s\nlogging:\n  level: error\n", port, dir, dir, dir, projects, dir, endpoint)
+	config := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\nipc:\n  socket_path: %s/ipc.sock\nstorage:\n  base_path: %s/storage\n  log_path: %s/logs\n  page_projects_path: %s\n  page_runtime_origin: https://pages.example.net\nstate:\n  bolt_path: %s/state.db\nauth:\n  nextjs_url: %s\nlogging:\n  level: error\n", port, dir, dir, dir, projects, dir, endpoint)
 	if err := os.WriteFile(cfg, []byte(config), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -73,7 +73,7 @@ func testApplicationHistory(t *testing.T, h *PageHandler, ws, user string, versi
 		workspace, actor, query string
 		status                  int
 	}{
-		{ws, user, query + "&limit=21", 400}, {ws, user, query + "&before=-1", 400}, {ws, user, "publication=999", 409}, {"foreign", user, query, 404}, {ws, "unauthorized-viewer", query, 404},
+		{ws, user, query + "&limit=21", 400}, {ws, user, query + "&limit=0", 400}, {ws, user, query + "&limit=-1", 400}, {ws, user, query + "&limit=9223372036854775807", 400}, {ws, user, query + "&limit=999999999999999999999999", 400}, {ws, user, query + "&before=-1", 400}, {ws, user, "publication=999", 409}, {"foreign", user, query, 404}, {ws, "unauthorized-viewer", query, 404},
 	} {
 		if w := call(test.workspace, test.actor, test.query); w.Code != test.status {
 			t.Fatalf("history gate %s: %d %s", test.query, w.Code, w.Body.String())
