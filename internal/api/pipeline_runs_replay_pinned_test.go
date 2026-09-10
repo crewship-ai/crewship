@@ -1,6 +1,6 @@
 package api
 
-// Version-pinned replay: the read-only primitive `crewship routine
+// Version-pinned replay: the live execution primitive `crewship routine
 // backtest` composes on (issue #1421). ReplayRun already re-invokes a
 // prior run's captured inputs; this adds an optional pinned_version so
 // the replay executes a specific immutable version's definition instead
@@ -25,7 +25,8 @@ import (
 // backtest primitive: replaying an existing run with pinned_version set
 // executes THAT version's definition, and never mutates the pipeline's
 // head_version or head definition — a backtest against a candidate
-// version must stay a read-only evaluation.
+// version must leave the published definition unchanged. The replay itself
+// still runs real steps and can incur external effects and costs.
 func TestReplayRun_PinnedVersion_ExecutesPinned_NotHead(t *testing.T) {
 	h, db, userID, wsID := runsHandlerRig(t)
 	h.SetRunner(&stubRunner{output: "ok"})
@@ -81,7 +82,7 @@ func TestReplayRun_PinnedVersion_ExecutesPinned_NotHead(t *testing.T) {
 		t.Errorf("step outputs %#v contain v2step — HEAD executed despite the pin", outputs)
 	}
 
-	// The read-only guarantee: head must be untouched by the backtest
+	// The definition guarantee: head must be untouched by the backtest
 	// replay — still v2, still the v2 definition.
 	p, err := h.store.GetBySlug(t.Context(), wsID, "replay-pin")
 	if err != nil {

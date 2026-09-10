@@ -54,9 +54,13 @@ var routinePendingListCmd = &cobra.Command{
 				return
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "PENDING ID\tROUTINE\tPRIORITY\tDEBOUNCE KEY\tFIRES AT")
+			fmt.Fprintln(w, "PENDING ID\tROUTINE\tPRIORITY\tDEBOUNCE KEY\tFIRES AT\tRECIPE VERSION")
 			for _, r := range rows {
-				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n", r.ID, r.PipelineSlug, r.Priority, r.DebounceKey, r.FireAt)
+				version := "live at dispatch (legacy/deferred)"
+				if r.PinnedVersion != nil {
+					version = fmt.Sprintf("v%d", *r.PinnedVersion)
+				}
+				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\n", r.ID, r.PipelineSlug, r.Priority, r.DebounceKey, r.FireAt, version)
 			}
 			flush.of(w)
 		}); err != nil {
@@ -68,11 +72,12 @@ var routinePendingListCmd = &cobra.Command{
 
 // pendingTriggerRow is one deferred (delayed/debounced) routine trigger.
 type pendingTriggerRow struct {
-	ID           string `json:"id" yaml:"id"`
-	PipelineSlug string `json:"pipeline_slug" yaml:"pipeline_slug"`
-	DebounceKey  string `json:"debounce_key" yaml:"debounce_key"`
-	Priority     int    `json:"priority" yaml:"priority"`
-	FireAt       string `json:"fire_at" yaml:"fire_at"`
+	PinnedVersion *int   `json:"pinned_version" yaml:"pinned_version"`
+	ID            string `json:"id" yaml:"id"`
+	PipelineSlug  string `json:"pipeline_slug" yaml:"pipeline_slug"`
+	DebounceKey   string `json:"debounce_key" yaml:"debounce_key"`
+	Priority      int    `json:"priority" yaml:"priority"`
+	FireAt        string `json:"fire_at" yaml:"fire_at"`
 }
 
 var routinePendingCancelCmd = &cobra.Command{

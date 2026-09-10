@@ -36,7 +36,7 @@ func routinesWorkspaceSchemaCatalog() (map[string]DomainSchema, map[string]any) 
 		"RoutineCalendarEvent": object(map[string]any{
 			"id": str(), "kind": enum("planned", "pending", "run"), "at": str(),
 			"slug": str(), "name": str(), "schedule_id": str(), "timezone": str(),
-			"status": str(), "outcome": str(),
+			"status": str(), "outcome": str(), "pinned_version": integer(),
 		}, "id", "kind", "at", "slug", "name"),
 		"RoutineCalendarResponse": object(map[string]any{
 			"events": array(ref("RoutineCalendarEvent")), "truncated": boolean(),

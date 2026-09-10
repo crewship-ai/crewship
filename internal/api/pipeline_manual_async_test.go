@@ -23,6 +23,9 @@ func TestManualRunAsync_ReturnsDurableIdentityBeforeWorkCompletes(t *testing.T) 
 	seedAgentRunPipeline(t, db, ws, "manual_async_pipeline", "manual-async")
 	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(`{"inputs":{}}`)), user, ws, "OWNER")
 	req.SetPathValue("slug", "manual-async")
+	requestContext, disconnect := context.WithCancel(req.Context())
+	defer disconnect()
+	req = req.WithContext(requestContext)
 	req.Header.Set("Prefer", "respond-async")
 	rr := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -49,6 +52,8 @@ func TestManualRunAsync_ReturnsDurableIdentityBeforeWorkCompletes(t *testing.T) 
 	case <-time.After(3 * time.Second):
 		t.Fatal("worker never started")
 	}
+	// N2: closing the browser must not cancel an already accepted run.
+	disconnect()
 	close(runner.release)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

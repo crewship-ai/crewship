@@ -1,3 +1,4 @@
+import type { DecisionForm } from "@/lib/decision-form"
 // The arithmetic behind the routines overview.
 //
 // The page it replaces spent its main pane on a table of every routine
@@ -210,7 +211,10 @@ const ARC = {
  * Live wins over the last result, because a routine running right now
  * is a routine whose previous failure you are already past.
  */
-export function catalogBuckets(routines: OverviewRoutine[], liveSlugs: Set<string>): CatalogBucket[] {
+export function catalogBuckets(
+  routines: OverviewRoutine[],
+  liveSlugs: Set<string>,
+): CatalogBucket[] {
   const counts = { live: 0, healthy: 0, failing: 0, awaiting: 0, disabled: 0, never: 0 }
   for (const r of routines) {
     if (liveSlugs.has(r.slug)) counts.live++
@@ -222,11 +226,41 @@ export function catalogBuckets(routines: OverviewRoutine[], liveSlugs: Set<strin
   }
   return [
     { key: "live", label: "Running now", count: counts.live, color: ARC.live, filter: "running" },
-    { key: "healthy", label: "Healthy", count: counts.healthy, color: ARC.healthy, filter: "completed" },
-    { key: "failing", label: "Failing", count: counts.failing, color: ARC.failing, filter: "failed" },
-    { key: "awaiting", label: "Awaiting approval", count: counts.awaiting, color: ARC.awaiting, filter: "awaiting" },
-    { key: "disabled", label: "Disabled", count: counts.disabled, color: ARC.disabled, filter: "all" },
-    { key: "never", label: "Never invoked", count: counts.never, color: ARC.never, filter: "never" },
+    {
+      key: "healthy",
+      label: "Healthy",
+      count: counts.healthy,
+      color: ARC.healthy,
+      filter: "completed",
+    },
+    {
+      key: "failing",
+      label: "Failing",
+      count: counts.failing,
+      color: ARC.failing,
+      filter: "failed",
+    },
+    {
+      key: "awaiting",
+      label: "Awaiting approval",
+      count: counts.awaiting,
+      color: ARC.awaiting,
+      filter: "awaiting",
+    },
+    {
+      key: "disabled",
+      label: "Disabled",
+      count: counts.disabled,
+      color: ARC.disabled,
+      filter: "all",
+    },
+    {
+      key: "never",
+      label: "Never invoked",
+      count: counts.never,
+      color: ARC.never,
+      filter: "never",
+    },
   ]
 }
 
@@ -285,6 +319,7 @@ export function dayBuckets(now: Date, days: number): Day[] {
 }
 
 export interface OverviewWaitpoint {
+  decision_form?: DecisionForm
   token: string
   pipeline_run_id: string
   step_id: string
@@ -297,6 +332,7 @@ export interface OverviewWaitpoint {
 export type PendingApproval =
   | {
       kind: "run"
+      decision_form?: DecisionForm
       token: string
       runId: string
       stepId: string
@@ -341,6 +377,7 @@ export function pendingApprovals(
       const r = slug ? bySlug.get(slug) : undefined
       return {
         kind: "run" as const,
+        decision_form: w.decision_form,
         token: w.token,
         runId: w.pipeline_run_id,
         stepId: w.step_id,
