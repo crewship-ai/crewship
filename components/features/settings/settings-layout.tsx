@@ -317,7 +317,7 @@ export function SettingsLayout() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px)]">
+    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))]">
       {/* Settings was the last page with no sub-bar: its identity lived in the
           global top bar as a "Settings / Profile" breadcrumb, which made it the
           one page whose top bar was not plain "Crewship". The identity belongs

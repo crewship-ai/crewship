@@ -542,7 +542,7 @@ export default function CredentialsPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
+      <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] bg-background">
         {subBar}
         <div className="flex-1 overflow-y-auto">
           {/* The skeleton is the OVERVIEW's geometry, not three grey bars where
@@ -578,7 +578,7 @@ export default function CredentialsPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] bg-background">
       {subBar}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Tapping away closes the overlay. Without it the only way back to the
@@ -599,7 +599,7 @@ export default function CredentialsPage() {
               sidebarCollapsed ? "w-9 overflow-hidden" : "w-[280px]",
               // The collapsed rail stays in flow at both sizes, so the expand
               // button never moves.
-              isMobile && !sidebarCollapsed && "fixed inset-y-0 left-0 z-50 shadow-2xl",
+              isMobile && !sidebarCollapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] shadow-2xl",
             )}
           >
             {sidebarCollapsed ? (

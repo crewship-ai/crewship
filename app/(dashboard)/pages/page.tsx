@@ -17,7 +17,7 @@ export default function PagesPage() {
 
   if (wsLoading || !workspaceId) {
     return (
-      <div className="flex h-[calc(100dvh-48px)] flex-col gap-3 p-4">
+      <div className="flex h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />
         <div className="flex flex-1 gap-3">
           <Skeleton className="h-full w-60" />

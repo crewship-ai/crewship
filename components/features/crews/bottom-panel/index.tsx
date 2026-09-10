@@ -111,6 +111,27 @@ export function BottomPanel({
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  /**
+   * The stored height is a synced user preference, so one chosen on a desktop
+   * — up to PANEL_HEIGHT_MAX — arrives on a phone taller than the viewport,
+   * and since the canvas beside it is the only `min-h-0` sibling the canvas
+   * collapses to nothing rather than the panel yielding.
+   *
+   * Clamped here rather than in the style, so the drag, the rendered height
+   * and the value the resize slider announces are all the same number. A
+   * clamp applied only when rendering left the gesture with a dead zone in
+   * both directions once it passed the ceiling.
+   */
+  const [viewportH, setViewportH] = useState<number | null>(null)
+  useEffect(() => {
+    const read = () => setViewportH(window.innerHeight)
+    read()
+    window.addEventListener("resize", read)
+    return () => window.removeEventListener("resize", read)
+  }, [])
+  const ceiling = viewportH ? Math.round(viewportH * 0.6) : PANEL_HEIGHT_MAX
+  const clampedHeight = Math.min(height, Math.max(PANEL_HEIGHT_MIN, ceiling))
+
   useEffect(() => {
     setTab(firstTab)
     setOpen(initialOpen)
@@ -175,7 +196,7 @@ export function BottomPanel({
         // tracks the cursor 1:1 instead of lerping behind it.
         !dragging && "transition-[height] duration-200",
       )}
-      style={{ height: open ? `min(${height}px, 60dvh)` : "36px" }}
+      style={{ height: open ? `${clampedHeight}px` : "36px" }}
     >
       {/* Resize handle — sits at the very top edge, hovers a thin grab
           target. Pointer-events only when the panel is open (it'd be
@@ -185,7 +206,7 @@ export function BottomPanel({
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize bottom panel"
-          aria-valuenow={height}
+          aria-valuenow={clampedHeight}
           aria-valuemin={PANEL_HEIGHT_MIN}
           aria-valuemax={PANEL_HEIGHT_MAX}
           tabIndex={0}

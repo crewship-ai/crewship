@@ -22,7 +22,7 @@
  * the bar is not rendered. 3.5rem is the bar itself; the safe-area inset is
  * padding inside it, not part of this number. */
 :root { --mobile-tab-bar-h: 0px; }
-@media (max-width: 767px) { :root { --mobile-tab-bar-h: 3.5rem; } }
+@media (max-width: 767px) { :root { --mobile-tab-bar-h: calc(3.5rem + env(safe-area-inset-bottom)); } }
 
 /* Reduced motion, covered once rather than per component.
  *

@@ -1,7 +1,7 @@
 import { SkillsBrowser } from "@/components/features/skills/skills-browser"
 
 // Skills browser owns its own chrome (toolbar + 3-panel resizable
-// layout), mirroring OrchestrationLayout's `h-[calc(100dvh-48px)]`
+// layout), mirroring OrchestrationLayout's `h-[calc(100dvh-48px-var(--mobile-tab-bar-h))]`
 // outer + 48px app toolbar offset. The browser already sets that
 // viewport height internally so this wrapper is intentionally thin —
 // changing it to padded would re-introduce the cropping bug visible

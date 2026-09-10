@@ -45,16 +45,37 @@ describe("back closes an overlay instead of leaving the page", () => {
     expect(seen).toContain("Escape")
   })
 
-  it("never rewinds history itself, even when its own entry is on top", () => {
-    // Tidying up the marker on close races pages that own their history — chat
-    // writes the selected conversation with replaceState and re-reads it on
-    // popstate — and rewound a conversation switch when it was tried. The
-    // leftover entry is a no-op back press; undoing someone else's navigation
-    // is not.
+  it("unwinds its own entry when the overlay closes by its own button", () => {
+    // Otherwise opening and closing a drawer five times costs five back
+    // presses before the page will leave.
     window.history.replaceState({ __overlay: true }, "")
     const { unmount } = render(<Probe />)
     unmount()
+    expect(backSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves history alone when something inside the overlay navigated", () => {
+    // The router has pushed over our marker; going back here would undo that
+    // navigation rather than closing anything. Chat writes its selected
+    // conversation with replaceState and re-reads it on popstate.
+    const { unmount } = render(<Probe />)
+    window.history.replaceState({ __NA: "somewhere-else" }, "")
+    unmount()
     expect(backSpy).not.toHaveBeenCalled()
+  })
+
+  it("answers one back press with one overlay, the innermost", () => {
+    // One popstate reaches every listener on window. When each overlay answered
+    // for itself, a sheet opened from inside a sheet dismissed both at once:
+    // Radix closes only the top layer for a synchronous Escape burst, so the
+    // outer one stayed open having already spent its history entry.
+    const seen: string[] = []
+    const listener = (e: Event) => seen.push((e as KeyboardEvent).key)
+    document.addEventListener("keydown", listener)
+    render(<><Probe /><Probe /></>)
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")) })
+    document.removeEventListener("keydown", listener)
+    expect(seen.filter((k) => k === "Escape"), "both layers answered one back").toHaveLength(1)
   })
 
   it("does not touch history when it is switched off", () => {

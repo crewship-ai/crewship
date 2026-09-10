@@ -35,6 +35,9 @@ export function MobileTabBar() {
       aria-label="Primary"
       className={cn(
         "flex shrink-0 items-stretch border-t border-border bg-background",
+        // The token already includes the home-indicator inset; padding by the
+        // same inset then leaves a 3.5rem content box, because box-sizing is
+        // border-box.
         "h-[var(--mobile-tab-bar-h)] pb-[env(safe-area-inset-bottom)]",
       )}
     >

@@ -584,7 +584,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const toolCount = composioStatus.counts.accounts
 
   return (
-    <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-48px-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar<IntegrationsTab>
         icon={Plug}
         title="Integrations"
@@ -662,7 +662,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all",
-            isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 shadow-2xl",
+            isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] shadow-2xl",
             // `overflow-hidden` only while collapsing, where it is what keeps
             // the content from spilling out of a 36px rail. Leaving it on when
             // expanded clipped the Filter popover at the panel's edge — the
