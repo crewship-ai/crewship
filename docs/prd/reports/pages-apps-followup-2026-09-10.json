@@ -1,11 +1,12 @@
 {
   "deployment": {
-    "pid": "1739749",
-    "sha256": "e2e9ec33735e89002038918191a66922f54b2e1aa94e480e897f0385d85fcc7b",
-    "commit": "078f3381",
-    "health": {
-      "status": "ok"
-    }
+    "commit": "7e7134bf79fa626dd505c75cf51c36f1c079f8a5",
+    "sha256": "9fc33456205cf86a7618233df1e7bc49285c346ac95baf2ff15f923af2573273",
+    "pid": "2562039",
+    "tools_image": "sha256:a2b33aba4b3338b16053c2166d03c7d19a41e5a8b4ba3b4f0ab0daa4723762fc",
+    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T150945Z",
+    "health": "200",
+    "deployed_at": "2026-09-10T15:09:48.609517+00:00"
   },
   "fsck": {
     "checked_artifacts": 3,
@@ -29,7 +30,11 @@
     "state": "in_progress",
     "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration",
     "superseded_ui": 34488992444,
-    "superseded_ui_reason": "Go Lint timestamp guard failed; fixed in 187ed2f9"
+    "superseded_ui_reason": "Go Lint timestamp guard failed; fixed in 187ed2f9",
+    "source_state": "success",
+    "server": 34493448807,
+    "server_sha": "53b6e1a0a2c327d7f0ea00106c2c9f3aad3f2344",
+    "server_state": "in_progress"
   },
   "tests": {
     "pages": "passed",
@@ -47,16 +52,19 @@
     "previous_ci_go_jobs": "source and cumulative UI passed"
   },
   "review": {
-    "state": "rate_limited",
+    "state": "source_manual_fallback_completed; server_manual_review_in_progress; server_coderabbit_throttled",
     "requested_at": "2026-09-10T11:12:28Z",
     "rejected_at": "2026-09-10T11:12:34Z",
     "retry_notice_minutes": 59,
     "merged": false,
-    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded"
+    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded",
+    "merged_prs": [
+      2475
+    ]
   },
   "safari_decision": "confirmed_panel_only_v1_2026-09-10",
   "integration": {
-    "main_sha": "6a9857f5da4558fca082223eafba750de0d76b48",
+    "main_sha": "410563ecab034eb3624ebfa7d56f4b73baa3c959",
     "state": "resolved_in_review_stack",
     "server_sha": "187ed2f9a5bb6f6d30f676e2d68583809d3e7976",
     "ui_sha": "aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad",
@@ -119,5 +127,35 @@
     "target_free_gib": 40,
     "minimum_age_hours": 25,
     "tests": "3 passed; real service and dry run passed (within_limits)"
+  },
+  "current_live_validation": {
+    "build": {
+      "artifact_digest": "eb478feb7ce7c7e6b35818dee4a6eef9c2fb054c843881b0415ba6e0e4d68f5e",
+      "completed_at": "2026-09-10T15:10:26.975504728Z",
+      "created_at": "2026-09-10T15:10:21.344304452Z",
+      "id": "cmtvnz63k00049554e39c",
+      "source_digest": "4ad8095167662e7f55be7762114e9e2706949ce0360200d905bf6d928697ea16",
+      "source_revision": 3,
+      "state": "ready"
+    },
+    "action": {
+      "pending_id": "pnd_cmtvo04hg000538d1ce0e",
+      "pending_status": "fired",
+      "routine_changed_since_publication": false,
+      "routine_definition_at_enqueue": "6314f4c8a8a622f3981c377a14b6afbed376345e468407315b65e895ab0675f4",
+      "routine_revision_pinned": false,
+      "run_id": "run_cmtvo063t00026c388d88",
+      "run_status": "completed"
+    },
+    "stale_save": "409: project revision changed; reload before saving",
+    "publication_version": 3,
+    "public_page_http": 200,
+    "fsck": "healthy",
+    "authoring": "awaiting explicit isolated crew permission; not measured",
+    "production_runtime": "awaiting separate registrable domain/DNS/TLS"
+  },
+  "server_review_tests": {
+    "mutation": "bypassing guided policy hold failed with held 200; reverted",
+    "restored_regressions": "passed (2.310s)"
   }
 }

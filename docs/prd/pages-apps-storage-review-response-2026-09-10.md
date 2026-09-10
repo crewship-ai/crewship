@@ -89,3 +89,29 @@ the installed service and dry run both succeeded with `within_limits`.
 The first run saw about 4.5 GiB cache and 72 GiB free and removed nothing.
 Configuration, tests, service/timer sources and operating instructions are
 kept in `/srv/crewship/maintenance/`; the journal records each result.
+
+## Delivery and dev3 verification — 15:12 UTC
+
+Source PR #2475 merged as `410563ec` after source CI 34488138789 completed
+successfully and the documented manual review fallback. Server #2477 now
+targets main at `53b6e1a0`; automatic CI 34493448807 is running. Its CodeRabbit
+request was throttled; manual server review is in progress, not complete.
+Bypassing the guided policy hold made the authoring identity/policy regression
+fail with `held 200`; after reverting the mutation, reviewed-path tests passed
+(2.310s). The other three PRs remain open.
+
+Dev3 was updated after a complete `make build` and rebuilding the pinned tools
+image. Running commit `7e7134bf`, binary SHA256
+`9fc33456205cf86a7618233df1e7bc49285c346ac95baf2ff15f923af2573273`
+was checked against `/proc/<pid>/exe`; health and public Page returned 200.
+The stopped-service snapshot in `rollback-2472-20260910T150945Z` preserves
+SQLite, Pages files and previous binaries, but is not a full crew-volume backup.
+
+A real preview build of revision 3 completed in 5.63 seconds; source/artifact
+integrity and binding checks passed. Existing publication remains version 3.
+Its refresh action reached `completed` (`run_cmtvo063t00026c388d88`). A stale
+source save at revision 2 returned a readable 409 without replacing the draft.
+Exact build/image/run identities are in the existing JSON report. This proves
+the current deployed engineering path, not chat authorship or clean production
+installation. The isolated authoring-crew permission and separate runtime
+domain/DNS/TLS questions remain pending.
