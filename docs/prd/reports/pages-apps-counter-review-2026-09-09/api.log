@@ -1,0 +1,103 @@
+=== RUN   TestPageApplicationActionsPublicationFenceAndOwnReceipt
+--- PASS: TestPageApplicationActionsPublicationFenceAndOwnReceipt (3.59s)
+=== RUN   TestPageBuildDockerRoundTrip
+    pages_build_docker_test.go:19: requires a pinned local Pages tools image
+--- SKIP: TestPageBuildDockerRoundTrip (0.00s)
+=== RUN   TestPageBuildLifecycleRBACAndRevision
+--- PASS: TestPageBuildLifecycleRBACAndRevision (0.38s)
+=== RUN   TestPageBuildFailureAndRestartRecovery
+--- PASS: TestPageBuildFailureAndRestartRecovery (0.29s)
+=== RUN   TestPagesPush_RingHonoursWorkspaceRetention
+--- PASS: TestPagesPush_RingHonoursWorkspaceRetention (0.08s)
+=== RUN   TestPagesPush_RetentionNeverDeletesTheLastKnownValue
+--- PASS: TestPagesPush_RetentionNeverDeletesTheLastKnownValue (0.07s)
+=== RUN   TestPageProjectHistoryRestoreCASAndIsolation
+--- PASS: TestPageProjectHistoryRestoreCASAndIsolation (0.45s)
+=== RUN   TestPageProjectAgentWorkflowIdentityPolicyAndCAS
+--- PASS: TestPageProjectAgentWorkflowIdentityPolicyAndCAS (0.45s)
+=== RUN   TestPageProjectPublicationAtomicCASRollbackAndReach
+--- PASS: TestPageProjectPublicationAtomicCASRollbackAndReach (0.31s)
+=== RUN   TestPageProjectRetentionPinsLiveDraftAndRunningBuild
+--- PASS: TestPageProjectRetentionPinsLiveDraftAndRunningBuild (0.38s)
+=== RUN   TestPageProjectRoundTripAndDraftIsolation
+--- PASS: TestPageProjectRoundTripAndDraftIsolation (0.32s)
+=== RUN   TestPageProjectRBACAndConcurrentSave
+--- PASS: TestPageProjectRBACAndConcurrentSave (0.40s)
+=== RUN   TestPageProjectImportMissingBindingIsAtomic
+--- PASS: TestPageProjectImportMissingBindingIsAtomic (0.58s)
+=== RUN   TestPageProjectStrictSaveAndDisabledStore
+--- PASS: TestPageProjectStrictSaveAndDisabledStore (0.09s)
+=== RUN   TestPageProjectDefinitionUpdateIsDraftOnly
+--- PASS: TestPageProjectDefinitionUpdateIsDraftOnly (0.43s)
+=== RUN   TestPageImport_CannotPublishAPanel
+--- PASS: TestPageImport_CannotPublishAPanel (0.10s)
+=== RUN   TestMutationRouteRolesMatchManifest
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.680Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+time=2026-09-09T13:31:02.681Z level=ERROR msg="internal token is empty -- all internal API calls will be rejected"
+--- PASS: TestMutationRouteRolesMatchManifest (0.09s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/api	8.099s

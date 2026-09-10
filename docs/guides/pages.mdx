@@ -1364,3 +1364,42 @@ crews deleted.
 - [Crew Journal](/guides/crew-journal) — where a page's history actually lives.
 - [Roles & Permissions](/security/rbac) — the workspace-role layer a page's
   grants sit on top of.
+
+
+### Writing a complete collector payload from a routine
+
+A `crewship` step with `action: page.write` can use a whole-object template for
+`args.data`, for example `data: "{{ steps.collect.output.services }}"`. The result
+must be a JSON object. Numbers, arrays and booleans inside that object retain
+their types; a missing reference, invalid JSON, `null`, array or scalar fails
+before the write. Normal authored data objects remain supported. This conversion
+is limited to the complete `page.write` data template; other verbs keep ordinary
+string interpolation. See `examples/pages-apps/custom-operations.routine.yaml`.
+
+
+## Shared company colors
+
+Workspace administrators can set custom Page colors under **Settings → General
+→ Pages appearance**. The React starter uses the workspace palette through
+`--crewship-page-accent`, `--crewship-page-background`, `--crewship-page-surface`,
+`--crewship-page-text`, `--crewship-page-muted` and `--crewship-page-border`.
+The SDK also exposes `usePageTheme()` and a derived contrasting button text token,
+`--crewship-page-on-accent`. These are optional design tokens: your Page retains
+its own components and layout.
+
+A palette update reaches open Pages without rebuilding their code. Older
+applications must first adopt the tokens and be built with the supporting SDK.
+Importing a Page inherits the destination workspace palette; it does not change
+that company's settings. Workspace color updates require OWNER/ADMIN and are
+audited. Custom animations should honor `prefers-reduced-motion`, as the seeded
+Operations Lab does.
+
+### Opening custom applications
+
+Studio keeps a loading surface in the workspace background color until the
+runtime has received the first snapshot and had two rendering opportunities.
+The application then fades in over 300 ms. Normal data updates do not replay
+this transition, and reduced-motion preferences disable it. If initialization
+does not finish within 20 seconds in a visible tab, close and reopen the
+application to retry. This loading signal is not an application health check;
+a custom app remains responsible for its own asynchronous content and errors.

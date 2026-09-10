@@ -38,6 +38,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).
 
+### Documentation
+- Document experimental Pages application installation, recovery, browser support and the verified limits of the initial release.
 
 ### Changed
 - Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
