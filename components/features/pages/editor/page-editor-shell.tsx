@@ -67,7 +67,7 @@ export interface PageEditorShellProps {
 }
 
 export function PageEditorShell({ workspaceId, slug, page, loading, capabilities, navigation }: PageEditorShellProps) {
-  const { section, pane, setSection, setPane, setMode, setDirty, pending } = navigation
+  const { section, pane, setSection, setPane, setMode, setDirty, pending, openPage } = navigation
   const Section = SECTION_COMPONENT[section]
 
   // Focus lands on the editor's heading when a section changes, so a keyboard
@@ -91,6 +91,10 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
     onNavigate: setSection,
     pane,
     onPaneChange: setPane,
+    onLeaveEditor: () => setMode("view"),
+    // A deleted Page has no view to go back to, so this is the overview and
+    // not `setMode("view")`.
+    onPageDeleted: () => openPage(null),
     onDirtyChange: setDirty,
   }
 

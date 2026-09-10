@@ -44,6 +44,11 @@ export function derivePageCapabilities(
 ): PageCapabilities {
   if (page == null) return NO_PAGE_CAPABILITIES
   const sealed = sealedPanelCount(page)
+  // `has_application` has no `omitempty` on the wire (internal/api/pages_handler.go
+  // `pageWire`), so the server always states it. Absent therefore means a
+  // fixture or a caller that did not, and `!== false` is the convention the
+  // live application view already uses — the cost of the other default is
+  // hiding the review screen on a Page that really has an application.
   const hasApplication = page.has_application !== false
   return {
     loaded: true,

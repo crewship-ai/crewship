@@ -29,6 +29,21 @@ export interface EditorSectionProps {
   pane: EditorPane
   onPaneChange: (pane: EditorPane) => void
   /**
+   * Leave the editor and go back to viewing the Page.
+   *
+   * Two sections need a way out that is not another section, and neither
+   * could express it: "Close without publishing" ends a review, and deleting
+   * a Page leaves nothing behind to edit. Without this they either become a
+   * silent no-op or reach for the router directly, which in this shell would
+   * unmount the rail the editor was careful not to disturb.
+   */
+  onLeaveEditor: () => void
+  /**
+   * The Page this editor was editing no longer exists. The shell returns to
+   * the overview; a section must not route away by itself.
+   */
+  onPageDeleted: () => void
+  /**
    * Raise while this section holds edits that are not written yet. The shell
    * guards Page switches, section switches and Back on it. It is not a promise
    * about closing the browser: `beforeunload` cannot make one.
