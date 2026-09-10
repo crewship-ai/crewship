@@ -25,6 +25,8 @@ export function PageApplicationView({ workspaceId, slug, page, fallback }: { wor
     }
   }, [hasApplication, opened, page?.publication_version, query.data, query.isError, query.isPending, storageBusy])
   const available = hasApplication && query.data?.publication && opened?.artifact && opened.runtime_url && page && (!query.isError || storageBusy)
+  const versionMismatch = hasApplication && !opened && !query.isError && query.data?.publication && page?.publication_version !== undefined && page.publication_version !== query.data.publication.version
+  if (versionMismatch) return <><p role="status" className="px-4 text-sm">Application versions are not synchronized. Showing panels until they agree.</p>{fallback}</>
   if (hasApplication && !query.isError && (query.isPending || (query.data?.publication && !opened))) return <div role="status" className="flex min-h-0 flex-1 items-center justify-center text-sm" style={{ backgroundColor: theme.background, color: theme.muted }}>Loading application…</div>
   if (!available) return <>{query.error && <p role="alert" className="px-4 text-sm text-destructive">{query.error.message}</p>}{fallback}</>
   const changed = opened.publication?.version !== query.data?.publication?.version
