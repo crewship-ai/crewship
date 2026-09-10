@@ -1,0 +1,127 @@
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+
+import { Button } from "@/components/ui/button"
+import { PagePreviewFrame } from "@/components/features/pages/page-preview"
+import { usePagePreview } from "@/hooks/use-page-preview"
+import type { WirePageDetail } from "@/hooks/use-page-grants"
+import type { WirePage } from "@/hooks/use-pages"
+
+/**
+ * The candidate's build, as a workspace of its own.
+ *
+ * It is a separate pane rather than a third column because a form, a diff and
+ * a live iframe do not fit side by side at any width anybody actually uses —
+ * and because the preview is a *detour* from a decision. Leaving it is
+ * therefore not free: the caller clears the review consent (`onReturn`), since
+ * the person is coming back to make the decision, not carrying one across.
+ *
+ * `onRequest` is deliberately not passed. A draft preview must not execute the
+ * application's actions; the runtime refuses an unhandled request already
+ * (`page-preview.tsx:121`, V10) and omitting the handler is what makes that
+ * refusal the only possible outcome rather than a policy someone can flip.
+ */
+export function ReviewPreview({
+  workspaceId,
+  slug,
+  page,
+  candidateRevision,
+  onReturn,
+}: {
+  workspaceId: string
+  slug: string
+  page: WirePageDetail | null
+  candidateRevision: number | null
+  onReturn: () => void
+}) {
+  const { query, build } = usePagePreview(workspaceId, slug)
+  const heading = useRef<HTMLHeadingElement>(null)
+  const [stopped, setStopped] = useState(false)
+  // Entering the preview is a navigation. Park focus on its heading so a
+  // keyboard user is not left on a control that no longer exists.
+  useEffect(() => heading.current?.focus(), [])
+
+  const data = query.data
+  const job = data?.build
+  const running = build.isPending || job?.state === "running"
+  const stale = typeof candidateRevision === "number" && typeof job?.source_revision === "number" && job.source_revision !== candidateRevision
+  const live = !!data?.artifact && !!data.runtime_url && job?.state === "ready" && !!page && !query.isError && !stopped
+
+  return (
+    <section className="flex min-h-0 w-full min-w-0 flex-col gap-4" aria-labelledby="review-preview-heading">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id="review-preview-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+            Candidate preview
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {candidateRevision === null ? "Candidate build" : `Draft ${candidateRevision}`} · actions are not executed here
+          </p>
+        </div>
+        <Button variant="outline" className="min-h-11" onClick={onReturn}>
+          Back to review
+        </Button>
+      </div>
+
+      <div role="note" className="rounded-md border border-dashed p-3 text-sm">
+        <p>This preview does not run the application&apos;s actions. No action handler is connected to it, and the runtime refuses a request it cannot answer.</p>
+        <p className="mt-2 text-muted-foreground">
+          It renders with the live data you are allowed to read. A new or changed panel may legitimately show an empty state here. This is not a test of the actions and not a
+          measurement of what a customer will see.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          className="min-h-11"
+          disabled={!data || running || query.isError}
+          onClick={() => {
+            setStopped(false)
+            build.mutate(data!.revision)
+          }}
+        >
+          {running ? "Building…" : "Build preview"}
+        </Button>
+        {/* Stop is a host control outside the iframe: there is no in-frame
+            stop message, and a preview that can only be stopped from inside
+            itself cannot be stopped at all. Unmounting the frame is the stop. */}
+        {live && (
+          <Button variant="outline" className="min-h-11" onClick={() => setStopped(true)}>
+            Stop preview
+          </Button>
+        )}
+        {stale && <span className="text-sm text-muted-foreground">This build is of an older draft. Build again to preview the candidate under review.</span>}
+      </div>
+
+      {(query.error || build.error) && (
+        <p role="alert" className="text-sm text-destructive">
+          {query.error?.message ?? build.error?.message}
+        </p>
+      )}
+      {data && !data.runtime_url && (
+        <p role="alert" className="text-sm text-muted-foreground">
+          An administrator needs to configure the application preview domain before a candidate can be previewed.
+        </p>
+      )}
+
+      <div className="min-h-[24rem] min-w-0 flex-1">
+        {live ? (
+          <PagePreviewFrame
+            workspaceId={workspaceId}
+            key={`${workspaceId}:${slug}:${job!.id}`}
+            artifact={data!.artifact!}
+            page={page as WirePage}
+            runtimeURL={data!.runtime_url}
+            developmentSameOrigin={data!.development_same_origin === true}
+            title="Candidate application preview"
+          />
+        ) : (
+          <div className="flex h-full min-h-[24rem] items-center justify-center rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+            {running ? "Preparing the candidate's preview…" : stopped ? "Preview stopped." : job?.state === "failed" ? "This candidate did not build. Its preview cannot be shown." : "Build this candidate to preview it."}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
