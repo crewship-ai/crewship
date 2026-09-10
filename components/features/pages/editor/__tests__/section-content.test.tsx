@@ -62,7 +62,12 @@ const PANEL_PAGE: WirePageDetail = {
   name: "Fleet overview",
   description: "Services and container memory",
   owner: "crew/lookout",
+  // Both flags stated: `has_application` is a PUBLISHED application and
+  // `has_project` is source of any kind. The backend field may not have
+  // landed, and an absent one reads as false — which is the answer here, but
+  // only by luck, so the fixture says it.
   has_application: false,
+  has_project: false,
   created_at: "2026-07-01T08:00:00Z",
   updated_at: "2026-08-10T08:00:00Z",
   panels: [
@@ -99,8 +104,16 @@ const SEALED_PAGE: WirePageDetail = {
   ] as WirePageDetail["panels"],
 }
 
-/** The Page the same fixture describes, once it carries an application. */
-const APP_PAGE: WirePageDetail = { ...PANEL_PAGE, has_application: true }
+/** The same Page once it carries a PUBLISHED application. */
+const APP_PAGE: WirePageDetail = { ...PANEL_PAGE, has_application: true, has_project: true }
+
+/**
+ * The same Page with application source that has never been published — the
+ * first-publication case. `has_application` is
+ * `EXISTS(page_project_live WHERE published=1)` and is therefore false here,
+ * which is exactly how gating the review on it hid this screen.
+ */
+const DRAFT_PAGE: WirePageDetail = { ...PANEL_PAGE, has_application: false, has_project: true }
 
 /**
  * The authorized review snapshot. Whether the review opens is read from HERE
@@ -129,6 +142,27 @@ const SNAPSHOT: ReviewSnapshotWire = {
   capabilities: { may_edit_spec: true, may_publish: true },
   blockers: [],
   initial_publication: false,
+}
+
+/** A candidate with nothing live behind it: publication 0, never published. */
+const FIRST_PUBLICATION: ReviewSnapshotWire = {
+  ...SNAPSHOT,
+  baseline: {
+    publication_version: 0,
+    published: false,
+    definition_digest: "sha256:definition",
+    source_revision: null,
+    git_commit: null,
+    source_available: false,
+    source_unavailable_reason: null,
+  },
+  initial_publication: true,
+}
+
+const FIRST_PUBLICATION_NO_CANDIDATE: ReviewSnapshotWire = {
+  ...FIRST_PUBLICATION,
+  candidate: null,
+  blockers: [{ code: "no_candidate", message: "No candidate has been submitted." }],
 }
 
 const NO_CANDIDATE: ReviewSnapshotWire = {
@@ -320,9 +354,12 @@ describe("nothing application-shaped appears on a Page that has no application",
     }
   })
 
-  it("reads no review snapshot at all for a Page that has no application", () => {
+  it("reads no review snapshot at all when neither flag is set", () => {
     const { calls } = mount()
+    // Neither published (`has_application`) nor drafted (`has_project`): an
+    // ordinary panel Page must not pay for a review it cannot have.
     expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(0)
+    expect(document.querySelector("[data-slot='add-application']")).toBeTruthy()
   })
 })
 
@@ -330,7 +367,9 @@ describe("nothing application-shaped appears on a Page that has no application",
 
 describe("an application Page shows the review AND the Page itself", () => {
   async function mountApplicationPage(harness: Harness = {}) {
-    const result = mount({ page: APP_PAGE, capabilities: { hasApplication: true }, ...harness })
+    // Capabilities are DERIVED from the fixture, not forced: whether the
+    // review is asked for at all is the thing under test here.
+    const result = mount({ page: APP_PAGE, ...harness })
     // Settle the snapshot read before asserting on what it decided.
     await waitFor(() => expect(document.body.textContent).not.toMatch(/Checking whether an agent/))
     return result
@@ -411,6 +450,53 @@ describe("an application Page shows the review AND the Page itself", () => {
 
   it("offers no second application on a Page that already has one", async () => {
     await mountApplicationPage()
+    expect(document.querySelector("[data-slot='add-application']")).toBeNull()
+  })
+})
+
+// ── 2c. The first publication (has_project, no has_application) ────────────
+
+describe("a Page whose application has never been published", () => {
+  async function mountDraftPage(harness: Harness = {}) {
+    const result = mount({ page: DRAFT_PAGE, review: jsonResponse(200, FIRST_PUBLICATION), ...harness })
+    await waitFor(() => expect(document.body.textContent).not.toMatch(/Checking whether an agent/))
+    return result
+  }
+
+  it("opens the review for the first publication, and keeps the Page below it", async () => {
+    const { calls } = await mountDraftPage()
+
+    // The gate asked the server at all — `has_application` is false here, and
+    // keying on it is what hid this screen.
+    expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(1)
+
+    const review = await screen.findByText("review of fleet-overview")
+    expect(review).toBeTruthy()
+    // The first-publication framing itself belongs to the review surface; what
+    // this section owes it is the mount and the Page's own content underneath.
+    expect(document.querySelector("[data-slot='nothing-to-review']")).toBeNull()
+    expect(screen.getByRole("heading", { name: "This Page itself" })).toBeTruthy()
+    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("shows ordinary Content, and never 'version 0', when no candidate is waiting", async () => {
+    await mountDraftPage({ review: jsonResponse(200, FIRST_PUBLICATION_NO_CANDIDATE) })
+
+    expect(screen.queryByText("review of fleet-overview")).toBeNull()
+    const line = document.querySelector("[data-slot='nothing-to-review']")!
+    expect(line.textContent).toContain("nothing has been published from it yet")
+    // The bug this wording replaces: a baseline of `{published: false,
+    // publication_version: 0}` announced "published as version 0".
+    expect(line.textContent).not.toMatch(/version 0/)
+    expect(line.textContent).not.toMatch(/published as version/)
+
+    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("still offers no 'add a custom application' — a draft is already one", async () => {
+    await mountDraftPage()
     expect(document.querySelector("[data-slot='add-application']")).toBeNull()
   })
 })

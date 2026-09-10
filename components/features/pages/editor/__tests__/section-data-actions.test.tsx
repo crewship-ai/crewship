@@ -36,6 +36,7 @@ const PAGE: WirePageDetail = {
   name: "Fleet overview",
   owner: "crew/lookout",
   has_application: false,
+  has_project: false,
   panels: [
     {
       id: "sluzby",
@@ -73,7 +74,11 @@ const PAGE: WirePageDetail = {
   ],
 }
 
-const APP_PAGE: WirePageDetail = { ...PAGE, has_application: true }
+const APP_PAGE: WirePageDetail = { ...PAGE, has_application: true, has_project: true }
+
+/** Application source that has never been published: `has_application` is
+ *  false, and its candidate can still declare a different definition. */
+const DRAFT_PAGE: WirePageDetail = { ...PAGE, has_application: false, has_project: true }
 
 /** The candidate's definition, in the document shape `GET …/project` sends. */
 function draft(panels: unknown[]) {
@@ -249,7 +254,6 @@ describe("the banner says which definition this is", () => {
   it("warns, and points at Content, when the candidate declares something else", async () => {
     mount({
       page: APP_PAGE,
-      capabilities: { hasApplication: true },
       project: jsonResponse(
         200,
         draft([
@@ -271,7 +275,6 @@ describe("the banner says which definition this is", () => {
   it("does not cry difference over `1h` versus 3600 seconds", async () => {
     mount({
       page: APP_PAGE,
-      capabilities: { hasApplication: true },
       project: jsonResponse(
         200,
         draft([
@@ -293,10 +296,27 @@ describe("the banner says which definition this is", () => {
     await waitFor(() => expect(banner.dataset.comparison).toBe("same"))
   })
 
+  it("warns on a first publication too, whose application is only a draft", async () => {
+    const { calls } = mount({
+      page: DRAFT_PAGE,
+      project: jsonResponse(
+        200,
+        draft([
+          { id: "sluzby", schema: "status.v1", title: "Renamed by the candidate", owner: "crew/lookout", producer: "routine/nightly", sla: "5m" },
+        ]),
+      ),
+    })
+
+    // `has_application` is false here — keying the banner on it would leave
+    // the one Page whose whole definition is about to change with no warning.
+    expect(calls.filter((c) => c.url.includes("/project"))).toHaveLength(1)
+    const banner = document.querySelector<HTMLElement>("[data-slot='live-definition-banner']")!
+    await waitFor(() => expect(banner.dataset.comparison).toBe("differs"))
+  })
+
   it("says the comparison is unavailable rather than implying there are no changes", async () => {
     mount({
       page: APP_PAGE,
-      capabilities: { hasApplication: true },
       project: jsonResponse(503, { error: "Page project storage is not configured" }),
     })
 

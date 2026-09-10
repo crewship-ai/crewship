@@ -84,7 +84,13 @@ export function EditorDataActionsSection({
         workspaceId={workspaceId}
         slug={slug}
         page={page}
-        hasApplication={capabilities.hasApplication}
+        // `hasApplicationDraft`, not `hasApplication`: the wire's
+        // `has_application` means a PUBLISHED application, and a candidate
+        // that has never been published can still declare a definition other
+        // than the live one. Keying on the published flag would leave a
+        // first-publication Page with no warning at all — the same miss F2
+        // recorded in Content.
+        hasCandidateSource={capabilities.hasApplicationDraft}
         onNavigate={onNavigate}
       />
 
@@ -194,19 +200,21 @@ function LiveDefinitionBanner({
   workspaceId,
   slug,
   page,
-  hasApplication,
+  hasCandidateSource,
   onNavigate,
 }: {
   workspaceId: string
   slug: string
   page: WirePageDetail | null
-  hasApplication: boolean
+  /** Application source exists — draft or published. Either can disagree with
+   *  the live definition described here. */
+  hasCandidateSource: boolean
   onNavigate: EditorSectionProps["onNavigate"]
 }) {
   const query = useQuery({
     queryKey: ["page-candidate-definition", workspaceId, { slug }],
     queryFn: ({ signal }) => readCandidate(slug, workspaceId, signal),
-    enabled: hasApplication,
+    enabled: hasCandidateSource,
     retry: false,
     gcTime: 0,
   })
@@ -214,7 +222,7 @@ function LiveDefinitionBanner({
   const livePanels = page?.panels
   const comparison: CandidateComparison = React.useMemo(() => {
     const live = Array.isArray(livePanels) ? livePanels : []
-    if (!hasApplication) return { kind: "none" }
+    if (!hasCandidateSource) return { kind: "none" }
     // `loading` is its own state, not an early `unknown`: the two read the
     // same to a person and completely differently to a test, and a banner that
     // announced an unavailable comparison while the request was still open
@@ -229,7 +237,7 @@ function LiveDefinitionBanner({
     return definitionSignature(data.panels) === definitionSignature(live)
       ? { kind: "same" }
       : { kind: "differs" }
-  }, [hasApplication, livePanels, query.data, query.error, query.isError, query.isPending])
+  }, [hasCandidateSource, livePanels, query.data, query.error, query.isError, query.isPending])
 
   return (
     <div
@@ -267,7 +275,7 @@ function LiveDefinitionBanner({
         </p>
       )}
 
-      {hasApplication && (
+      {hasCandidateSource && (
         <div>
           <Button
             type="button"

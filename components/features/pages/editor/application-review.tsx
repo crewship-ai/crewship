@@ -138,7 +138,15 @@ function basisKey(basis: ConsentBasis): string {
 
 export function EditorApplicationReview(props: EditorSectionProps) {
   const { workspaceId, slug, page, capabilities, pane, onPaneChange, onDirtyChange } = props
-  const review = usePageReview(workspaceId, slug, capabilities.hasApplication)
+  const review = usePageReview(
+    workspaceId,
+    slug,
+    // Source exists, published or not. On the published flag a draft-only
+    // Page disabled all three queries here and the screen only rendered
+    // because its parent had filled the shared cache — and `gcTime: 0` puts
+    // that one refactor away from reading nothing at all.
+    capabilities.hasApplicationDraft,
+  )
   const previewBuild = usePagePreview(workspaceId, slug)
   const snapshot = review.snapshot.data
 

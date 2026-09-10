@@ -15,10 +15,15 @@
  * has none of those.
  *
  * Whether the review appears at all is decided by the SERVER's review
- * snapshot, never by `has_application` (F2). §5 rule 6: a candidate that does
+ * snapshot, never by a flag on the Page (F2). §5 rule 6: a candidate that does
  * not exist, or one identical to what is live, does not open the review — the
  * reader goes straight to Content, and is told in one line why there is
  * nothing to review.
+ *
+ * Which Page even ASKS for that snapshot is `hasApplicationDraft`, because
+ * `has_application` means a PUBLISHED application. A Page whose source is
+ * still only a draft answered false, so the first publication — the one
+ * candidate that has to be read in full (§3) — never reached the screen.
  *
  * The independent review's U02 is the other half of the acceptance test — *the
  * ordinary panel Page must be a complete first-class case, not Operations Lab
@@ -86,11 +91,19 @@ export function EditorContentSection(props: EditorSectionProps) {
       </p>
     )
   }
-  // `hasApplication` decides which Content this is. It never decides whether
-  // the Page's own identity and panels are reachable — that was F1, and it
-  // left an application Page with no way anywhere in the product to rename
-  // itself or open its document.
-  if (!props.capabilities.hasApplication) return <PanelPageContent {...props} />
+  // `hasApplicationDraft`, not `hasApplication`: the wire's `has_application`
+  // is `EXISTS(page_project_live WHERE published=1)`, so a Page whose
+  // application has only ever been a draft reports false — and that is the
+  // FIRST PUBLICATION, the one case §3 says must open the review and show the
+  // whole candidate. Gating on the published flag hid exactly that screen.
+  //
+  // This decides only whether to ASK the server. What is then shown is
+  // decided by the snapshot (`reviewGateOf`), never by either flag.
+  //
+  // Neither flag decides whether the Page's own identity and panels are
+  // reachable — that was F1, and it left an application Page with no way
+  // anywhere in the product to rename itself or open its document.
+  if (!props.capabilities.hasApplicationDraft) return <PanelPageContent {...props} />
   return <ApplicationPageContent {...props} />
 }
 
@@ -108,8 +121,10 @@ function PanelPageContent(props: EditorSectionProps) {
 
       <PageOwnContent {...props} onDirtyChange={props.onDirtyChange} />
 
-      {/* Only where there is no application yet. Offering to add a second one
-          to a Page that already has one would be nonsense. */}
+      {/* Structurally unreachable on a Page that already has application
+          source: `hasApplicationDraft` sends those to the other Content, draft
+          or publication alike. Offering to add a second one would be nonsense,
+          and a draft nobody has published yet is still one. */}
       <AddApplicationOffer workspaceId={props.workspaceId} slug={props.slug} />
     </div>
   )
@@ -144,11 +159,15 @@ function reviewGateOf(
     return { kind: "unreadable", reason: "The server sent no review of this application." }
   }
   if (!snapshot.candidate) {
+    // `published` and a version of 0 are two different facts and the baseline
+    // can carry either. "Published as version 0" is the sentence this branch
+    // exists to never print: nothing has been published from this source yet.
+    const live = snapshot.baseline.published && snapshot.baseline.publication_version > 0
     return {
       kind: "nothing",
-      sentence: snapshot.baseline.published
+      sentence: live
         ? `This Page runs a custom application, published as version ${snapshot.baseline.publication_version}. No agent has submitted a change, so there is nothing to review.`
-        : "This Page has a custom application, but nothing is published and no change has been submitted for review.",
+        : "This Page has application source, but nothing has been published from it yet and no candidate is waiting for review.",
     }
   }
   // The server's own words when it says the candidate adds nothing — it is the
