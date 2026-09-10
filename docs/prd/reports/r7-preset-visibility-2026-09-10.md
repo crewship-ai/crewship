@@ -70,3 +70,6 @@ Finální lokální důkazy: `/tmp/r7-final-evidence.json` a
 `/tmp/r7-browser-reviewed.log`. Chunk `web/out/_next/static/chunks/1jzb0u_44iwx-.js`
 obsahuje nový string a má SHA-256 `533c8d9890cf7b1438b9de33971237ce3edab154461383d668f87aa93d2f9a41`;
 bajty stažené z portu 8081 souhlasí se statickým exportem.
+
+
+Final review follow-up (22:09 UTC): CodeRabbit reviewed head 8d46c8fe7 and found a file-prefix normalization bypass and incomplete sensitive-fixture presence assertions. New frontend and Go regressions each failed for data/file/blob prefixes with whitespace and Unicode format characters before the fix. Both display classifiers now normalize before prefix detection. API tests require the sensitive pending row and an actual planned occurrence, with redaction assertions for both. CI and deployment evidence below must be refreshed for this follow-up; earlier evidence remains attributed to its original commit.

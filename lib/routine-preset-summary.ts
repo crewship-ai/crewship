@@ -15,6 +15,7 @@ export function routinePresetSummary(inputs: unknown): string {
   for (const [key, value] of entries) {
     if (shown.length === 2) break
     const fieldWords = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    const normalized = typeof value === "string" ? value.replace(/\p{Cf}/gu, "").trimStart() : ""
     let preview: string | undefined
     if (isRecord(value) && value.type === "redacted") {
       preview = "Hidden"
@@ -22,12 +23,11 @@ export function routinePresetSummary(inputs: unknown): string {
       preview = "Credential reference"
     } else if (/password|secret|token|api.?key|authorization|private.?key/i.test(key)) {
       preview = "Hidden"
-    } else if (/(?:^|[_-])(?:files?|attachments?|documents?)(?:$|[_-])/i.test(fieldWords) || (isRecord(value) && (value.type === "file" || "filename" in value)) || (typeof value === "string" && /^(data:|file:|blob:)/i.test(value))) {
+    } else if (/(?:^|[_-])(?:files?|attachments?|documents?)(?:$|[_-])/i.test(fieldWords) || (isRecord(value) && (value.type === "file" || "filename" in value)) || (typeof value === "string" && /^(data:|file:|blob:)/i.test(normalized))) {
       preview = "File"
     } else if (typeof value === "string") {
       // Mask recognizable tokens before clipping, including neutral field names.
       // New calendar/pending responses also apply the server's full scrubber.
-      const normalized = value.replace(/\p{Cf}/gu, "")
       preview = /^(credential:|vault:)/i.test(normalized) ? "Credential reference"
         : /\b(?:gh[pors]_|github_pat_|glpat-|sk-|xox[bpar]-|AIzaSy|AKIA|cur_|fact(?:ory)?_|xai-|gsk_|Bearer\s)|-----BEGIN [^-]*PRIVATE KEY/i.test(normalized) ? "Hidden"
         : line(value, 56) || '""'

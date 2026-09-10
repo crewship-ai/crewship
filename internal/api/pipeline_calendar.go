@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -167,7 +168,12 @@ func planPresetInputs(raw string) (map[string]any, error) {
 		_, credentialRef := record["credential_ref"]
 		_, filename := record["filename"]
 		text, isText := value.(string)
-		lowerText := strings.ToLower(text)
+		lowerText := strings.ToLower(strings.TrimSpace(strings.Map(func(r rune) rune {
+			if unicode.Is(unicode.Cf, r) {
+				return -1
+			}
+			return r
+		}, text)))
 		marker := ""
 		switch {
 		case strings.Contains(strings.ToLower(key), "credential") || credentialRef || kind == "credential":

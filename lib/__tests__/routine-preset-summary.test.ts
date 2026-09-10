@@ -23,6 +23,9 @@ describe("routine preset summary", () => {
     expect(routinePresetSummary({ message: "ghp_" + "x".repeat(36) })).toBe("Inputs: message: Hidden")
     expect(routinePresetSummary({ message: { type: "redacted" } })).toBe("Inputs: message: Hidden")
   })
+  it.each(["data:", "file:", "blob:"])("hides %s payloads after whitespace and invisible characters", (prefix) => {
+    expect(routinePresetSummary({ message: " \t\u200b" + prefix.slice(0, 2) + "\u200b" + prefix.slice(2) + "private-content" })).toBe("Inputs: message: File")
+  })
   it("hides secrets and summarizes credentials and files by type", () => {
     expect(routinePresetSummary({ api_key: "secret-value", credential: "vault-private-id" })).toBe("Inputs: api_key: Hidden · credential: Credential reference")
     expect(routinePresetSummary({ file: { name: "invoice.pdf", content: "private-content" } })).toBe("Inputs: file: File")

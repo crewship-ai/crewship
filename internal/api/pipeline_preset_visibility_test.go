@@ -54,6 +54,7 @@ func TestPlanPresetVisibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			found := map[string]bool{}
+			foundPlanned := false
 			for _, row := range rows {
 				inputs, ok := row["inputs"].(map[string]any)
 				if !ok {
@@ -61,8 +62,12 @@ func TestPlanPresetVisibility(t *testing.T) {
 				}
 				id := row["id"].(string)
 				found[id] = true
-				if id == "sensitive_inputs" {
-					for _, key := range []string{"api_key", "message"} {
+				if id == "sensitive_inputs" || row["kind"] == "planned" {
+					keys := []string{"api_key"}
+					if id == "sensitive_inputs" {
+						keys = append(keys, "message")
+					}
+					for _, key := range keys {
 						if v, ok := inputs[key].(map[string]any); !ok || v["type"] != "redacted" {
 							t.Fatalf("unredacted %s", key)
 						}
@@ -80,15 +85,37 @@ func TestPlanPresetVisibility(t *testing.T) {
 				if id == "empty_inputs" && len(inputs) != 0 {
 					t.Fatalf("empty preset: %v", inputs)
 				}
+				if row["kind"] == "planned" {
+					foundPlanned = true
+				}
 				if row["kind"] == "planned" && inputs["message"] != "recurring" {
 					t.Fatalf("wrong recurring preset: %v", inputs)
 				}
 			}
-			if !found["with_inputs"] || !found["empty_inputs"] {
+			if !found["with_inputs"] || !found["empty_inputs"] || !found["sensitive_inputs"] {
 				t.Fatalf("missing one-time plans: %v", found)
 			}
-			if calendar && len(rows) < 3 {
+			if calendar && !foundPlanned {
 				t.Fatal("missing recurring occurrence")
+			}
+		})
+	}
+}
+
+func TestPlanPresetFilePrefixNormalization(t *testing.T) {
+	for _, prefix := range []string{"data:", "file:", "blob:"} {
+		t.Run(prefix, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{"message": " \t\u200b" + prefix[:2] + "\u200b" + prefix[2:] + "private-content"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inputs, err := planPresetInputs(string(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			marker, ok := inputs["message"].(map[string]any)
+			if !ok || len(marker) != 1 || marker["type"] != "file" {
+				t.Fatal("file payload was not replaced with a marker")
 			}
 		})
 	}
