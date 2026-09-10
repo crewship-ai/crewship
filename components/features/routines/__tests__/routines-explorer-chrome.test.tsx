@@ -38,7 +38,12 @@ const PROPS = {
   onSearchChange: vi.fn(),
   selectedSlug: null,
   onSelectRoutine: vi.fn(),
-  filters: { status: "all" as const, invocations: "all" as const, authorAgentId: null, showEphemeral: false },
+  filters: {
+    status: "all" as const,
+    invocations: "all" as const,
+    authorAgentId: null,
+    showEphemeral: false,
+  },
   onChange: vi.fn(),
 }
 
@@ -69,9 +74,14 @@ describe("<RoutinesExplorer> chrome", () => {
   })
 
   it("keeps the live sub-line on a running routine", () => {
-    h.live = new Map([["nightly", { status: "running", current_step_id: "draft", started_at: new Date().toISOString() }]])
+    h.live = new Map([
+      [
+        "nightly",
+        { status: "running", current_step_id: "draft", started_at: new Date().toISOString() },
+      ],
+    ])
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
-    expect(screen.getByText(/draft/)).toBeInTheDocument()
+    expect(screen.getByText(/▶ Running/)).toBeInTheDocument()
   })
 })
 

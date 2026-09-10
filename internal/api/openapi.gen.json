@@ -8297,6 +8297,9 @@
           "status": {
             "type": "string"
           },
+          "step_count": {
+            "type": "integer"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -11540,6 +11543,9 @@
           },
           "status": {
             "type": "string"
+          },
+          "step_count": {
+            "type": "integer"
           },
           "trigger": {
             "additionalProperties": true,

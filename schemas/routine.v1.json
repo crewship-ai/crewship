@@ -224,6 +224,7 @@
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_-]*$",
           "description": "Unique within this routine. Referenced via {{ steps.<id>.output }}."
         },
+        "name": { "type": "string", "description": "Optional human-readable step name. The UI derives an action label when omitted." },
         "type": {
           "type": "string",
           "enum": ["agent_run", "call_pipeline", "http", "code", "wait", "transform", "notify", "script", "query", "foreach", "crewship"]

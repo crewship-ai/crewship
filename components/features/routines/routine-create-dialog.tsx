@@ -12,15 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { motion, useReducedMotion } from "motion/react"
 import { RoutineRecipeSteps } from "./routine-recipe-steps"
 import { RoutinePublicationReview } from "./routine-publication-review"
-import { RoutineTestWorkspace } from "./routine-test-workspace"
 import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Save, ArrowLeft, Sparkles, GitFork, Braces, Search } from "lucide-react"
+import { Save, Sparkles, GitFork, Braces, Search } from "lucide-react"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
   slashFieldsFromRoutineInputs,
@@ -43,9 +41,7 @@ import {
   CreateSurfaceHeader,
   CreateSurfaceLoading,
   CreateSurfaceRefusal,
-  CreateSurfaceSecondaryAction,
   CreateSurfaceSection,
-  CreateSurfaceSteps,
   CreateSurfaceTile,
 } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
@@ -59,13 +55,11 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { FileEditor } from "@/components/features/files/file-editor"
-import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { parseRoutineBuffer } from "@/lib/routine-buffer"
 import { routineDslExtensions } from "@/lib/routine-dsl-editor-extensions"
 import { convertDsl, toYaml, type DslFormat } from "@/lib/routine-dsl-format"
 
 /** Which reading of the definition the editor pane is showing. */
-type EditorPane = "code" | "graph"
 
 // All three creation paths share the same recipe definition and save contract.
 // The server's test_run endpoint performs static validation and mints the save
@@ -114,7 +108,9 @@ export const STARTER_TEMPLATES = [
       dsl_version: "1.0",
       name: "summarize-text",
       description: "Summarize input text in 3 bullet points.",
-      inputs: [{ name: "text", type: "string", required: true, description: "Text to summarize" }],
+      inputs: [
+        { name: "text", type: "string", required: true, description: "Text to summarize" },
+      ],
       outputs: [{ name: "summary", type: "string" }],
       steps: [
         {
@@ -122,7 +118,8 @@ export const STARTER_TEMPLATES = [
           type: "agent_run",
           agent_slug: "your-agent-slug",
           complexity: "fast",
-          prompt: "Summarize the following text in 3 concise bullet points:\n\n{{ inputs.text }}",
+          prompt:
+            "Summarize the following text in 3 concise bullet points:\n\n{{ inputs.text }}",
           validation: {
             min_length: 10,
             must_not_contain: ["API_KEY=", "Bearer "],
@@ -218,7 +215,6 @@ export function RoutineCreateDialog({
   savedDraftLink,
 }: Props) {
   const router = useRouter()
-  const reduceMotion = useReducedMotion()
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
@@ -265,7 +261,6 @@ export function RoutineCreateDialog({
   const [dslFormat, setDslFormat] = useState<DslFormat>("yaml")
   // Code, not graph: this surface exists to type a DSL, and the graph is a
   // reading of what was typed.
-  const [editorPane, setEditorPane] = useState<EditorPane>("code")
   const [dslText, setDslText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
   const [liveText, setLiveText] = useState(() => toYaml(STARTER_TEMPLATES[0].json))
   const bufferRef = useRef(toYaml(STARTER_TEMPLATES[0].json))
@@ -280,12 +275,10 @@ export function RoutineCreateDialog({
   })
   const [sourcesAndOutput, setSourcesAndOutput] = useState("")
   const [scheduledValues, setScheduledValues] = useState<Record<string, string>>({})
-  const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(null)
-  const [section, setSection] = useState("Overview")
-  const lastRecipeSection = useRef("Overview")
-  useEffect(() => {
-    if (section !== "Code") lastRecipeSection.current = section
-  }, [section])
+  const [testResult, setTestResult] = useState<{ passed: boolean; details: string } | null>(
+    null,
+  )
+  const [section, setSection] = useState("Recipe")
   const [forkSource, setForkSource] = useState<string | null>(null)
   // saveToken captured from the most recent successful /test_run.
   // Used by the subsequent /save call so the server can verify via
@@ -323,7 +316,7 @@ export function RoutineCreateDialog({
     if (routine) {
       const text = toYaml(initialDraft ?? routine.definition)
       setMode("advanced")
-      setSection("Overview")
+      setSection("Recipe")
       setDslFormat("yaml")
       setName(routine.name)
       setDescription(routine.description ?? "")
@@ -353,7 +346,7 @@ export function RoutineCreateDialog({
         bufferRef.current = text
         pristineText.current = text
         setEditorKey((k) => k + 1)
-        setSection("Overview")
+        setSection("Recipe")
         setForkSource(null)
         setTrigger((t) => ({ ...t, kind: "manual", at: "" }))
         setScheduledValues({})
@@ -405,7 +398,7 @@ export function RoutineCreateDialog({
         )
     }
     setMode("advanced")
-    setSection("Overview")
+    setSection("Recipe")
   }
 
   useEffect(() => {
@@ -430,7 +423,10 @@ export function RoutineCreateDialog({
           savedDraftLink?.slug || routine!.slug,
           controller.signal,
         )
-        if (savedDraftLink && (!draft.id || (savedDraftLink.id && draft.id !== savedDraftLink.id)))
+        if (
+          savedDraftLink &&
+          (!draft.id || (savedDraftLink.id && draft.id !== savedDraftLink.id))
+        )
           throw new Error(
             "This draft link is no longer current. Close it and open the saved draft from New routine.",
           )
@@ -704,7 +700,7 @@ export function RoutineCreateDialog({
   const handleTestRun = async (): Promise<{ passed: boolean; token: string | null }> => {
     const parsed = parseDSLWithError()
     if (!parsed) {
-      toast.error("Fix the definition before continuing")
+      toast.error("Fix the recipe before continuing")
       return { passed: false, token: null }
     }
     setBusy("testing")
@@ -728,7 +724,7 @@ export function RoutineCreateDialog({
       if (!res.ok) {
         const msg = data.error ?? `HTTP ${res.status}`
         setTestResult({ passed: false, details: msg })
-        toast.error("Definition validation failed", { description: msg })
+        toast.error("Test passedation failed", { description: msg })
         return { passed: false, token: null }
       }
       // DRY_RUN_OK is the dry-run validation's pass status; COMPLETED is
@@ -749,9 +745,9 @@ export function RoutineCreateDialog({
         setSaveToken(token)
       }
       if (passed) {
-        toast.success("Definition validated — no work was executed")
+        toast.success("Test passedated — no work was executed")
       } else {
-        toast.error("Definition validation failed", {
+        toast.error("Test passedation failed", {
           description: data.error ?? "see details below",
         })
       }
@@ -759,7 +755,7 @@ export function RoutineCreateDialog({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setTestResult({ passed: false, details: msg })
-      toast.error("Definition validation unavailable", { description: msg })
+      toast.error("Test passedation unavailable", { description: msg })
       return { passed: false, token: null }
     } finally {
       setBusy("none")
@@ -806,7 +802,7 @@ export function RoutineCreateDialog({
     if (draftLoading || draftLoadFailed || (draftOnly && publicationBusy.current)) return
     const parsed = parseDSLWithError()
     if (!parsed) {
-      toast.error("Fix the definition before continuing")
+      toast.error("Fix the recipe before continuing")
       return
     }
     if (
@@ -888,7 +884,9 @@ export function RoutineCreateDialog({
               "A saved draft already exists. Open it from New routine before replacing its content.",
             )
           if (!routine && baseline.base_pipeline_id)
-            throw new Error("This routine already exists. Choose a new identifier or open Edit.")
+            throw new Error(
+              "This routine already exists. Choose a new identifier or open Edit.",
+            )
           draft = baseline
         }
         body.icon = icon
@@ -926,9 +924,12 @@ export function RoutineCreateDialog({
         const saved = await res.json().catch(() => ({}))
         if (!res.ok && saved.schedule_conflict?.schedule_id)
           setScheduleConflict(saved.schedule_conflict)
-        if (!res.ok) throw new Error(saved.error || "Publication failed. The draft is still saved.")
+        if (!res.ok)
+          throw new Error(saved.error || "Publication failed. The draft is still saved.")
         if (!saved.slug)
-          throw new Error("Publication could not be confirmed. Reload the recipe before retrying.")
+          throw new Error(
+            "Publication could not be confirmed. Reload the recipe before retrying.",
+          )
         savedRecipe.current = saved.slug
       }
       const appearance = await apiFetch(
@@ -1011,7 +1012,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       setIcon(resolveRoutineIcon({ ...detail, slug: item.slug }))
       setColor(resolveRoutineColor({ ...detail, slug: item.slug }))
       setForkSource(item.name || item.slug)
-      setSection("Overview")
+      setSection("Recipe")
       setName("")
       setDescription(item.description ?? detail.description ?? "")
       setParseError(null)
@@ -1085,18 +1086,6 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     color !== (routine ? resolveRoutineColor(routine) : "violet") ||
     liveText !== pristineText.current
 
-  const recipeSections = ["Overview", "Steps", "Schedule", "Validate", "Publish"]
-  const sectionIndex = recipeSections.indexOf(
-    section === "Code" ? lastRecipeSection.current : section,
-  )
-  const saveSection = section === "Publish" || savedRecipe.current !== null
-  const continueRecipe = () =>
-    setSection(
-      section === "Code"
-        ? lastRecipeSection.current
-        : recipeSections[Math.min(sectionIndex + 1, recipeSections.length - 1)],
-    )
-
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
   // does, and nothing on the two modes whose actions are their list rows.
   const handleKeyboardSubmit = () => {
@@ -1104,13 +1093,12 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     if (mode === "describe") {
       handleDescribe()
     } else if (mode === "advanced") {
-      if (saveSection) void handleTestAndSave()
-      else continueRecipe()
+      void handleTestAndSave()
     }
   }
 
   const advancedPrimaryLabel =
-    busy === "testing" ? "Validating…" : busy === "saving" ? "Saving…" : "Validate & Publish"
+    busy === "testing" ? "Testing…" : busy === "saving" ? "Publishing…" : "Publish"
 
   return (
     <CreateSurface
@@ -1123,7 +1111,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       discardLabel="this routine"
       onSubmit={handleKeyboardSubmit}
       className={
-        mode === "advanced" ? "sm:h-[min(85vh,760px)] sm:max-h-[90vh] sm:max-w-[800px]" : undefined
+        mode === "advanced"
+          ? "sm:h-[min(85vh,760px)] sm:max-h-[90vh] sm:max-w-[800px]"
+          : undefined
       }
     >
       <CreateSurfaceHeader
@@ -1194,7 +1184,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               icon={Braces}
               accent="teal"
               title="Write it yourself"
-              description="Build a recipe with a clear overview of inputs, steps and outputs. Edit YAML or JSON, preview the graph, then validate and save."
+              description="Build a recipe with a clear overview of inputs, steps and outputs. Edit YAML or JSON, test with sample data, then publish."
               meta="full control"
               onClick={() => setMode("advanced")}
             />
@@ -1238,7 +1228,11 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
         <>
           <CreateSurfaceBody className="flex flex-col gap-4">
             <div className="flex items-end gap-3">
-              <CreateSurfaceField label="Owner (crew)" htmlFor="describe-crew" className="flex-1">
+              <CreateSurfaceField
+                label="Owner (crew)"
+                htmlFor="describe-crew"
+                className="flex-1"
+              >
                 <CrewPicker
                   id="describe-crew"
                   ariaLabel="Select crew"
@@ -1300,11 +1294,16 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 placeholder="What should it work with, and what should you receive?"
               />
             </CreateSurfaceField>
-            <RoutineTriggerFields workspaceId={workspaceId} value={trigger} onChange={setTrigger} />
+            <RoutineTriggerFields
+              workspaceId={workspaceId}
+              value={trigger}
+              onChange={setTrigger}
+            />
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions, then
-              show a readable preview — nothing is saved without you. It grounds the draft in your
-              crew's connected integrations, your existing routines, and the routine schema.
+              {describeLead?.name ?? "The Lead"} will draft it and ask a couple of questions,
+              then show a readable preview — nothing is saved without you. It grounds the draft
+              in your crew's connected integrations, your existing routines, and the routine
+              schema.
             </p>
 
             <div className="flex gap-3 text-[11px] text-muted-foreground">
@@ -1406,7 +1405,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               </div>
             )}
             <p className="rounded-md border border-dashed border-border/60 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-              Forking copies a routine&apos;s definition into the editor so you can adapt it — the
+              Forking copies a routine&apos;s recipe into the editor so you can adapt it — the
               original is untouched. Publish creates a new routine.
             </p>
           </CreateSurfaceBody>
@@ -1442,57 +1441,26 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       {/* ── ADVANCED (the DSL editor) ─────────────────────────────────── */}
       {mode === "advanced" && (
         <>
-          <div
-            inert={savedRecipe.current !== null || draftLoading}
-            className="relative shrink-0 border-b border-hairline pr-20 [&>nav]:border-b-0"
-          >
-            <CreateSurfaceSteps
-              ariaLabel="Recipe sections"
-              steps={["Recipe", "Test", "Publish"].map((label) => ({ id: label, label }))}
-              current={sectionIndex < 3 ? 0 : sectionIndex - 2}
-              allowJumpAhead
-              onJump={(i) => setSection(i === 0 ? "Overview" : i === 1 ? "Validate" : "Publish")}
-            />
+          <div className="flex shrink-0 items-center justify-between border-b border-hairline px-4 py-2">
+            <span className="text-sm font-medium">Recipe</span>
             <button
               type="button"
               aria-pressed={section === "Code"}
-              onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")}
-              className={cn(
-                "absolute right-4 top-2 inline-flex h-7 max-sm:top-1 max-sm:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted",
-                section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground",
-              )}
+              disabled={draftLoading || busy !== "none"}
+              onClick={() => setSection(section === "Code" ? "Recipe" : "Code")}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-primary hover:bg-muted"
             >
-              <Braces className="h-3 w-3" />
-              Code
+              <Braces className="size-3.5" />
+              {section === "Code" ? "Back to recipe" : "Code"}
             </button>
           </div>
-          {sectionIndex < 3 && (
-            <nav
-              aria-label="Recipe details"
-              className="flex gap-2 border-b border-hairline px-4 py-2"
-            >
-              {recipeSections.slice(0, 3).map((label, i) => (
-                <button
-                  key={label}
-                  type="button"
-                  aria-label={`Step ${i + 1}: ${label}`}
-                  aria-current={section === label ? "step" : undefined}
-                  disabled={draftLoading || busy !== "none"}
-                  onClick={() => setSection(label)}
-                  className={cn(
-                    "rounded-md px-3 py-2 text-xs",
-                    section === label ? "bg-muted text-foreground" : "text-muted-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-          )}
           {/* Keep the code buffer and overview mounted while navigating. */}
           <CreateSurfaceBody
             inert={savedRecipe.current !== null || draftLoading}
-            className={cn("flex overflow-y-hidden p-0 sm:p-0", savedRecipe.current && "opacity-60")}
+            className={cn(
+              "flex overflow-y-hidden p-0 sm:p-0",
+              savedRecipe.current && "opacity-60",
+            )}
           >
             <div
               className={cn(
@@ -1500,26 +1468,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 section === "Code" && "hidden",
               )}
             >
-              {section !== "Overview" && (
-                <motion.header
-                  key={section}
-                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.16 }}
-                  className="mb-4"
-                >
-                  <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {section === "Steps"
-                      ? "Workflow"
-                      : section === "Publish"
-                        ? "Ready to publish?"
-                        : section === "Validate"
-                          ? "Check your recipe"
-                          : "When it runs"}
-                  </h2>
-                </motion.header>
-              )}
-              <div hidden={section !== "Overview"} className="space-y-4">
+              <div className="space-y-4">
                 {forkSource && (
                   <p className="rounded-xl border p-3 text-sm">
                     Based on {forkSource}. Publishing creates a separate routine.
@@ -1655,7 +1604,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 )}
                 <details className="group border-t border-hairline">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
-                    <span className="text-sm font-medium">Start form</span>
+                    <span className="text-sm font-medium">Inputs</span>
                     <span className="text-xs text-muted-foreground">
                       {definitionRows(parsedDSL?.inputs).length
                         ? `${definitionRows(parsedDSL?.inputs).length} questions`
@@ -1669,10 +1618,13 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     (parsedDSL.inputs == null ||
                       (Array.isArray(parsedDSL.inputs) &&
                         parsedDSL.inputs.every(
-                          (i) => i != null && typeof i === "object" && typeof i.name === "string",
+                          (i) =>
+                            i != null && typeof i === "object" && typeof i.name === "string",
                         ))) ? (
                       <RoutineInputFormBuilder
-                        inputs={definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]}
+                        inputs={
+                          definitionRows(parsedDSL.inputs) as unknown as RoutineInputSpec[]
+                        }
                         onChange={(inputs) =>
                           replaceBuffer(
                             dslFormat === "yaml"
@@ -1699,9 +1651,13 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   <div className="space-y-3 pb-3">
                     {definitionRows(parsedDSL?.outputs).map((output, i) => (
                       <div key={i}>
-                        <p className="text-sm">{String(output.label || output.name || "Result")}</p>
+                        <p className="text-sm">
+                          {String(output.label || output.name || "Result")}
+                        </p>
                         <p className="text-sm text-muted-foreground">
-                          {String(output.description || "No description supplied by the author.")}
+                          {String(
+                            output.description || "No description supplied by the author.",
+                          )}
                         </p>
                       </div>
                     ))}
@@ -1756,7 +1712,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 )}
                 {!routine && (
                   <details className="border-t border-hairline pt-3">
-                    <summary className="cursor-pointer text-sm">Choose a starter template</summary>
+                    <summary className="cursor-pointer text-sm">
+                      Choose a starter template
+                    </summary>
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       {STARTER_TEMPLATES.map((t) => (
                         <CreateSurfaceTile
@@ -1770,26 +1728,34 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   </details>
                 )}
               </div>
-              {section === "Steps" &&
-                (parsedDSL ? (
-                  <RoutineRecipeSteps
-                    definition={parsedDSL}
-                    slug={slug}
-                    name={name || slug}
-                    onChange={(next) =>
-                      replaceBuffer(
-                        dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2),
-                        { baseline: false },
-                      )
-                    }
-                    onOpenCode={() => setSection("Code")}
-                  />
-                ) : (
-                  <p className="text-sm text-destructive">
-                    Fix the definition in Code to see its steps.
-                  </p>
-                ))}
-              {section === "Schedule" && routine && (
+              {parsedDSL ? (
+                <RoutineRecipeSteps
+                  definition={parsedDSL}
+                  testPanel={{
+                    workspaceId,
+                    definition: parsedDSL,
+                    busy: busy !== "none",
+                    result: testResult,
+                    onValidate: handleTestRun,
+                    onOpenCode: () => setSection("Code"),
+                    parseError,
+                  }}
+                  slug={slug}
+                  name={name || slug}
+                  onChange={(next) =>
+                    replaceBuffer(
+                      dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2),
+                      { baseline: false },
+                    )
+                  }
+                  onOpenCode={() => setSection("Code")}
+                />
+              ) : (
+                <p className="text-sm text-destructive">
+                  Fix the recipe in Code to see its steps.
+                </p>
+              )}
+              {routine && (
                 <div className="space-y-5">
                   <p className="text-sm text-muted-foreground">
                     Schedule changes apply immediately.
@@ -1813,7 +1779,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   </details>
                 </div>
               )}
-              {section === "Schedule" && !routine && (
+              {!routine && (
                 <div className="space-y-5">
                   {" "}
                   <RoutineTriggerFields
@@ -1842,34 +1808,25 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                       </section>
                     )}
                   <p className="text-sm text-muted-foreground">
-                    Publishing activates the selected schedule. Save draft leaves automatic starts
-                    unchanged.
+                    Publishing activates the selected schedule. Save draft leaves automatic
+                    starts unchanged.
                   </p>
                 </div>
               )}
-              {section === "Publish" && (
-                <RoutinePublicationReview
-                  draft={parsedDSL}
-                  published={routine?.definition}
-                  existing={!!draftRef.current?.base_pipeline_id || !!routine}
-                  name={name || slug}
-                  validated={!!testResult?.passed}
-                />
-              )}
-              {section === "Validate" && (
-                <RoutineTestWorkspace
-                  published={!!routine || !!draftRef.current?.base_pipeline_id}
-                  workspaceId={workspaceId}
-                  slug={slug}
-                  definition={parsedDSL}
-                  busy={busy !== "none"}
-                  result={testResult}
-                  onValidate={handleTestRun}
-                  onPublish={() => setSection("Publish")}
-                  onOpenCode={() => setSection("Code")}
-                  parseError={parseError}
-                />
-              )}
+              <details className="mt-5 border-t border-border pt-4">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Publication changes
+                </summary>
+                <div className="mt-3">
+                  <RoutinePublicationReview
+                    draft={parsedDSL}
+                    published={routine?.definition}
+                    existing={!!draftRef.current?.base_pipeline_id || !!routine}
+                    name={name || slug}
+                    validated={!!testResult?.passed}
+                  />
+                </div>
+              </details>
             </div>
             <div
               className={cn(
@@ -1899,35 +1856,12 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   <span className="font-mono">slug: {slug}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Code and graph SHARE the pane rather than splitting it.
-                   *
-                   * They sat side by side, and with the identity aside also
-                   * on screen that is three columns inside an 800px surface:
-                   * the graph got ~240px and the code ~52% of what was left,
-                   * so neither was usable and the thing you are actually
-                   * doing here — typing a DSL — was the narrower of the two.
-                   *
-                   * Code leads because it is the input; the graph is a
-                   * reading of it. Switching is one click and keeps the
-                   * buffer, so it is a look rather than a mode change. */}
-                  <CreateSurfaceChoice
-                    ariaLabel="Editor pane"
-                    value={editorPane}
-                    onChange={(pane) => {
-                      if (pane === "code") setDslText(bufferRef.current)
-                      setEditorPane(pane)
-                    }}
-                    options={[
-                      { value: "code" as EditorPane, label: "Code" },
-                      { value: "graph" as EditorPane, label: "Preview" },
-                    ]}
-                  />
                   {!parsedDSL ? (
                     <span
                       className="truncate text-[10px] text-destructive"
-                      title={parseError ?? "Open Validate for details"}
+                      title={parseError ?? "Open Test for details"}
                     >
-                      Definition needs attention
+                      Recipe needs attention
                     </span>
                   ) : (
                     <span className="text-[10px] text-success">syntax ok</span>
@@ -1935,38 +1869,19 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 </div>
               </div>
               <div className="flex min-h-0 flex-1 flex-col">
-                {editorPane === "code" ? (
-                  <div className="min-h-[240px] w-full min-w-0 flex-1 overflow-hidden">
-                    <FileEditor
-                      key={editorKey}
-                      code={dslText}
-                      language={dslFormat}
-                      onDocChange={handleDocChange}
-                      extraExtensions={dslExtensions}
-                      onSave={(next) => {
-                        bufferRef.current = next
-                        setLiveText(next)
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="relative min-h-[240px] w-full min-w-0 flex-1">
-                    {parsedDSL ? (
-                      <RoutineDefinitionCanvas
-                        definition={parsedDSL}
-                        slug={slug}
-                        name={name || slug}
-                      />
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[11px] text-muted-foreground-soft">
-                        <span>The graph appears once the definition parses.</span>
-                        {parseError && (
-                          <span className="font-mono text-destructive">{parseError}</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="min-h-[240px] w-full min-w-0 flex-1 overflow-hidden">
+                  <FileEditor
+                    key={editorKey}
+                    code={dslText}
+                    language={dslFormat}
+                    onDocChange={handleDocChange}
+                    extraExtensions={dslExtensions}
+                    onSave={(next) => {
+                      bufferRef.current = next
+                      setLiveText(next)
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </CreateSurfaceBody>
@@ -1983,7 +1898,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               )}
             >
               <div className="flex items-center gap-1.5 font-medium">
-                {testResult.passed ? "Definition valid" : "Definition invalid"}
+                {testResult.passed ? "Test passed" : "Test needs attention"}
               </div>
               <p className="mt-0.5 max-h-24 overflow-y-auto break-words font-mono text-[10px] opacity-80">
                 {testResult.details}
@@ -2016,7 +1931,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
           <div className="flex items-center gap-3 border-t border-hairline px-4 py-2 text-xs">
             <button
               type="button"
-              disabled={busy !== "none" || draftLoading || draftLoadFailed || !!savedRecipe.current}
+              disabled={
+                busy !== "none" || draftLoading || draftLoadFailed || !!savedRecipe.current
+              }
               onClick={() => void handleSave(undefined, true)}
               className="rounded-md border px-3 py-2 disabled:opacity-50"
             >
@@ -2032,7 +1949,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 Discard saved draft
               </button>
             )}
-            {saveSection && (
+            {
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -2041,37 +1958,20 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                 />
                 Approve capability changes for this publication
               </label>
-            )}
+            }
           </div>
           <CreateSurfaceFooter
             hint={
               draftLoading
                 ? "Loading saved draft…"
                 : draftRevision
-                  ? `Saved draft · revision ${draftRevision} · Publish updates the live recipe`
+                  ? "Saved draft · Publish updates the live recipe"
                   : "Unsaved draft · Save draft does not change live work"
             }
             onCancel={onClose}
-            secondary={
-              sectionIndex > 0 && section !== "Code" && !savedRecipe.current ? (
-                <CreateSurfaceSecondaryAction
-                  icon={ArrowLeft}
-                  disabled={busy !== "none"}
-                  onClick={() => setSection(recipeSections[sectionIndex - 1])}
-                >
-                  Back
-                </CreateSurfaceSecondaryAction>
-              ) : undefined
-            }
-            primaryLabel={
-              saveSection
-                ? advancedPrimaryLabel
-                : section === "Code"
-                  ? "Back to recipe"
-                  : "Continue"
-            }
-            primaryIcon={saveSection ? Save : undefined}
-            onPrimary={saveSection ? handleTestAndSave : continueRecipe}
+            primaryLabel={advancedPrimaryLabel}
+            primaryIcon={Save}
+            onPrimary={handleTestAndSave}
             primaryDisabled={draftLoading || draftLoadFailed}
             busy={busy !== "none"}
           />

@@ -17,7 +17,7 @@ Each routine bundles:
 - **Authorship metadata** — which crew, which agent (or user), via which path
 - **Triggers** — cron schedules and webhook tokens that fire it autonomously
 - **Run history** — every invocation as an immutable journal trace with step-level events
-- **Versions** — every save creates a new version; rollback is one API call
+- **Versions** — publishing creates an immutable version; rollback is one API call
 
 Compared to other layers in Crewship:
 
@@ -29,76 +29,63 @@ Compared to other layers in Crewship:
 
 ### The routines page
 
-Two states, no tabs: the **overview**, or the routine you picked in the sidebar.
+The main **Routines** list shows each recipe's name, purpose and step count.
+Search and status filters apply to both this list and the sidebar. **Health**,
+**Calendar** and **Recent runs** are separate views. Missing descriptions are
+summarized from actual step actions; an unreadable recipe is shown as unavailable.
+On a phone, the sidebar opens over the main view and closes after selection.
 
-The routine you picked is in the URL as `?slug=`: a pick is a history entry, so **Back** closes the detail, a reload resumes it, and `/routines?slug=page-watch` is a link you can send. Every routine link in the product is built through `entityHref`, which writes `?slug=`; the older `?routine=` spelling is still read and rewritten on the first pick.
-
-The overview answers, in the order you ask on arrival — did anything run today, is the catalog healthy, what fires next, what ran, what did it cost, what is broken:
-
-| Card | What it answers |
-|------|-----------------|
-| **Runs today · Success · Next run · Needs attention** | The shift report. The success rate always carries its denominator (`100% · 1 of 1`), because a rate without a sample size cannot be weighed. |
-| **Catalog health** | The catalog as one donut — running, healthy, failing, awaiting approval, disabled, never invoked. The arcs sum to the catalog, and clicking one filters the sidebar to it. |
-| **Firing next** | The upcoming schedules, soonest first, each written as a sentence (`Every weekday at 08:00`) rather than as a cron expression. A `next_run_at` already in the past is left out — that is a scheduler that has not caught up, not a next run. |
-| **Recent runs** | The last ten invocations with duration, cost and age. Live runs pin to the top with their current step. Each row opens that run in [Activity](/guides/activity). |
-| **Waiting on you** | One queue, two sources: runs parked on a `wait: approval` gate, with **Approve / Deny** on the row, and routines saved as `proposed` whose definition needs review. Parked runs sort first, soonest to expire first — they hold a live process and time out, while a proposal sits still. A waitpoint with no timeout sorts last among runs, not first. |
-
-There is no **Refresh** button, because a dashboard with one is a dashboard admitting it is not live. Run events already pushed themselves; the catalog now broadcasts [`pipeline.saved`](/api-reference/websocket) on every save, approval, rejection, disable and delete, and the schedule list listens to run events too — `next_run_at` moves the moment a schedule fires.
-
-On a phone the routine sidebar opens **over** the overview rather than beside it: 280px of a 390px screen is not a column, it is a replacement. Picking a routine closes it.
-| **Runs · 7 days** | The week by verdict — green passed, red failed, amber not yet judged, grey cancelled. The bars sum to the runs that day: a cancelled run is stacked rather than dropped, because a bar shorter than its own day is a chart lying by omission. |
-| **Recently failing** | The last failed **runs**, each naming the step it died on and the error. One routine failing three times is three rows — that repetition is the signal. Each opens the run in [Activity](/guides/activity). |
-
-**No money on this page.** Crewship bills by subscription and is driven from the CLI, so a per-run dollar figure is an internal estimate dressed as an invoice — four decimal places about a number nobody is charged. The **author's** estimate (`estimated_cost_usd`) stays on the routine, where "roughly what will this cost me to run" is a real question; summing it into a workspace ledger answered one nobody asked.
-
-This replaced a **List / Schedules / Insights** tab bar. List rendered a table of every routine beside a sidebar that was already the catalog — the same list twice, and the copy in the main pane was the one you could not search. Schedules was a read-only table; every action on a schedule (create, pause, delete) lives on the routine's own **Triggers** card, so the tab held no capability. Insights was four derived numbers and a "top routines by usage" leaderboard. What was load-bearing in those two — what fires next, what runs cost, which routines are over budget, what is failing — is a card on the overview now.
-
-**New routine** offers three ways to fill one buffer, because the server has one way to create a routine: `test_run` mints a `save_token` bound to the definition's hash, and `save` refuses without a fresh one. **Describe it** hands off to a crew Lead carrying the `routine-author` skill. **Fork** copies one of your own routines' definitions, renamed. **Write it yourself** opens the same editor the detail page uses — YAML by default, schema completion, errors located on the line, and the step graph beside the code. All three end at the same Test-run → Save.
-
-The **skip test-run gate** checkbox appears only for OWNER/ADMIN, which is the tier the server accepts it from. An affordance that cannot work reads as a broken product rather than a limit on the person.
+Selecting a routine uses `?slug=` in the URL. Reload and browser history preserve
+that selection. A selected run adds `&run=` and keeps its recorded recipe version.
 
 ### The detail page
 
-Opening a routine gives you one scrolling surface of cards, not a tab bar:
+| View | What it answers |
+| --- | --- |
+| **Recipe** | What the routine does: purpose, inputs, results, readable steps, access and scheduled starts. List and Map show the same steps. **Edit** opens the authoring surface. |
+| **History** | Recorded runs, their verdicts and how they started. Each opens its run detail. Composition depth is under Technical details. |
+| **Versions** | Published recipes and an explicit comparison of chosen versions. Comparison starts real work and can change connected systems or incur costs. |
+| **Schedule** | Scheduled starts and their saved inputs, shared with Calendar. |
 
-| Card | What it answers |
-|------|-----------------|
-| **Definition** | What it does. The step graph, drawn by the same renderer Activity uses for live runs — so a definition and a run of it read as one picture. **Edit code** opens the DSL editor beside it; the expand button takes it full screen over a blurred page, carrying the unsaved buffer both ways. |
-| **Last run** | How the most recent invocation ended, tinted by outcome, linking to its full trace. |
-| **Triggers** | Cron schedules, inbound webhooks, and — when at least one exists — the [automations](/guides/automations) that can start this routine, with the event each one watches and whether it is armed. |
-| **Access** | Integrations, credentials, agents and egress — everything the routine can reach if it misbehaves — plus **Writes to Crewship**, the [`crewship` step](#crewship--act-on-crewships-own-nouns) verbs the definition acts on the board with. |
-| **Versions** | Head version and metadata; **History** reveals the full version list and rollback. |
-| **Runs** | Recent invocations, each linking into Activity filtered to this routine, and each saying **how it started**. A run that was composed rather than started directly carries a `chain N` badge — hops from whatever a human did, capped at 8. |
+Steps use an explicit name when provided, otherwise a description of their action.
+Stable IDs remain secondary technical identifiers. Empty schedules and results
+collapse to a short row. The run page leads with its verdict, error and failed
+step, and opens failed, current or waiting steps automatically. Missing evidence
+is distinguished from an empty result. Stopping a run does not undo prior actions.
 
-<Warning>
-On the Runs card, **automation** and **schedule** are different words for a
-reason. Every deferred run — cron and rule alike — is stored with
-`triggered_via: "schedule"`, so the raw field cannot tell them apart. The page
-reads the rule's name off the run instead. If a row says `automation`, a
-[rule](/guides/automations) started it; if it says `schedule`, a cron did.
-</Warning>
+Waiting decisions appear in the run and the authenticated **Inbox**. Typed forms
+use the same decision contract in both places. A routine proposed for review also
+has an Inbox item showing its requested access and version changes. Review actions
+remain subject to server permissions. Recurring and automation starts retain their
+recorded provenance; the stored `triggered_via` value alone does not distinguish them.
 
-A routine's **monthly budget** is on its own card here. It used to be a workspace-wide roll-up on the overview, which put a third card about money on one row — and before that a tab nobody opened. It is kept as a per-routine guardrail; it is not a bill, and nothing on the overview sums it.
+The icon and colour are independent metadata: changing them does not publish a
+recipe version. Routine budgets remain guardrails, not invoices.
 
-A routine also carries an **icon and colour**, picked from the header and stored in columns of their own — so recolouring never touches the definition, never mints a version, and never invalidates a save token. Unset routines derive a stable icon from their slug, so a list of thirty is legible before anyone chooses anything. CLI: [`crewship routine appearance`](/cli/routine#crewship-routine-appearance).
+### Edit and Test
 
-Wait points are not on the detail page: they belong to a *run*, and [Activity](/guides/activity) is where the run is. The **pending** ones are on the overview's **Waiting on you** card, decidable in place — a parked run is a stopped process, and finding it should not require knowing which routine stopped.
+**New routine** offers AI authoring, copying an existing recipe or writing one.
+These paths use the same durable draft. **Edit** is one scrolling document:
+identity, Inputs, steps and schedule. A selected step has **Edit / Test** tools.
+**Code** edits the same buffer, preserving unsupported keys and expressions.
+**Publication changes** is a collapsed review inside the document.
 
-A routine awaiting approval says what it is asking for, not just that it asks: the banner lists the **credentials, integrations and egress hosts** its definition declares, beside **Approve**, **Reject** and an **Inbox** button that deep-links the review row itself. `credentials_required` is the risk *category*; `github:repo` is the ask, and it is the one a reviewer actually weighs.
+- **Save draft** saves work without publishing or running it. A conflicting edit
+  reports the conflict and preserves local work.
+- **Test routine** checks the recipe, references and static prerequisites. It does
+  not run agents, scripts or HTTP calls and cannot prove a real run will succeed.
+- **Test this step** uses sample data. Transforms calculate a result; agent, HTTP
+  and script steps require an explicit replacement output and make no external
+  calls. Unsupported step types cannot execute through this test.
+- **Publish** performs the required recipe test and publishes the draft after
+  applicable risk review. It is one explicit action, separate from saving a draft.
+- **Run** starts actual work. It can change data in connected systems and incur
+  costs. With inputs, it first presents their typed form. A new run is recorded
+  in History; an existing run retains its accepted snapshot after later edits.
 
-The same list is on the inbox item, and so are **Approve / Reject**. They were missing: a routine proposal fell through to "no decision to make here" while the routine sat at `proposed`, unable to run, with both endpoints live on the server. The queue said "your move" and the item said "not here".
-
-When a routine does land as `proposed`, its inbox review item carries a **unified diff of the two versions** — what was last accepted against what is being proposed — so a reviewer decides from the change itself rather than from a slug and a risk label. A routine's first version has no predecessor, so that item says so instead of diffing against nothing.
-
-One item per routine, **refreshed** each time that routine goes for review: proposing again reopens it with the current versions, reasons and diff rather than adding a second card. That matters most on the second pass — a routine reviewed once, approved, then edited into new risk raises the review again instead of being swallowed by the resolved item from last time.
-
-There is no **Dry run** button. Two thirds of what its report showed — the step plan and the declared resources — is the Definition graph and the Access card, permanently on the page. Its one unique fact, the model each agent step resolves to, is now a chip on the node it describes, and the author's cost estimate is in the figures strip. The `/dry_run` endpoint and [`crewship routine dry-run`](/cli/routine) are unchanged and still the right thing in CI, where nobody is looking at a page.
-
-The user-facing label is **Routine** across web UI, CLI, agent system prompts and marketing surfaces. The backend identifier (database table, Go package, HTTP route paths) remains `pipelines` for backwards compatibility.
-
-<Note>
-**Naval theme.** Routines are the boring, accurate, repeated procedures a ship's crew runs every day — the equivalent of [naval drills](https://en.wikipedia.org/wiki/Drill_(naval)) in the Crewship metaphor. Programs your AI agents follow.
-</Note>
+Sample data, publication review, decision-form authoring and version comparison
+remain available. There is no general sandbox guarantee. The technical
+`fixture_test`, `test_run` and `dry_run` API/CLI names retain their existing contracts.
 
 ## Three authoring paths
 
@@ -111,7 +98,11 @@ Crewship is unusual among workflow systems because **agents author routines**, n
     You can also just **describe a routine in chat** — "make a routine that summarizes yesterday's commits and posts to Slack." A crew **Lead** carries the bundled **`routine-author`** skill (an authoring playbook): it clarifies the essentials, grounds the DSL in the crew's `[CONNECTED INTEGRATIONS]` and `[AVAILABLE ROUTINES]`, writes and test-runs the routine, then tells you whether it went live or landed as a **proposed** routine for a Manager to approve (see [Governance](#governance--agent-proposes-human-approves-the-risky-ones)).
   </Card>
   <Card title="UI" icon="browser">
-    Open `/routines`, click **+ New routine**, pick a starter template, edit the DSL JSON, click **Test & Save**. Test_run runs against the execution tier; on pass the routine is persisted with `authored_via=user_api` and the JWT user as author. An **existing** routine's DSL is also fully editable in-place from its detail page — press **Edit code** on the Definition card and the editor opens beside the graph (CodeMirror, format + revert + copy) — see the note below on how that path's Save differs from Test & Save.
+    Open `/routines`, choose **New routine**, then write or copy a recipe.
+    Edit the document or its Code view, use **Save draft** for unfinished work
+    and **Publish** to make it available. Existing routines use the same editor
+    through **Edit**. The server enforces permissions, draft revisions and the
+    publication test proof for both paths.
   </Card>
   <Card title="CLI" icon="terminal">
     Scaffold a starting file with `crewship routine init -o file.json` (a minimal valid one-step skeleton) or clone an existing routine with `crewship routine init --from <slug> -o file.json`. Then `crewship routine save --name "..." --definition file.json --author-crew <crew-slug-or-id>`. The server validates the DSL on save (same gate as the UI). CI-friendly: validate offline first with `crewship routine validate file.json`, then save. Print the machine-readable authoring contract with `crewship routine schema` (wire it into an editor for autocomplete, or hand it to an agent authoring a routine).
@@ -119,7 +110,9 @@ Crewship is unusual among workflow systems because **agents author routines**, n
 </CardGroup>
 
 <Note>
-**Editing an existing routine's DSL bypasses the test-run gate.** The Definition card's editor Save button posts straight to `/pipelines/save` with `skip_test_gate: true` — it does not send the definition through `test_run` first. The server only honors that flag for **OWNER/ADMIN** (lower roles get `403`), so this is a fast lane for trusted operators, not a hole in the gate: a MEMBER/MANAGER can view and copy the DSL but can't save an edit without going through the create flow's Test & Save. A follow-up will chain `test_run → save_token → save` behind one button so any MANAGER+ role can edit safely.
+The routine editor uses the draft/test/publish flow. Its UI does not expose a
+skip-test checkbox. The legacy `/save` contract remains for compatible API/CLI
+clients, including its separately permission-checked `skip_test_gate` option.
 </Note>
 
 ## Authoring with AI (one-shot)
@@ -1790,11 +1783,12 @@ thing `update` deliberately does not do.
 
 `crewship routine run <slug> --inputs '{...}'` or click the Run button in the UI detail panel. Same execution path.
 
-After you click **Run** or **Test run** in the UI, a live **Run activity** rail appears inline in the detail panel showing the just-started run step by step (started → each step → completed/failed) — so status is visible immediately without switching to the Runs tab. Full run history stays in the **Runs** tab; see the [Activity](/guides/activity#run-activity-rail) guide for the rail, and the toolbar Activity Bar for a workspace-wide "what's running now" view.
-
-<Note>
-The **Test run** button calls the public, JWT-authed `test_run` endpoint (`POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`). It **validates a draft** — parse + `Validate` + the integration and resource preconditions + a `dry_run` pass (no agent is invoked; you can't run an agent "dry") — and on success mints an HMAC **`save_token`** bound to (workspace, definition hash, user). **Save** verifies that token, so a draft can't be saved as "test passed" unless it actually passed `test_run`. The UI button and the CLI both use this endpoint. To preview a *saved* routine instead, use **Dry run** — it walks the saved definition, renders templates, and returns the declared **manifest** (the blast radius) without invoking anything.
-</Note>
+After **Run**, the run detail shows recorded progress, decisions and results.
+**History** retains prior runs. **Test routine** creates no real run: the public,
+JWT-authenticated `POST /api/v1/workspaces/{workspaceId}/pipelines/test_run` checks
+the draft and returns a workspace/user/recipe-bound `save_token` on success.
+Publication verifies that proof. Sample step tests use the separate `fixture_test`
+contract and explicitly supplied replacement data.
 
 ### Deferred dispatch: delay, ttl, debounce, priority
 
@@ -1830,12 +1824,10 @@ Dry-run is the safe "what would this routine do?" preview, and an honest **stati
 crewship routine dry-run email-fetch --inputs '{"since":"yesterday"}'
 ```
 
-In the UI: click **Dry run** in the routine detail panel. The `would_execute` report renders inline above the tab bar with per-step:
-
-- Step ID + type
-- Resolved `tier_adapter:tier_model` (e.g. `claude:claude-haiku-4-5`)
-- Estimated cost in USD (order-of-magnitude only — the executor uses a flat token-density heuristic, not real pricing)
-- `would_call_agent` / `would_call_pipeline` target
+In the UI, use **Test routine** inside the selected step's Test panel for recipe
+checks. The saved-recipe `/dry_run` report remains available through the API and
+CLI. Its technical report contains the step ID/type, resolved execution tier,
+estimated cost and declared agent or child-routine target.
 
 The estimate is intentionally labelled "estimated" everywhere it surfaces — it's a planning aid, not a quote. Real cost only lands once you switch to `run`.
 

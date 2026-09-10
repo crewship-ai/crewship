@@ -1,5 +1,7 @@
 "use client"
 
+import { describeStep } from "@/lib/routine-step-describe"
+
 import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { routineInputSpecs } from "@/lib/routine-inputs"
@@ -24,8 +26,10 @@ interface FixtureResult {
 export function RoutineFixtureTest({
   workspaceId,
   definition,
+  selectedStepId,
 }: {
   workspaceId: string
+  selectedStepId?: string
   definition: Record<string, unknown> | null
 }) {
   const steps = Array.isArray(definition?.steps)
@@ -34,7 +38,8 @@ export function RoutineFixtureTest({
           !!step && typeof step === "object" && typeof step.id === "string",
       )
     : []
-  const [stepId, setStepId] = useState("")
+  const [localStepId, setStepId] = useState("")
+  const stepId = selectedStepId ?? localStepId
   const selected = steps.find((step) => step.id === stepId)
   const [upstream, setUpstream] = useState("{}")
   const [captured, setCaptured] = useState<CapturedRoutineFixture | null>(null)
@@ -46,6 +51,15 @@ export function RoutineFixtureTest({
   const scope = useRef(0)
   const [error, setError] = useState<string | null>(null)
   const [last, setLast] = useState<{ definition: string; result: FixtureResult } | null>(null)
+  useEffect(() => {
+    scope.current++
+    inFlight.current = false
+    setBusy(false)
+    setError(null)
+    setReplacement("")
+    setReplaceConfirmed(false)
+    setLast(null)
+  }, [selectedStepId])
   useEffect(() => {
     const epochRef = scope
     epochRef.current++
@@ -62,10 +76,12 @@ export function RoutineFixtureTest({
       epochRef.current++
     }
   }, [workspaceId])
-  const needsFixture = selected && ["agent_run", "http", "script"].includes(String(selected.type))
+  const needsFixture =
+    selected && ["agent_run", "http", "script"].includes(String(selected.type))
   const supported = selected?.type === "transform" || needsFixture
   const run = async (inputs: Record<string, unknown>) => {
-    if (inFlight.current || !definition || !supported || (needsFixture && !replaceConfirmed)) return
+    if (inFlight.current || !definition || !supported || (needsFixture && !replaceConfirmed))
+      return
     inFlight.current = true
     setBusy(true)
     setError(null)
@@ -99,7 +115,7 @@ export function RoutineFixtureTest({
       if (scope.current !== epoch) return
       if (!response.ok) throw new Error(result.error || "Fixture test failed")
       if (result.execution_mode !== "fixtures" || typeof result.valid !== "boolean")
-        throw new Error("The server did not confirm fixture execution.")
+        throw new Error("The server did not confirm a test with sample data.")
       setLast({ definition: snapshot, result })
     } catch (e) {
       if (scope.current === epoch) setError(e instanceof Error ? e.message : String(e))
@@ -114,14 +130,14 @@ export function RoutineFixtureTest({
     <section className="space-y-4 rounded-2xl border border-hairline p-5">
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium">Test with fixtures</h3>
+          <h3 className="font-medium">Test this step</h3>
           <span className="rounded-full bg-success/10 px-2.5 py-1 text-xs text-success">
             Sample data · no external actions
           </span>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          Test one step using supplied data. Transforms compute their result; agent, HTTP and script
-          steps only validate your replacement output. No external work runs.
+          Test one step using supplied data. Transforms compute their result; agent, HTTP and
+          script steps only validate your replacement output. No external work runs.
         </p>
       </div>
       <RoutineFixtureImport
@@ -135,13 +151,16 @@ export function RoutineFixtureTest({
         }}
       />
       {captured && (
-        <p className="break-all text-xs text-muted-foreground">
-          Source run {captured.source.run_id} · {captured.source.status} · recipe{" "}
-          {captured.source.definition_hash}. Only recorded outputs were copied; missing steps remain
-          missing. Inputs below use captured values for matching fields.
-        </p>
+        <details className="break-all text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Technical details · sample origin</summary>
+          <p>
+            Source run {captured.source.run_id} · {captured.source.status} · recipe{" "}
+            {captured.source.definition_hash}. Only recorded outputs were copied; missing steps
+            remain missing. Inputs below use captured values for matching fields.
+          </p>
+        </details>
       )}
-      <div>
+      <div hidden={selectedStepId !== undefined}>
         <label htmlFor="fixture-step" className="text-sm font-medium">
           Step to test
         </label>
@@ -158,14 +177,14 @@ export function RoutineFixtureTest({
           <option value="">Choose a step…</option>
           {steps.map((step) => (
             <option key={String(step.id)} value={String(step.id)}>
-              {String(step.name || step.id)} · {String(step.type)}
+              {describeStep(step, 1).title}
             </option>
           ))}
         </select>
       </div>
       {selected && !supported && (
         <p role="status" className="text-sm text-muted-foreground">
-          Fixture tests do not support this step type. No work will be executed.
+          Tests with sample data do not support this step type. No work will be executed.
         </p>
       )}
       {supported && (
@@ -212,7 +231,7 @@ export function RoutineFixtureTest({
                 className="w-full rounded-md border bg-card p-2 font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">
-                An empty value is an explicit empty fixture. This does not test what the real
+                An empty value is an explicit empty sample. This does not test what the real
                 service or model returns.
               </p>
             </div>
@@ -227,8 +246,8 @@ export function RoutineFixtureTest({
               )}
               submitting={busy}
               onRun={run}
-              onCancel={() => setStepId("")}
-              submitLabel="Test with fixtures"
+              onCancel={selectedStepId === undefined ? () => setStepId("") : undefined}
+              submitLabel="Test this step"
             />
           </fieldset>
         </>
@@ -240,27 +259,36 @@ export function RoutineFixtureTest({
       )}
       {last && (
         <div className="space-y-2 rounded-md border p-3 text-sm">
-          <h4 className="font-medium">Last fixture test · {last.result.step_id}</h4>
+          <h4 className="font-medium">
+            Last step test ·{" "}
+            {
+              describeStep(
+                steps.find((step) => step.id === last.result.step_id),
+                1,
+              ).title
+            }
+          </h4>
           <p>
             {last.result.valid
               ? last.result.validation_declared
-                ? "Fixture output passed structural validation."
+                ? "Sample result passed its checks."
                 : "No output checks are declared for this step."
-              : `Fixture output failed: ${last.result.validation_reason || "Validation did not pass"}`}
+              : `Sample result failed: ${last.result.validation_reason || "Result checks did not pass"}`}
           </p>
           {last.definition !== JSON.stringify(definition) && (
             <p className="text-warn">The recipe has changed since this test.</p>
           )}
           <p className="text-xs text-muted-foreground">
-            Output source: {last.result.output_source}. Results describe the last submitted inputs.
+            Output source: {last.result.output_source}. Results describe the last submitted
+            inputs.
           </p>
           <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">
             {last.result.output}
           </pre>
           <details className="text-xs text-muted-foreground">
-            <summary>Test evidence and limits</summary>
-            <p className="break-all">Definition: {last.result.definition_hash}</p>
-            <p className="break-all">Fixture: {last.result.fixture_hash}</p>
+            <summary>Technical details</summary>
+            <p className="break-all">Recipe hash: {last.result.definition_hash}</p>
+            <p className="break-all">Sample hash: {last.result.fixture_hash}</p>
             {last.result.limitations?.map((line) => (
               <p key={line}>{line}</p>
             ))}

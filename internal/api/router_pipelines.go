@@ -19,9 +19,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// reusable across crews. Runner is wired post-construction by the
 	// orchestrator boot path; an unwired runner returns 503 from /run
 	// so the rest of the surface (List/Get/Delete/DryRun) stays usable
-	// for read-only inspection during boot. There is no public test_run
-	// route — the only draft validation gate is the internal save gate
-	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
+	// for read-only inspection during boot. Public test_run validates a
+	// draft with a workspace-scoped save proof; the internal test_run route
+	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	pipes.storagePath = r.storagePath
 	r.PipelinesHandler = pipes // expose for orchestrator wiring

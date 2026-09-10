@@ -49,6 +49,7 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
 import { RoutineWebhooksTab } from "./routine-webhooks-tab"
+import { RoutineComparison } from "./routine-comparison"
 import { RoutineVersionsTab } from "./routine-versions-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
 import { RoutineReachCard } from "./routine-reach-card"
@@ -151,7 +152,11 @@ export function RoutineCardDetail({
   const [manageRuns, setManageRuns] = React.useState(false)
 
   const { records } = usePipelineRunRecords(workspaceId, routine.slug)
-  const { schedules } = usePipelineSchedules(workspaceId)
+  const {
+    schedules,
+    loading: schedulesLoading,
+    error: schedulesError,
+  } = usePipelineSchedules(workspaceId)
   const { automations } = useAutomations(workspaceId)
 
   const mine = React.useMemo(
@@ -210,7 +215,9 @@ export function RoutineCardDetail({
         actions={actions}
       >
         {statusPills}
-        <Pill tone="default">{mine.some((s) => s.enabled) ? "scheduled" : "manual / event"}</Pill>
+        <Pill tone="default">
+          {mine.some((s) => s.enabled) ? "scheduled" : "manual / event"}
+        </Pill>
         {myAutomations.length > 0 && (
           <span data-testid="routine-automations-pill">
             <Pill tone="default">
@@ -221,18 +228,30 @@ export function RoutineCardDetail({
         )}
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
       </RoutineIdentityHeader>
-      <RoutineNavigation slug={routine.slug} view={view} onChange={setView} runId={lastRun?.id} />
+      <RoutineNavigation
+        slug={routine.slug}
+        view={view}
+        onChange={setView}
+        runId={lastRun?.id}
+      />
       {view === "versions" && (
-        <RoutineVersionsTab
-          workspaceId={workspaceId}
-          slug={routine.slug}
-          onRolledBack={onChanged}
-          onPrepareDraft={(definition, version) => {
-            setDraft({ definition, version })
-            setEditing(true)
-            setView("definition")
-          }}
-        />
+        <div className="space-y-5">
+          <RoutineVersionsTab
+            workspaceId={workspaceId}
+            slug={routine.slug}
+            onRolledBack={onChanged}
+            onPrepareDraft={(definition, version) => {
+              setDraft({ definition, version })
+              setEditing(true)
+              setView("definition")
+            }}
+          />
+          <RoutineComparison
+            key={`${workspaceId}:${routine.slug}`}
+            workspaceId={workspaceId}
+            slug={routine.slug}
+          />
+        </div>
       )}
       {view === "plan" && (
         <div className="space-y-4">
@@ -282,8 +301,8 @@ export function RoutineCardDetail({
                   </Link>
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  The access checks are applied when a run starts. Editing these connections does
-                  not rewrite historical runs.
+                  The access checks are applied when a run starts. Editing these connections
+                  does not rewrite historical runs.
                 </p>
               </DetailCard>
               <AccessCard
@@ -303,8 +322,8 @@ export function RoutineCardDetail({
       {view === "definition" && draft && (
         <DetailCard>
           <p className="text-sm">
-            Unsaved draft from version {draft.version}. Review the editor and save to create a new
-            version. The graph still shows the currently saved recipe.
+            Unsaved draft from version {draft.version}. Review the editor and save to create a
+            new version. The graph still shows the currently saved recipe.
           </p>
           <button
             className="mt-2 text-xs text-primary"
@@ -385,95 +404,126 @@ export function RoutineCardDetail({
             </Appear>
 
             <Appear order={4}>
-              <DetailCard
-                title={TRIGGER_TITLE[triggerKind]}
-                icon={TRIGGER_ICON[triggerKind]}
-                tone="purple"
-                action={
-                  triggerKind !== "automations" && (
-                    <button
-                      type="button"
-                      onClick={() => setManageTriggers((v) => !v)}
-                      className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      {manageTriggers
-                        ? "Done"
-                        : triggerKind === "schedules"
-                          ? "Edit schedules"
-                          : "Manage webhooks"}
-                    </button>
-                  )
-                }
-                footer={
-                  // Was a link that toggled between two kinds. A third kind
-                  // makes a toggle unreadable — you cannot see the option you
-                  // are not on — so the same switch the card already uses in
-                  // its header does the job here. `automations` appears only
-                  // when a rule actually targets this routine.
-                  <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                    {TRIGGER_KINDS.filter(
-                      (k) => k !== "automations" || myAutomations.length > 0,
-                    ).map((k) => (
+              {!schedulesLoading &&
+              !schedulesError &&
+              mine.length === 0 &&
+              myAutomations.length === 0 &&
+              !manageTriggers &&
+              triggerKind === "schedules" ? (
+                <details className="rounded-lg border border-border px-4 py-3 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    Schedule · 0
+                  </summary>
+                  <p className="mt-2">No scheduled starts.</p>
+                  <button
+                    type="button"
+                    className="mt-2 text-primary"
+                    onClick={() => setManageTriggers(true)}
+                  >
+                    Edit schedule
+                  </button>
+                  <button
+                    type="button"
+                    className="ml-4 mt-2 text-primary"
+                    onClick={() => setTriggerKind("webhooks")}
+                  >
+                    Webhooks
+                  </button>
+                </details>
+              ) : (
+                <DetailCard
+                  title={TRIGGER_TITLE[triggerKind]}
+                  icon={TRIGGER_ICON[triggerKind]}
+                  tone="purple"
+                  action={
+                    triggerKind !== "automations" && (
                       <button
-                        key={k}
                         type="button"
-                        onClick={() => {
-                          setTriggerKind(k)
-                          setManageTriggers(false)
-                        }}
-                        aria-pressed={triggerKind === k}
-                        className={cn(
-                          "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors",
-                          triggerKind === k
-                            ? "bg-primary/15 text-primary"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
+                        onClick={() => setManageTriggers((v) => !v)}
+                        className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
                       >
-                        {React.createElement(TRIGGER_ICON[k], {
-                          className: "h-3 w-3",
-                          "aria-hidden": true,
-                        } as React.ComponentProps<typeof CalendarClock>)}
-                        {k}
+                        {manageTriggers
+                          ? "Done"
+                          : triggerKind === "schedules"
+                            ? "Edit schedules"
+                            : "Manage webhooks"}
                       </button>
-                    ))}
-                  </div>
-                }
-              >
-                {triggerKind === "automations" ? (
-                  <div data-testid="routine-automations" className="space-y-2.5">
+                    )
+                  }
+                  footer={
+                    // Was a link that toggled between two kinds. A third kind
+                    // makes a toggle unreadable — you cannot see the option you
+                    // are not on — so the same switch the card already uses in
+                    // its header does the job here. `automations` appears only
+                    // when a rule actually targets this routine.
+                    <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                      {TRIGGER_KINDS.filter(
+                        (k) => k !== "automations" || myAutomations.length > 0,
+                      ).map((k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => {
+                            setTriggerKind(k)
+                            setManageTriggers(false)
+                          }}
+                          aria-pressed={triggerKind === k}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors",
+                            triggerKind === k
+                              ? "bg-primary/15 text-primary"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {React.createElement(TRIGGER_ICON[k], {
+                            className: "h-3 w-3",
+                            "aria-hidden": true,
+                          } as React.ComponentProps<typeof CalendarClock>)}
+                          {k}
+                        </button>
+                      ))}
+                    </div>
+                  }
+                >
+                  {triggerKind === "automations" ? (
+                    <div data-testid="routine-automations" className="space-y-2.5">
+                      <p className="text-[12px] text-muted-foreground">
+                        <span
+                          data-testid="routine-automations-count"
+                          className="text-foreground/85"
+                        >
+                          {myAutomations.length}
+                        </span>{" "}
+                        {myAutomations.length === 1 ? "automation" : "automations"} can start
+                        this routine.
+                      </p>
+                      <AutomationList automations={myAutomations} />
+                    </div>
+                  ) : manageTriggers ? (
+                    triggerKind === "webhooks" ? (
+                      <RoutineWebhooksTab
+                        workspaceId={workspaceId}
+                        pipelineId={routine.id}
+                        slug={routine.slug}
+                      />
+                    ) : (
+                      <RoutineSchedulesTab
+                        workspaceId={workspaceId}
+                        pipelineId={routine.id}
+                        slug={routine.slug}
+                        concurrencyKey={concurrencyKey}
+                        maxConcurrent={maxConcurrent}
+                      />
+                    )
+                  ) : triggerKind === "webhooks" ? (
                     <p className="text-[12px] text-muted-foreground">
-                      <span data-testid="routine-automations-count" className="text-foreground/85">
-                        {myAutomations.length}
-                      </span>{" "}
-                      {myAutomations.length === 1 ? "automation" : "automations"} can start this
-                      routine.
+                      Open Manage webhooks to view, create or rotate webhook URLs.
                     </p>
-                    <AutomationList automations={myAutomations} />
-                  </div>
-                ) : manageTriggers ? (
-                  triggerKind === "webhooks" ? (
-                    <RoutineWebhooksTab
-                      workspaceId={workspaceId}
-                      pipelineId={routine.id}
-                      slug={routine.slug}
-                    />
                   ) : (
-                    <RoutineSchedulesTab
-                      workspaceId={workspaceId}
-                      pipelineId={routine.id}
-                      slug={routine.slug}
-                      concurrencyKey={concurrencyKey}
-                      maxConcurrent={maxConcurrent}
-                    />
-                  )
-                ) : triggerKind === "webhooks" ? (
-                  <p className="text-[12px] text-muted-foreground">
-                    Open Manage webhooks to view, create or rotate webhook URLs.
-                  </p>
-                ) : (
-                  <ScheduleList schedules={mine} />
-                )}
-              </DetailCard>
+                    <ScheduleList schedules={mine} />
+                  )}
+                </DetailCard>
+              )}
             </Appear>
 
             <Appear order={5}>
@@ -570,7 +620,9 @@ function LastRunCard({
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium capitalize">Last run · {presentation.label}</div>
+          <div className="text-[13px] font-medium capitalize">
+            Last run · {presentation.label}
+          </div>
           {runId && (
             <div className="truncate font-mono text-[10px] text-muted-foreground">{runId}</div>
           )}
@@ -599,7 +651,9 @@ function LastRunCard({
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">{label}</dt>
+      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+        {label}
+      </dt>
       <dd className="tabular-nums text-foreground/85">{value}</dd>
     </div>
   )
@@ -649,7 +703,10 @@ function ScheduleList({
           />
           <div className="min-w-0 flex-1">
             <div
-              className={cn("truncate", s.enabled ? "text-foreground/90" : "text-muted-foreground")}
+              className={cn(
+                "truncate",
+                s.enabled ? "text-foreground/90" : "text-muted-foreground",
+              )}
             >
               {s.name}
             </div>
@@ -749,7 +806,9 @@ function AccessCard({
                     href="/integrations"
                     icon={
                       brand
-                        ? () => <BrandGlyph brand={brand} fallback={Puzzle} className="h-3 w-3" />
+                        ? () => (
+                            <BrandGlyph brand={brand} fallback={Puzzle} className="h-3 w-3" />
+                          )
                         : Puzzle
                     }
                     label={integrationLabel(integration)}
@@ -764,7 +823,8 @@ function AccessCard({
           <details className="border-t border-border/60 pt-3">
             <summary className="flex cursor-pointer items-center gap-2 text-xs">
               <Globe className="h-3.5 w-3.5 text-warn" />
-              Allowed network hosts <span className="text-muted-foreground">{hosts.length}</span>
+              Allowed network hosts{" "}
+              <span className="text-muted-foreground">{hosts.length}</span>
             </summary>
             <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
               {hosts.map((host) => (
@@ -780,7 +840,9 @@ function AccessCard({
         )}
         {crewshipActions.length > 0 && (
           <div data-testid="routine-crewship-actions">
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">Writes to Crewship</h3>
+            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
+              Writes to Crewship
+            </h3>
             <div className="flex flex-wrap gap-1.5">
               {crewshipActions.map((action) => (
                 <EntityChip key={action} icon={PenSquare} label={action} tone="warn" />
@@ -819,7 +881,9 @@ function Metadata({ routine, steps }: { routine: RoutineDetail; steps: number })
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-[11px]">
       {rows.map(([k, v]) => (
         <div key={k}>
-          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">{k}</dt>
+          <dt className="text-[10px] uppercase tracking-wider text-muted-foreground-soft">
+            {k}
+          </dt>
           <dd className="mt-0.5 truncate font-mono text-foreground/85">{v}</dd>
         </div>
       ))}
@@ -867,13 +931,7 @@ function RunsCard({
   )
 }
 
-function RunsList({
-  slug,
-  workspaceId,
-}: {
-  slug: string
-  workspaceId: string
-}) {
+function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) {
   const [pages, setPages] = React.useState<string[]>([])
   const before = pages.at(-1)
   const { records, error, loading, refresh } = usePipelineRunRecords(
@@ -936,17 +994,6 @@ function RunsList({
                           {prov.source}
                         </span>
                       )}
-                      {/* Only on a composed run. A depth-0 badge on every row
-                          would be chrome for a fact that is the default. */}
-                      {prov.chainDepth !== undefined && (
-                        <span
-                          data-testid={`run-chain-depth-${r.id}`}
-                          title="Composed run: hops from whatever a human did (max 8)"
-                          className="rounded border border-border/60 px-1 normal-case tabular-nums text-muted-foreground"
-                        >
-                          chain {prov.chainDepth}
-                        </span>
-                      )}
                     </div>
                   </div>
                   <div className="text-right text-[11px] tabular-nums text-muted-foreground">
@@ -954,6 +1001,14 @@ function RunsList({
                   </div>
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground-soft" />
                 </Link>
+                {prov.chainDepth !== undefined && (
+                  <details className="px-4 pb-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">Technical details</summary>
+                    <p data-testid={`run-chain-depth-${r.id}`}>
+                      Composition depth: {prov.chainDepth}
+                    </p>
+                  </details>
+                )}
               </li>
             )
           })}

@@ -370,10 +370,13 @@ export function RoutinesDetailPanel({
     }
     setBusyGov(action)
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      })
+      const res = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      )
       if (!res.ok) {
         const t = await res.text().catch(() => "")
         throw new Error(`${res.status}: ${t || res.statusText}`)
@@ -615,7 +618,7 @@ export function RoutinesDetailPanel({
           A tab is a hiding place: 38 routines had zero schedules between
           them while Schedules was a tab nobody clicked. Everything that
           worked is still here — the editor opens beside the graph,
-          schedules and webhooks live inside Triggers, versions have
+          schedules and webhooks live under Schedule, versions have
           their own card. What went is the filing, not the machinery.
           Wait points went to Activity, where the run they belong to is. */}
       {/* A SIBLING of the routine block, not a child of it.

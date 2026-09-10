@@ -13,7 +13,7 @@
 
 import * as React from "react"
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { RoutineStepSpine, type StepSpineRecord } from "../routine-step-spine"
 import type { StepExecutionSummary, RunExecution } from "@/hooks/use-run-executions"
@@ -71,11 +71,40 @@ const runRecord = (
 })
 
 describe("routine step spine", () => {
+  it("opens a failed step beyond the initial limit and respects a manual close during polling", async () => {
+    const long = {
+      steps: Array.from({ length: 16 }, (_, index) => ({
+        id: `step_${index}`,
+        name: `Action ${index + 1}`,
+        type: "transform",
+      })),
+    }
+    const record = runRecord({ failedStepId: "step_15" })
+    const view = render(
+      <RoutineStepSpine definition={long} record={record} initialLimit={12} />,
+    )
+    const failed = document.querySelector(
+      'details[data-step-id="step_15"]',
+    ) as HTMLDetailsElement
+    await waitFor(() => expect(failed.open).toBe(true))
+    expect(failed.querySelector("summary")).toHaveTextContent("Action 16")
+    expect(document.querySelector('[data-step-id="step_13"]')).toBeNull()
+    failed.open = false
+    fireEvent(failed, new Event("toggle"))
+    view.rerender(
+      <RoutineStepSpine definition={long} record={{ ...record }} initialLimit={12} />,
+    )
+    await waitFor(() => expect(failed.open).toBe(false))
+  })
   it("describes the saved recipe without claiming any state", () => {
     render(<RoutineStepSpine definition={definition} />)
     expect(screen.getByText("What this routine does")).toBeInTheDocument()
-    expect(screen.getByText("Probe")).toBeInTheDocument()
-    expect(screen.getAllByText(/Run a script/).length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-step-id="probe"] > summary')).toHaveTextContent(
+      "Run script probe",
+    )
+    expect(document.querySelector('[data-step-id="triage"] > summary')).toHaveTextContent(
+      "Ask morgan",
+    )
     expect(screen.getByText("Only if")).toBeInTheDocument()
     expect(screen.queryByText(/No response recorded/)).not.toBeInTheDocument()
     expect(screen.queryByText("Done")).not.toBeInTheDocument()
@@ -154,6 +183,6 @@ describe("routine step spine", () => {
     expect(screen.queryByRole("button", { name: "pick triage" })).not.toBeInTheDocument()
     const open = document.querySelectorAll("details[open]")
     expect(open).toHaveLength(1)
-    expect(open[0].textContent).toContain("Triage")
+    expect(open[0].textContent).toContain("Ask morgan")
   })
 })

@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- Routines opens on a searchable list with visible purposes and step counts. Steps have optional human names. Edit is one recipe document with step-level Edit/Test tools; run failures show their reason and open the affected step.
+
 - Routine authoring saves durable drafts, reviews publication changes, tests steps with explicit samples and compares archived versions with recorded run evidence. Run details group attempts and outputs by step. Proxy errors and obsolete draft loads preserve the user's work.
 
 - Add typed human decision forms to routine waits, Inbox and CLI; preserve rejection and approved-answer recovery (N5, N10, N15; #2473).

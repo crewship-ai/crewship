@@ -51,7 +51,11 @@ import type { StepExecutionSummary } from "@/hooks/use-run-executions"
 const STEP_VISUALS: Record<string, { icon: LucideIcon; label: string; tone: string }> = {
   agent_run: { icon: Bot, label: "Agent task", tone: "bg-purple/10 text-purple" },
   script: { icon: FileCode2, label: "Run a script", tone: "bg-info/10 text-info" },
-  transform: { icon: ArrowLeftRight, label: "Prepare data", tone: "bg-success/10 text-success" },
+  transform: {
+    icon: ArrowLeftRight,
+    label: "Prepare data",
+    tone: "bg-success/10 text-success",
+  },
   http: { icon: Globe, label: "Call a service", tone: "bg-info/10 text-info" },
   wait: { icon: Clock, label: "Wait", tone: "bg-warn/10 text-warn" },
   code: { icon: Braces, label: "Run code", tone: "bg-warn/10 text-warn" },
@@ -76,7 +80,11 @@ const STATUS_PRESENTATION: Record<string, { label: string; className: string; do
   queued: { label: "Queued", className: "text-muted-foreground", dot: "bg-muted-foreground" },
   waiting: { label: "Waiting", className: "text-warn", dot: "bg-warn" },
   paused: { label: "Waiting", className: "text-warn", dot: "bg-warn" },
-  cancelled: { label: "Stopped", className: "text-muted-foreground", dot: "bg-muted-foreground" },
+  cancelled: {
+    label: "Stopped",
+    className: "text-muted-foreground",
+    dot: "bg-muted-foreground",
+  },
   interrupted: { label: "Interrupted", className: "text-warn", dot: "bg-warn" },
   skipped: { label: "Skipped", className: "text-muted-foreground", dot: "bg-muted-foreground" },
 }
@@ -107,6 +115,7 @@ export interface RoutineStepSpineProps {
     outputsAvailable: boolean
     /** Raw sub_spans map from the run row. */
     subSpans?: Record<string, unknown>
+    failedStepId?: string | null
     currentStepId?: string | null
     active: boolean
     /** Recorded executions could not be read at all. */
@@ -136,7 +145,7 @@ export function RoutineStepSpine({
   definition,
   record,
   map,
-  initialLimit = 6,
+  initialLimit = 12,
   onEdit,
   title,
 }: RoutineStepSpineProps) {
@@ -165,9 +174,32 @@ export function RoutineStepSpine({
     [dsl.steps],
   )
   const running = record?.currentStepId ?? null
+  const importantIds = steps
+    .filter((step) => {
+      const id = String(step.id)
+      return (
+        id === record?.failedStepId ||
+        (record?.active && id === running) ||
+        ["failed", "waiting"].includes(record?.lookup(id).execution?.latest.status ?? "")
+      )
+    })
+    .map((step) => String(step.id))
+  const importantKey = JSON.stringify(importantIds)
+  const autoOpened = React.useRef(new Set<string>())
+  React.useEffect(() => {
+    const ids: string[] = JSON.parse(importantKey)
+    const newlyImportant = ids.filter((id) => !autoOpened.current.has(id))
+    if (!newlyImportant.length) return
+    newlyImportant.forEach((id) => autoOpened.current.add(id))
+    setOpenIds((previous) => new Set([...previous, ...newlyImportant]))
+  }, [importantKey])
 
   const heading = title ?? (record ? "What happened, step by step" : "What this routine does")
-  const shown = expanded ? steps : steps.slice(0, initialLimit)
+  const shown = expanded
+    ? steps
+    : steps.filter(
+        (step, index) => index < initialLimit || importantIds.includes(String(step.id)),
+      )
 
   return (
     <DetailCard
@@ -229,7 +261,7 @@ export function RoutineStepSpine({
             <SpineRow
               key={String(step.id || index)}
               step={step}
-              index={index}
+              index={steps.indexOf(step)}
               workspaceId={workspaceId}
               agents={agents}
               record={record}
@@ -250,8 +282,8 @@ export function RoutineStepSpine({
           )}
           {record?.executionsTruncated && (
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Only the first recorded executions were loaded for this run. Later attempts are not
-              shown here.
+              Only the first recorded executions were loaded for this run. Later attempts are
+              not shown here.
               {record.onLoadMoreExecutions && (
                 <button
                   type="button"
@@ -301,10 +333,7 @@ function SpineRow({
   }
   const Icon = visual.icon
   const agent = agents?.find((a) => a.slug === step.agent_slug)
-  const name =
-    typeof step.name === "string" && step.name
-      ? step.name
-      : readableFieldName(String(step.id ?? description.title))
+  const name = description.title
   const action = description.kind === "unknown" ? visual.label : description.title
   const stored = record?.lookup(stepId)
   const execution = stored?.execution
@@ -322,7 +351,10 @@ function SpineRow({
     if (record.active && running === stepId) {
       state = (
         <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-primary">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+          <span
+            className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"
+            aria-hidden="true"
+          />
           Current step
         </span>
       )
@@ -330,9 +362,15 @@ function SpineRow({
       const presentation = presentStatus(execution.latest.status)
       state = (
         <span
-          className={cn("flex shrink-0 items-center gap-1.5 text-[11px]", presentation.className)}
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 text-[11px]",
+            presentation.className,
+          )}
         >
-          <span className={cn("h-1.5 w-1.5 rounded-full", presentation.dot)} aria-hidden="true" />
+          <span
+            className={cn("h-1.5 w-1.5 rounded-full", presentation.dot)}
+            aria-hidden="true"
+          />
           {presentation.label}
           {execution.durationMs != null && (
             <span className="tabular-nums text-muted-foreground">
@@ -353,6 +391,7 @@ function SpineRow({
 
   return (
     <details
+      data-step-id={stepId}
       open={open}
       onToggle={(event) => onOpenChange(stepId, event.currentTarget.open)}
       className="group border-t border-border/60 py-2.5 first:border-t-0"
@@ -386,6 +425,7 @@ function SpineRow({
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-[13px] font-medium capitalize text-foreground">{name}</span>
+            <span className="font-mono text-[10px] text-muted-foreground">{stepId}</span>
             {Boolean(step.if) && (
               <Pill tone="warn">
                 <GitBranch className="h-3 w-3" />
@@ -394,8 +434,7 @@ function SpineRow({
             )}
           </span>
           <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-            {action}
-            {description.detail ? ` · ${description.detail}` : ""}
+            {description.detail || (action !== name ? action : "")}
           </span>
         </span>
         {/* Hidden on a phone: the row's name and action are what a narrow
@@ -497,7 +536,11 @@ function SpineRow({
           </p>
         )}
         {onEdit && (
-          <button type="button" onClick={onEdit} className="text-xs text-primary hover:underline">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-xs text-primary hover:underline"
+          >
             Edit recipe →
           </button>
         )}

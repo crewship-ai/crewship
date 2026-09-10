@@ -82,7 +82,12 @@ vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
   }),
 }))
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
-  usePipelineSchedules: () => ({ schedules: [], loading: false, error: null, refresh: vi.fn() }),
+  usePipelineSchedules: () => ({
+    schedules: [],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }))
 vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
@@ -287,9 +292,8 @@ describe("what a routine writes back to Crewship", () => {
 describe("routine access and starting points", () => {
   it("distinguishes timed starts from webhook starts and opens their management", () => {
     renderCard()
-    expect(screen.getByText("When it runs")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^schedules$/i }).querySelector("svg")).not.toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Edit schedules", exact: true }))
+    expect(screen.getByText("Schedule · 0")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Edit schedule", exact: true }))
     expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
     fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))

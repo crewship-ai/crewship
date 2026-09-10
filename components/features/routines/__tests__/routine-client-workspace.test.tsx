@@ -34,7 +34,9 @@ vi.mock("../routine-identity-header", () => ({
   ),
 }))
 vi.mock("@/components/features/activity/trace-canvas", () => ({
-  TraceCanvas: ({ dsl }: { dsl: unknown }) => <div data-testid="map">{JSON.stringify(dsl)}</div>,
+  TraceCanvas: ({ dsl }: { dsl: unknown }) => (
+    <div data-testid="map">{JSON.stringify(dsl)}</div>
+  ),
 }))
 vi.mock("@/components/features/activity/run-activity-timeline", () => ({
   RunActivityTimeline: () => <div>Activity evidence</div>,
@@ -70,6 +72,25 @@ beforeEach(() => {
 })
 
 describe("client routine workspace", () => {
+  it("shows the error and named failed step together without opening technical details", () => {
+    h.run = {
+      ...h.run,
+      status: "failed",
+      failed_at_step: "internal_probe",
+      error_message: "Service did not answer",
+    }
+    h.dsl = {
+      steps: [{ id: "internal_probe", name: "Check the customer service", type: "http" }],
+    }
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    const error = screen.getByText("Service did not answer")
+    expect(error).toBeVisible()
+    expect(error.closest("details")).toBeNull()
+    expect(error.parentElement).toHaveTextContent("Check the customer service")
+    expect(document.querySelector('details[data-step-id="internal_probe"]')).toHaveAttribute(
+      "open",
+    )
+  })
   it("leads with the recorded report without disguising failed completion", async () => {
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
     expect(
@@ -116,7 +137,9 @@ describe("client routine workspace", () => {
     // is behind a second row of tabs any more.
     expect(screen.getByText("Original prompt")).toBeInTheDocument()
     expect(screen.getByText("Saved answer")).toBeInTheDocument()
-    expect(screen.getByText("Historical step")).toBeInTheDocument()
+    expect(
+      document.querySelector('[data-step-id="historical-step"] > summary'),
+    ).toHaveTextContent("Ask an agent")
     fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
   })
@@ -132,7 +155,9 @@ describe("client routine workspace", () => {
     render(
       <RoutineWorkOverview
         definition={{
-          inputs: [{ name: "source", label: "Service URL", required: true, default: "example" }],
+          inputs: [
+            { name: "source", label: "Service URL", required: true, default: "example" },
+          ],
           outputs: [{ name: "report" }],
           steps: [
             {
@@ -147,7 +172,7 @@ describe("client routine workspace", () => {
       />,
     )
     expect(screen.getByText("Service URL")).toBeInTheDocument()
-    expect(screen.getByText("You get")).toBeInTheDocument()
+    expect(screen.getByText("Results")).toBeInTheDocument()
     expect(screen.getByText("Only if")).toBeInTheDocument()
     expect(screen.getAllByText("Runs after: fetch").length).toBeGreaterThan(0)
     expect(screen.queryByText(/Ready to run/)).not.toBeInTheDocument()

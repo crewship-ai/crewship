@@ -19,6 +19,11 @@ const STEP_TONE: Record<ReadableStep["kind"], string> = {
   wait: "bg-warn/15 text-warn",
   code: "bg-success/15 text-success",
   call_pipeline: "bg-purple/15 text-purple",
+  script: "bg-info/15 text-info",
+  notify: "bg-notice/15 text-notice",
+  query: "bg-info/15 text-info",
+  foreach: "bg-purple/15 text-purple",
+  crewship: "bg-success/15 text-success",
   unknown: "bg-white/[0.06] text-muted-foreground",
 }
 
