@@ -97,7 +97,7 @@ export function BaseImageRow({ state, onChange }: { state: WizardState; onChange
     <button
       type="button"
       onClick={onChange}
-      className="flex w-full items-center gap-3 rounded-lg border border-hairline bg-foreground/[0.02] p-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.04] max-sm:min-h-12"
+      className="flex w-full items-center gap-3 rounded-lg border border-hairline bg-foreground/[0.02] p-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.04] coarse:min-h-12"
     >
       {def ? (
         <def.icon className="h-6 w-6 shrink-0" style={brand ? { color: brand } : undefined} />
@@ -174,7 +174,7 @@ export function BaseImagePanel({
             value={def ? "" : value}
             onChange={(e) => onChange(e.target.value)}
             placeholder="ghcr.io/your-org/your-image:tag"
-            className="h-8 font-mono text-xs max-sm:h-12 max-sm:text-sm"
+            className="h-8 font-mono text-xs coarse:h-12 coarse:text-sm"
           />
         </CreateSurfaceField>
       }

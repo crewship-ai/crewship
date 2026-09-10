@@ -451,7 +451,7 @@ function SecretReveal({ secret, onDone }: { secret: string; onDone: () => void }
       <Button
         variant="soft"
         size="sm"
-        className="h-8 text-xs max-sm:h-12 max-sm:text-sm"
+        className="h-8 text-xs coarse:h-12 coarse:text-sm"
         onClick={onDone}
       >
         Done

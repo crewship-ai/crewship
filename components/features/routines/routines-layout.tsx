@@ -176,7 +176,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
       {/* ---- Sub-bar: identity + actions ----
           Row 1 carries global context (Import / New routine); the
           page-specific 'Back to routines / <name>' breadcrumb lives one level
@@ -226,14 +226,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             type="button"
             aria-label="Close routine list"
             onClick={() => setLeftCollapsed(true)}
-            className="absolute inset-0 z-20 bg-black/50"
+            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
             leftCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
+            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
           )}
         >
           {leftCollapsed ? (

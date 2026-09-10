@@ -134,6 +134,14 @@ Frontend: `app/` (Next.js App Router), `components/` (`ui/` = shadcn), `hooks/`,
   via `deleted_at`; timestamps TEXT (RFC 3339).
 - **Frontend**: Next.js 16 App Router (static export), Tailwind 4 + Radix/shadcn,
   Zod, CASL (`lib/permissions/`). ES modules only. `@/*` path alias.
+- **Responsive**: two axes, and picking the wrong one is how tablets broke
+  (#2483). *Layout* keys on width — `md:` for the phone/desktop split, matching
+  `useIsMobile`'s 768. *Touch sizing* keys on the pointer — `coarse:`
+  (`@media (pointer: coarse)`, defined in `app/globals.css`), so a 44px target
+  applies to every touch device at any width instead of stopping at some
+  breakpoint. Note `--spacing` is `0.23rem`, so `h-12` is the 44px class, not
+  `h-11`. Navigation is defined once in `lib/nav-sections.ts` and read by both
+  the rail and the phone sheet.
 - **Commits**: conventional (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`,
   `chore:`). Branch from `main`.
 
