@@ -156,7 +156,7 @@ describe("the flow", () => {
     h.apiFetch.mockResolvedValue(fail(501, { error: "device flow not available for GOOGLE" }))
     const { onStateChange } = renderIt({ provider: "GOOGLE" })
     expect(await screen.findByRole("alert")).toHaveTextContent("device flow not available for GOOGLE")
-    expect(onStateChange).toHaveBeenLastCalledWith("error")
+    await waitFor(() => expect(onStateChange).toHaveBeenLastCalledWith("error"))
     expect(screen.queryByTestId("device-user-code")).not.toBeInTheDocument()
   })
 
