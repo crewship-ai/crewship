@@ -3,6 +3,7 @@ package pages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sort"
@@ -74,6 +75,21 @@ func (s *ProjectStore) SetCheckpointBoundaries(ctx context.Context, ws, page str
 	repo, err := s.gitPath(ctx, ws, page, false)
 	if err != nil {
 		return err
+	}
+	// Validate all objects before touching shallow or its lock. One bounded
+	// batch avoids a process per retained checkpoint; a blob/tree is not a root.
+	checked, err := runProjectGit(ctx, repo, []byte(strings.Join(ids, "\n")+"\n"), "cat-file", "--batch-check=%(objectname) %(objecttype)")
+	if err != nil {
+		return fmt.Errorf("validate checkpoint boundaries: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(checked)), "\n")
+	if len(lines) != len(ids) {
+		return errors.New("incomplete checkpoint boundary validation")
+	}
+	for i, id := range ids {
+		if lines[i] != id+" commit" {
+			return fmt.Errorf("checkpoint boundary %s is not an existing commit", id)
+		}
 	}
 	root, err := os.OpenRoot(repo)
 	if err != nil {
