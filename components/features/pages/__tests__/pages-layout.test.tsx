@@ -22,6 +22,22 @@ vi.mock("next/navigation", () => ({
 }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 
+// The four editor sections are five other files' worth of behaviour and are
+// tested there. This suite is about the shell around them: which door opens,
+// what the address says, and that the rail never blinks.
+vi.mock("@/components/features/pages/editor/section-content", () => ({
+  EditorContentSection: () => <div data-testid="section-content">Content</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-data-actions", () => ({
+  EditorDataActionsSection: () => <div data-testid="section-data">Data & actions</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-access", () => ({
+  EditorAccessSection: () => <div data-testid="section-access">Access</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-history", () => ({
+  EditorHistorySection: () => <div data-testid="section-history">History</div>,
+}))
+
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { PANEL_STATES } from "@/components/features/pages/panels/types"
