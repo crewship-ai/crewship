@@ -40,7 +40,14 @@ package api
 //	                       likewise the handler's: the middleware knows roles,
 //	                       not whether a container is holding the pen.
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+	"path/filepath"
+
+	"github.com/crewship-ai/crewship/internal/pagebuild"
+	"github.com/crewship-ai/crewship/internal/pages"
+)
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
@@ -48,7 +55,33 @@ func (r *Router) registerPageRoutes() {
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
+	if r.pageProjectsPath != "" {
+		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
+	}
 
+	if r.pageBuildImage != "" && r.pageProjectsPath != "" {
+		if err := pagebuild.ValidateImage(r.pageBuildImage); err != nil {
+			r.logger.Error("Page build configuration", "error", err)
+		} else {
+			p.SetBuildWorker(&pagebuild.DockerBuilder{Image: r.pageBuildImage}, &pagebuild.Store{Directory: filepath.Join(r.pageProjectsPath, "artifacts")})
+			if err := p.recoverPageBuilds(context.Background()); err != nil {
+				r.logger.Error("recover Page builds", "error", err)
+				p.builds = nil
+			}
+		}
+	}
+	if r.pageRuntimeOrigin != "" {
+		if err := pagebuild.ValidateRuntimeOriginForDevelopment(r.pageRuntimeOrigin, r.pageStudioOrigin, r.pageRuntimeDevelopmentSameOrigin); err != nil {
+			r.logger.Error("Page runtime configuration", "error", err)
+		} else {
+			p.pageRuntimeOrigin = r.pageRuntimeOrigin
+			p.pageStudioOrigin = r.pageStudioOrigin
+			p.pageRuntimeDevelopmentSameOrigin = r.pageRuntimeDevelopmentSameOrigin
+			if r.pageRuntimeDevelopmentSameOrigin {
+				r.logger.Warn("Pages same-origin development mode enabled: reviewed code only, no browser process isolation guarantee")
+			}
+		}
+	}
 	// Same two wrappers every read route in this package uses; the local
 	// aliases keep the registration lines readable (router_orchestration.go).
 	authed := r.authMw.RequireAuth
@@ -68,6 +101,43 @@ func (r *Router) registerPageRoutes() {
 	// (§10b.1) register themselves, next to their handlers — see
 	// router_pages_transfer.go.
 	r.registerPageTransferRoutes()
+	// openapi: responses 200,404
+	r.mux.Handle("GET /api/v1/pages/runtime/bootstrap", http.HandlerFunc(p.PageRuntime))
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project", authed(wsCtx(http.HandlerFunc(p.GetProject))))
+	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
+	r.authedMut("PUT", "/api/v1/pages/{slug}/project", roleSelf, p.PutProject)
+	// openapi: responses 202,400,401,403,404,409,413,429,500,503,507
+	r.authedMut("POST", "/api/v1/pages/{slug}/project/build", roleSelf, p.BuildProject)
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/preview", authed(wsCtx(http.HandlerFunc(p.GetProjectPreview))))
+	// openapi: responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/fsck", authed(wsCtx(http.HandlerFunc(p.VerifyProjectStorage))))
+	r.authedMut("POST", "/api/v1/pages/maintenance", roleManage, p.CompactPageProjects)
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/history", authed(wsCtx(http.HandlerFunc(p.ProjectHistory))))
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/history/{revision}", authed(wsCtx(http.HandlerFunc(p.GetProjectRevision))))
+	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
+	r.authedMut("POST", "/api/v1/pages/{slug}/project/restore", roleSelf, p.RestoreProject)
+
+	// openapi: responses 200,400,401,403,404,409,413,422,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/project/check", roleSelf, p.CheckProject)
+	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
+	r.authedMut("POST", "/api/v1/pages/{slug}/project/publish", roleSelf, p.PublishProject)
+	// openapi: responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/publications", authed(wsCtx(http.HandlerFunc(p.PublicationHistory))))
+	// openapi: responses 200,400,401,403,404,409,413,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/project/unpublish", roleSelf, p.UnpublishProject)
+	// openapi: responses 200,304,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/application", authed(wsCtx(http.HandlerFunc(p.PageApplication))))
+
+	// openapi: responses 202,400,401,403,404,409,413,429,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/application/actions/{panelId}/{actionId}", roleCreate, p.DispatchApplicationAction)
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/application/actions/{pendingId}", authed(wsCtx(http.HandlerFunc(p.ApplicationActionStatus))))
+
+	// openapi: responses 200,400,401,404,409,413,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/application/panels/{panelId}/history", authed(wsCtx(http.HandlerFunc(p.ApplicationPanelHistory))))
 
 	// Action dispatch (§8b.2) — router_pages_actions.go, which also argues why
 	// its POST declares a role floor where the mutations above declare roleSelf.

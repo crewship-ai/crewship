@@ -11,6 +11,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"log/slog"
 	"path/filepath"
 	"time"
@@ -63,7 +64,8 @@ type CreateOptions struct {
 	// instead of DB rows pointing at nothing. Empty disables the
 	// section — matches the rest of the memory subsystem's "empty
 	// BlobRoot disables versioning" convention.
-	BlobRoot string
+	BlobRoot         string
+	PageProjectsPath string
 }
 
 // Validate returns an error if opts lack the fields required by its
@@ -348,6 +350,16 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	}
 
 	// 5c. DB dump.
+	var pageRelease func()
+	if opts.PageProjectsPath != "" && opts.Scope == ScopeWorkspace {
+		pageRelease, err = (&pages.ProjectStore{Directory: opts.PageProjectsPath}).Lease(ctx, target.ID, false)
+		if err != nil {
+			_ = payloadWriter.Close()
+			_ = payloadFile.Close()
+			return nil, err
+		}
+		defer pageRelease()
+	}
 	var dump *DBDump
 	switch opts.Scope {
 	case ScopeWorkspace:
@@ -368,6 +380,15 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			_ = payloadFile.Close()
 			return nil, err
 		}
+	}
+
+	if err := WritePageProjectsSection(ctx, payloadWriter, opts.PageProjectsPath, dump, now); err != nil {
+		_ = payloadWriter.Close()
+		_ = payloadFile.Close()
+		return nil, err
+	}
+	if pageRelease != nil {
+		pageRelease()
 	}
 
 	// 5d. Memory-version blobs referenced by the DB dump's

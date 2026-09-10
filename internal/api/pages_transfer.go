@@ -45,6 +45,7 @@ package api
 // point of a bundle arriving from somewhere else.
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -75,12 +76,7 @@ const pageImportEnvelopeSlack = 32 << 10
 
 // pageBundle is the portable document `page export` produces and `page import`
 // consumes.
-type pageBundle struct {
-	Format string             `json:"format"`
-	Page   pageBundlePage     `json:"page"`
-	Refs   []pageBundleRef    `json:"references"`
-	Meta   pageBundleMetadata `json:"metadata"`
-}
+type pageBundle = pages.TransferBundle
 
 // pageBundlePage is the spec, stripped.
 //
@@ -88,13 +84,7 @@ type pageBundle struct {
 // owner_user_id is a workspace-specific id, and the importer becomes the owner
 // of what they installed — which is also the only answer §7.1 rule 1 allows,
 // since "a page is created owned by its creator or by a crew".
-type pageBundlePage struct {
-	Name        string            `json:"name"`
-	Slug        string            `json:"slug"`
-	Description string            `json:"description,omitempty"`
-	Owner       string            `json:"owner,omitempty"`
-	Panels      []pageBundlePanel `json:"panels"`
-}
+type pageBundlePage = pages.TransferPage
 
 // pageBundlePanel is one panel as it travels.
 //
@@ -114,24 +104,9 @@ type pageBundlePage struct {
 // page's shape, authored into the document, and a bundle that dropped it would
 // install one long scroll where the author drew four screens.
 //
-// `refresh` does NOT travel, and that is a decision rather than an omission.
-// It rides with `wake:`, `actions:` and `on_failure:`, which this struct has
-// never carried — and it could not travel alone even if it wanted to:
-// `refresh: on:wake` is refused on a page that declares no gate
-// (internal/pages/refresh.go), so a bundle carrying the trigger without the
-// gates that fire it would be a bundle no import could accept. Stated in
-// docs/guides/pages.mdx, where the person exporting a page will read it.
-type pageBundlePanel struct {
-	ID         string `json:"id"`
-	Schema     string `json:"schema"`
-	Title      string `json:"title,omitempty"`
-	Icon       string `json:"icon,omitempty"`
-	Tab        string `json:"tab,omitempty"`
-	Owner      string `json:"owner"`
-	Producer   string `json:"producer"`
-	SLASeconds int    `json:"sla_seconds"`
-	Span       int    `json:"span,omitempty"`
-}
+// V1 omits actions, wake, on_failure and refresh. V2 preserves them only in
+// the source draft; importing never activates the declared behavior.
+type pageBundlePanel = pages.TransferPanel
 
 // pageBundleRef is one declared placeholder: something outside the page that
 // the page needs, named as "<kind>/<slug>" exactly as the spec names it.
@@ -143,19 +118,11 @@ type pageBundlePanel struct {
 // and there is nothing local to resolve it against. It is still DECLARED,
 // because the importer is owed the complete list of what the page expects to
 // be fed by; it is simply not something the import can gate on.
-type pageBundleRef struct {
-	Ref      string   `json:"ref"`
-	Kind     string   `json:"kind"`
-	Bindable bool     `json:"bindable"`
-	UsedBy   []string `json:"used_by"`
-}
+type pageBundleRef = pages.TransferReference
 
 // pageBundleMetadata is deliberately thin. There is no source_workspace_id
 // here — see the file header.
-type pageBundleMetadata struct {
-	ExportedAt string `json:"exported_at"`
-	PanelCount int    `json:"panel_count"`
-}
+type pageBundleMetadata = pages.TransferMetadata
 
 // pageBundleOwnerUse is the `used_by` entry for the page's own owner, as
 // opposed to a panel id. A bundle reader has to be able to tell "this crew
@@ -178,6 +145,11 @@ const pageBundleOwnerUse = "page (owner)"
 // withhold. Owner, workspace admin, or a `write` grantee: the three principals
 // who can already see the entire spec by editing it.
 func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
+	release, leased := h.pageLease(w, r)
+	if !leased {
+		return
+	}
+	defer release()
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -206,6 +178,28 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var project *pages.SourceProject
+	draft, draftErr := h.loadProject(r, rec)
+	if draftErr == nil {
+		doc = &draft.Definition
+		project = draft.Project
+	} else if !errors.Is(draftErr, sql.ErrNoRows) {
+		if h.projectStore == nil {
+			replyError(w, 503, "Page project storage is not configured")
+			return
+		}
+		replyInternalError(w, h.logger, "load exported project", draftErr)
+		return
+	}
+	if project != nil {
+		for i := range doc.Spec.Panels {
+			doc.Spec.Panels[i].Public = false
+		}
+		if err := validatePortableDraft(doc); err != nil {
+			replyError(w, 422, err.Error())
+			return
+		}
+	}
 	owner := ""
 	if rec.OwnerCrewID != "" {
 		// A crew owner is a SLUG in the bundle. The id it resolves to here is
@@ -227,6 +221,10 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 			ExportedAt: h.evaluator().Now().UTC().Format(time.RFC3339),
 			PanelCount: len(doc.Spec.Panels),
 		},
+	}
+	if project != nil {
+		bundle.Format = pages.TransferV2
+		bundle.Project = project
 	}
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
@@ -251,6 +249,26 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	bundle.Refs = pageBundleReferences(doc, owner)
 
+	if project != nil {
+		for i, p := range doc.Spec.Panels {
+			bundle.Page.Panels[i].Actions = p.Actions
+			bundle.Page.Panels[i].Wake = p.Wake
+			bundle.Page.Panels[i].OnFailure = p.OnFailure
+			bundle.Page.Panels[i].Refresh = p.Refresh
+		}
+	}
+	if project != nil {
+		if _, err := pages.MarshalProjectTransfer(bundle); err != nil {
+			replyError(w, 422, err.Error())
+			return
+		}
+		encoded, err := json.Marshal(bundle)
+		if err != nil || len(encoded) > pages.MaxTransferBytes {
+			replyError(w, 422, "encoded bundle exceeds size limit")
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, bundle)
 }
 
@@ -286,6 +304,17 @@ func pageBundleReferences(doc *pages.Document, owner string) []pageBundleRef {
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
 		add(strings.TrimSpace(p.Owner), "crew", true, p.ID)
+		for _, a := range p.Actions {
+			if a.Kind == pages.ActionCall {
+				add("routine/"+strings.TrimSpace(a.Routine), "routine", true, p.ID)
+			}
+		}
+		for _, gate := range p.Wake {
+			add(gate.Agent, "crew", true, p.ID)
+		}
+		if p.OnFailure != nil {
+			add(p.OnFailure.Issue, "crew", true, p.ID)
+		}
 		kind, _, err := p.ProducerParts()
 		if err != nil {
 			continue
@@ -322,14 +351,7 @@ func pageRefBindable(kind string) bool {
 // repeated flag cannot be mis-split. One key may therefore appear only once —
 // two bindings for one reference is an operator error the CLI refuses before
 // the request is sent, and which JSON could not represent anyway.
-type pageImportRequest struct {
-	Format string          `json:"format"`
-	Page   pageBundlePage  `json:"page"`
-	Refs   []pageBundleRef `json:"references"`
-
-	Slug string            `json:"slug"`
-	Bind map[string]string `json:"bind"`
-}
+type pageImportRequest = pages.TransferImport
 
 // pageUnresolvedRef is one reference the import could not bind.
 type pageUnresolvedRef struct {
@@ -349,6 +371,11 @@ type pageUnresolvedRef struct {
 // and an import that reported one missing reference per attempt would take as
 // many round trips as the page has panels to discover it is not installable.
 func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
+	release, leased := h.pageLease(w, r)
+	if !leased {
+		return
+	}
+	defer release()
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
@@ -365,7 +392,7 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, ok := readCapped(w, r, pages.MaxSpecBytes+pageImportEnvelopeSlack, "page bundle")
+	body, ok := readCapped(w, r, pages.MaxTransferBytes, "page bundle")
 	if !ok {
 		return
 	}
@@ -374,11 +401,32 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if strings.TrimSpace(req.Format) != pageBundleFormat {
+	if strings.TrimSpace(req.Format) != pageBundleFormat && req.Format != pages.TransferV2 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":  fmt.Sprintf("unsupported bundle format %q; this build reads %s", req.Format, pageBundleFormat),
 			"format": req.Format,
 		})
+		return
+	}
+
+	if req.Format == pages.TransferV2 {
+		parsed, err := pages.ParseProjectTransfer(bytes.NewReader(body))
+		if err != nil {
+			replyError(w, 400, err.Error())
+			return
+		}
+		req = *parsed
+		if h.projectStore == nil {
+			replyError(w, 503, "Page project storage is not configured")
+			return
+		}
+	} else if req.Project != nil {
+		replyError(w, 400, "v1 bundle cannot contain a project")
+		return
+	}
+
+	if req.Format != pages.TransferV2 && len(body) > pages.MaxSpecBytes+pageImportEnvelopeSlack {
+		writeRejection(w, pageRejection{Kind: "cap", Message: "page bundle exceeds the v1 size limit", Detail: map[string]any{"bytes_attempted": len(body), "bytes_limit": pages.MaxSpecBytes + pageImportEnvelopeSlack}})
 		return
 	}
 
@@ -422,6 +470,14 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 			// themselves after looking at it.
 		})
 	}
+	if req.Project != nil {
+		for i, p := range req.Page.Panels {
+			doc.Spec.Panels[i].Actions = p.Actions
+			doc.Spec.Panels[i].Wake = p.Wake
+			doc.Spec.Panels[i].OnFailure = p.OnFailure
+			doc.Spec.Panels[i].Refresh = p.Refresh
+		}
+	}
 	owner := strings.TrimSpace(req.Page.Owner)
 
 	// 1. Bind. A binding that names nothing in the bundle is refused rather
@@ -438,6 +494,13 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if err := doc.Validate(); err != nil {
 		writeSpecError(w, err)
 		return
+	}
+
+	if req.Project != nil {
+		if err := validatePortableDraft(doc); err != nil {
+			replyError(w, 422, err.Error())
+			return
+		}
 	}
 
 	// 3. Bind-time reference checking (§10b.1: import skips the AUTHORING
@@ -483,7 +546,39 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(specJSON) > pages.MaxSpecBytes {
+		replyError(w, 422, "page definition exceeds spec limit")
+		return
+	}
+	fullDraftJSON := string(specJSON)
+	sourceDigest := ""
+	if req.Project != nil {
+		sourceDigest, err = h.projectStore.Put(r.Context(), wsID, req.Project)
+		if err != nil {
+			h.projectStoreError(w, err)
+			return
+		}
+		for i := range doc.Spec.Panels {
+			doc.Spec.Panels[i].Actions = nil
+			doc.Spec.Panels[i].Wake = nil
+			doc.Spec.Panels[i].OnFailure = nil
+			doc.Spec.Panels[i].Refresh = ""
+		}
+		specJSON, err = json.Marshal(doc)
+		if err != nil {
+			replyInternalError(w, h.logger, "encode inactive page", err)
+			return
+		}
+	}
 	pageID := generateCUID()
+	gitCommit := ""
+	if req.Project != nil {
+		gitCommit, err = h.projectStore.Checkpoint(r.Context(), wsID, pageID, "", fullDraftJSON, user.ID, 1, req.Project)
+		if err != nil {
+			h.projectStoreError(w, err)
+			return
+		}
+	}
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 	ownerUserID := user.ID
 	if ownerCrewID != "" {
@@ -521,6 +616,18 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if err := insertPageVersion(r.Context(), tx, pageID, 1, string(specJSON), user.ID, now); err != nil {
 		replyInternalError(w, h.logger, "insert imported page version", err)
 		return
+	}
+	if sourceDigest != "" {
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_drafts(page_id,source_digest,revision,spec_json,updated_by,updated_at,git_commit) VALUES(?,?,1,?,?,?,?)`, pageID, sourceDigest, fullDraftJSON, user.ID, now, gitCommit); err != nil {
+			replyInternalError(w, h.logger, "import project draft", err)
+			return
+		}
+	}
+	if sourceDigest != "" {
+		if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_revisions(page_id,revision,source_digest,actor_user_id,created_at,git_commit,spec_json) VALUES(?,1,?,?,?,?,?)`, pageID, sourceDigest, user.ID, now, gitCommit, fullDraftJSON); err != nil {
+			replyInternalError(w, h.logger, "record imported source revision", err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit page import", err)
@@ -578,6 +685,9 @@ func applyPageBinds(doc *pages.Document, owner *string, bind map[string]string) 
 	}
 
 	present := map[string]bool{}
+	for _, ref := range pageBundleReferences(doc, *owner) {
+		present[ref.Ref] = true
+	}
 	if *owner != "" {
 		present[*owner] = true
 	}
@@ -603,6 +713,24 @@ func applyPageBinds(doc *pages.Document, owner *string, bind map[string]string) 
 	}
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
+		for j := range p.Actions {
+			a := &p.Actions[j]
+			if a.Kind == pages.ActionCall {
+				if to, ok := binds["routine/"+strings.TrimSpace(a.Routine)]; ok {
+					a.Routine = strings.TrimPrefix(to, "routine/")
+				}
+			}
+		}
+		for j := range p.Wake {
+			if to, ok := binds[p.Wake[j].Agent]; ok {
+				p.Wake[j].Agent = to
+			}
+		}
+		if p.OnFailure != nil {
+			if to, ok := binds[p.OnFailure.Issue]; ok {
+				p.OnFailure.Issue = to
+			}
+		}
 		if to, ok := binds[strings.TrimSpace(p.Owner)]; ok {
 			p.Owner = to
 		}
@@ -716,6 +844,36 @@ func (h *PageHandler) bindPageReferences(r *http.Request, wsID string, doc *page
 			}
 		}
 		resolved[p.ID] = resolvedPanel{OwnerCrewID: crewID, Kind: string(kind), Ref: ref}
+	}
+
+	already := map[string]bool{owner: true}
+	for _, p := range doc.Spec.Panels {
+		already[p.Owner] = true
+		already[p.Producer] = true
+	}
+	for _, binding := range pageBundleReferences(doc, owner) {
+		if already[binding.Ref] {
+			continue
+		}
+		kind, slug, _ := strings.Cut(binding.Ref, "/")
+		if kind == "crew" {
+			_, reason, err := lookupCrew(binding.Ref)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			if reason != "" {
+				miss(binding.Ref, kind, strings.Join(binding.UsedBy, ","), reason)
+			}
+		}
+		if kind == "routine" {
+			var one int
+			err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, wsID, slug).Scan(&one)
+			if errors.Is(err, sql.ErrNoRows) {
+				miss(binding.Ref, kind, strings.Join(binding.UsedBy, ","), "routine does not exist in target workspace")
+			} else if err != nil {
+				return nil, "", nil, err
+			}
+		}
 	}
 
 	if len(order) == 0 {

@@ -71,9 +71,15 @@ func effectivePendingTrigger(pr PendingRun) (TriggeredVia, string) {
 }
 
 // PendingRunStore is the DB access layer for deferred dispatch.
-type PendingRunStore struct {
-	db *sql.DB
+type pendingRunDB interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
+type PendingRunStore struct{ db pendingRunDB }
+
+// NewPendingRunStoreTx lets admission checks and enqueue share one transaction.
+func NewPendingRunStoreTx(tx *sql.Tx) *PendingRunStore { return &PendingRunStore{db: tx} }
 
 // NewPendingRunStore wraps a DB handle.
 func NewPendingRunStore(db *sql.DB) *PendingRunStore {
@@ -217,7 +223,7 @@ func (s *PendingRunStore) DueRuns(ctx context.Context, now time.Time, limit int)
 SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
        COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
        COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
-       COALESCE(chain_origin,''), pinned_version
+       COALESCE(chain_origin,''), pinned_version, fire_at
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
@@ -229,11 +235,16 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 	var out []PendingRun
 	for rows.Next() {
 		var pr PendingRun
+		var fireAt string
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
 			&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
 			&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
-			&pr.ChainOrigin, &pr.PinnedVersion); err != nil {
+			&pr.ChainOrigin, &pr.PinnedVersion, &fireAt); err != nil {
 			return nil, err
+		}
+		pr.FireAt, err = time.Parse(time.RFC3339Nano, fireAt) // tsformat:allow: parsing a persisted timestamp, not writing or comparing SQL text
+		if err != nil {
+			return nil, fmt.Errorf("pending_runs: parse fire_at for %s: %w", pr.ID, err)
 		}
 		out = append(out, pr)
 	}

@@ -265,7 +265,14 @@ POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/onboarding/setup-agent/start roleSelf
 POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
+POST /api/v1/pages/maintenance roleManage
+POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
+POST /api/v1/pages/{slug}/project/build roleSelf
+POST /api/v1/pages/{slug}/project/check roleSelf
+POST /api/v1/pages/{slug}/project/publish roleSelf
+POST /api/v1/pages/{slug}/project/restore roleSelf
+POST /api/v1/pages/{slug}/project/unpublish roleSelf
 POST /api/v1/pages/{slug}/public roleSelf
 POST /api/v1/pages/{slug}/rollback roleSelf
 POST /api/v1/pages/{slug}/webhooks roleSelf
@@ -346,6 +353,7 @@ PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
 PUT /api/v1/pages/{slug}/grants roleSelf
 PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
+PUT /api/v1/pages/{slug}/project roleSelf
 PUT /api/v1/provider-logins/pools/{poolId} roleManage
 PUT /api/v1/users/me/peer-consent roleSelf
 PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage

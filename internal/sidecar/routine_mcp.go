@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/manifest"
+	"github.com/crewship-ai/crewship/internal/pages"
 )
 
 // RoutinesMCPServerName is the server identity the in-container CLI sees in
@@ -218,6 +219,10 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 		InputSchema: routineMCPRunSchema,
 	},
 	{
+		Name:        "page_project",
+		Description: "Edit a custom React Page draft without publishing. First create the Page with save_page. init requires expected_revision=0 and creates the fixed starter; read lists files and the exact @crewship/pages SDK contract, or reads one path; save replaces supplied files/deletes named paths with expected_revision CAS; build starts an isolated compiler; status reports the job without code; check requires build_id and expected_revision. Inspect errors and retry after reading current revision. Never claim saved/built means published. Source changes use page_create policy and the Page owner crew. Use small file batches under the 1 MiB tool envelope; no shell, packages or secrets are installed.",
+		InputSchema: pageProjectMCPSchema,
+	}, {
 		Name: "save_page",
 		Description: "Create a Crewship page (a typed operational dashboard: status/metric/series/table/narrative/embed " +
 			"panels). Supply the page name, a short description, and the `panels` array. If this crew's autonomy level " +
@@ -276,12 +281,12 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap — MCP requests are tiny
-	if err != nil {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1)) // Bounded file patches, never an unbounded source upload
+	if err != nil || len(raw) > 1<<20 {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
 			ID:      mcpNullID,
-			Error:   &memoryMCPRPCError{Code: -32700, Message: "parse error: " + err.Error()},
+			Error:   &memoryMCPRPCError{Code: -32700, Message: "invalid or oversized MCP request"},
 		})
 		return
 	}
@@ -402,6 +407,13 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
+	case "page_project":
+		var project pageProjectToolRequest
+		if err := pages.DecodeProjectJSON(params.Arguments, &project); err != nil {
+			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid project arguments"}))
+			return
+		}
+		status, bodyBytes = s.pageProject(r.Context(), project, actingAgentID)
 	case "save_page":
 		var save pagesSaveRequest
 		if len(params.Arguments) > 0 {

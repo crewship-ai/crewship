@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/policy"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -55,11 +56,17 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
-	db      *sql.DB
-	hub     *ws.Hub
-	logger  *slog.Logger
-	journal journal.Emitter
-	clock   pages.Clock
+	projectStore                     *pages.ProjectStore
+	builds                           *pageBuildCoordinator
+	pageArtifacts                    *pagebuild.Store
+	pageRuntimeOrigin                string
+	pageRuntimeDevelopmentSameOrigin bool
+	pageStudioOrigin                 string
+	db                               *sql.DB
+	hub                              *ws.Hub
+	logger                           *slog.Logger
+	journal                          journal.Emitter
+	clock                            pages.Clock
 	// pushLimits is §10b.3's push rate, layer 1: per-panel and per-workspace
 	// token buckets over the values in internal/ratelimitcfg. Held on the
 	// handler rather than in a package global so a test owns its own buckets,
@@ -237,14 +244,16 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Owner       string `json:"owner"`
-	Panels      []any  `json:"panels"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	HasApplication     bool   `json:"has_application"`
+	PublicationVersion int64  `json:"publication_version"`
+	ID                 string `json:"id"`
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	Description        string `json:"description,omitempty"`
+	Owner              string `json:"owner"`
+	Panels             []any  `json:"panels"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 
 	// Authored says the panels below carry their authored half — `public`,
 	// `actions`, `wake`, `on_failure`, `refresh` — because this caller may
@@ -280,12 +289,14 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
-	ID            string `json:"id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	Owner         string `json:"owner"`
-	OwnerCrewSlug string `json:"owner_crew_slug,omitempty"`
+	HasApplication     bool   `json:"has_application"`
+	PublicationVersion int64  `json:"publication_version"`
+	ID                 string `json:"id"`
+	Slug               string `json:"slug"`
+	Name               string `json:"name"`
+	Description        string `json:"description,omitempty"`
+	Owner              string `json:"owner"`
+	OwnerCrewSlug      string `json:"owner_crew_slug,omitempty"`
 	// PanelCount counts EVERY panel on the page, including sealed ones: the
 	// grid renders a placeholder for those, so a count that skipped them would
 	// disagree with what the page draws.
@@ -329,14 +340,16 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
-	ID          string
-	Slug        string
-	Name        string
-	Description string
-	OwnerUserID string
-	OwnerCrewID string
-	CreatedAt   string
-	UpdatedAt   string
+	HasApplication     bool
+	PublicationVersion int64
+	ID                 string
+	Slug               string
+	Name               string
+	Description        string
+	OwnerUserID        string
+	OwnerCrewID        string
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 type panelRecord struct {
@@ -403,8 +416,8 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
-		       p.created_at, p.updated_at
-		FROM pages p
+		       p.created_at, p.updated_at, COALESCE(l.published,0), COALESCE(l.version,0)
+		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ?
 		ORDER BY p.updated_at DESC, p.slug ASC`, wsID)
 	if err != nil {
@@ -417,7 +430,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion); err != nil {
 			replyInternalError(w, h.logger, "scan page", err)
 			return
 		}
@@ -463,6 +476,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		row := pageListWire{
+			HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 			ID:          rec.ID,
 			Slug:        rec.Slug,
 			Name:        rec.Name,
@@ -994,10 +1008,12 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 	err := h.db.QueryRowContext(ctx, `
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
-		       created_at, updated_at
+		       created_at, updated_at,
+ EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
+ COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
-		&p.CreatedAt, &p.UpdatedAt)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -1291,6 +1307,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
+		HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

@@ -1169,6 +1169,7 @@ var startCmd = &cobra.Command{
 				if apiRouter := srv.APIRouter(); apiRouter != nil {
 					if ph := apiRouter.Pages(); ph != nil {
 						ph.StartPanelFreshnessSweeper(ctx, 0)
+						ph.StartProjectRetention(ctx)
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

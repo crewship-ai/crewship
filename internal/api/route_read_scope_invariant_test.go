@@ -140,6 +140,7 @@ var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|
 // roleInline equivalent), say so explicitly in the reason, because that shifts
 // the guarantee off the chokepoint and onto that handler forever.
 var readRoutesWithoutWorkspace = map[string]string{
+	"GET /api/v1/pages/runtime/bootstrap": "public constant HTML bootstrap; reads no database, source, artifact or user data; accepts only the configured runtime Host",
 	// Pre-auth / bootstrap. These run before a session exists, so there is no
 	// workspace to scope to and no authed() wrapper either.
 	"GET /api/v1/auth/google/status": "pre-auth: the login page renders its Google button from this",

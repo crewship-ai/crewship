@@ -433,6 +433,25 @@ func WithKeeperPhase2Evaluators(
 // It applies security headers to all responses and per-IP rate limiting:
 // stricter limits on auth endpoints, general limits on public API,
 
+// WithPageProjectsPath enables protected local source storage. Empty disables project writes.
+func WithPageProjectsPath(path string) RouterOption {
+	return func(r *Router) { r.pageProjectsPath = path }
+}
+
+// WithPageBuildImage enables the isolated preview compiler using a pinned local image.
+func WithPageBuildImage(image string) RouterOption {
+	return func(r *Router) { r.pageBuildImage = image }
+}
+
+// WithPageRuntime configures the separate-site bootstrap and its allowed Studio parent.
+func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) RouterOption {
+	return func(r *Router) {
+		r.pageRuntimeOrigin = runtime
+		r.pageStudioOrigin = studio
+		r.pageRuntimeDevelopmentSameOrigin = len(developmentSameOrigin) > 0 && developmentSameOrigin[0]
+	}
+}
+
 // WithMemoryInventoryRoot enables read-only workspace knowledge discovery.
 func WithMemoryInventoryRoot(path string) RouterOption {
 	return func(r *Router) { r.memoryInventoryRoot = path }

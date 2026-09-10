@@ -95,6 +95,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	page := obj(map[string]any{
+		"has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": map[string]any{"type": "string",
 			"description": "`user/<id>` or `crew/<slug>` — exactly one of the two (§7.1 rule 1)."},
@@ -105,6 +106,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
 		"owner": str(), "owner_crew_slug": str(),
 		"panel_count": map[string]any{"type": "integer",
@@ -208,9 +210,16 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"used_by": arr(str()),
 		"reason":  str(),
 	})
+	bundlePanelSpec := withoutKey(writePanelSpec, "public")
+	bundlePanelSpec["actions"] = map[string]any{"type": "array", "description": "V2 only: authored actions retained in the draft, never activated by import. Only call and toggle are portable.", "items": obj(map[string]any{
+		"id": str(), "kind": map[string]any{"type": "string", "enum": []string{"call", "toggle"}},
+		"label": str(), "style": str(), "routine": str(), "params": anyObject(),
+		"inputs": arr(anyObject()), "target": arr(str()), "confirm": anyObject(),
+	})}
 	bundleProps := map[string]any{
+		"project": pageProjectSourceSchema(),
 		"format": map[string]any{"type": "string",
-			"description": "`crewship.page.bundle/v1`. An unknown format is refused rather than read optimistically."},
+			"description": "crewship-page-bundle/v1 for legacy panels; crewship-page-bundle/v2 requires a project source draft. Unknown formats are refused."},
 		"page": obj(map[string]any{
 			"name": str(), "slug": str(), "description": str(), "owner": str(),
 			// The bundle's panel is the spec MINUS `public`. The prose above
@@ -219,7 +228,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			// document would send a field the importer is documented to
 			// refuse. Publication is a property of the install (§7.3.2 rule 2),
 			// so it has no place in a document that travels.
-			"panels": arr(obj(withoutKey(panelSpec, "public"))),
+			"panels": arr(obj(bundlePanelSpec)),
 		}),
 		"references": map[string]any{"type": "array", "items": bundleRef,
 			"description": "Every reference the page makes to something outside itself. The importer must bind each one explicitly; an unbound reference is refused (422), because guessing would hand the page to whoever happens to hold that name in the receiving workspace."},
@@ -303,10 +312,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"confirm": obj(map[string]any{"title": str(), "body": str()}),
 		"routine": map[string]any{"type": "string",
 			"description": "Read-only. The caller dispatches an ACTION ID, never a routine name, so a button cannot be redirected at something the panel author did not declare."},
-		"params": anyObject(),
-		"inputs": arr(actionInput),
-		"target": arr(str()),
-		"ref":    obj(map[string]any{"kind": str(), "id": str()}),
+		"routine_changed_since_publication": boolean(),
+		"params":                            anyObject(),
+		"inputs":                            arr(actionInput),
+		"target":                            arr(str()),
+		"ref":                               obj(map[string]any{"kind": str(), "id": str()}),
 	})
 
 	return map[string]DomainSchema{

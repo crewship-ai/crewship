@@ -31,6 +31,7 @@ var unregisteredSpawnSites = map[string]string{
 	"credential_rotation.go:StartCredentialRotationExpiryWorker": "boot daemon: stop channel + caller's WaitGroup",
 	"escalation_lifecycle.go:StartEscalationExpirySweeper":       "boot daemon: ticker loop, stopped via ctx",
 	"assignments_lease.go:StartLeaseSweeper":                     "boot daemon: ticker loop, stopped via ctx (B4, #2343)",
+	"pages_project_retention.go:StartProjectRetention":           "boot daemon: bounded hourly retention, stopped via ctx",
 	"pages_on_failure.go:StartPanelFreshnessSweeper":             "boot daemon: ticker loop, stopped via ctx",
 	"mcp_registry.go:StartRegistrySyncWorker":                    "boot daemon: stop channel + caller's WaitGroup",
 	"oauth_token.go:StartOAuthRefreshWorker":                     "boot daemon: stop channel + caller's WaitGroup",

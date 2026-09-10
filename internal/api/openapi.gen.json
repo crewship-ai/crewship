@@ -2608,6 +2608,37 @@
             "nullable": true,
             "type": "string"
           },
+          "pages_theme": {
+            "additionalProperties": false,
+            "description": "Workspace colors for custom Pages. Omitted keys inherit SDK defaults; an empty object resets the palette.",
+            "properties": {
+              "accent": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "background": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "border": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "muted": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "surface": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "text": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "preferred_language": {
             "nullable": true,
             "type": "string"
@@ -13511,6 +13542,37 @@
           "name": {
             "type": "string"
           },
+          "pages_theme": {
+            "additionalProperties": false,
+            "description": "Workspace colors for custom Pages. Omitted keys inherit SDK defaults; an empty object resets the palette.",
+            "properties": {
+              "accent": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "background": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "border": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "muted": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "surface": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "text": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "preferred_language": {
             "nullable": true,
             "type": "string"
@@ -13536,6 +13598,7 @@
           "allow_privileged_credentials",
           "logo_url",
           "preferred_language",
+          "pages_theme",
           "run_retention_days",
           "credential_audit_retention_days",
           "audit_log_retention_days"
@@ -14554,6 +14617,37 @@
           "name": {
             "nullable": true,
             "type": "string"
+          },
+          "pages_theme": {
+            "additionalProperties": false,
+            "description": "Workspace colors for custom Pages. Omitted keys inherit SDK defaults; an empty object resets the palette.",
+            "properties": {
+              "accent": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "background": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "border": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "muted": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "surface": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              },
+              "text": {
+                "pattern": "^#[0-9a-fA-F]{6}$",
+                "type": "string"
+              }
+            },
+            "type": "object"
           },
           "preferred_language": {
             "nullable": true,
@@ -79455,6 +79549,9 @@
                       "description": {
                         "type": "string"
                       },
+                      "has_application": {
+                        "type": "boolean"
+                      },
                       "id": {
                         "type": "string"
                       },
@@ -79492,6 +79589,9 @@
                           }
                         },
                         "type": "object"
+                      },
+                      "publication_version": {
+                        "type": "integer"
                       },
                       "slug": {
                         "type": "string"
@@ -79736,6 +79836,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -79876,6 +79979,9 @@
                         ]
                       },
                       "type": "array"
+                    },
+                    "publication_version": {
+                      "type": "integer"
                     },
                     "slug": {
                       "type": "string"
@@ -79903,6 +80009,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80043,6 +80152,9 @@
                         ]
                       },
                       "type": "array"
+                    },
+                    "publication_version": {
+                      "type": "integer"
                     },
                     "slug": {
                       "type": "string"
@@ -80163,7 +80275,7 @@
                     "type": "object"
                   },
                   "format": {
-                    "description": "`crewship.page.bundle/v1`. An unknown format is refused rather than read optimistically.",
+                    "description": "crewship-page-bundle/v1 for legacy panels; crewship-page-bundle/v2 requires a project source draft. Unknown formats are refused.",
                     "type": "string"
                   },
                   "metadata": {
@@ -80192,6 +80304,55 @@
                       "panels": {
                         "items": {
                           "properties": {
+                            "actions": {
+                              "description": "V2 only: authored actions retained in the draft, never activated by import. Only call and toggle are portable.",
+                              "items": {
+                                "properties": {
+                                  "confirm": {
+                                    "additionalProperties": true,
+                                    "type": "object"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "inputs": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "kind": {
+                                    "enum": [
+                                      "call",
+                                      "toggle"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "params": {
+                                    "additionalProperties": true,
+                                    "type": "object"
+                                  },
+                                  "routine": {
+                                    "type": "string"
+                                  },
+                                  "style": {
+                                    "type": "string"
+                                  },
+                                  "target": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
                             "icon": {
                               "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
                               "enum": [
@@ -80215,12 +80376,29 @@
                               "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
                               "type": "string"
                             },
+                            "on_failure": {
+                              "properties": {
+                                "issue": {
+                                  "description": "`crew/\u003cslug\u003e` — the crew an SLA lapse or a producer failure opens an issue on, once per lapse (§4 rule 4).",
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
                             "owner": {
                               "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
                               "type": "string"
                             },
                             "producer": {
                               "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                              "type": "string"
+                            },
+                            "refresh": {
+                              "description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. `on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. Refused at save time: a value outside the set; a producer that is not `routine/\u003cslug\u003e` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); `on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop.",
+                              "enum": [
+                                "on:wake",
+                                "on:panels-changed"
+                              ],
                               "type": "string"
                             },
                             "schema": {
@@ -80249,6 +80427,31 @@
                             },
                             "title": {
                               "type": "string"
+                            },
+                            "wake": {
+                              "description": "Thresholds that turn this panel into a sensor (§5). Each compiles to an `automations` row owned by the page spec. Max 4 per panel.",
+                              "items": {
+                                "properties": {
+                                  "agent": {
+                                    "description": "`crew/\u003cslug\u003e` — the crew woken when the gate fires. A crew and never a single agent.",
+                                    "type": "string"
+                                  },
+                                  "for": {
+                                    "description": "Go duration. The condition must hold this long, continuously, before the gate fires, so one bad scrape wakes nobody. Max 24h.",
+                                    "type": "string"
+                                  },
+                                  "when": {
+                                    "description": "The threshold, in one of two forms: `any(state == \"critical\")` / `all(state == \"ok\")` over a status.v1 panel, or `value \u003e 90` over a metric.v1 panel. Not an expression language; a predicate the panel's schema cannot satisfy is refused at save time rather than never matching (§5).",
+                                    "type": "string"
+                                  },
+                                  "writes": {
+                                    "description": "The panel the woken agent is expected to write. Must exist on this page. A declaration, not a grant: the agent still needs produce authority on it.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              "type": "array"
                             }
                           },
                           "type": "object"
@@ -80259,6 +80462,62 @@
                         "type": "string"
                       }
                     },
+                    "type": "object"
+                  },
+                  "project": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "files": {
+                        "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "content": {
+                              "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                              "type": "string"
+                            },
+                            "encoding": {
+                              "enum": [
+                                "utf8",
+                                "base64"
+                              ],
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                              "maxLength": 240,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "encoding",
+                            "content"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 256,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "format": {
+                        "enum": [
+                          "crewship-page-source/v1"
+                        ],
+                        "type": "string"
+                      },
+                      "runtime": {
+                        "enum": [
+                          "react-vite-typescript/v1"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "format",
+                      "runtime",
+                      "files"
+                    ],
                     "type": "object"
                   },
                   "references": {
@@ -80313,6 +80572,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80453,6 +80715,9 @@
                         ]
                       },
                       "type": "array"
+                    },
+                    "publication_version": {
+                      "type": "integer"
                     },
                     "slug": {
                       "type": "string"
@@ -80480,6 +80745,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80620,6 +80888,9 @@
                         ]
                       },
                       "type": "array"
+                    },
+                    "publication_version": {
+                      "type": "integer"
                     },
                     "slug": {
                       "type": "string"
@@ -80719,6 +80990,142 @@
             "secureSessionCookie": []
           }
         ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/maintenance": {
+      "post": {
+        "operationId": "post_api_v1_pages_maintenance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "discard_history": {
+                    "type": "boolean"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "compacted": {
+                      "type": "boolean"
+                    },
+                    "discarded_optional_history": {
+                      "type": "boolean"
+                    },
+                    "preserved": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/runtime/bootstrap": {
+      "get": {
+        "operationId": "get_api_v1_pages_runtime_bootstrap",
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [],
         "tags": [
           "pages"
         ]
@@ -80856,6 +81263,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80996,6 +81406,9 @@
                         ]
                       },
                       "type": "array"
+                    },
+                    "publication_version": {
+                      "type": "integer"
                     },
                     "slug": {
                       "type": "string"
@@ -81256,6 +81669,9 @@
                     "description": {
                       "type": "string"
                     },
+                    "has_application": {
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -81397,6 +81813,9 @@
                       },
                       "type": "array"
                     },
+                    "publication_version": {
+                      "type": "integer"
+                    },
                     "slug": {
                       "type": "string"
                     },
@@ -81500,6 +81919,917 @@
         ]
       }
     },
+    "/api/v1/pages/{slug}/application": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_application",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "artifact": {
+                      "properties": {
+                        "css": {
+                          "type": "string"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-preview/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "javascript": {
+                          "type": "string"
+                        },
+                        "profile_sha256": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "toolchain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "javascript",
+                        "css",
+                        "toolchain"
+                      ],
+                      "type": "object"
+                    },
+                    "can_publish": {
+                      "type": "boolean"
+                    },
+                    "development_same_origin": {
+                      "description": "Explicit operator setting for reviewed same-origin development demos; does not provide browser process isolation.",
+                      "type": "boolean"
+                    },
+                    "publication": {
+                      "nullable": true,
+                      "properties": {
+                        "artifact_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "build_id": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "git_commit": {
+                          "pattern": "^([0-9a-f]{40})?$",
+                          "type": "string"
+                        },
+                        "source_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_revision": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "version": {
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "publication_version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "runtime_url": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not Modified"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/application/actions/{panelId}/{actionId}": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_application_actions_panelId_actionId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "actionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "panelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "inputs": {
+                    "type": "object"
+                  },
+                  "publication": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "publication"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "pending_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "SCHEDULED",
+                        "DEDUPED"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "pending_id",
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/application/actions/{pendingId}": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_application_actions_pendingId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pendingId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "pending_id": {
+                      "type": "string"
+                    },
+                    "pending_status": {
+                      "type": "string"
+                    },
+                    "routine_changed_since_publication": {
+                      "type": "boolean"
+                    },
+                    "routine_definition_at_enqueue": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "routine_revision_pinned": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "run_status": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/application/panels/{panelId}/history": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_application_panels_panelId_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "panelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publication",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "items": {
+                      "items": {
+                        "properties": {
+                          "data": {},
+                          "producedAt": {
+                            "type": "string"
+                          },
+                          "sequence": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "state": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "maxItems": 20,
+                      "type": "array"
+                    },
+                    "next_before": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "publication": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
     "/api/v1/pages/{slug}/export": {
       "get": {
         "operationId": "get_api_v1_pages_slug_export",
@@ -81529,7 +82859,7 @@
                 "schema": {
                   "properties": {
                     "format": {
-                      "description": "`crewship.page.bundle/v1`. An unknown format is refused rather than read optimistically.",
+                      "description": "crewship-page-bundle/v1 for legacy panels; crewship-page-bundle/v2 requires a project source draft. Unknown formats are refused.",
                       "type": "string"
                     },
                     "metadata": {
@@ -81558,6 +82888,55 @@
                         "panels": {
                           "items": {
                             "properties": {
+                              "actions": {
+                                "description": "V2 only: authored actions retained in the draft, never activated by import. Only call and toggle are portable.",
+                                "items": {
+                                  "properties": {
+                                    "confirm": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "inputs": {
+                                      "items": {
+                                        "additionalProperties": true,
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "kind": {
+                                      "enum": [
+                                        "call",
+                                        "toggle"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "type": "string"
+                                    },
+                                    "params": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "routine": {
+                                      "type": "string"
+                                    },
+                                    "style": {
+                                      "type": "string"
+                                    },
+                                    "target": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
                               "icon": {
                                 "description": "Optional. The panel's glyph, from a CLOSED set (internal/pages/icons.go) — a name the client has no glyph for would render a blank header, which is a quieter failure than an unknown schema. Absent means the icon the panel's schema implies. There is no per-icon colour: colour on a panel means state.",
                                 "enum": [
@@ -81581,12 +82960,29 @@
                                 "description": "The author-chosen panel id. It is the address a producer pushes to, so it is stable across edits.",
                                 "type": "string"
                               },
+                              "on_failure": {
+                                "properties": {
+                                  "issue": {
+                                    "description": "`crew/\u003cslug\u003e` — the crew an SLA lapse or a producer failure opens an issue on, once per lapse (§4 rule 4).",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "owner": {
                                 "description": "`crew/\u003cslug\u003e`. This is the ACL, not a label: a viewer outside the crew never receives the panel (§7.1 rule 2).",
                                 "type": "string"
                               },
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
+                                "type": "string"
+                              },
+                              "refresh": {
+                                "description": "Optional, and CLOSED. The event that RUNS this panel's producer — a trigger, not a hint: a page holds no query, so nothing polls and a refresh that does not run the producer refreshes nothing. `on:wake` fires when a wake gate ANYWHERE on this page fires; `on:panels-changed` fires when the page's panel list changes (a rename is not a panel change). Each compiles to an `automations` row with `action_kind: routine`, so the producer run is debounced, coalesced, rate-capped and priced against the chain-depth budget like any other automation. Refused at save time: a value outside the set; a producer that is not `routine/\u003cslug\u003e` (the server cannot run a script, call a webhook producer, or dispatch an agent — an agent is woken by a gate's `writes:`); `on:wake` on a page that declares no gate; and `on:wake` on a panel that declares its own gate, which is a loop.",
+                                "enum": [
+                                  "on:wake",
+                                  "on:panels-changed"
+                                ],
                                 "type": "string"
                               },
                               "schema": {
@@ -81615,6 +83011,31 @@
                               },
                               "title": {
                                 "type": "string"
+                              },
+                              "wake": {
+                                "description": "Thresholds that turn this panel into a sensor (§5). Each compiles to an `automations` row owned by the page spec. Max 4 per panel.",
+                                "items": {
+                                  "properties": {
+                                    "agent": {
+                                      "description": "`crew/\u003cslug\u003e` — the crew woken when the gate fires. A crew and never a single agent.",
+                                      "type": "string"
+                                    },
+                                    "for": {
+                                      "description": "Go duration. The condition must hold this long, continuously, before the gate fires, so one bad scrape wakes nobody. Max 24h.",
+                                      "type": "string"
+                                    },
+                                    "when": {
+                                      "description": "The threshold, in one of two forms: `any(state == \"critical\")` / `all(state == \"ok\")` over a status.v1 panel, or `value \u003e 90` over a metric.v1 panel. Not an expression language; a predicate the panel's schema cannot satisfy is refused at save time rather than never matching (§5).",
+                                      "type": "string"
+                                    },
+                                    "writes": {
+                                      "description": "The panel the woken agent is expected to write. Must exist on this page. A declaration, not a grant: the agent still needs produce authority on it.",
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                "type": "array"
                               }
                             },
                             "type": "object"
@@ -81625,6 +83046,62 @@
                           "type": "string"
                         }
                       },
+                      "type": "object"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
                       "type": "object"
                     },
                     "references": {
@@ -82431,6 +83908,9 @@
                             "description": "Read-only. The caller dispatches an ACTION ID, never a routine name, so a button cannot be redirected at something the panel author did not declare.",
                             "type": "string"
                           },
+                          "routine_changed_since_publication": {
+                            "type": "boolean"
+                          },
                           "style": {
                             "enum": [
                               "default",
@@ -82942,6 +84422,2983 @@
               }
             },
             "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "definition": {
+                      "description": "Authored kind: Page document; draft-only, no publication authority.",
+                      "required": [
+                        "apiVersion",
+                        "kind",
+                        "metadata",
+                        "spec"
+                      ],
+                      "type": "object"
+                    },
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "definition",
+                    "project"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_pages_slug_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "definition": {
+                    "description": "Authored kind: Page document; draft-only, no publication authority.",
+                    "required": [
+                      "apiVersion",
+                      "kind",
+                      "metadata",
+                      "spec"
+                    ],
+                    "type": "object"
+                  },
+                  "expected_revision": {
+                    "description": "0 creates the first draft. A stale revision returns 409.",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "project": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "files": {
+                        "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "content": {
+                              "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                              "type": "string"
+                            },
+                            "encoding": {
+                              "enum": [
+                                "utf8",
+                                "base64"
+                              ],
+                              "type": "string"
+                            },
+                            "path": {
+                              "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                              "maxLength": 240,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "path",
+                            "encoding",
+                            "content"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 256,
+                        "minItems": 3,
+                        "type": "array"
+                      },
+                      "format": {
+                        "enum": [
+                          "crewship-page-source/v1"
+                        ],
+                        "type": "string"
+                      },
+                      "runtime": {
+                        "enum": [
+                          "react-vite-typescript/v1"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "format",
+                      "runtime",
+                      "files"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "expected_revision",
+                  "project"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "draft"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/build": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_project_build",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "artifact_digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "completed_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "source_digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "source_revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "running",
+                        "ready",
+                        "failed",
+                        "interrupted"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/check": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_project_check",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "build_id": {
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "build_id",
+                  "expected_revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Integrity, compiler and current binding checks. Browser and security review still required.",
+                  "properties": {
+                    "artifact_digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "build_id": {
+                      "type": "string"
+                    },
+                    "checks": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "source_revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/fsck": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_fsck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "checked_artifacts": {
+                      "type": "integer"
+                    },
+                    "checked_checkpoints": {
+                      "type": "integer"
+                    },
+                    "checked_git_objects": {
+                      "type": "integer"
+                    },
+                    "checked_sources": {
+                      "type": "integer"
+                    },
+                    "failures": {
+                      "items": {
+                        "properties": {
+                          "error": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "healthy": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/history": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_history",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "next_before": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "revisions": {
+                      "items": {
+                        "properties": {
+                          "actor": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "digest": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "git_commit": {
+                            "pattern": "^([0-9a-f]{40})?$",
+                            "type": "string"
+                          },
+                          "restorable": {
+                            "type": "boolean"
+                          },
+                          "revision": {
+                            "minimum": 1,
+                            "type": "integer"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/history/{revision}": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_history_revision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "definition": {
+                      "description": "Authored kind: Page document; draft-only, no publication authority.",
+                      "required": [
+                        "apiVersion",
+                        "kind",
+                        "metadata",
+                        "spec"
+                      ],
+                      "type": "object"
+                    },
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "git_commit",
+                    "definition",
+                    "project"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/preview": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "artifact": {
+                      "properties": {
+                        "css": {
+                          "type": "string"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-preview/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "javascript": {
+                          "type": "string"
+                        },
+                        "profile_sha256": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "toolchain": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "javascript",
+                        "css",
+                        "toolchain"
+                      ],
+                      "type": "object"
+                    },
+                    "build": {
+                      "nullable": true,
+                      "properties": {
+                        "artifact_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "completed_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "source_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "source_revision": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "state": {
+                          "enum": [
+                            "running",
+                            "ready",
+                            "failed",
+                            "interrupted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "development_same_origin": {
+                      "description": "Explicit operator setting for reviewed same-origin development demos; does not provide browser process isolation.",
+                      "type": "boolean"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "runtime_url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "build",
+                    "runtime_url"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/publications": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_publications",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "can_publish": {
+                      "type": "boolean"
+                    },
+                    "next_before": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "publication_version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "publications": {
+                      "items": {
+                        "properties": {
+                          "actor": {
+                            "type": "string"
+                          },
+                          "artifact_digest": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "build_id": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "git_commit": {
+                            "pattern": "^([0-9a-f]{40})?$",
+                            "type": "string"
+                          },
+                          "rollback_of": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "source_digest": {
+                            "pattern": "^[0-9a-f]{64}$",
+                            "type": "string"
+                          },
+                          "source_revision": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "version": {
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "withdrawn_at": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "maxItems": 50,
+                      "type": "array"
+                    },
+                    "published": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/publish": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_project_publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "build_id": {
+                    "type": "string"
+                  },
+                  "expected_publication": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "reviewed_code": {
+                    "enum": [
+                      true
+                    ],
+                    "type": "boolean"
+                  },
+                  "rollback_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_publication",
+                  "reviewed_code"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "artifact_digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "build_id": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "is_current": {
+                      "type": "boolean"
+                    },
+                    "live_version": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "published": {
+                      "type": "boolean"
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "source_digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "source_revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/restore": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_project_restore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "revision",
+                  "expected_revision"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "state": {
+                      "enum": [
+                        "draft"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "507": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/unpublish": {
+      "post": {
+        "operationId": "post_api_v1_pages_slug_project_unpublish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected_publication": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "expected_publication"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "publication": {
+                      "nullable": true,
+                      "type": "object"
+                    },
+                    "publication_version": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "published": {
+                      "enum": [
+                        false
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -83546,6 +88003,9 @@
                         "description": {
                           "type": "string"
                         },
+                        "has_application": {
+                          "type": "boolean"
+                        },
                         "id": {
                           "type": "string"
                         },
@@ -83686,6 +88146,9 @@
                             ]
                           },
                           "type": "array"
+                        },
+                        "publication_version": {
+                          "type": "integer"
                         },
                         "slug": {
                           "type": "string"

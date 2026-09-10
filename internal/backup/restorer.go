@@ -87,7 +87,8 @@ type ExtractedPayload struct {
 	// by slug — memory_versions has no crew_id. Empty when the bundle
 	// carried no such section (older bundles, or BlobRoot unset at
 	// backup time).
-	memoryBlobsPath string
+	memoryBlobsPath  string
+	pageProjectsPath string
 }
 
 // storageOrDefault returns the payload's captured StorageOps, or the
@@ -120,6 +121,7 @@ func (p *ExtractedPayload) Close() error {
 	p.memoryPathBySlug = nil
 	p.systemPathsBySlug = nil
 	p.memoryBlobsPath = ""
+	p.pageProjectsPath = ""
 	return err
 }
 
@@ -293,6 +295,8 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 	// caller can stream it straight back into docker CopyTo without
 	// materialising the whole thing. sink type declared at file scope.
 	sinks := map[string]*sink{}
+	var pageBytes int64
+	pageEntries := 0
 	sinkFor := func(key string) (*sink, error) {
 		if s, ok := sinks[key]; ok {
 			return s, nil
@@ -426,6 +430,15 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 				return nil, err
 			}
 
+		case strings.HasPrefix(name, pageProjectsPrefix):
+			pageBytes += hdr.Size
+			pageEntries++
+			if hdr.Size < 0 || hdr.Size > 8<<20 || pageBytes > maxPageArchiveBytes || pageEntries > 66048 {
+				return nil, fmt.Errorf("backup: Page project section exceeds limits")
+			}
+			if err := repackIntoSink(tr, hdr, name, pageProjectsPrefix, sinkFor); err != nil {
+				return nil, err
+			}
 		case strings.HasPrefix(name, memoryBlobsSectionPrefix):
 			if err := repackIntoSink(tr, hdr, name, memoryBlobsSectionPrefix, sinkFor); err != nil {
 				return nil, err
@@ -453,6 +466,10 @@ func ExtractPayload(ctx context.Context, payload io.Reader) (*ExtractedPayload, 
 		name := s.file.Name()
 		if err := s.file.Close(); err != nil {
 			return nil, fmt.Errorf("backup: close inner tar file %s: %w", key, err)
+		}
+		if key == "page-projects" {
+			out.pageProjectsPath = name
+			continue
 		}
 		if key == memoryBlobsSinkKey {
 			out.memoryBlobsPath = name
@@ -565,6 +582,9 @@ func repackIntoSink(tr *TarZstReader, hdr *tar.Header, name, topPrefix string, s
 		}
 		key = "system/" + slug + "/" + kind
 		strip = slug + "/" + kind + "/"
+	case pageProjectsPrefix:
+		key = "page-projects"
+		strip = ""
 	case memoryBlobsSectionPrefix:
 		// No crew slug — memory_versions is workspace-scoped. rest is
 		// already "<sha[:2]>/<sha>", so it rides straight through as
