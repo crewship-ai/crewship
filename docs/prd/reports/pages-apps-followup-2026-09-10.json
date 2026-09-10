@@ -1,12 +1,12 @@
 {
   "deployment": {
-    "commit": "ab31f8d976e6171fa1deca168532281c3a406164",
-    "sha256": "15978e8ff37da628cf17aeab389fee4a2012415443f0c1aef3d6635b14d111eb",
-    "pid": "2992918",
+    "commit": "e5c7b130f33709e1e39cb9c1bccf54010db2fd45",
+    "sha256": "8181a71c299e91c000f33a6b8e3e9090dcc0610d22ede2f6899136ad3b7562ca",
+    "pid": "3327283",
     "tools_image": "sha256:a2b33aba4b3338b16053c2166d03c7d19a41e5a8b4ba3b4f0ab0daa4723762fc",
-    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T171255Z",
+    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T194903Z",
     "health": "200",
-    "deployed_at": "2026-09-10T17:12:57.117986+00:00"
+    "deployed_at": "2026-09-10T19:49:04.737519+00:00"
   },
   "fsck": {
     "checked_artifacts": 3,
@@ -25,18 +25,24 @@
   "ci": {
     "source": 34488138789,
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
-    "ui": 34506738305,
-    "ui_sha": "8b956e0818eb8e4f0bc7cf2a501ca4780dde82af",
+    "ui": 34522534989,
+    "ui_sha": "2cab42ef483e3b2112a161b36d1c050442d322b6",
     "state": "in_progress",
-    "scope": "CLI automatic merge-ref CI after server merge; cumulative UI dispatch includes unsupported-browser fallback",
+    "scope": "both CLI and UI now have automatic pull_request CI targeting main; redundant dispatch 34522442403 cancelled",
     "superseded_ui": 34495835090,
     "superseded_ui_reason": "cancelled by newer UI dispatch; not recorded as passed",
     "source_state": "success",
     "server": 34495400146,
     "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
     "server_state": "success",
-    "cli": 34506708956,
-    "cli_sha": "d0a125e0ddebbf04421c2f141aaecbb23b1fb812"
+    "cli": 34522292431,
+    "cli_sha": "8414f9590700c7b0ca6daa5bdba423669de0df8b",
+    "previous_successful_integration": {
+      "cli": 34506708956,
+      "ui": 34506738305,
+      "state": "success",
+      "base": "5ea6989e"
+    }
   },
   "tests": {
     "pages": "passed",
@@ -52,8 +58,9 @@
     "local_full_vet": "passed",
     "ui_lint": "passed; zero errors",
     "previous_ci_go_jobs": "source and cumulative UI passed",
-    "current_main_pages_frontend": "45 files / 582 tests passed",
-    "current_main_production_build": "make build passed"
+    "current_main_pages_frontend": "95 Pages/routines files / 898 tests passed",
+    "current_main_production_build": "make build passed",
+    "current_main_integration_go": "Page action receipt isolation, MCP policy/CAS and routine resume tests passed; API 2.761s, pipeline 0.635s"
   },
   "review": {
     "state": "CLI CodeRabbit requested changes on ce5f1b9; both actionable findings fixed in 64fb85e1; new review requested; current CI pending",
@@ -65,12 +72,14 @@
     "merged_prs": [
       2475,
       2477
-    ]
+    ],
+    "ui": "targets main with 83 files including pending CLI layer; manual review recorded, CodeRabbit request rate-limited",
+    "cli_fix_review": "CodeRabbit comment 5622546162 verified ce5f1b9..64fb85e1 with no actionable findings; formal review still old changes_requested"
   },
   "safari_decision": "confirmed_panel_only_v1_2026-09-10",
   "integration": {
-    "main_sha": "5ea6989e4f0f47287f0bfbdcfca45f674655722c",
-    "state": "current main merged without conflicts through remaining stack",
+    "main_sha": "812ea8eff1a232b2720cd1ba7bf36a06b5b6f8e8",
+    "state": "current routines main integrated without conflicts",
     "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
     "ui_sha": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
     "conflicts": [],
@@ -184,13 +193,13 @@
     "codeql_recheck": "fixed on merge ref 7ae5596c0817f212eaca0616bbeb83d3bae1c5a2"
   },
   "previous_deployment": {
-    "commit": "15ccf0b25609e6eab225feb7996301b1c9ee07ce",
-    "sha256": "b74208792e6d223041bfe995099edd38b16b002153d662e6d2a8d9bdc63d4064",
-    "pid": "2808742",
+    "commit": "ab31f8d976e6171fa1deca168532281c3a406164",
+    "sha256": "15978e8ff37da628cf17aeab389fee4a2012415443f0c1aef3d6635b14d111eb",
+    "pid": "2992918",
     "tools_image": "sha256:a2b33aba4b3338b16053c2166d03c7d19a41e5a8b4ba3b4f0ab0daa4723762fc",
-    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T161348Z",
+    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T171255Z",
     "health": "200",
-    "deployed_at": "2026-09-10T16:13:51.218565+00:00"
+    "deployed_at": "2026-09-10T17:12:57.117986+00:00"
   },
   "unsupported_browser_fallback": {
     "commit": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
