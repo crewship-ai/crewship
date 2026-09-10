@@ -31,6 +31,13 @@ runtimes, overlapping in wall-clock time) has not been attempted.
 | `4b4aedc` | **E0 mechanical half** — per-run tmux/args/env/script/FIFO/exit, run-scoped cancel and attach, and the credential file unlinked the instant it is read |
 | `4433755` | **the memory mutation contract** and the profile that refuses to fake a guarantee |
 | `b135692` | §6 retention and ingress capacity |
+| `85798ea` | webhook handlers accept durably, then dispatch — W2, W3, W4, W6, W8, W9 closed |
+| `6659886` | work-items and webhook-deliveries API + CLI, with a cancel that reports `requested` rather than claiming a stop it did not make |
+| `3af1176` | §10 metrics and journal events, with an allow-listed label set |
+| `a2282dc` | the work UI, and three corrected sentences in the routine webhooks tab |
+| `79067a2` | **E0 second half** — per-run HOME, output, secrets and sidecar identity; the memory mutation endpoint; backup classification for the new tables |
+| `6c31d0c` | a detached run keeps its refresh reachability |
+| `fb193af` | the login refresher had no address after the HOME split |
 
 ### Stage A is closed
 
@@ -142,7 +149,7 @@ way, and T14's evidence needs a separate harness by design.
 | **I1** no `202` before a durable commit | **Demonstrated at the store level** — `AcceptDeliveryTx` writes delivery and work in one transaction, and a SIGKILL'd child proves the after-commit and before-commit cases. Handler wiring is in flight |
 | **I2** one delivery → at most one work item | **Demonstrated** — duplicates, concurrent duplicates, content-key replay under a fresh id, and same-id-different-body as a conflict |
 | **I3** one active turn per session; atomic claim | **Demonstrated**, including that an unreconciled turn keeps the session |
-| **I4** state/memory/sidecar changes verify the live run | Demonstrated for **state**. Memory has the hook (`MutateRequest.Authorize`) and the guaranteed profile REFUSES a write without it — but nothing wires it yet, so no memory write is run-verified today. Sidecar: not started |
+| **I4** state/memory/sidecar changes verify the live run | **State**: demonstrated. **Memory**: the host endpoint verifies run and generation properly (mutation-checked) — but nothing supplies a run id, so no production write is verified yet. **Sidecar**: per-run `agtv2` tokens verified against a crew-scoped key, with a run registry that refuses an ended run |
 | **I5** an old attempt cannot overwrite a newer one | **Demonstrated**, mutation-checked |
 | **I6** memory writes are not lost under concurrency | **Demonstrated for the host path** — 100 concurrent replaces from one revision yield exactly one winner, and crash recovery never overwrites a third party's content. NOT reachable from the two agent-facing paths (see below) |
 | **I7** no producer bypasses admission | **Not met.** Six pumps and three unguarded producers remain. Nobody is on it |
@@ -160,7 +167,7 @@ Nothing is PASS. Saying otherwise would be the exact error the PRD warns about.
 | T04 held write lock, checkpoint, FULL everywhere | Measured, and now enforced: the acceptance guard refuses after 452 ms with a 600 ms budget against a lock held 6 s. `FULL` on every pooled connection is asserted |
 | T05 all producers at once, mailbox | Mailbox table exists, unused. Not started — and blocked on I7 |
 | T06 real Claude, chat + background overlapping | **Not attempted.** Admission-level only, and the parallel flag stays off until it is |
-| T07 start/cleanup/cancel B during A | E0's mechanical half proves it for tmux, args, env, script, FIFO, exit and cancel targeting, on generated command strings and the provider fake. HOME/output/secrets/sidecar attribution in flight. No live container |
+| T07 start/cleanup/cancel B during A | **Eight tests**, all passing: start B leaves A untouched, credentials are not overwritten across runs, cleanup of B leaves A's directories alone, memory stays shared and survives cleanup, cancelling B does not name A, the run-end notification is scoped and secret-safe, and a login refresh reaches every live run. On generated command strings and the provider fake — **no live container** |
 | T08 lost heartbeat, late completion, restart | **Fencing, lease loss and recovery demonstrated and mutation-checked.** The restart half now has T03's harness to build on |
 | T09 external success without a receipt | Table exists, unused |
 | T10 memory CAS, append retry, cap race | **Demonstrated host-side**: 100 concurrent replaces yield one winner; 100 identical append retries yield one increment; the cap race still holds. Unreachable from the agent paths — see §5a |
@@ -272,7 +279,32 @@ of this programme touches that file** — coordinate before editing it.
 
 ## 5a. The gap that matters most right now
 
-**The guaranteed memory profile exists, is tested, and nothing can reach it.**
+**The guaranteed memory profile is reachable, and nothing supplies the run id
+it needs.**
+
+`POST /api/v1/internal/memory/mutation` performs the write host-side under
+`ProfileGuaranteed` against the real ledger, and `Authorize` genuinely verifies:
+the run exists, the item belongs to this workspace and to the acting agent
+resolved from the token rather than the body, the attempt has not ended, the
+item is live, and the attempt's generation matches both the item's and the
+request's. Replacing that closure with `return nil` turns six subtests green
+that should be red.
+
+What is missing is upstream. No dispatch path threads a run id to the agent, so
+every real write still degrades — with its reason stated, `revision_checked:
+false`, and `degraded: true`. An environment variable is the obvious shortcut
+and is wrong: a run id is per attempt and a container outlives many attempts, so
+it would carry a stale run for every attempt after the first, which is exactly
+what the fencing term exists to catch.
+
+Two smaller limits, both stated where they bite: a guaranteed FIRST replace on a
+key is impossible by contract (revision 0 is what an unanchored key has, and the
+profile requires `ExpectedRevision > 0`), so the first write to a key must be an
+append; and the MCP `memory.write` tool stays legacy because its path
+resolution, injection screen and quarantine live in `internal/memory`, which the
+container cannot give a database handle.
+
+### The older framing, kept because the shape still matters
 
 `memory.Mutate` has two profiles. `ProfileGuaranteed` refuses a write missing a
 caller-supplied operation id, a durable ledger handle, `ExpectedRevision` with
@@ -301,28 +333,28 @@ replace. Both are recorded as unverified rather than presented as checked.
 
 In order. The first two are what the release commitment actually waits on.
 
-1. **Wire acceptance.** Put the agent and routine webhook handlers onto
-   `work.AcceptTx` + `internal/webhook/profiles`, inside one transaction, with the
-   delivery ledger row. This retires W2, W3, W4 and gives T01–T03 something real
-   to test. It requires the **acceptance budget guard** from §1 — a handle with a
-   `busy_timeout` shorter than the budget — because a context will not bound it.
-   Note that `internal/api/pipeline_webhooks_failed_forget_test.go` pins the W6
-   behaviour that has to be inverted; deleting that test is the visible sign the
-   contract moved, so do it deliberately.
-2. **Write the process-crash harness.** T03, T08 and T11 all need it and none of
-   them can be honest without it: spawn the real binary with a configurable kill
-   point, `SIGKILL`, restart on the same data dir, and diff the ledger. A `kill -9`
-   is still not OS-crash evidence — T14 is separate and needs a statement of the
-   storage assumptions.
-3. **Finish E0 and prove T06.** The mechanical per-run rename is in progress. The
-   parts deliberately left out because they need a decision: splitting `HOME`
-   (which is also the parent of `.memory`), splitting `/output/<slug>` (four read
-   surfaces), splitting `/secrets/<slug>`, and per-run sidecar identity — which the
-   PRD calls a release blocker if unmet and which is the single largest piece.
-4. **The memory mutation contract**, on top of `memdiff`.
-5. **Collapse the six pumps** onto `work.Claim`. Do this after 1–4: it is the
-   change most likely to break live behaviour, and it wants the crash harness in
-   place first.
+1. **Thread a run id to the agent.** This is the smallest change with the
+   largest effect: it is what makes memory writes run-verified, and it is the
+   last thing standing between the guaranteed profile and production. It must
+   travel per attempt, not per container.
+2. **Nothing claims queued work.** Acceptance is durable and correct, and then
+   the work sits there — a dispatch failure leaves it `queued` forever rather
+   than retrying, because no dispatcher owns `retry_wait` yet. `work.Claim`,
+   `Heartbeat`, `Transition` and `RecoverExpiredLeases` all exist and are tested;
+   what is missing is the loop that calls them, and the scheduling of
+   `RetentionPolicy.Sweep` beside it.
+3. **Collapse the six pumps onto `work.Claim` (I7).** The largest remaining
+   invariant gap, and the change most likely to break live behaviour — which is
+   why it comes after the crash harness exists rather than before. Three
+   producers still start runs with no shared lock at all: the agent webhook
+   (which permits eight concurrent runs of one agent), the direct IPC start
+   route, and peer query.
+4. **Prove T06.** A real Claude adapter, two runtimes overlapping in wall-clock
+   time, a third piece of work waiting. Everything below it is now in place; this
+   is the release commitment and it has not been attempted. **Do not enable the
+   parallel flag before it passes.**
+5. **T14.** OS-crash or storage-fault evidence, explicitly not a `kill -9`, with
+   the fsync and storage assumptions written down.
 
 ## 7. Practical notes for the next session
 
