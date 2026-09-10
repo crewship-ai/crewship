@@ -24,10 +24,11 @@
   "ci": {
     "source": 34488138789,
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
-    "ui": 34488234440,
-    "ui_sha": "832e69fc991d71afdf5fa9e31c41b7a680c8c8b7",
+    "ui": 34488992444,
+    "ui_sha": "0bba090e8008aa1e2f9222b9435c38c8fab1aa18",
     "state": "in_progress",
-    "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration"
+    "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration",
+    "superseded_ui": 34488234440
   },
   "tests": {
     "pages": "passed",
@@ -56,8 +57,8 @@
   "integration": {
     "main_sha": "6a9857f5da4558fca082223eafba750de0d76b48",
     "state": "resolved_in_review_stack",
-    "server_sha": "4122eb356d3497f33fb6b6c510daf4ec3e97988b",
-    "ui_sha": "832e69fc991d71afdf5fa9e31c41b7a680c8c8b7",
+    "server_sha": "4b33e6efc3dd29cacabd8bbf1f16abb23ed0cda8",
+    "ui_sha": "0bba090e8008aa1e2f9222b9435c38c8fab1aa18",
     "conflicts": [],
     "openapi_operations": 654,
     "mcp_tools": 10
@@ -97,5 +98,13 @@
       "Binary Build"
     ],
     "source_state": "success"
+  },
+  "pending_occurrence": {
+    "fix_sha": "4b33e6ef",
+    "red_test": "DueRuns returned zero FireAt",
+    "regression": "rearming a row preserves its new occurrence and dispatch identity",
+    "pipeline_full_tests": "passed (12.129s)",
+    "pipeline_vet": "passed",
+    "integrated_pages_api_tests": "passed (8.683s)"
   }
 }

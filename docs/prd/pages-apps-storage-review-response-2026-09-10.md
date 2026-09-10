@@ -48,3 +48,19 @@ Fresh [source PR CI](https://github.com/crewship-ai/crewship/actions/runs/344881
 and [cumulative UI CI](https://github.com/crewship-ai/crewship/actions/runs/34488234440)
 are running. Neither is recorded as passed yet. The older green runs above remain
 valid historical evidence, not a merge gate for these new heads.
+
+## Dispatcher integration regression
+
+The new routines dispatcher derives its idempotency key from `PendingRun.FireAt`,
+but `DueRuns` did not load `fire_at`. The returned time was always zero, so rearming
+the same one-time row could reuse the old execution identity. Server commit
+`4b33e6ef` loads and parses the stored occurrence. A regression failed first with
+`FireAt=0001-01-01`, then passed for initial dispatch and a rearmed row. The full
+pipeline package passed (12.129s), as did its vet. Integrated Pages API tests also
+passed (8.683s).
+
+Current code heads after this fix: source `39146cdb`, server `4b33e6ef`, CLI
+`6402d250`, UI `0bba090e`. The UI run above is superseded by
+[fresh cumulative CI 34488992444](https://github.com/crewship-ai/crewship/actions/runs/34488992444)
+at `0bba090e8008aa1e2f9222b9435c38c8fab1aa18`. It is running; source run
+34488138789 remains the applicable source PR check. No PR has been merged.
