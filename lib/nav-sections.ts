@@ -83,3 +83,32 @@ export const navSections: NavSection[] = [
 export function isHiddenForRole(item: NavItem, role: string | null | undefined): boolean {
   return item.badge === "ADMIN" && role !== "OWNER" && role !== "ADMIN"
 }
+
+/**
+ * The phone tab bar's destinations.
+ *
+ * Three, chosen from what the product already says about itself rather than
+ * from taste: Inbox is the only nav row in the codebase carrying a live badge
+ * (`useInboxUnreadCount`); Chat has a PRD section titled Mobile calling the
+ * mobile chat "written and unreachable — the cheapest large improvement
+ * available"; and the Dashboard is built as the aggregator of every other
+ * surface's urgent items, which is what a phone gets opened for.
+ *
+ * Issues was considered and left out: `docs/ux/audit-work.md` measures its
+ * board at 1088px wide on a 390px screen, so a tab would promote the product's
+ * strongest desktop surface as its worst mobile one. It belongs here once the
+ * list view is responsive.
+ *
+ * Hrefs, not copies — the label and icon still come from `navSections`, so a
+ * rename cannot leave the tab bar saying something the rail does not.
+ */
+export const PHONE_TAB_HREFS = ["/", "/inbox", "/chat"] as const
+
+export function phoneTabs(): NavItem[] {
+  const byHref = new Map(navSections.flatMap((s) => s.items).map((i) => [i.href, i]))
+  return PHONE_TAB_HREFS.map((href) => {
+    const item = byHref.get(href)
+    if (!item) throw new Error(`PHONE_TAB_HREFS names ${href}, which navSections does not carry`)
+    return item
+  })
+}

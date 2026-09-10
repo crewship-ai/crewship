@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
   BookOpen, ChevronDown, GitBranch, HelpCircle,
-  LogOut, Menu, Search, User, X,
+  LogOut, Search, User, X,
 } from "lucide-react"
 
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
@@ -111,7 +111,10 @@ export function AppToolbar() {
   const { session, signOut } = useAuth()
   const { status: wsStatus } = useRealtime()
   const isMobile = useIsMobile()
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // Shared with the phone tab bar's "More", which is a sibling of this
+  // component rather than a child, so the state cannot be local to either.
+  const mobileNavOpen = useAppStore((st) => st.mobileNavOpen)
+  const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
@@ -350,10 +353,6 @@ export function AppToolbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Mobile: hamburger for main navigation */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 coarse:h-12 coarse:w-12 md:hidden" aria-label="Navigation" onClick={() => setMobileNavOpen(true)}>
-          <Menu className="h-4 w-4" />
-        </Button>
       </div>
 
       {/* Mobile: main navigation bottom sheet */}

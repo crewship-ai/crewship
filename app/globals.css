@@ -16,6 +16,37 @@
  * target on every touch device including tablets, at any width. */
 @custom-variant coarse (@media (pointer: coarse));
 
+/* The phone tab bar's height, as a token so SaveFooter can sit above it
+ * instead of on top of it. Declared for every width and zeroed above the
+ * phone breakpoint, so `bottom-[var(--mobile-tab-bar-h)]` is a no-op wherever
+ * the bar is not rendered. 3.5rem is the bar itself; the safe-area inset is
+ * padding inside it, not part of this number. */
+:root { --mobile-tab-bar-h: 0px; }
+@media (max-width: 767px) { :root { --mobile-tab-bar-h: 3.5rem; } }
+
+/* Reduced motion, covered once rather than per component.
+ *
+ * Every Radix primitive in components/ui — sheet, dialog, alert-dialog,
+ * dropdown-menu, select, popover, hover-card, tooltip — animates through
+ * Tailwind's `animate-in`/`animate-out` utilities, which carry their own
+ * keyframes and so were untouched by the two component-specific blocks lower
+ * in this file. A user who has asked the system to stop moving things still
+ * got all of it (#2483).
+ *
+ * State changes stay instant rather than being removed: the overlay still
+ * appears, it just does not travel. Motion-driven components read the same
+ * preference through `prefersReducedMotion()` in lib/motion.ts. */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot$="-content"],
+  [data-slot$="-overlay"],
+  [data-state][class*="animate-in"],
+  [data-state][class*="animate-out"] {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */

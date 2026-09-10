@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
+import { duration, panel } from "@/lib/motion"
 import {
   Workflow, Clock, Activity, GitBranch,
   PanelLeftOpen,
@@ -664,6 +665,7 @@ export function OrchestrationLayout({
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
+                    transition={{ duration: duration.short }}
                     onClick={() => setLeftCollapsed(true)}
                   />
                   <motion.div
@@ -671,7 +673,7 @@ export function OrchestrationLayout({
                     initial={{ x: -280 }}
                     animate={{ x: 0 }}
                     exit={{ x: -280 }}
-                    transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                    transition={panel.sideLeft.transition}
                   >
                     <div className="flex items-center justify-end px-3 py-2 border-b border-white/[0.1]">
                       <button
@@ -1108,7 +1110,7 @@ export function OrchestrationLayout({
                   initial={{ x: "100%" }}
                   animate={{ x: 0 }}
                   exit={{ x: "100%" }}
-                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                  transition={panel.sideLeft.transition}
                 >
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
                     <button

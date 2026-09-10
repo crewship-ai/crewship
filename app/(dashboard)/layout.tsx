@@ -1,6 +1,9 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
+import { usePathname } from "next/navigation"
+import { useIsMobile } from "@/hooks/use-mobile"
+import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
 import { Spinner } from "@/components/ui/spinner"
 import { useSession } from "@/hooks/use-auth"
 
@@ -24,6 +27,19 @@ export default function DashboardLayout({
 }) {
   const { status } = useSession()
   const { workspaceId } = useWorkspace()
+  const isMobile = useIsMobile()
+  const pathname = usePathname()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * The page content scrolls inside this div, not the document, so the browser
+   * has nothing to reset on a route change — arriving at a new screen already
+   * scrolled halfway down the last one. Nothing about that is visible on a
+   * desktop, where a route change usually fits the viewport anyway.
+   */
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 })
+  }, [pathname])
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -59,9 +75,13 @@ export default function DashboardLayout({
             <RealtimeStatusBanner />
             <RuntimeBanner />
             <UpdateBanner />
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
+            <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
               {children}
             </div>
+            {/* A flex sibling, not a fixed bar: it takes real space, so the
+                scroll container above it needs no compensating padding and
+                nothing can end up hidden underneath it. */}
+            {isMobile && <MobileTabBar />}
           </SidebarInset>
         </SidebarProvider>
         <RealtimeToasts />

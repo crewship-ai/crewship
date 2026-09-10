@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, cleanup } from "@testing-library/react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 
@@ -37,9 +37,12 @@ vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 3 }))
 // The sheet only renders when the toolbar believes it is on a phone.
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => true }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
+const setMobileNavOpen = vi.fn()
 vi.mock("@/lib/store", () => ({
-  useAppStore: (selector: (s: { settingsTab: string | null; breadcrumbs: unknown[] }) => unknown) =>
-    selector({ settingsTab: null, breadcrumbs: [] }),
+  // The sheet is open for the whole of this file: what is under test is what
+  // it offers, not how it is opened (that is mobile-tab-bar.test.tsx).
+  useAppStore: (selector: (s: Record<string, unknown>) => unknown) =>
+    selector({ settingsTab: null, breadcrumbs: [], mobileNavOpen: true, setMobileNavOpen }),
 }))
 vi.mock("@/components/features/inbox/inbox-bell", () => ({ InboxBell: () => null }))
 vi.mock("@/components/features/activity/activity-bell", () => ({ ActivityBell: () => null }))
@@ -54,7 +57,7 @@ function flatten(): NavItem[] {
   return navSections.flatMap((s) => s.items)
 }
 
-/** Renders the toolbar on a phone and opens the navigation sheet. */
+/** Renders the toolbar on a phone with the navigation sheet already open. */
 function openMobileNav() {
   cleanup()
   render(
@@ -62,7 +65,6 @@ function openMobileNav() {
       <AppToolbar />
     </TooltipProvider>,
   )
-  fireEvent.click(screen.getByRole("button", { name: /^navigation$/i }))
 }
 
 describe("the phone navigation sheet offers the whole product", () => {

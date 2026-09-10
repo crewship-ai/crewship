@@ -175,7 +175,7 @@ export function BottomPanel({
         // tracks the cursor 1:1 instead of lerping behind it.
         !dragging && "transition-[height] duration-200",
       )}
-      style={{ height: open ? `${height}px` : "36px" }}
+      style={{ height: open ? `min(${height}px, 60dvh)` : "36px" }}
     >
       {/* Resize handle — sits at the very top edge, hovers a thin grab
           target. Pointer-events only when the panel is open (it'd be
@@ -226,7 +226,7 @@ export function BottomPanel({
           The strip is now a plain flex row with the tablist and the control as
           siblings; nothing moves visually. */}
       <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
-        <div role="tablist" aria-label="Bottom panel" className="flex items-center gap-1 overflow-x-auto">
+        <div role="tablist" aria-label="Bottom panel" className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {tabIds.map((id) => {
           const meta = TAB_META[id]
           const Icon = meta.icon
