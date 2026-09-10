@@ -292,6 +292,7 @@ type ToolRef struct {
 // wait, transform, branch) are deferred to Phase 2; the parser
 // rejects them with a clear error at save time.
 type Step struct {
+	Name          string       `json:"name,omitempty"`
 	ID            string       `json:"id"`
 	Type          StepType     `json:"type"`
 	Complexity    Complexity   `json:"complexity,omitempty"`

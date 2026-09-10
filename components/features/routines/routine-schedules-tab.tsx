@@ -215,7 +215,9 @@ export function RoutineSchedulesTab({
                     <div
                       className={cn(
                         "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-                        s.enabled ? "bg-purple/20 text-purple" : "bg-muted text-muted-foreground",
+                        s.enabled
+                          ? "bg-purple/20 text-purple"
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       <Calendar className="h-4 w-4" />
@@ -292,22 +294,29 @@ export function RoutineSchedulesTab({
                         <span>
                           Failures:{" "}
                           <span className="text-foreground/85">{s.consecutive_failures}</span>
-                          <span className="opacity-60">/{s.max_consecutive_failures || "—"}</span>
+                          <span className="opacity-60">
+                            /{s.max_consecutive_failures || "—"}
+                          </span>
                         </span>
                         {s.catchup_policy && (
                           <span>
-                            Catch-up: <span className="text-foreground/85">{s.catchup_policy}</span>
+                            Catch-up:{" "}
+                            <span className="text-foreground/85">{s.catchup_policy}</span>
                           </span>
                         )}
                         {!!s.last_missed_count && (
-                          <span className="text-warn">Missed last tick: {s.last_missed_count}</span>
+                          <span className="text-warn">
+                            Missed last tick: {s.last_missed_count}
+                          </span>
                         )}
                         {s.wake_pipeline_slug && (
                           <span>
                             Wake gate:{" "}
                             <span className="text-foreground/85">{s.wake_fire_count ?? 0}</span>{" "}
                             fired /{" "}
-                            <span className="text-foreground/85">{s.wake_check_count ?? 0}</span>{" "}
+                            <span className="text-foreground/85">
+                              {s.wake_check_count ?? 0}
+                            </span>{" "}
                             checked
                             {s.last_wake_status && (
                               <span className="ml-1 opacity-80">({s.last_wake_status})</span>
@@ -448,20 +457,22 @@ export function RoutineSchedulesTab({
           >
             {concurrencyKey ? (
               <>
-                Serialized by <span className="font-mono text-foreground/85">{concurrencyKey}</span>
-                , up to{" "}
+                Serialized by{" "}
+                <span className="font-mono text-foreground/85">{concurrencyKey}</span>, up to{" "}
                 <span className="text-foreground/85">
                   {maxConcurrent && maxConcurrent > 0 ? maxConcurrent : 1}
                 </span>{" "}
                 at once — a new run beyond that limit is rejected (429), not queued.
               </>
             ) : (
-              "Unbounded — no concurrency_key set, so runs of this routine never wait on each other."
+              "No overlap limit is configured. Runs can start at the same time."
             )}{" "}
-            Change it using Edit code in Definition (
-            <span className="font-mono">concurrency_key</span> /{" "}
-            <span className="font-mono">max_concurrent</span>
-            ).
+            Change it using Code in the recipe editor.
+            <details className="mt-2">
+              <summary className="cursor-pointer">Technical details</summary>
+              <span className="font-mono">concurrency_key</span> /{" "}
+              <span className="font-mono">max_concurrent</span>
+            </details>
           </div>
         </Card>
       </details>

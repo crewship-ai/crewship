@@ -97,74 +97,101 @@ export function RoutineWorkOverview({
 
   return (
     <div className="space-y-4">
-      <DetailCard title="What it needs and what it returns">
-        <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
-          <section className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 border-b border-border/50 pb-2">
-              <ArrowDownToLine className="h-3.5 w-3.5 text-primary" />
-              <h3 className="text-[13px] font-medium">You provide</h3>
-              <span className="ml-auto text-[11px] text-muted-foreground">{inputs.length}</span>
-            </div>
-            {inputs.length ? (
-              <ul>
-                {inputs.map((input) => {
-                  const visual = fieldVisual(input.type, input.options)
-                  return (
-                    <ContractRow
-                      key={input.name}
-                      icon={visual.icon}
-                      tone="bg-primary/10 text-primary"
-                      name={input.label || readableName(input.name)}
-                      meta={`${visual.label} · ${input.required ? "required" : "optional"}${input.default !== undefined ? " · has a default" : ""}`}
-                      description={input.description}
-                    />
-                  )
-                })}
-              </ul>
-            ) : (
-              <p className="py-1.5 text-xs text-muted-foreground">
-                Nothing to answer before starting.
-              </p>
-            )}
-          </section>
-          <section className="min-w-0">
-            <div className="mb-2 flex items-center gap-2 border-b border-border/50 pb-2">
-              <ArrowUpFromLine className="h-3.5 w-3.5 text-success" />
-              <h3 className="text-[13px] font-medium">You get</h3>
-              <span className="ml-auto text-[11px] text-muted-foreground">{outputs.length}</span>
-            </div>
+      {inputs.length || outputs.length ? (
+        <DetailCard title="Inputs and results">
+          <div className="grid gap-x-8 gap-y-5 md:grid-cols-2">
+            <section className="min-w-0">
+              <div className="mb-2 flex items-center gap-2 border-b border-border/50 pb-2">
+                <ArrowDownToLine className="h-3.5 w-3.5 text-primary" />
+                <h3 className="text-[13px] font-medium">Inputs</h3>
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  {inputs.length}
+                </span>
+              </div>
+              {inputs.length ? (
+                <ul>
+                  {inputs.map((input) => {
+                    const visual = fieldVisual(input.type, input.options)
+                    return (
+                      <ContractRow
+                        key={input.name}
+                        icon={visual.icon}
+                        tone="bg-primary/10 text-primary"
+                        name={input.label || readableName(input.name)}
+                        meta={`${visual.label} · ${input.required ? "required" : "optional"}${input.default !== undefined ? " · has a default" : ""}`}
+                        description={input.description}
+                      />
+                    )
+                  })}
+                </ul>
+              ) : (
+                <p className="py-1.5 text-xs text-muted-foreground">
+                  Nothing to answer before starting.
+                </p>
+              )}
+            </section>
             {outputs.length ? (
-              <ul>
-                {outputs.map((output, i) => {
-                  const visual = fieldVisual(
-                    typeof output.type === "string" ? output.type : undefined,
-                  )
-                  return (
-                    <ContractRow
-                      key={i}
-                      icon={visual.icon}
-                      tone="bg-success/10 text-success"
-                      name={
-                        typeof output.label === "string"
-                          ? output.label
-                          : readableName(output.name || "Result")
-                      }
-                      meta={visual.label}
-                      description={
-                        typeof output.description === "string" ? output.description : undefined
-                      }
-                    />
-                  )
-                })}
-              </ul>
+              <section className="min-w-0">
+                <div className="mb-2 flex items-center gap-2 border-b border-border/50 pb-2">
+                  <ArrowUpFromLine className="h-3.5 w-3.5 text-success" />
+                  <h3 className="text-[13px] font-medium">Results</h3>
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {outputs.length}
+                  </span>
+                </div>
+                {outputs.length ? (
+                  <ul>
+                    {outputs.map((output, i) => {
+                      const visual = fieldVisual(
+                        typeof output.type === "string" ? output.type : undefined,
+                      )
+                      return (
+                        <ContractRow
+                          key={i}
+                          icon={visual.icon}
+                          tone="bg-success/10 text-success"
+                          name={
+                            typeof output.label === "string"
+                              ? output.label
+                              : readableName(output.name || "Result")
+                          }
+                          meta={visual.label}
+                          description={
+                            typeof output.description === "string"
+                              ? output.description
+                              : undefined
+                          }
+                        />
+                      )
+                    })}
+                  </ul>
+                ) : (
+                  <p className="py-1.5 text-xs text-muted-foreground">
+                    Nothing is declared. Each run still keeps its recorded response and any
+                    files.
+                  </p>
+                )}
+              </section>
             ) : (
-              <p className="py-1.5 text-xs text-muted-foreground">
-                Nothing is declared. Each run still keeps its recorded response and any files.
-              </p>
+              <details className="self-start py-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer">Results · 0 declared</summary>
+                <p className="mt-2">Each run still keeps its response and saved files.</p>
+              </details>
             )}
-          </section>
+          </div>
+        </DetailCard>
+      ) : (
+        <div className="flex flex-wrap gap-4 rounded-lg border border-border px-4 py-3 text-xs text-muted-foreground">
+          <details>
+            <summary className="cursor-pointer">Inputs · 0</summary>
+            <p className="mt-2">Nothing to fill in before running.</p>
+          </details>
+          <details>
+            <summary className="cursor-pointer">Results · 0 declared</summary>
+            <p className="mt-2">Each run still keeps its response and saved files.</p>
+          </details>
         </div>
-      </DetailCard>
+      )}
       <RoutineStepSpine
         workspaceId={workspaceId}
         definition={definition}

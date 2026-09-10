@@ -8328,6 +8328,9 @@
           "status": {
             "type": "string"
           },
+          "step_count": {
+            "type": "integer"
+          },
           "updated_at": {
             "format": "date-time",
             "type": "string"
@@ -11572,6 +11575,9 @@
           "status": {
             "type": "string"
           },
+          "step_count": {
+            "type": "integer"
+          },
           "trigger": {
             "additionalProperties": true,
             "type": "object"
@@ -14433,6 +14439,9 @@
           "slug": {
             "type": "string"
           },
+          "step_count": {
+            "type": "integer"
+          },
           "updated_at": {
             "type": "string"
           },
@@ -14583,6 +14592,9 @@
             },
             "slug": {
               "type": "string"
+            },
+            "step_count": {
+              "type": "integer"
             },
             "updated_at": {
               "type": "string"

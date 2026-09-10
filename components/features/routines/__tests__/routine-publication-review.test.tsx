@@ -11,7 +11,7 @@ it("does not present an unavailable published definition as an empty recipe", ()
       validated={false}
     />,
   )
-  expect(screen.getByText(/published definition is unavailable/)).toBeInTheDocument()
+  expect(screen.getByText(/published recipe is unavailable/)).toBeInTheDocument()
   expect(screen.queryByText(/Added ·/)).not.toBeInTheDocument()
 })
 

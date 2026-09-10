@@ -6,9 +6,12 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
 
 describe("compact run artifacts", () => {
   it("shows a compact empty state only after a successful lookup", async () => {
-    api.mockResolvedValue({ ok: true, json: async () => ({ artifacts: [], next_cursor: null }) })
+    api.mockResolvedValue({
+      ok: true,
+      json: async () => ({ artifacts: [], next_cursor: null }),
+    })
     render(<RoutineRunArtifacts workspaceId="ws" runId="run" active={false} compact />)
-    expect(await screen.findByText("No saved files or declared outputs.")).toBeInTheDocument()
+    expect(await screen.findByText("No saved files.")).toBeInTheDocument()
     expect(screen.queryByText("Saved files and outputs")).not.toBeInTheDocument()
   })
   it("does not turn a failed lookup into a no-files claim", async () => {

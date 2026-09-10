@@ -2,63 +2,46 @@ import { useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { expect, it, vi } from "vitest"
 vi.mock("../routine-fixture-test", () => ({
-  RoutineFixtureTest: () => {
+  RoutineFixtureTest: ({ selectedStepId }: { selectedStepId: string }) => {
     const [text, setText] = useState("")
     return (
-      <input aria-label="Fixture data" value={text} onChange={(e) => setText(e.target.value)} />
+      <input
+        aria-label={`Sample for ${selectedStepId}`}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
     )
   },
 }))
-vi.mock("../routine-comparison", () => ({
-  RoutineComparison: ({ onBusyChange }: { onBusyChange: (busy: boolean) => void }) => (
-    <button onClick={() => onBusyChange(true)}>Begin comparison</button>
-  ),
-}))
 import { RoutineTestWorkspace } from "../routine-test-workspace"
 const props = {
-  published: true,
   workspaceId: "ws",
-  slug: "demo",
   definition: {},
   busy: false,
   result: null,
   onValidate: vi.fn(),
-  onPublish: vi.fn(),
   onOpenCode: vi.fn(),
   parseError: null,
+  stepId: "review",
 }
-const select = (name: string) =>
-  fireEvent.mouseDown(screen.getByRole("tab", { name }), { button: 0, ctrlKey: false })
 
-it("preserves fixture work when changing test methods and never starts work just by switching", () => {
+it("tests the selected step without nested navigation or starting live work", () => {
   render(<RoutineTestWorkspace {...props} />)
-  select("Test a step")
-  fireEvent.change(screen.getByRole("textbox", { name: "Fixture data" }), {
-    target: { value: "saved sample" },
-  })
-  select("Check definition")
-  expect(screen.queryByRole("textbox", { name: "Fixture data" })).not.toBeInTheDocument()
-  select("Test a step")
-  expect(screen.getByRole("textbox", { name: "Fixture data" })).toHaveValue("saved sample")
+  expect(screen.getByRole("textbox", { name: "Sample for review" })).toBeVisible()
+  expect(screen.queryByRole("tablist")).not.toBeInTheDocument()
+  expect(screen.queryByText("Compare versions")).not.toBeInTheDocument()
   expect(props.onValidate).not.toHaveBeenCalled()
+  expect(screen.getByText(/does not run agents, scripts or HTTP calls/)).toBeVisible()
 })
 
-it("keeps live comparison status visible when inspecting another method", () => {
-  render(<RoutineTestWorkspace {...props} />)
-  select("Compare versions")
-  fireEvent.click(screen.getByRole("button", { name: "Begin comparison" }))
-  select("Check definition")
-  expect(screen.getByRole("status")).toHaveTextContent("Live comparison is running")
-  fireEvent.click(screen.getByRole("button", { name: "View progress" }))
-  expect(screen.getByRole("tab", { name: "Compare versions" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+it("keeps samples while the routine test result updates", () => {
+  const view = render(<RoutineTestWorkspace {...props} />)
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "saved sample" } })
+  fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+  expect(props.onValidate).toHaveBeenCalledTimes(1)
+  view.rerender(
+    <RoutineTestWorkspace {...props} result={{ passed: true, details: "References exist" }} />,
   )
-})
-
-it("explains why a new draft cannot run a version comparison", () => {
-  render(<RoutineTestWorkspace {...props} published={false} />)
-  select("Compare versions")
-  expect(screen.getByText("Publish a version to compare real runs")).toBeInTheDocument()
-  expect(screen.queryByRole("button", { name: "Begin comparison" })).not.toBeInTheDocument()
+  expect(screen.getByRole("textbox")).toHaveValue("saved sample")
+  expect(screen.getByRole("status")).toHaveTextContent("Test passed")
 })
