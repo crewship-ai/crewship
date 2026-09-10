@@ -79564,6 +79564,10 @@
                       "has_application": {
                         "type": "boolean"
                       },
+                      "has_project": {
+                        "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                        "type": "boolean"
+                      },
                       "id": {
                         "type": "string"
                       },
@@ -79851,6 +79855,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80022,6 +80030,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -80587,6 +80599,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80758,6 +80774,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -81278,6 +81298,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -81682,6 +81706,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -87321,6 +87349,7 @@
                               "build_failed",
                               "build_stale",
                               "baseline_unavailable",
+                              "routine_unresolved",
                               "definition_moved",
                               "not_permitted",
                               "storage_unavailable"
@@ -87344,6 +87373,7 @@
                       "nullable": true,
                       "properties": {
                         "actor": {
+                          "description": "Who the candidate is attributed to: in draft mode the AUTHOR of the source revision, in ?publication=N mode the PUBLISHER that publication recorded. An erased publisher is kind \"unknown\".",
                           "properties": {
                             "id": {
                               "type": "string"
@@ -87398,6 +87428,7 @@
                           "type": "object"
                         },
                         "created_at": {
+                          "description": "In draft mode, when the source revision was saved. In ?publication=N mode, when that publication was made.",
                           "format": "date-time",
                           "type": "string"
                         },
@@ -87453,6 +87484,10 @@
                             "nullable": true,
                             "type": "string"
                           },
+                          "in_candidate": {
+                            "description": "This routine is declared by the candidate, so it belongs in expected_routine_digests. The list is a union and also carries routines only the live publication called; fencing on one of those is refused as a routines conflict naming a routine nobody moved.",
+                            "type": "boolean"
+                          },
                           "published_digest": {
                             "nullable": true,
                             "type": "string"
@@ -87473,7 +87508,8 @@
                           "routine",
                           "published_digest",
                           "current_digest",
-                          "state"
+                          "state",
+                          "in_candidate"
                         ],
                         "type": "object"
                       },
@@ -88428,6 +88464,10 @@
                           "type": "string"
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_project": {
+                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
                         "id": {

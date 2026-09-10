@@ -74,7 +74,11 @@ func validHexDigest(value string) bool {
 // before the transaction opened — which is the difference between fencing the
 // publication and describing it. The pre-publication check passes h.db and
 // gets the same answer through the same code, so the two can never drift.
-func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc *pages.Document) (map[string]string, error) {
+// A routine the candidate calls but this workspace no longer has comes back as
+// `unresolved` rather than as an error: it is a reviewable fact about the
+// candidate, not a storage failure, and the caller owes the human a sentence
+// naming it. Only a real query failure comes back as err.
+func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc *pages.Document) (map[string]string, string, error) {
 	result := map[string]string{}
 	for _, panel := range doc.Spec.Panels {
 		for _, action := range panel.Actions {
@@ -82,13 +86,25 @@ func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc 
 				continue
 			}
 			var definition string
-			if err := q.QueryRowContext(ctx, `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, action.Routine).Scan(&definition); err != nil {
-				return nil, fmt.Errorf("read action routine %q: %w", action.Routine, err)
+			err := q.QueryRowContext(ctx, `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, action.Routine).Scan(&definition)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, action.Routine, nil
+			}
+			if err != nil {
+				return nil, "", fmt.Errorf("read action routine %q: %w", action.Routine, err)
 			}
 			result[action.Routine] = pageRoutineDigest(definition)
 		}
 	}
-	return result, nil
+	return result, "", nil
+}
+
+// pageUnresolvedRoutineMessage is the one sentence a caller gets when the
+// candidate calls a routine that is gone. `sql: no rows in result set` used to
+// reach the wire through err.Error(); a driver string is not an API contract,
+// and it does not tell the reader which routine to go and fix.
+func pageUnresolvedRoutineMessage(routine string) string {
+	return fmt.Sprintf("This candidate has an action calling routine %q, which no longer exists in this workspace; restore the routine or remove the action before publishing.", routine)
 }
 
 type pageRowQuerier interface {
@@ -188,9 +204,13 @@ func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return nil, false
 	}
-	routines, err := pageRoutineDigestsIn(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), &doc)
+	routines, unresolved, err := pageRoutineDigestsIn(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), &doc)
 	if err != nil {
-		replyError(w, 422, err.Error())
+		replyInternalError(w, h.logger, "read candidate routine definitions", err)
+		return nil, false
+	}
+	if unresolved != "" {
+		replyError(w, 422, pageUnresolvedRoutineMessage(unresolved))
 		return nil, false
 	}
 	report := map[string]any{"routine_definitions": routines, "routine_revision_pinned": false, "source_integrity": "pass", "artifact_integrity": "pass", "typecheck": "pass", "build": "pass", "bindings": "pass", "toolchain": artifact.Toolchain, "browser_review": "required", "security_review": "required"}
@@ -343,19 +363,15 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		replyPublishConflict(w, "The live Page definition changed since this candidate was reviewed; review the current definition before publishing", "definition", nil)
 		return
 	}
-	// Rollback publishes a retained artifact over the SAME live definition, so
-	// it is fenced identically: restoring old code against a declaration the
-	// reviewer never saw binds it to panels, producers and routines nobody
-	// approved for it.
-	currentRoutines, err := pageRoutineDigestsIn(r.Context(), tx, ws, candidate.document)
-	if err != nil {
-		replyError(w, 422, err.Error())
-		return
-	}
-	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
-		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
-		return
-	}
+	// The draft CAS runs BEFORE the routine fence, not after.
+	//
+	// When a caller publishes a revision the draft has since moved past, both
+	// checks fail — but for one reason, and only one of them names it. The
+	// routine map was built for whichever document the caller believed was
+	// current, so comparing it against THIS candidate's routines answers
+	// `conflict:"routines"` naming routines nobody touched. Checking the draft
+	// first lets the accurate `conflict:"draft"` win, and the caller rebuilds
+	// against the revision that actually exists.
 	if req.RollbackVersion == 0 {
 		var revision int64
 		var commit string
@@ -367,6 +383,23 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 			replyPublishConflict(w, "Draft changed; build and review the current revision", "draft", nil)
 			return
 		}
+	}
+	// Rollback publishes a retained artifact over the SAME live definition, so
+	// it is fenced identically: restoring old code against a declaration the
+	// reviewer never saw binds it to panels, producers and routines nobody
+	// approved for it.
+	currentRoutines, unresolvedRoutine, err := pageRoutineDigestsIn(r.Context(), tx, ws, candidate.document)
+	if err != nil {
+		replyInternalError(w, h.logger, "recompute candidate routine definitions", err)
+		return
+	}
+	if unresolvedRoutine != "" {
+		replyError(w, 422, pageUnresolvedRoutineMessage(unresolvedRoutine))
+		return
+	}
+	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
+		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
+		return
 	}
 	version := *req.ExpectedPublication + 1
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_publications(page_id,version,build_id,source_revision,source_digest,git_commit,artifact_digest,spec_json,checks_json,actor_user_id,created_at,rollback_of) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,0))`, rec.ID, version, candidate.record.BuildID, candidate.record.SourceRevision, candidate.record.SourceDigest, candidate.record.GitCommit, candidate.record.ArtifactDigest, candidate.spec, string(report), user.ID, now, req.RollbackVersion); err != nil {

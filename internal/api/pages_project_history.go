@@ -54,7 +54,6 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	result := make([]pageProjectRevision, 0)
-	ws := WorkspaceIDFromContext(r.Context())
 	for rows.Next() {
 		var v pageProjectRevision
 		var actorUser, actorJSON string
@@ -62,7 +61,9 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "read project revision", err)
 			return
 		}
-		v.ActorKind = h.reviewActor(r.Context(), ws, actorUser, actorJSON).Kind
+		// Kind only: this list renders no labels, and resolving one would be a
+		// directory read per row whose result is then discarded.
+		v.ActorKind = reviewActorKind(actorUser, actorJSON).Kind
 		result = append(result, v)
 	}
 	if err := rows.Err(); err != nil {

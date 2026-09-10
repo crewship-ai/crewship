@@ -244,6 +244,17 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	// HasProject and HasApplication answer DIFFERENT questions, and the editor
+	// needs both. HasApplication is "an application is published and running";
+	// HasProject is "this Page has application source at all", published or
+	// not. A first publication is precisely the case where the second is true
+	// and the first is false, and it is the case the review screen exists for
+	// — keying the editor off HasApplication alone hides the review from every
+	// Page whose application has never shipped.
+	//
+	// Neither carries omitempty: a client must not have to treat an absent
+	// field as a third state.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -289,6 +300,8 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	// See pageWire.HasProject: source that exists versus source that is live.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -340,6 +353,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasProject         bool
 	HasApplication     bool
 	PublicationVersion int64
 	ID                 string
@@ -416,7 +430,9 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
-		       p.created_at, p.updated_at, COALESCE(l.published,0), COALESCE(l.version,0)
+		       p.created_at, p.updated_at,
+		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
+		       COALESCE(l.published,0), COALESCE(l.version,0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ?
 		ORDER BY p.updated_at DESC, p.slug ASC`, wsID)
@@ -430,7 +446,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion); err != nil {
+			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
 			replyInternalError(w, h.logger, "scan page", err)
 			return
 		}
@@ -476,7 +492,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		row := pageListWire{
-			HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+			HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 			ID:          rec.ID,
 			Slug:        rec.Slug,
 			Name:        rec.Name,
@@ -1009,11 +1025,12 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
 		       created_at, updated_at,
+ EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -1307,7 +1324,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

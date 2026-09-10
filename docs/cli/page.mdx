@@ -999,17 +999,21 @@ confirms that review; it is not a request for an automated security scan.
 Publication requires Page owner/workspace admin authority. An ordinary write grant
 does not grant permission to publish executable code for readers.
 
-`publish` and `rollback` also send the two values the reviewer attested to.
+`publish` and `rollback` also send the two fence values.
 `--expected-definition-digest` is the sha256 of the Page definition that was
 reviewed, and `--expected-routine-digest routine=sha256` (repeatable) is the
-routine definition behind each `call` action. Omit them and the CLI reads them
-from `project review` itself — `rollback` asks it for the retained version it
-is restoring — and prints, on stderr, every digest it is fencing
-on before it sends the request — nobody has to copy hex by hand, and nobody
-attests to a value they were not shown. Pass either flag and that half is sent
-verbatim, unread. If the live definition or a routine script moved since the
-review, the server refuses with 409 and names which one; re-read `review` and
-publish again.
+routine definition behind each `call` action. Pass either flag and that half
+is sent verbatim.
+
+Omit them and the CLI reads `project review` itself immediately before
+publishing — `rollback` asks it for the retained version it is restoring —
+uses the digests it returns, and prints each one to stderr as it sends the
+request. That saves copying hex by hand, and it leaves a record of what the
+publication was fenced on. It is **not** a review step: the command does not
+pause, and nobody sees those digests before they are sent. To review first,
+run `crewship page project review <slug>`, read it, and pass the values back
+with the flags. If the live definition or a routine script moves between the
+snapshot and the write, the server refuses with 409 and names which one.
 
 `--expected-publication 0` creates the first publication. Exact retries return the
 original receipt. Rollback creates a new publication of an earlier artifact and

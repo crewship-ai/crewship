@@ -81,6 +81,18 @@ type reviewRoutineWire struct {
 	PublishedDigest *string `json:"published_digest"`
 	CurrentDigest   *string `json:"current_digest"`
 	State           string  `json:"state"`
+	// InCandidate marks the rows that belong in the publish fence: exactly
+	// the routines the candidate document declares, which is exactly the key
+	// set pageRoutineDigestsIn will rebuild and compare against.
+	//
+	// The list itself stays a UNION, because a routine the live publication
+	// called and the candidate drops is worth seeing. Fencing on one is a
+	// different matter: the server's map would not have that key, movedRoutines
+	// would report it, and the publication would be refused naming a routine
+	// nobody moved — permanently, since every refetch says the same thing.
+	// The flag is on the wire so no client has to re-derive the server's own
+	// choice of candidate document to avoid that.
+	InCandidate bool `json:"in_candidate"`
 }
 
 type reviewBlockerWire struct {
@@ -111,6 +123,7 @@ const (
 	reviewBlockerBuildFailed        = "build_failed"
 	reviewBlockerBuildStale         = "build_stale"
 	reviewBlockerBaselineMissing    = "baseline_unavailable"
+	reviewBlockerRoutineUnresolved  = "routine_unresolved"
 	reviewBlockerDefinitionMoved    = "definition_moved"
 	reviewBlockerNotPermitted       = "not_permitted"
 	reviewBlockerStorageUnavailable = "storage_unavailable"
@@ -237,27 +250,42 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 		// publication is a refusal.
 	}
 
-	// The candidate, and the document its routines are read from.
-	var comparison, comparisonChecks string
+	// The candidate, the document its routines are fenced on, and whatever
+	// else is worth showing beside them.
+	var candidateSpec, contextSpec, comparisonChecks string
 	if requested > 0 {
 		spec, checks, ok := h.reviewRetainedCandidate(w, r, rec, requested, &snapshot, blocked)
 		if !ok {
 			return
 		}
-		comparison, comparisonChecks = spec, checks
+		candidateSpec, comparisonChecks = spec, checks
 	} else {
-		spec, ok := h.reviewDraftCandidate(w, r, rec, publishedSource, publishedSpec, liveSpec, &snapshot, blocked)
+		spec, ok := h.reviewDraftCandidate(w, r, rec, publishedSource, publishedSpec, &snapshot, blocked)
 		if !ok {
 			return
 		}
-		comparison, comparisonChecks = spec, publishedChecks
+		candidateSpec, comparisonChecks = spec, publishedChecks
 	}
-	routines, err := h.reviewRoutines(ctx, ws, comparison, comparisonChecks)
+	// With no candidate there is nothing to fence, so nothing is in_candidate;
+	// the live definition still supplies rows so drift stays visible.
+	if snapshot.Candidate == nil {
+		candidateSpec, contextSpec = "", liveSpec
+	}
+	routines, err := h.reviewRoutines(ctx, ws, candidateSpec, contextSpec, comparisonChecks)
 	if err != nil {
 		replyInternalError(w, h.logger, "read routine definitions", err)
 		return
 	}
 	snapshot.Routines = routines
+	// A candidate calling a routine that no longer resolves is not merely
+	// `unknown`: publishing it is refused with a 422 further down, so the
+	// review has to say so too. Reporting only the state told the reviewer
+	// that publication was available when it was not.
+	for _, row := range routines {
+		if row.InCandidate && row.CurrentDigest == nil {
+			blocked(reviewBlockerRoutineUnresolved, fmt.Sprintf("This candidate has an action calling routine %q, which no longer exists in this workspace; publishing is refused until the routine is restored or the action removed.", row.Routine))
+		}
+	}
 
 	if h.pageArtifacts == nil || h.pageRuntimeOrigin == "" {
 		blocked(reviewBlockerStorageUnavailable, "Page build storage and a separate runtime origin must be configured before an application can be published.")
@@ -270,9 +298,9 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 }
 
 // reviewDraftCandidate fills in the current draft as the candidate and returns
-// the document its routines are read from: the draft when there is one, and
-// the live definition otherwise, so a Page with no draft still shows drift.
-func (h *PageHandler) reviewDraftCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, publishedSource, publishedSpec, liveSpec string, snapshot *reviewSnapshotWire, blocked func(string, string)) (string, bool) {
+// the draft's definition — the document the fence is computed from — or "" when
+// there is no candidate to publish.
+func (h *PageHandler) reviewDraftCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, publishedSource, publishedSpec string, snapshot *reviewSnapshotWire, blocked func(string, string)) (string, bool) {
 	ctx := r.Context()
 	ws := WorkspaceIDFromContext(ctx)
 	var draftRevision int64
@@ -283,20 +311,22 @@ func (h *PageHandler) reviewDraftCandidate(w http.ResponseWriter, r *http.Reques
 		replyInternalError(w, h.logger, "read project draft", err)
 		return "", false
 	}
-	comparison := draftSpec
-	if !hasDraft {
-		comparison = liveSpec
-	}
 	switch {
 	case !hasDraft:
 		blocked(reviewBlockerNoCandidate, "This Page has no application draft to review.")
-		return comparison, true
+		return "", true
 	// Identical means BOTH bases agree: the same source bytes and the same
 	// declaration. Two different sources can declare the same panels, and the
 	// same source can be saved with a changed declaration.
-	case publishedSource != "" && draftDigest == publishedSource && draftSpec == publishedSpec:
+	//
+	// And it only means "already live" while the publication is actually
+	// running. After a withdrawal nothing is serving, and republishing the
+	// same source is the recovery path, not a no-op — calling it
+	// candidate_matches_live would null the candidate and leave the caller
+	// with an empty fence for a candidate that does declare routines.
+	case snapshot.Baseline.Published && publishedSource != "" && draftDigest == publishedSource && draftSpec == publishedSpec:
 		blocked(reviewBlockerMatchesLive, "The current draft is identical to the live publication; there is nothing new to review.")
-		return comparison, true
+		return "", true
 	}
 	candidate := &reviewCandidateWire{Revision: draftRevision, GitCommit: draftCommit, SourceDigest: draftDigest}
 	var actorUser, actorJSON string
@@ -329,7 +359,7 @@ func (h *PageHandler) reviewDraftCandidate(w http.ResponseWriter, r *http.Reques
 			blocked(reviewBlockerBuildMissing, "The current draft revision has no ready build.")
 		}
 	}
-	return comparison, true
+	return draftSpec, true
 }
 
 // reviewRetainedCandidate fills in retained publication `version` as the
@@ -446,7 +476,13 @@ func (h *PageHandler) reviewHasReadyBuildElsewhere(ctx context.Context, page str
 // routine, and the routine no longer resolves in this workspace. Neither is
 // evidence of agreement, and rendering either as `unchanged` is the defect
 // this state exists to prevent.
-func (h *PageHandler) reviewRoutines(ctx context.Context, ws, specJSON, checksJSON string) ([]reviewRoutineWire, error) {
+//
+// candidateSpec is the document being published — empty when there is no
+// candidate — and its routines are the ones flagged `in_candidate`.
+// contextSpec adds rows worth showing that are not part of the fence; it is
+// the live definition when there is no candidate at all, so a Page without a
+// draft still shows routine drift.
+func (h *PageHandler) reviewRoutines(ctx context.Context, ws, candidateSpec, contextSpec, checksJSON string) ([]reviewRoutineWire, error) {
 	published := map[string]string{}
 	if checksJSON != "" {
 		var checks pageRoutineChecks
@@ -456,35 +492,21 @@ func (h *PageHandler) reviewRoutines(ctx context.Context, ws, specJSON, checksJS
 			}
 		}
 	}
-	declared := map[string]bool{}
-	if specJSON != "" {
-		var doc pages.Document
-		if err := json.Unmarshal([]byte(specJSON), &doc); err == nil {
-			for _, panel := range doc.Spec.Panels {
-				for _, action := range panel.Actions {
-					if action.Kind == pages.ActionCall && action.Routine != "" {
-						declared[action.Routine] = true
-					}
-				}
-			}
-		}
-	}
-	names := make([]string, 0, len(published)+len(declared))
+	candidate := pageDeclaredRoutines(candidateSpec)
+	context := pageDeclaredRoutines(contextSpec)
+	names := make([]string, 0, len(published)+len(candidate)+len(context))
 	seen := map[string]bool{}
-	for name := range published {
-		if !seen[name] {
-			seen[name], names = true, append(names, name)
-		}
-	}
-	for name := range declared {
-		if !seen[name] {
-			seen[name], names = true, append(names, name)
+	for _, set := range []map[string]bool{published2set(published), candidate, context} {
+		for name := range set {
+			if !seen[name] {
+				seen[name], names = true, append(names, name)
+			}
 		}
 	}
 	sort.Strings(names)
 	out := make([]reviewRoutineWire, 0, len(names))
 	for _, name := range names {
-		row := reviewRoutineWire{Routine: name, State: "unknown"}
+		row := reviewRoutineWire{Routine: name, State: "unknown", InCandidate: candidate[name]}
 		if digest, ok := published[name]; ok && digest != "" {
 			value := digest
 			row.PublishedDigest = &value
@@ -509,9 +531,68 @@ func (h *PageHandler) reviewRoutines(ctx context.Context, ws, specJSON, checksJS
 	return out, nil
 }
 
+// pageDeclaredRoutines is the set of routines a Page definition's `call`
+// actions name. An unparseable document declares nothing rather than failing
+// the whole review: the reviewer still needs the rest of the snapshot.
+func pageDeclaredRoutines(specJSON string) map[string]bool {
+	out := map[string]bool{}
+	if specJSON == "" {
+		return out
+	}
+	var doc pages.Document
+	if err := json.Unmarshal([]byte(specJSON), &doc); err != nil {
+		return out
+	}
+	for _, panel := range doc.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind == pages.ActionCall && action.Routine != "" {
+				out[action.Routine] = true
+			}
+		}
+	}
+	return out
+}
+
+func published2set(m map[string]string) map[string]bool {
+	out := make(map[string]bool, len(m))
+	for name := range m {
+		out[name] = true
+	}
+	return out
+}
+
 // reviewActor turns the stored id snapshot into a kind and an id, and resolves
 // a label only when a real current row answers for it.
 func (h *PageHandler) reviewActor(ctx context.Context, ws, actorUser, actorJSON string) reviewActorWire {
+	actor := reviewActorKind(actorUser, actorJSON)
+	if actor.ID == "" {
+		return actor
+	}
+	lookup := func(query string, args ...any) string {
+		var label string
+		if err := h.db.QueryRowContext(ctx, query, args...).Scan(&label); err != nil {
+			return ""
+		}
+		return label
+	}
+	switch actor.Kind {
+	case "user":
+		actor.Label = lookup(`SELECT COALESCE(email,'') FROM users WHERE id=?`, actor.ID)
+	case "agent":
+		actor.Label = lookup(`SELECT COALESCE(slug,'') FROM agents WHERE id=? AND workspace_id=?`, actor.ID, ws)
+	case "crew":
+		actor.Label = lookup(`SELECT COALESCE(slug,'') FROM crews WHERE id=? AND workspace_id=?`, actor.ID, ws)
+	}
+	return actor
+}
+
+// reviewActorKind is the classification alone, with no directory read.
+//
+// A list endpoint wants the kind for every row and the label for none of them;
+// resolving one is a query per row (51 on a page of history) whose result is
+// then discarded. Splitting it keeps the single definition of what the stored
+// shapes mean while letting a caller pay only for what it renders.
+func reviewActorKind(actorUser, actorJSON string) reviewActorWire {
 	var stored struct {
 		UserID      string `json:"user_id"`
 		WorkspaceID string `json:"workspace_id"`
@@ -522,24 +603,17 @@ func (h *PageHandler) reviewActor(ctx context.Context, ws, actorUser, actorJSON 
 	if actorJSON != "" {
 		_ = json.Unmarshal([]byte(actorJSON), &stored)
 	}
-	lookup := func(query string, args ...any) string {
-		var label string
-		if err := h.db.QueryRowContext(ctx, query, args...).Scan(&label); err != nil {
-			return ""
-		}
-		return label
-	}
 	switch {
 	case stored.UserID != "" || actorUser != "":
 		id := stored.UserID
 		if id == "" {
 			id = actorUser
 		}
-		return reviewActorWire{Kind: "user", ID: id, Label: lookup(`SELECT COALESCE(email,'') FROM users WHERE id=?`, id)}
+		return reviewActorWire{Kind: "user", ID: id}
 	case stored.AgentID != "":
-		return reviewActorWire{Kind: "agent", ID: stored.AgentID, Label: lookup(`SELECT COALESCE(slug,'') FROM agents WHERE id=? AND workspace_id=?`, stored.AgentID, ws)}
+		return reviewActorWire{Kind: "agent", ID: stored.AgentID}
 	case stored.CrewID != "":
-		return reviewActorWire{Kind: "crew", ID: stored.CrewID, Label: lookup(`SELECT COALESCE(slug,'') FROM crews WHERE id=? AND workspace_id=?`, stored.CrewID, ws)}
+		return reviewActorWire{Kind: "crew", ID: stored.CrewID}
 	}
 	return reviewActorWire{Kind: "unknown", ID: ""}
 }

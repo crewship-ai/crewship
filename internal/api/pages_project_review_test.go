@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -438,11 +439,15 @@ func reviewDraftWithRoutines(t *testing.T, h *PageHandler, slug string, routines
 // against the draft's own build. Publishing through the handler cannot produce
 // the gaps this test is about — a real publication records every routine it
 // resolved — and the gaps are exactly what a retained record can have.
+//
+// It records the LIVE Page definition rather than the draft's, so the draft
+// stays a candidate: a publication carrying the draft's own declaration and
+// digest is what "already live" means, and then there is nothing to fence.
 func reviewSeedPublication(t *testing.T, h *PageHandler, slug, checks string) {
 	t.Helper()
 	var page, digest, commit, spec string
 	var revision int64
-	if err := h.db.QueryRow(`SELECT p.id,d.revision,d.source_digest,d.git_commit,d.spec_json FROM page_project_drafts d JOIN pages p ON p.id=d.page_id WHERE p.slug=?`, slug).Scan(&page, &revision, &digest, &commit, &spec); err != nil {
+	if err := h.db.QueryRow(`SELECT p.id,d.revision,d.source_digest,d.git_commit,p.spec_json FROM page_project_drafts d JOIN pages p ON p.id=d.page_id WHERE p.slug=?`, slug).Scan(&page, &revision, &digest, &commit, &spec); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.Exec(`INSERT INTO page_project_builds(id,page_id,source_revision,source_digest,state,artifact_digest,created_at) VALUES('bld-review',?,?,?,'ready',?, '2026-09-10T00:00:00Z')`, page, revision, digest, digest); err != nil {
@@ -869,12 +874,15 @@ func TestPageProjectReviewRetainedPublicationFencesItsOwnRoutines(t *testing.T) 
 	})
 }
 
-// reviewFenceFromSnapshot turns a retained snapshot's routines into the map a
-// rollback publication must send. Every row is a fence key in that mode.
+// reviewFenceFromSnapshot builds expected_routine_digests the way a client
+// must: from the rows the server flagged `in_candidate`, and no others.
 func reviewFenceFromSnapshot(t *testing.T, snapshot reviewSnapshotWire) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	for _, row := range snapshot.Routines {
+		if !row.InCandidate {
+			continue
+		}
 		if row.CurrentDigest == nil {
 			t.Fatalf("routine %q has no current definition to fence on", row.Routine)
 		}
@@ -898,5 +906,351 @@ func reviewSaveDefinition(t *testing.T, h *PageHandler, ws, user, slug string, e
 	h.PutProject(w, r)
 	if w.Code != 200 {
 		t.Fatalf("save draft definition: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestPageProjectReviewDroppedRoutineIsNotFenced — F1. A draft that removes a
+// `call` action the live publication had still SHOWS that routine (a reviewer
+// should see it being dropped) but must not offer it as a fence key: the
+// server rebuilds the map from the candidate alone, so sending the dropped
+// routine is a key it does not have, and the publication is refused naming a
+// routine nobody moved. Refetching returns the same snapshot, so a client that
+// cannot tell the two apart can never publish that draft.
+//
+// Against the pre-`in_candidate` code the fence built here carries two keys
+// and the publish below returns 409.
+func TestPageProjectReviewDroppedRoutineIsNotFenced(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	for _, q := range []string{
+		`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-restart', ?, 'ops-restart', 'Restart', '{"steps":[]}', 'h1')`,
+		`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-drain', ?, 'ops-drain', 'Drain', '{"steps":[1]}', 'h2')`,
+	} {
+		if _, err := h.db.Exec(q, ws); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// Publication 1 calls both routines.
+	reviewSaveDefinition(t, h, ws, user, "health", 1, projectTestSource(), reviewDraftWithRoutines(t, h, "health", "ops-restart", "ops-drain"))
+	build := reviewBuildRevision(t, h, ws, user, 2)
+	zero, one := int64(0), int64(1)
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: build, ExpectedRevision: 2, ExpectedPublication: &zero, ReviewedCode: true,
+		ExpectedRoutineDigests: map[string]string{"ops-restart": pageRoutineDigest(`{"steps":[]}`), "ops-drain": pageRoutineDigest(`{"steps":[1]}`)}}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// The draft drops ops-restart.
+	source := projectTestSource()
+	source.Files[3].Content = "// dropped the restart action\n"
+	reviewSaveDefinition(t, h, ws, user, "health", 2, source, reviewDraftWithRoutines(t, h, "health", "ops-drain"))
+	next := reviewBuildRevision(t, h, ws, user, 3)
+
+	_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	dropped := reviewRoutineRow(t, snapshot, "ops-restart")
+	if dropped.InCandidate {
+		t.Fatalf("a routine the draft dropped is offered as a fence key: %+v", dropped)
+	}
+	if dropped.PublishedDigest == nil || dropped.CurrentDigest == nil || dropped.State != "unchanged" {
+		t.Fatalf("the dropped routine stopped being visible to the reviewer: %+v", dropped)
+	}
+	kept := reviewRoutineRow(t, snapshot, "ops-drain")
+	if !kept.InCandidate || kept.CurrentDigest == nil {
+		t.Fatalf("the candidate's own routine is not in the fence: %+v", kept)
+	}
+
+	// The publication a browser would send: every in_candidate row, nothing else.
+	fence := reviewFenceFromSnapshot(t, snapshot)
+	if len(fence) != 1 {
+		t.Fatalf("fence key set = %v, want only ops-drain", fence)
+	}
+	w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: next, ExpectedRevision: 3, ExpectedPublication: &one, ReviewedCode: true,
+		ExpectedDefinitionDigest: snapshot.Baseline.DefinitionDigest, ExpectedRoutineDigests: fence})
+	if w.Code != 200 {
+		t.Fatalf("a draft that dropped a routine is unpublishable: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestPageProjectReviewUnresolvedRoutineBlocksPublication — F2. A candidate
+// calling a soft-deleted routine used to report `unknown` with a ready build
+// and no blocker, i.e. "publishing is fine", and publishing then failed 422.
+func TestPageProjectReviewUnresolvedRoutineBlocksPublication(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if _, err := h.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-restart', ?, 'ops-restart', 'Restart', '{"steps":[]}', 'h1')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	reviewSaveDefinition(t, h, ws, user, "health", 1, projectTestSource(), reviewDraftWithRoutines(t, h, "health", "ops-restart"))
+	build := reviewBuildRevision(t, h, ws, user, 2)
+
+	_, before := reviewCall(t, h, ws, user, "OWNER", "health")
+	if _, ok := reviewBlockers(before)[reviewBlockerRoutineUnresolved]; ok {
+		t.Fatalf("a resolvable routine reported as unresolved: %+v", before.Blockers)
+	}
+	if _, err := h.db.Exec(`UPDATE pipelines SET deleted_at='2026-09-10T00:00:00Z' WHERE id='pl-restart'`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	row := reviewRoutineRow(t, snapshot, "ops-restart")
+	if row.CurrentDigest != nil || row.State != "unknown" || !row.InCandidate {
+		t.Fatalf("vanished routine: %+v", row)
+	}
+	message, ok := reviewBlockers(snapshot)[reviewBlockerRoutineUnresolved]
+	if !ok {
+		t.Fatalf("missing routine_unresolved: %+v", snapshot.Blockers)
+	}
+	if !strings.Contains(message, "ops-restart") {
+		t.Fatalf("blocker does not name the routine: %q", message)
+	}
+	if snapshot.Candidate == nil || snapshot.Candidate.Build == nil || snapshot.Candidate.Build.State != "ready" {
+		t.Fatalf("the build is still ready, and the snapshot must still say so: %+v", snapshot.Candidate)
+	}
+	// And publishing is in fact refused — the blocker was telling the truth —
+	// with a sentence naming the routine and no driver text in it. The
+	// reference check ahead of the digest pass is what answers here; the
+	// digest pass answers when a routine vanishes after that check, and both
+	// now name the routine instead of quoting the driver.
+	zero := int64(0)
+	w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: build, ExpectedRevision: 2, ExpectedPublication: &zero, ReviewedCode: true})
+	if w.Code < 400 || w.Code >= 500 {
+		t.Fatalf("publish with a vanished routine: %d %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body.Error, "sql:") || !strings.Contains(body.Error, "ops-restart") {
+		t.Fatalf("refusal leaks driver text or omits the routine: %q", body.Error)
+	}
+}
+
+// TestPageRoutineDigestsInReportsTheMissingRoutine — the digest pass must hand
+// its caller the routine's NAME, not a wrapped driver error. `sql: no rows in
+// result set` was reaching the wire through err.Error().
+func TestPageRoutineDigestsInReportsTheMissingRoutine(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if _, err := h.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-restart', ?, 'ops-restart', 'Restart', '{"steps":[]}', 'h1')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	var doc pages.Document
+	if err := json.Unmarshal([]byte(reviewDraftWithRoutines(t, h, "health", "ops-restart")), &doc); err != nil {
+		t.Fatal(err)
+	}
+	digests, unresolved, err := pageRoutineDigestsIn(context.Background(), h.db, ws, &doc)
+	if err != nil || unresolved != "" || digests["ops-restart"] != pageRoutineDigest(`{"steps":[]}`) {
+		t.Fatalf("resolvable routine: %v %q %v", err, unresolved, digests)
+	}
+	if _, err := h.db.Exec(`UPDATE pipelines SET deleted_at='2026-09-10T00:00:00Z' WHERE id='pl-restart'`); err != nil {
+		t.Fatal(err)
+	}
+	digests, unresolved, err = pageRoutineDigestsIn(context.Background(), h.db, ws, &doc)
+	if err != nil {
+		t.Fatalf("a vanished routine is a reviewable fact, not an error: %v", err)
+	}
+	if unresolved != "ops-restart" || digests != nil {
+		t.Fatalf("unresolved = %q, digests = %v", unresolved, digests)
+	}
+	if message := pageUnresolvedRoutineMessage(unresolved); !strings.Contains(message, "ops-restart") || strings.Contains(message, "sql:") {
+		t.Fatalf("message: %q", message)
+	}
+}
+
+// TestPageProjectPublishStaleRevisionReportsTheDraft — F4. Publishing a
+// revision the draft has moved past must answer `conflict:"draft"`. The
+// routine map was built for a different document, so checking routines first
+// answered `conflict:"routines"` naming routines nobody touched.
+func TestPageProjectPublishStaleRevisionReportsTheDraft(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if _, err := h.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-restart', ?, 'ops-restart', 'Restart', '{"steps":[]}', 'h1')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	reviewSaveDefinition(t, h, ws, user, "health", 1, projectTestSource(), reviewDraftWithRoutines(t, h, "health", "ops-restart"))
+	stale := reviewBuildRevision(t, h, ws, user, 2)
+	// The draft moves on, and its routines move with it.
+	source := projectTestSource()
+	source.Files[3].Content = "// the draft moved on\n"
+	reviewSaveDefinition(t, h, ws, user, "health", 2, source, reviewDraftWithRoutines(t, h, "health"))
+	reviewBuildRevision(t, h, ws, user, 3)
+
+	// The caller still holds revision 2's build and the current snapshot's
+	// (now empty) routine map.
+	_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	zero := int64(0)
+	w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: stale, ExpectedRevision: 2, ExpectedPublication: &zero, ReviewedCode: true,
+		ExpectedDefinitionDigest: snapshot.Baseline.DefinitionDigest, ExpectedRoutineDigests: reviewFenceFromSnapshot(t, snapshot)})
+	if w.Code != 409 {
+		t.Fatalf("stale revision published: %d %s", w.Code, w.Body.String())
+	}
+	kind, routines := publishConflict(t, w)
+	if kind != "draft" {
+		t.Fatalf("conflict = %q with routines %v, want draft (%s)", kind, routines, w.Body.String())
+	}
+}
+
+// TestPageProjectReviewWithdrawnPublicationIsNotAlreadyLive — a withdrawn
+// publication means nothing is serving, so a draft identical to it is a real
+// candidate and republishing it is the recovery path. Calling that
+// `candidate_matches_live` nulls the candidate, empties the fence, and the
+// republication is then refused as a routines conflict.
+func TestPageProjectReviewWithdrawnPublicationIsNotAlreadyLive(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if _, err := h.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-restart', ?, 'ops-restart', 'Restart', '{"steps":[]}', 'h1')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	reviewSaveDefinition(t, h, ws, user, "health", 1, projectTestSource(), reviewDraftWithRoutines(t, h, "health", "ops-restart"))
+	build := reviewBuildRevision(t, h, ws, user, 2)
+	zero, one := int64(0), int64(1)
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: build, ExpectedRevision: 2, ExpectedPublication: &zero, ReviewedCode: true,
+		ExpectedRoutineDigests: map[string]string{"ops-restart": pageRoutineDigest(`{"steps":[]}`)}}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	// While it is running, the identical draft is correctly "already live".
+	_, live := reviewCall(t, h, ws, user, "OWNER", "health")
+	if _, ok := reviewBlockers(live)[reviewBlockerMatchesLive]; !ok || live.Candidate != nil {
+		t.Fatalf("a live identical draft: %+v %+v", live.Candidate, live.Blockers)
+	}
+
+	body, _ := json.Marshal(map[string]any{"expected_publication": 1})
+	r := pagesRequest(t, "POST", "/", ws, user, "OWNER", string(body))
+	r.SetPathValue("slug", "health")
+	w := httptest.NewRecorder()
+	h.UnpublishProject(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+
+	_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	if snapshot.Baseline.Published {
+		t.Fatal("baseline still reports the withdrawn application as published")
+	}
+	if _, ok := reviewBlockers(snapshot)[reviewBlockerMatchesLive]; ok {
+		t.Fatalf("a withdrawn publication reported as already live: %+v", snapshot.Blockers)
+	}
+	if snapshot.Candidate == nil || snapshot.Candidate.Revision != 2 {
+		t.Fatalf("no candidate to republish after withdrawal: %+v", snapshot.Candidate)
+	}
+	row := reviewRoutineRow(t, snapshot, "ops-restart")
+	if !row.InCandidate {
+		t.Fatalf("the candidate's routine is missing from the fence: %+v", row)
+	}
+	fence := reviewFenceFromSnapshot(t, snapshot)
+	if len(fence) != 1 {
+		t.Fatalf("fence = %v, want ops-restart", fence)
+	}
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: build, ExpectedRevision: 2, ExpectedPublication: &one, ReviewedCode: true,
+		ExpectedDefinitionDigest: snapshot.Baseline.DefinitionDigest, ExpectedRoutineDigests: fence}); w.Code != 200 {
+		t.Fatalf("republication after withdrawal: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestPageWireHasProjectIsNotHasApplication — `has_application` means "a
+// publication is running". A Page whose application source has never shipped
+// reports it false, which is exactly the first-publication case the review
+// screen exists for, so a client keying off it alone never opens the review.
+// `has_project` answers the other question, on both the detail and the list.
+func TestPageWireHasProjectIsNotHasApplication(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	pagesCreate(t, h, ws, user, "plain")
+
+	detail := func(slug string) (bool, bool) {
+		t.Helper()
+		doc := pagesGet(t, h, ws, user, "OWNER", slug)
+		project, okProject := doc["has_project"].(bool)
+		application, okApplication := doc["has_application"].(bool)
+		if !okProject || !okApplication {
+			t.Fatalf("%s: has_project/has_application missing from the page wire: %v", slug, doc)
+		}
+		return project, application
+	}
+	listed := func(slug string) (bool, bool) {
+		t.Helper()
+		r := pagesRequest(t, "GET", "/api/v1/pages", ws, user, "OWNER", "")
+		w := httptest.NewRecorder()
+		h.List(w, r)
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
+			t.Fatalf("list is not JSON: %v — %s", err, w.Body.String())
+		}
+		for _, row := range rows {
+			if row["slug"] != slug {
+				continue
+			}
+			project, okProject := row["has_project"].(bool)
+			application, okApplication := row["has_application"].(bool)
+			if !okProject || !okApplication {
+				t.Fatalf("%s: has_project/has_application missing from the list row: %v", slug, row)
+			}
+			return project, application
+		}
+		t.Fatalf("%s missing from the list", slug)
+		return false, false
+	}
+
+	for _, stage := range []struct {
+		name                     string
+		slug                     string
+		wantProject, wantAppLive bool
+	}{
+		{"no source at all", "plain", false, false},
+		{"draft awaiting its first publication", "health", true, false},
+	} {
+		if stage.slug == "health" {
+			if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+				t.Fatal(w.Body.String())
+			}
+		}
+		project, application := detail(stage.slug)
+		if project != stage.wantProject || application != stage.wantAppLive {
+			t.Errorf("%s: detail has_project=%v has_application=%v, want %v/%v", stage.name, project, application, stage.wantProject, stage.wantAppLive)
+		}
+		if listProject, listApplication := listed(stage.slug); listProject != project || listApplication != application {
+			t.Errorf("%s: list says %v/%v, detail says %v/%v", stage.name, listProject, listApplication, project, application)
+		}
+	}
+
+	// Published: both true.
+	build := reviewBuildRevision(t, h, ws, user, 1)
+	zero := int64(0)
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: build, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if project, application := detail("health"); !project || !application {
+		t.Errorf("published: has_project=%v has_application=%v, want both true", project, application)
+	}
+	if project, application := listed("health"); !project || !application {
+		t.Errorf("published, listed: has_project=%v has_application=%v, want both true", project, application)
+	}
+
+	// Withdrawn: the source is still there, the application is not running.
+	body, _ := json.Marshal(map[string]any{"expected_publication": 1})
+	r := pagesRequest(t, "POST", "/", ws, user, "OWNER", string(body))
+	r.SetPathValue("slug", "health")
+	w := httptest.NewRecorder()
+	h.UnpublishProject(w, r)
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if project, application := detail("health"); !project || application {
+		t.Errorf("withdrawn: has_project=%v has_application=%v, want true/false", project, application)
+	}
+	if project, application := listed("health"); !project || application {
+		t.Errorf("withdrawn, listed: has_project=%v has_application=%v, want true/false", project, application)
 	}
 }

@@ -427,6 +427,7 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 		Routines []struct {
 			Routine       string  `json:"routine"`
 			CurrentDigest *string `json:"current_digest"`
+			InCandidate   bool    `json:"in_candidate"`
 		} `json:"routines"`
 	}
 	if err := pageGetJSON(pageReviewEndpoint(slug, rollbackVersion), &snapshot); err != nil {
@@ -439,38 +440,22 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 		fence.Definition = snapshot.Baseline.DefinitionDigest
 	}
 	if !explicitRoutines {
-		// Rollback: `?publication=N` reports exactly the routines of the
-		// archived spec the server will recompute from, so every row is a
-		// fence key and no client-side derivation is involved at all.
-		//
-		// Publish: the draft snapshot's routines are a UNION of the
-		// candidate's and the live publication's, so a `call` action the draft
-		// has since dropped would still appear. Sending it would be a key the
-		// server's map does not have — a 409 naming a routine nobody moved —
-		// so the draft path intersects with what the draft actually declares.
-		names := make([]string, 0, len(snapshot.Routines))
+		// `in_candidate` is the server saying which rows belong in the fence:
+		// exactly the routines the document being published declares. The list
+		// is a union, so it also carries routines the live publication called
+		// and this candidate drops — sending one of those is a key the
+		// server's map does not have, and the publication is refused naming a
+		// routine nobody moved. This used to be worked around here by
+		// re-reading the draft and intersecting, which is a second guess at
+		// the server's own choice of candidate document; the flag replaced it.
 		for _, row := range snapshot.Routines {
-			names = append(names, row.Routine)
-		}
-		if rollbackVersion == 0 {
-			declared, err := pageCandidateRoutines(slug)
-			if err != nil {
-				return fence, err
+			if !row.InCandidate {
+				continue
 			}
-			names = declared
-		}
-		current := map[string]string{}
-		for _, row := range snapshot.Routines {
-			if row.CurrentDigest != nil {
-				current[row.Routine] = *row.CurrentDigest
+			if row.CurrentDigest == nil {
+				return fence, fmt.Errorf("routine %q has no current definition; restore it or remove the action before publishing", row.Routine)
 			}
-		}
-		for _, name := range names {
-			digest, ok := current[name]
-			if !ok {
-				return fence, fmt.Errorf("routine %q has no current definition in the review snapshot; resolve it or pass --expected-routine-digest %s=<sha256>", name, name)
-			}
-			fence.Routines[name] = digest
+			fence.Routines[row.Routine] = *row.CurrentDigest
 		}
 	}
 	out := cmd.ErrOrStderr()
@@ -485,33 +470,6 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 		fmt.Fprintf(out, "Fencing on routine %s sha256 %s\n", name, fence.Routines[name])
 	}
 	return fence, nil
-}
-
-// pageCandidateRoutines lists the `call` routines the current draft declares.
-//
-// Only the draft path needs this. A rollback's key set comes from
-// `project review --publication N`, which reads the archived spec the server
-// itself will recompute from; walking the publication receipts and the source
-// history to rebuild that document here would be a second implementation of
-// the server's choice, free to drift from it.
-func pageCandidateRoutines(slug string) ([]string, error) {
-	var payload struct {
-		Definition pages.Document `json:"definition"`
-	}
-	if err := pageGetJSON("/api/v1/pages/"+pagePathEscape(slug)+"/project", &payload); err != nil {
-		return nil, err
-	}
-	seen := map[string]bool{}
-	names := []string{}
-	for _, panel := range payload.Definition.Spec.Panels {
-		for _, action := range panel.Actions {
-			if action.Kind == pages.ActionCall && action.Routine != "" && !seen[action.Routine] {
-				seen[action.Routine] = true
-				names = append(names, action.Routine)
-			}
-		}
-	}
-	return names, nil
 }
 
 func pageReviewEndpoint(slug string, publication int64) string {

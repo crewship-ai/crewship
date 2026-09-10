@@ -220,6 +220,16 @@ data:
 }
 ```
 
+Every page object — here and in the list — also carries two booleans about its
+custom application, and they answer different questions. `has_project` is true
+when the page has application source at all, published or not. `has_application`
+is true only while a publication is actually running. A page awaiting its first
+publication has `has_project: true` and `has_application: false`; that is the
+case the [publication review](#review-a-publication-candidate) exists for, so a
+client deciding whether to offer the review reads `has_project`. A withdrawn
+application leaves `has_project` true and `has_application` false as well.
+Neither field is omitted when false.
+
 A panel owned by a crew the caller does not belong to arrives as a **sealed
 placeholder**: it keeps its id, schema and span so the page has the same shape
 for everyone, and carries no data and no provenance. This is decided server-side
@@ -1202,13 +1212,17 @@ common errors.
 **Response 200:** `{issued_at, candidate, baseline, routines, capabilities,
 blockers, initial_publication}`. `candidate` is the current draft revision with
 its actor and the build of exactly that revision, and is `null` when there is
-no draft or the draft is already live.
+no draft, or when the draft is identical to a publication that is still
+running. A withdrawn publication is not running, so an identical draft is
+still a candidate: republishing it is how a withdrawal is undone.
 
 Pass `publication=<version>` to ask what publishing that retained version
 would be fenced on instead. `candidate` then describes that publication's
 archived source — its source revision, checkpoint, digest, the publisher it
 recorded and when — with the build it recorded, and `routines` is computed
-from its archived Page definition. That is exactly the key set a
+from its archived Page definition. `candidate.actor` and `candidate.created_at`
+mean the source revision's author and save time in draft mode, and the
+publication's publisher and publication time in this one. That is exactly the key set a
 `rollback_version` publication must send as `expected_routine_digests`; the
 draft's routines are a different document's routines, and no client can
 recompute the current digest of each one. `baseline` is identical in both
@@ -1221,12 +1235,22 @@ sha256 of the live Page definition and is the value a publication is fenced on.
 `baseline.source_available:false` means the retained source for the live
 publication cannot be read back — a missing comparison, never "no changes" —
 and `source_unavailable_reason` says why in a sentence.
-`routines[].state` is `unchanged`, `changed` or `unknown`; `unknown` covers a
-publication that recorded no digest for a routine and a routine that no longer
-resolves, and is never rendered as agreement. `blockers[].code` is one of
+`routines` is a union: the candidate's own `call` routines and the ones the
+live publication recorded, so a routine being dropped stays visible.
+`routines[].in_candidate` marks the rows that belong in a publication's
+`expected_routine_digests` — the candidate declares them, so the server
+rebuilds and compares exactly those. Sending a row without the flag is a key
+the server does not have and is refused as a `routines` conflict naming a
+routine nobody moved. `routines[].state` is `unchanged`, `changed` or
+`unknown`; `unknown` covers a publication that recorded no digest for a
+routine and a routine that no longer resolves, and is never rendered as
+agreement. `blockers[].code` is one of
 `no_candidate`, `candidate_matches_live`, `build_missing`, `build_failed`,
-`build_stale`, `baseline_unavailable`, `definition_moved`, `not_permitted` and
-`storage_unavailable`. Missing build storage or a missing runtime origin is a
+`build_stale`, `baseline_unavailable`, `routine_unresolved`,
+`definition_moved`, `not_permitted` and `storage_unavailable`.
+`routine_unresolved` is emitted for every `in_candidate` routine with no
+current digest: publishing such a candidate is refused, so the review says so
+rather than reporting the routine as merely `unknown` beside a ready build. Missing build storage or a missing runtime origin is a
 blocker, not a 503: a reviewer who cannot publish can still read the snapshot.
 **Statuses:** `400` non-positive or malformed `publication`, plus common
 errors. Responses are `no-store`.
