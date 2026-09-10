@@ -9,8 +9,8 @@ vi.mock("../use-application-actions", () => ({ useApplicationActions: () => ({ h
 import { PageApplicationView } from "../page-application"
 const props = { workspaceId: "ws", slug: "health", page: { slug: "health", panels: [] }, fallback: <p>Panel view</p> }
 function release(version: number): PageApplication { return { can_publish: true, publication: { version, build_id: String(version), source_revision: version, artifact_digest: "sha", git_commit: "git", created_at: "2026-09-08" }, artifact: { format: "crewship-page-preview/v1", javascript: `Release ${version}`, css: "", toolchain: "test" }, runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap" } }
-beforeEach(() => { state.query.isPending = false; state.query.data = release(1); state.query.isError = false; state.query.error = null })
-afterEach(cleanup)
+beforeEach(() => { vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 Chrome/130.0.0.0 Safari/537.36"); state.query.isPending = false; state.query.data = release(1); state.query.isError = false; state.query.error = null })
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 it("keeps the opened application until the reader explicitly loads a new publication", async () => {
   const { rerender } = render(<PageApplicationView {...props} />)
   expect(await screen.findByText("Release 1")).toBeTruthy()
@@ -85,3 +85,21 @@ it("shows panels on mismatched versions and opens only after metadata agrees", (
  expect(screen.getByText("Release 2")).toBeTruthy()
  expect(screen.queryByText("Panel view")).toBeNull()
 })
+
+ it.each([
+  ["Safari", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15"],
+  ["Firefox", "Mozilla/5.0 Gecko/20100101 Firefox/130.0"],
+  ["mobile Chrome", "Mozilla/5.0 (Linux; Android 14) Chrome/130.0.0.0 Mobile Safari/537.36"],
+ ])("shows panels immediately in %s, with pending or cached application metadata", (_name, userAgent) => {
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(userAgent)
+  state.query.isPending = true; state.query.data = null
+  const page = { ...props.page, has_application: true, publication_version: 1 }
+  const { rerender } = render(<PageApplicationView {...props} page={page} />)
+  expect(screen.getByText("Panel view")).toBeTruthy()
+  expect(screen.queryByText("Loading application…")).toBeNull()
+  state.query.isPending = false; state.query.data = release(1)
+  rerender(<PageApplicationView {...props} page={page} />)
+  expect(screen.getByText("Panel view")).toBeTruthy()
+  expect(screen.queryByTestId("application")).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent("desktop Chrome or Edge")
+ })
