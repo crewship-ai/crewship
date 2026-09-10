@@ -126,7 +126,7 @@ import {
 // `.type-page-meta` from the Pages register (`app/globals.css`). §9b.2 says
 // what the idiom IS; the register says how big it is, once.
 
-function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
+export function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
   return (
     <span className="type-page-label inline-flex items-center gap-1.5 text-foreground/70">
       <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />
@@ -135,12 +135,12 @@ function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children
   )
 }
 
-function CardAnswer({ children }: { children: React.ReactNode }) {
+export function CardAnswer({ children }: { children: React.ReactNode }) {
   return <span className="type-page-meta text-muted-foreground">{children}</span>
 }
 
 /** One label/answer line. Same idiom, one row deep. */
-function Fact({
+export function Fact({
   label,
   mono,
   children,
@@ -175,7 +175,7 @@ function Fact({
  * quietly rendered as a toast that scrolls away — a 403 on the ACL is an
  * answer the reader has to keep looking at, not a notification.
  */
-function Refusal({ children }: { children: React.ReactNode }) {
+export function Refusal({ children }: { children: React.ReactNode }) {
   return (
     <div
       role="alert"
@@ -214,7 +214,7 @@ function when(iso: string | null | undefined): string {
  */
 type RevokeTarget = { kind: "one"; grant: PageGrant } | { kind: "all"; subject: PageGrant; levels: number }
 
-function GrantRow({
+export function GrantRow({
   grant,
   onRevoke,
   onRevokeAll,
@@ -320,7 +320,7 @@ const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none " +
   "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
 
-function AccessCard({
+export function AccessCard({
   workspaceId,
   slug,
   panelIDs,
@@ -619,7 +619,7 @@ function AccessCard({
 
 // ── General information ────────────────────────────────────────────────────
 
-function VersionRow({
+export function VersionRow({
   version,
   onRollback,
   disabled,
@@ -671,7 +671,7 @@ function VersionRow({
   )
 }
 
-function GeneralCard({
+export function GeneralCard({
   workspaceId,
   slug,
   page,
@@ -839,7 +839,7 @@ export interface PageSettingsProps {
  * convenience banner: it is the only moment the value exists on this screen,
  * and dismissing it is the user saying they have it. It stays until they do.
  */
-function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
+export function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
   // Three states, not two. A clipboard write can be REFUSED — an insecure
   // origin, a denied permission — and the old version set "Copied" without
   // waiting for the promise, so the one moment this value exists on screen
@@ -888,7 +888,7 @@ function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
 }
 
 /** One public link, live or withdrawn. */
-function LinkRow({
+export function LinkRow({
   link,
   onRevoke,
 }: {
@@ -951,7 +951,7 @@ function LinkRow({
  * in a place they had no reason to look. It belongs next to Access, because
  * the two together are the whole answer to who reaches this page.
  */
-function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+export function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const { links, loading, refusal, error } = usePagePublicLinks(workspaceId, slug)
   const [minted, setMinted] = React.useState<string | null>(null)
   const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
@@ -1118,7 +1118,7 @@ function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string 
  * form therefore makes the panel a required choice rather than an optional
  * scope, which is the same shape the server enforces.
  */
-function WebhooksCard({
+export function WebhooksCard({
   workspaceId,
   slug,
   panelIDs,
@@ -1312,7 +1312,7 @@ function WebhooksCard({
  * page's, not the producer's — and the confirm says so, because a producer
  * pushing every thirty seconds does not make the history it wrote recoverable.
  */
-function DangerCard({
+export function DangerCard({
   workspaceId,
   slug,
   onDeleted,
@@ -1415,7 +1415,7 @@ function DangerCard({
  * a monitored page and imports a silent one should learn that here and not
  * from a panel that never fired.
  */
-function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+export function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const [busy, setBusy] = React.useState(false)
   const [refusal, setRefusal] = React.useState<string | null>(null)
 
