@@ -1,5 +1,7 @@
 "use client"
 
+import { routinePresetSummary } from "@/lib/routine-preset-summary"
+
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Plus, Trash2, Calendar, Power, PowerOff, Pencil } from "lucide-react"
 import {
@@ -210,7 +212,7 @@ export function RoutineSchedulesTab({
                     key={s.id}
                     id={`schedule-${s.id}`}
                     tabIndex={-1}
-                    className="grid scroll-mt-4 grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 target:bg-muted target:ring-1 target:ring-inset target:ring-border"
+                    className="grid scroll-mt-4 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3 target:bg-muted target:ring-1 target:ring-inset target:ring-border"
                   >
                     <div
                       className={cn(
@@ -278,6 +280,7 @@ export function RoutineSchedulesTab({
                           )}
                         </div>
                       )}
+                      <p className="truncate text-xs text-muted-foreground">{routinePresetSummary(s.inputs)}</p>
                       <button
                         type="button"
                         className="text-xs underline underline-offset-4"

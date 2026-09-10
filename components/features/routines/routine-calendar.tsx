@@ -1,5 +1,7 @@
 "use client"
 
+import { routinePresetSummary } from "@/lib/routine-preset-summary"
+
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Plus } from "lucide-react"
@@ -31,6 +33,7 @@ interface CalendarEvent {
   at: string
   slug: string
   name: string
+  inputs?: Record<string, unknown>
   status?: string
   outcome?: string
   pinned_version?: number | null
@@ -175,6 +178,9 @@ export function RoutineCalendar({
           </span>
           <span className="block truncate">{routine.name || event.name}</span>
           <span className="block text-muted-foreground">{label}</span>
+          {event.kind !== "run" && (
+            <span className="block truncate text-muted-foreground">{routinePresetSummary(event.inputs)}</span>
+          )}
         </span>
       </Link>
     )

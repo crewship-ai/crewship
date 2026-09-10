@@ -163,6 +163,13 @@ kvůli uložení. Změna živé verze je explicitní akce s oprávněním, ne ka
 
 ### 5.5 Kalendář a verze
 
+**Vstupní preset R7 ověřen na dev1 (2026-09-10):** souhrn je vidět u
+opakovaného i jednorázového plánu v detailu a kalendáři. Změna přes Edit inputs
+se promítla do obou míst; ověřeny prázdné vstupy, dlouhý text a detail při 390 px.
+Důkazy: [protokol R7](reports/r7-preset-visibility-2026-09-10.md). Toto splňuje
+část §5.5 o viditelnosti presetu; nenahrazuje přejímku DST/§9 ani uživatelovo
+potvrzení Edit/Test/Run.
+
 Schedule obsahuje společný seznam jednorázových startů i opakování a příslušnou
 kalendářní projekci. Prázdný stav „No schedules“ nesmí nastat při existujícím
 jednorázovém startu. Položka ukazuje ikonu, čas/zónu, vstupní preset a stav.
