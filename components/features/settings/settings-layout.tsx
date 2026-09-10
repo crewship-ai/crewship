@@ -317,7 +317,7 @@ export function SettingsLayout() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)]">
+    <div className="flex flex-col h-[calc(100dvh-48px)]">
       {/* Settings was the last page with no sub-bar: its identity lived in the
           global top bar as a "Settings / Profile" breadcrumb, which made it the
           one page whose top bar was not plain "Crewship". The identity belongs
@@ -332,7 +332,7 @@ export function SettingsLayout() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="h-7 w-7 -ml-1"
+              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2 coarse:after:content-['']"
               aria-label="Open settings navigation"
               onClick={() => setMobileNavOpen(true)}
             >

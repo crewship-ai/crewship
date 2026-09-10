@@ -5,11 +5,11 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
-  Activity, BookOpen, ChevronDown, GitBranch, HelpCircle, Key, LayoutDashboard,
-  LogOut, Menu, Network, Search, Settings, Shield, ShieldCheck, Store, User, X, Zap,
+  BookOpen, ChevronDown, GitBranch, HelpCircle,
+  LogOut, Menu, Search, User, X,
 } from "lucide-react"
 
-import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useRealtime } from "@/hooks/use-realtime"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,7 @@ import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useCrewsStatus } from "@/hooks/use-crews-status"
 import { useProvisioningStatus } from "@/hooks/use-provisioning-status"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
 import { CommandPalette } from "@/components/command-palette"
@@ -46,47 +47,23 @@ const GITHUB_URL = "https://github.com/crewship-ai/crewship"
 const SUPPORT_URL = "https://github.com/crewship-ai/crewship/issues"
 
 /**
- * Exported for the same reason as `navSections` in app-sidebar: the two nav
- * definitions are hand-kept twins, and a test that reads both is what stops a
- * surface from existing on the desktop rail and nowhere on a phone.
+ * The phone sheet carries the same unread count the desktop rail does — it was
+ * the one live signal in the product with no mobile home at all, since the
+ * bell that shows it sits inside `hidden md:flex` (#2483).
+ *
+ * It is a leaf rather than a hook in AppToolbar so the query only runs while
+ * the sheet is actually open: the toolbar renders on every route at every
+ * width, and the badge is never visible outside the sheet.
  */
-export const mobileNavSections = [
-  {
-    label: "Work",
-    items: [
-      { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      // Same entry as the desktop rail, same icon (CONCEPT_ICON.sessions).
-      // The mobile sheet otherwise picks its icons locally from lucide, but
-      // an icon that changes between breakpoints is the drift lib/concept-icons
-      // exists to prevent.
-      { title: "Chat", href: "/chat", icon: CONCEPT_ICON.sessions },
-      { title: "Crews & Agents", href: "/crews", icon: Network },
-    ],
-  },
-  {
-    label: "Configure",
-    items: [
-      { title: "Skills", href: "/skills", icon: Zap },
-      { title: "Marketplace", href: "/marketplace", icon: Store, disabled: true },
-      { title: "Credentials", href: "/credentials", icon: Key },
-    ],
-  },
-  {
-    label: "Monitor",
-    items: [
-      { title: "Runs", href: "/journal?tab=runs", icon: Activity },
-      { title: "Audit Log", href: "/settings?tab=audit", icon: Shield },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { title: "Settings", href: "/settings", icon: Settings },
-      { title: "Admin", href: "/admin", icon: ShieldCheck, adminOnly: true },
-    ],
-  },
-]
-
+function InboxUnreadBadge({ workspaceId }: { workspaceId: string | null }) {
+  const unread = useInboxUnreadCount(workspaceId)
+  if (!unread) return null
+  return (
+    <span className="ml-auto rounded-full bg-primary px-1.5 text-micro font-semibold text-primary-foreground">
+      {unread > 99 ? "99+" : unread}
+    </span>
+  )
+}
 
 // The top bar is the product's identity strip, not a page label — it says
 // "Crewship" and nothing else. There used to be a route -> title map here
@@ -279,7 +256,7 @@ export function AppToolbar() {
         </Button>
 
         {/* Mobile: search icon only */}
-        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Search" onClick={() => setCmdkOpen(true)}>
+        <Button variant="ghost" size="icon-sm" className="md:hidden coarse:h-12 coarse:w-12" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
         </Button>
 
@@ -314,7 +291,7 @@ export function AppToolbar() {
         {/* Personal settings live in the profile menu on every screen size. */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
+            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 coarse:min-h-12 hover:bg-accent transition-colors" aria-label="User menu">
               <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-7 w-7" textClassName="text-micro" />
               <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
@@ -374,7 +351,7 @@ export function AppToolbar() {
         </DropdownMenu>
 
         {/* Mobile: hamburger for main navigation */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" aria-label="Navigation" onClick={() => setMobileNavOpen(true)}>
+        <Button variant="ghost" size="icon" className="h-8 w-8 coarse:h-12 coarse:w-12 md:hidden" aria-label="Navigation" onClick={() => setMobileNavOpen(true)}>
           <Menu className="h-4 w-4" />
         </Button>
       </div>
@@ -382,7 +359,7 @@ export function AppToolbar() {
       {/* Mobile: main navigation bottom sheet */}
       {isMobile && (
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-          <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl max-h-[85vh] p-0">
+          <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl max-h-[85dvh] p-0">
             <div className="w-12 h-1.5 rounded-full bg-border mx-auto mt-3 mb-1" />
             <SheetHeader className="px-4 py-2 border-b">
               <div className="flex items-center justify-between">
@@ -396,21 +373,22 @@ export function AppToolbar() {
               </div>
             </SheetHeader>
             <div className="flex-1 overflow-y-auto py-2">
-              {mobileNavSections.map((section) => (
+              {navSections.map((section) => (
                 <div key={section.label}>
                   <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
                   {section.items
-                    // Admin console floor is ADMIN+ (#868/#893), matching the sidebar + backend.
-                    .filter((item) => !("adminOnly" in item && item.adminOnly && role !== "OWNER" && role !== "ADMIN"))
+                    .filter((item) => !isHiddenForRole(item, role))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
-                      const disabled = "disabled" in item && item.disabled
+                      // FUTURE is announced, not built — the row reads as a
+                      // destination but must not navigate anywhere.
+                      const disabled = item.badge === "FUTURE"
                       return (
                         <Link
                           key={item.href}
                           href={disabled ? "#" : item.href}
                           onClick={() => !disabled && setMobileNavOpen(false)}
-                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                          className={`w-full flex items-center gap-3 px-4 min-h-11 py-2.5 text-sm transition-colors ${
                             disabled
                               ? "text-muted-foreground-soft pointer-events-none"
                               : isActive
@@ -418,8 +396,9 @@ export function AppToolbar() {
                                 : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
                           }`}
                         >
-                          <item.icon className="h-4 w-4" />
-                          {item.title}
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{item.title}</span>
+                          {item.href === "/inbox" && <InboxUnreadBadge workspaceId={workspaceId} />}
                           {disabled && <span className="text-micro bg-muted px-1.5 rounded ml-auto">FUTURE</span>}
                         </Link>
                       )
@@ -427,7 +406,7 @@ export function AppToolbar() {
                 </div>
               ))}
             </div>
-            <div className="border-t p-4">
+            <div className="border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <div className="flex items-center gap-3">
                 <UserAvatar name={userName} email={userEmail} src={userAvatar} className="h-8 w-8" textClassName="text-micro" />
                 <div className="flex-1 min-w-0">
