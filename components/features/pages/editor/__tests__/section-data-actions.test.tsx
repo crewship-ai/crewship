@@ -25,7 +25,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/re
 
 import { EditorDataActionsSection } from "@/components/features/pages/editor/section-data-actions"
 import { derivePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
-import type { PageCapabilities } from "@/lib/pages/editor-contract"
+import { NO_PAGE_CAPABILITIES, type PageCapabilities } from "@/lib/pages/editor-contract"
 import type { WirePageDetail } from "@/hooks/use-page-grants"
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -91,14 +91,15 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 interface Harness {
-  page?: WirePageDetail
+  /** `null` stands for a detail read that failed — a 403 or a 500. */
+  page?: WirePageDetail | null
   capabilities?: Partial<PageCapabilities>
   /** Answer for `GET …/project` — the candidate's definition. */
   project?: Response
 }
 
 function mount(harness: Harness = {}) {
-  const page = harness.page ?? PAGE
+  const page = harness.page === undefined ? PAGE : harness.page
   const calls: Array<{ method: string; url: string }> = []
   const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -113,14 +114,16 @@ function mount(harness: Harness = {}) {
 
   const onNavigate = vi.fn()
   const onDirtyChange = vi.fn()
-  const capabilities: PageCapabilities = { ...derivePageCapabilities(page), ...harness.capabilities }
+  const capabilities: PageCapabilities = page
+    ? { ...derivePageCapabilities(page), ...harness.capabilities }
+    : { ...NO_PAGE_CAPABILITIES, ...harness.capabilities }
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   render(
     <QueryClientProvider client={qc}>
       <EditorDataActionsSection
         workspaceId="ws-1"
-        slug={page.slug!}
+        slug={page?.slug ?? "fleet-overview"}
         page={page}
         capabilities={capabilities}
         onNavigate={onNavigate}
@@ -302,5 +305,20 @@ describe("the banner says which definition this is", () => {
     expect(banner.textContent).toContain("could not be compared")
     expect(banner.textContent).toContain("Page project storage is not configured")
     expect(banner.textContent).not.toMatch(/no changes/i)
+  })
+})
+
+// ── 5. A Page that could not be read ───────────────────────────────────────
+
+describe("a failed detail read", () => {
+  it("says the Page could not be read instead of claiming it declares no panels", () => {
+    mount({ page: null })
+    const status = screen.getByRole("status")
+    expect(status.textContent).toContain("could not be read")
+    expect(status.textContent).toContain("not the same as none")
+    // F7: the old copy turned a 403 into a statement about the Page's content.
+    expect(document.body.textContent).not.toMatch(/declares no panels/)
+    expect(document.querySelectorAll("[data-slot='panel-data']")).toHaveLength(0)
+    expect(document.querySelector("[data-slot='live-definition-banner']")).toBeNull()
   })
 })

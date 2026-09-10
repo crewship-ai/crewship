@@ -31,6 +31,11 @@
  * is "we could not read it". A refused or failed read says which, in the
  * server's words: an empty list is a claim about history, and this section
  * only makes that claim when the server actually made it.
+ *
+ * Padding and the readable measure belong to the shell, which supplies them
+ * for all four sections. This one carries neither: a second `max-w-*` here
+ * would nest two measures and leave this section narrower than its
+ * neighbours, and its own padding would double the shell's.
  */
 
 import * as React from "react"
@@ -876,7 +881,7 @@ export function EditorHistorySection({
   }, [onDirtyChange])
 
   return (
-    <div data-slot="editor-section-history" className="flex w-full max-w-3xl flex-col gap-4">
+    <div data-slot="editor-section-history" className="flex w-full flex-col gap-4">
       <p className="type-page-meta text-muted-foreground">
         Three kinds of history, and each restores something different. None of them is a full
         restore of the Page: grants, producer tokens, public links and panel data are not part of

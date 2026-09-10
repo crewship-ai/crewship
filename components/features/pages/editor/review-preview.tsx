@@ -55,8 +55,17 @@ export function ReviewPreview({
           <h2 id="review-preview-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
             Candidate preview
           </h2>
+          {/* The label names the revision that is actually RUNNING, not the one
+              under review. When a stale build is mounted those are different,
+              and a header reading "Draft 7" over an artifact built from draft 5
+              invites the reviewer to treat what they see as the candidate. */}
           <p className="text-sm text-muted-foreground">
-            {candidateRevision === null ? "Candidate build" : `Draft ${candidateRevision}`} · actions are not executed here
+            {stale
+              ? `Showing draft ${job!.source_revision} — not the draft ${candidateRevision} under review`
+              : candidateRevision === null
+                ? "Candidate build"
+                : `Draft ${candidateRevision}`}{" "}
+            · actions are not executed here
           </p>
         </div>
         <Button variant="outline" className="min-h-11" onClick={onReturn}>

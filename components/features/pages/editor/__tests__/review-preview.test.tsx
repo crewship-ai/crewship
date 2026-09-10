@@ -25,8 +25,25 @@ import type { PagePreview } from "@/hooks/use-page-preview"
 const state = vi.hoisted(() => ({
   query: { data: null as PagePreview | null, isError: false, error: null as Error | null, refetch: vi.fn() },
   build: { isPending: false, error: null as Error | null, mutate: vi.fn() },
+  frameProps: [] as Array<Record<string, unknown>>,
 }))
 vi.mock("@/hooks/use-page-preview", () => ({ usePagePreview: () => state }))
+
+// A recording pass-through, NOT a stand-in: the real `PagePreviewFrame` still
+// renders, so `validatePreview` and `supportsPageApplications` are the ones
+// under test above, while the props it was handed stay inspectable. Asserting
+// a copy string and a sandbox value cannot detect an added `onRequest`; only
+// looking at the props can.
+vi.mock("@/components/features/pages/page-preview", async importActual => {
+  const actual = await importActual<typeof import("@/components/features/pages/page-preview")>()
+  return {
+    ...actual,
+    PagePreviewFrame: (props: Record<string, unknown>) => {
+      state.frameProps.push(props)
+      return React.createElement(actual.PagePreviewFrame, props as never)
+    },
+  }
+})
 
 import { ReviewPreview } from "@/components/features/pages/editor/review-preview"
 
@@ -46,6 +63,7 @@ beforeEach(() => {
   state.query.isError = false
   state.build.error = null
   state.build.isPending = false
+  state.frameProps = []
 })
 afterEach(cleanup)
 
@@ -121,11 +139,25 @@ it("does not execute an application in an unsupported browser", () => {
   expect(screen.getByRole("alert").textContent).toContain("desktop Chrome or Edge")
 })
 
-it("never hands the frame an action handler, in any of these states", () => {
+it("never hands the frame an action handler", () => {
   render(<ReviewPreview {...props} />)
   // A draft preview must not execute the application's actions. The runtime
   // refuses an unhandled request, and omitting the handler is what makes that
   // refusal the only possible outcome rather than a policy someone can flip.
+  // Asserted structurally: adding an `onRequest` must turn this red.
+  expect(state.frameProps).toHaveLength(1)
+  expect("onRequest" in state.frameProps[0]).toBe(false)
+  expect(state.frameProps[0].onRequest).toBeUndefined()
   expect(screen.getByText(/does not run the application's actions/)).toBeTruthy()
   expect(screen.getByTitle(FRAME_TITLE).getAttribute("sandbox")).toBe("allow-scripts")
+})
+
+it("labels a stale build by the revision that is actually running, not the one under review", () => {
+  state.query.data!.build = { id: "build-5", source_revision: 5, state: "ready" }
+  render(<ReviewPreview {...props} />)
+  // The frame IS mounted — an older artifact is still worth looking at — so
+  // the header must not call it the candidate.
+  expect(screen.getByTitle(FRAME_TITLE)).toBeTruthy()
+  expect(screen.getByText(/Showing draft 5 — not the draft 7 under review/)).toBeTruthy()
+  expect(screen.queryByText(/^Draft 7 ·/)).toBeNull()
 })

@@ -35,6 +35,11 @@
  * settings modal is deleted, and both are access-shaped: an export is the
  * whole Page leaving the workspace as a file, and a delete is the most
  * complete revocation there is.
+ *
+ * Padding and the readable measure belong to the shell, which supplies them
+ * for all four sections. This one carries neither: a second `max-w-*` here
+ * would nest two measures and leave this section narrower than its
+ * neighbours, and its own padding would double the shell's.
  */
 
 import * as React from "react"
@@ -88,7 +93,7 @@ export function EditorAccessSection({
   const canManage = capabilities.mayManageAccess
 
   return (
-    <div data-slot="editor-section-access" className="flex w-full max-w-3xl flex-col gap-4">
+    <div data-slot="editor-section-access" className="flex w-full flex-col gap-4">
       <p className="type-page-meta text-muted-foreground">
         {SAVE_EFFECT_NOTE["immediate-grant"]} Access changes take effect on their own — they are
         not part of a draft and not part of a publication.

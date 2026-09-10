@@ -4,20 +4,28 @@
  * Content — the first of the editor's four sections (PRD
  * `docs/prd/pages-settings-editor-review-proposal-2026-09-10.md` §3).
  *
- * The section has two faces and picks between them on one fact: whether this
- * Page carries a custom application. That is the whole of the branch, and it
- * is deliberately not a tab. The independent review's U02 is the acceptance
- * test for this file — *the ordinary panel Page must be a complete first-class
- * case, not Operations Lab with features switched off* — so an ordinary Page
- * renders no application tab, no publication checklist, no permanently
- * disabled Publish and no greyed-out application heading. There is nothing
- * here to switch off, because none of it is built for that Page in the first
- * place.
+ * The P0 row reads *"Content — panelový obsah, aplikační kontrola, metadata"*:
+ * all three, on every Page that has them. So this section is not a switch
+ * between two screens. Every Page shows its own identity, facts and panels;
+ * an application Page shows the review of a submitted change ABOVE them.
  *
- * What the ordinary Page does get is the complete thing: its identity, its
- * panels with their type, producer and freshness, one unambiguous way into the
- * editor this product actually has (the YAML document), and — last, quiet, and
- * honest about what it costs — the offer of a custom application.
+ * Getting that wrong once cost real function (F1): routing an application
+ * Page straight into the review left it with no way anywhere in the product to
+ * be renamed, described, or opened as a document, because the review surface
+ * has none of those.
+ *
+ * Whether the review appears at all is decided by the SERVER's review
+ * snapshot, never by `has_application` (F2). §5 rule 6: a candidate that does
+ * not exist, or one identical to what is live, does not open the review — the
+ * reader goes straight to Content, and is told in one line why there is
+ * nothing to review.
+ *
+ * The independent review's U02 is the other half of the acceptance test — *the
+ * ordinary panel Page must be a complete first-class case, not Operations Lab
+ * with features switched off* — so an ordinary Page renders no application
+ * tab, no publication checklist, no permanently disabled Publish and no
+ * greyed-out application heading. There is nothing here to switch off, because
+ * none of it is built for that Page in the first place.
  *
  * Two properties worth stating, because both are easy to undo:
  *
@@ -27,8 +35,13 @@
  *    nothing else. Hiding the panel list along with it was V01.
  *
  *  · **Nothing is fetched to draw a panel list.** The panels are already on
- *    `props.page`. The only extra read in this file is the application-hosting
- *    probe, and it is issued when somebody opens that offer, never on mount.
+ *    `props.page`. An ordinary Page issues no request at all from here: the
+ *    review snapshot is read only when the Page has an application, and the
+ *    application-hosting probe only when somebody opens that offer.
+ *
+ * Padding and the readable measure belong to the shell, which supplies them
+ * for all four sections. A second `max-w-*` here would nest two measures and
+ * make this section narrower than its neighbours for no reason.
  */
 
 import * as React from "react"
@@ -44,9 +57,10 @@ import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
 import { useQuery } from "@tanstack/react-query"
 import { ApiMutationError, useApiMutation } from "@/hooks/use-api-mutation"
-import { SAVE_EFFECT_NOTE } from "@/lib/pages/editor-contract"
+import { SAVE_EFFECT_NOTE, type ReviewSnapshotWire } from "@/lib/pages/editor-contract"
 import { pagesKeys, toPanelView, type WirePanel } from "@/hooks/use-pages"
 import { pageQueryString, type WirePageDetail } from "@/hooks/use-page-grants"
+import { usePageReview } from "@/hooks/use-page-review"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import { PageEditor } from "@/components/features/pages/page-editor"
 // `PageFactsCard` is the derived-facts block (owner, panels, created, spec
@@ -63,38 +77,173 @@ const EditorApplicationReview = React.lazy(async () => {
   return { default: mod.EditorApplicationReview }
 })
 
-/** The readable measure. A name field stretched across an ultrawide monitor
- *  is not a form, it is a stripe (§3). */
-const MEASURE = "mx-auto w-full max-w-3xl"
-
 export function EditorContentSection(props: EditorSectionProps) {
   if (!props.capabilities.loaded || props.page == null) {
     return (
-      <p role="status" className="p-4 type-page-value text-muted-foreground">
-        This Page&apos;s content is not loaded.
+      <p role="status" className="type-page-value text-muted-foreground">
+        This Page could not be read, so its content cannot be shown. This is not the same as a Page with
+        nothing on it.
       </p>
     )
   }
-  if (props.capabilities.hasApplication) {
-    return (
-      <React.Suspense
-        fallback={
-          <p role="status" className="flex items-center gap-2 p-4 type-page-value text-muted-foreground">
-            <Spinner className="h-3.5 w-3.5" />
-            Opening the application review…
-          </p>
-        }
-      >
-        <EditorApplicationReview {...props} />
-      </React.Suspense>
-    )
-  }
-  return <PanelPageContent {...props} />
+  // `hasApplication` decides which Content this is. It never decides whether
+  // the Page's own identity and panels are reachable — that was F1, and it
+  // left an application Page with no way anywhere in the product to rename
+  // itself or open its document.
+  if (!props.capabilities.hasApplication) return <PanelPageContent {...props} />
+  return <ApplicationPageContent {...props} />
 }
 
 // ── The ordinary panel Page ────────────────────────────────────────────────
 
-function PanelPageContent({
+function PanelPageContent(props: EditorSectionProps) {
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h3 className="text-heading font-medium">Page content</h3>
+        <p className="type-page-meta text-muted-foreground">
+          This Page shows panels. Changes saved here update the live Page.
+        </p>
+      </div>
+
+      <PageOwnContent {...props} onDirtyChange={props.onDirtyChange} />
+
+      {/* Only where there is no application yet. Offering to add a second one
+          to a Page that already has one would be nonsense. */}
+      <AddApplicationOffer workspaceId={props.workspaceId} slug={props.slug} />
+    </div>
+  )
+}
+
+// ── The application Page ───────────────────────────────────────────────────
+
+/**
+ * What the authorized snapshot says there is to do here.
+ *
+ * The decision is taken from the SNAPSHOT and never from `has_application`
+ * (F2). §5 rule 6 of the independent review is explicit: a candidate that does
+ * not exist, or one identical to the live version, does not open the review
+ * screen — it goes straight to Content. Routing on `has_application` opened an
+ * empty review over a Page whose own content was then unreachable, which is
+ * the same defect twice.
+ */
+type ReviewGate =
+  | { kind: "loading" }
+  | { kind: "review" }
+  | { kind: "nothing"; sentence: string }
+  | { kind: "unreadable"; reason: string }
+
+function reviewGateOf(
+  snapshot: ReviewSnapshotWire | undefined,
+  pending: boolean,
+  error: Error | null,
+): ReviewGate {
+  if (pending) return { kind: "loading" }
+  if (error) return { kind: "unreadable", reason: error.message }
+  if (!snapshot) {
+    return { kind: "unreadable", reason: "The server sent no review of this application." }
+  }
+  if (!snapshot.candidate) {
+    return {
+      kind: "nothing",
+      sentence: snapshot.baseline.published
+        ? `This Page runs a custom application, published as version ${snapshot.baseline.publication_version}. No agent has submitted a change, so there is nothing to review.`
+        : "This Page has a custom application, but nothing is published and no change has been submitted for review.",
+    }
+  }
+  // The server's own words when it says the candidate adds nothing — it is the
+  // one that compared the digests, and "identical" is its verdict, not ours.
+  const identical = snapshot.blockers.find((b) => b.code === "candidate_matches_live")
+  if (identical) {
+    return {
+      kind: "nothing",
+      sentence:
+        identical.message ||
+        "The submitted candidate is identical to what is already live, so there is nothing to review.",
+    }
+  }
+  return { kind: "review" }
+}
+
+function ApplicationPageContent(props: EditorSectionProps) {
+  const { workspaceId, slug, onDirtyChange } = props
+  const review = usePageReview(workspaceId, slug, true)
+  const gate = reviewGateOf(
+    review.snapshot.data,
+    review.snapshot.isPending,
+    (review.snapshot.error as Error | null) ?? null,
+  )
+
+  // Two children can hold work on this screen, and the shell asks the SECTION,
+  // not each of them. Aggregating here is what keeps the review's "I hold
+  // nothing" from clearing the guard over a half-typed rename underneath it.
+  const parts = React.useRef({ review: false, content: false })
+  const report = React.useCallback(
+    (which: "review" | "content") => (dirty: boolean) => {
+      parts.current[which] = dirty
+      onDirtyChange(parts.current.review || parts.current.content)
+    },
+    [onDirtyChange],
+  )
+  const reportReview = React.useMemo(() => report("review"), [report])
+  const reportContent = React.useMemo(() => report("content"), [report])
+
+  return (
+    <div className="flex flex-col gap-6">
+      {gate.kind === "loading" && (
+        <p role="status" className="flex items-center gap-2 type-page-value text-muted-foreground">
+          <Spinner className="h-3.5 w-3.5" />
+          Checking whether an agent has submitted a change to this Page…
+        </p>
+      )}
+
+      {gate.kind === "unreadable" && (
+        <p role="alert" data-slot="review-unreadable" className="type-page-value text-warn">
+          This Page has a custom application, but its review could not be read, so this screen cannot say
+          whether a change is waiting: {gate.reason} The Page&apos;s own content is below and unaffected.
+        </p>
+      )}
+
+      {gate.kind === "nothing" && (
+        <p role="status" data-slot="nothing-to-review" className="type-page-value text-muted-foreground">
+          {gate.sentence}
+        </p>
+      )}
+
+      {gate.kind === "review" && (
+        <React.Suspense
+          fallback={
+            <p role="status" className="flex items-center gap-2 type-page-value text-muted-foreground">
+              <Spinner className="h-3.5 w-3.5" />
+              Opening the review of the submitted change…
+            </p>
+          }
+        >
+          <EditorApplicationReview {...props} onDirtyChange={reportReview} />
+        </React.Suspense>
+      )}
+
+      <section aria-labelledby="page-own-content-heading" className="flex flex-col gap-5">
+        <div className={cn(gate.kind === "review" && "border-t border-border/60 pt-6")}>
+          <h3 id="page-own-content-heading" className="text-heading font-medium">
+            {gate.kind === "review" ? "This Page itself" : "Page content"}
+          </h3>
+          <p className="type-page-meta text-muted-foreground">
+            {/* Two definitions live on an application Page and they are not the
+                same thing. Saying which one this half writes is the whole of §4. */}
+            The Page&apos;s name, description and panels. Saved here they change the live Page — they are
+            not part of an application publication.
+          </p>
+        </div>
+
+        <PageOwnContent {...props} onDirtyChange={reportContent} />
+      </section>
+    </div>
+  )
+}
+
+/** The Page's own identity and panels. One copy, mounted by both Contents. */
+function PageOwnContent({
   workspaceId,
   slug,
   page,
@@ -103,14 +252,7 @@ function PanelPageContent({
   onDirtyChange,
 }: EditorSectionProps) {
   return (
-    <div className={cn(MEASURE, "flex flex-col gap-5 p-4 sm:p-6")}>
-      <div>
-        <h3 className="text-heading font-medium">Page content</h3>
-        <p className="type-page-meta text-muted-foreground">
-          This Page shows panels. Changes saved here update the live Page.
-        </p>
-      </div>
-
+    <>
       <PageIdentityCard
         workspaceId={workspaceId}
         slug={slug}
@@ -127,9 +269,7 @@ function PanelPageContent({
         documentRefusal={capabilities.documentRefusal}
         onNavigate={onNavigate}
       />
-
-      <AddApplicationOffer workspaceId={workspaceId} slug={slug} />
-    </div>
+    </>
   )
 }
 

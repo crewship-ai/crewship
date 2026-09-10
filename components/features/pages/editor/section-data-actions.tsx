@@ -42,8 +42,6 @@ import { toPanelView, type WirePanel } from "@/hooks/use-pages"
 import { pageQueryString, type WirePageDetail } from "@/hooks/use-page-grants"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
 
-const MEASURE = "mx-auto w-full max-w-3xl"
-
 export function EditorDataActionsSection({
   workspaceId,
   slug,
@@ -59,10 +57,22 @@ export function EditorDataActionsSection({
     onDirtyChange(false)
   }, [onDirtyChange])
 
-  const panels = Array.isArray(page?.panels) ? page.panels : []
+  // Read-failure and emptiness are two different sentences, and rendering the
+  // second for the first was F7: an empty list drawn as a claim about the Page
+  // ("declares no panels") when the detail read had 403'd or 500'd.
+  if (!capabilities.loaded || page == null) {
+    return (
+      <p role="status" className="type-page-value text-muted-foreground">
+        This Page could not be read, so nothing here describes it. Its panels, their producers and their
+        actions are unknown — which is not the same as none.
+      </p>
+    )
+  }
+
+  const panels = Array.isArray(page.panels) ? page.panels : []
 
   return (
-    <div className={cn(MEASURE, "flex flex-col gap-5 p-4 sm:p-6")}>
+    <div className="flex flex-col gap-5">
       <div>
         <h3 className="text-heading font-medium">Data &amp; actions</h3>
         <p className="type-page-meta text-muted-foreground">

@@ -37,7 +37,6 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 import * as cards from "@/components/features/pages/page-settings"
 import {
   AccessCard,
-  GeneralCard,
   PageFactsCard,
   PanelVersionsCard,
   pagePanelIDs,
@@ -168,16 +167,53 @@ function mount(page: WirePageDetail, routes: Routes = {}) {
   vi.stubGlobal("fetch", mockFetch)
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  // The cards, mounted the way the editor's sections mount them — Access in
-  // one section, the facts and the version log in two others. What used to
-  // stack them was a modal; nothing stacks them now, so the harness does.
   render(
     <QueryClientProvider client={qc}>
       <AccessCard workspaceId="ws-1" slug={page.slug!} panelIDs={pagePanelIDs(page)} />
-      <GeneralCard workspaceId="ws-1" slug={page.slug!} page={page} />
     </QueryClientProvider>,
   )
   return { calls, mockFetch }
+}
+
+/**
+ * One card per mount, because that is now the only way they are ever drawn.
+ *
+ * These three used to arrive stacked — first by the settings modal, then by
+ * the `GeneralCard` composition that outlived it. Both are deleted, and the
+ * editor mounts the facts in Content and the version log in History with a
+ * whole section between them. A harness that kept stacking them would be the
+ * last place in the repo where a card could quietly depend on a sibling.
+ */
+function mountFacts(page: WirePageDetail) {
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(404, { error: "the facts card fetches nothing" })))
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <PageFactsCard slug={page.slug!} page={page} />
+    </QueryClientProvider>,
+  )
+}
+
+function mountVersions(routes: Routes = {}) {
+  const calls: Array<{ method: string; url: string }> = []
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? "GET").toUpperCase()
+      calls.push({ method, url })
+      if (url.includes("/rollback")) return routes.rollback ?? jsonResponse(200, { rolled_back_to: 3 })
+      if (url.includes("/versions")) return routes.versions ?? jsonResponse(200, VERSIONS)
+      return jsonResponse(404, { error: `unrouted ${method} ${url}` })
+    }),
+  )
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <PanelVersionsCard workspaceId="ws-1" slug="fleet-201" />
+    </QueryClientProvider>,
+  )
+  return { calls }
 }
 
 function grantRows(): HTMLElement[] {
@@ -337,9 +373,9 @@ describe("issuing a grant", () => {
 
 // ── 4. General information ─────────────────────────────────────────────────
 
-describe("the General card", () => {
+describe("the page facts card", () => {
   it("renders the owner and the panel count for a crew-owned page", async () => {
-    mount(CREW_OWNED)
+    mountFacts(CREW_OWNED)
     const owner = await waitFor(() => document.querySelector("[data-fact='owner']")!)
     // §7.1 rule 1: owner_user_id XOR owner_crew_id, and which arc it is
     // changes what the line means.
@@ -350,10 +386,14 @@ describe("the General card", () => {
     expect(document.querySelector("[data-fact='panels']")!.textContent).toContain("2")
     expect(document.querySelector("[data-fact='slug']")!.textContent).toContain("fleet-201")
     expect(document.querySelector("[data-fact='description']")!.textContent).toContain("Ship telemetry")
+    // It stands alone. The facts go to Content and the version log goes to
+    // History; a card that only drew right beside its old sibling would
+    // break the moment a section mounted it by itself.
+    expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(0)
   })
 
   it("renders the owner and the panel count for a user-owned page", async () => {
-    mount(USER_OWNED)
+    mountFacts(USER_OWNED)
     const owner = await waitFor(() => document.querySelector("[data-fact='owner']")!)
     expect(owner.textContent).toContain("user")
     expect(owner.textContent).toContain("ada@example.com")
@@ -365,9 +405,11 @@ describe("the General card", () => {
       document.querySelector("[data-fact='description'] [data-slot='fact-value']")!.textContent,
     ).toBe("—")
   })
+})
 
+describe("the panel versions card", () => {
   it("lists the version history with who authored each version", async () => {
-    mount(CREW_OWNED)
+    mountVersions()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(2),
     )
@@ -378,10 +420,12 @@ describe("the General card", () => {
     // A version authored by an agent is credited to the agent (§10b.1 — the
     // one who breaks it is rarely the one who notices).
     expect(rows[1].textContent).toContain("watcher")
+    // The other half of the split: no page facts travel with it.
+    expect(document.querySelector("[data-fact='owner']")).toBeNull()
   })
 
   it("asks before restoring a panel version, and names what it does to the data", async () => {
-    const { calls } = mount(CREW_OWNED)
+    const { calls } = mountVersions()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(2),
     )
@@ -405,45 +449,18 @@ describe("the General card", () => {
   })
 })
 
-// ── 4b. The split ──────────────────────────────────────────────────────────
+// ── 4b. What the library no longer has ─────────────────────────────────────
 
 describe("the card library", () => {
-  it("no longer exports a settings modal", () => {
-    // The modal is not deprecated, it is deleted. A build that still has it
-    // has a second, unrouted place to change a page's ACL from.
+  it("exports neither the settings modal nor the composition that outlived it", () => {
+    // Neither is deprecated; both are deleted. The modal was a second,
+    // unrouted place to change a page's ACL from. `GeneralCard` was the
+    // thin stack of PageFactsCard and PanelVersionsCard kept so existing
+    // importers would not break — and once the sections mounted the two
+    // halves directly, nothing imported it and its own test was the only
+    // thing rendering it.
     expect((cards as Record<string, unknown>).PageSettings).toBeUndefined()
-  })
-
-  it("splits the facts and the version log into cards that stand alone", async () => {
-    // The two halves now live in different sections — the facts in Content,
-    // the versions in History — so each has to render without the other.
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) =>
-        String(input).includes("/versions")
-          ? jsonResponse(200, VERSIONS)
-          : jsonResponse(404, { error: "unrouted" }),
-      ),
-    )
-    render(
-      <QueryClientProvider client={qc}>
-        <PageFactsCard slug="fleet-201" page={CREW_OWNED} />
-      </QueryClientProvider>,
-    )
-    expect(document.querySelector("[data-fact='owner']")!.textContent).toContain("lookout")
-    expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(0)
-
-    cleanup()
-    render(
-      <QueryClientProvider client={qc}>
-        <PanelVersionsCard workspaceId="ws-1" slug="fleet-201" />
-      </QueryClientProvider>,
-    )
-    await waitFor(() =>
-      expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(2),
-    )
-    expect(document.querySelector("[data-fact='owner']")).toBeNull()
+    expect((cards as Record<string, unknown>).GeneralCard).toBeUndefined()
   })
 })
 

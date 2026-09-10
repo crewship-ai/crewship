@@ -61,6 +61,71 @@ describe("panel fields", () => {
   })
 })
 
+describe("failure handling and icon", () => {
+  const failing = (issue: string) => panel({ on_failure: { issue } })
+
+  const failureCases: Array<{ what: string; before: Dict; after: Dict; tone: string; summary: string }> = [
+    {
+      what: "added",
+      before: panel(),
+      after: failing("crew/ops"),
+      tone: "add",
+      summary: 'Panel "ops" going quiet now raises an issue for crew/ops.',
+    },
+    {
+      what: "removed",
+      before: failing("crew/ops"),
+      after: panel(),
+      tone: "remove",
+      summary: 'Panel "ops" going quiet no longer raises an issue for crew/ops: from now on it fails silently.',
+    },
+    {
+      what: "rerouted",
+      before: failing("crew/ops"),
+      after: failing("crew/platform"),
+      tone: "change",
+      summary: 'Panel "ops" going quiet now raises an issue for crew/platform instead of crew/ops.',
+    },
+  ]
+  it.each(failureCases)("says what stops or starts happening when failure handling is $what", ({ before, after, tone, summary }) => {
+    const diff = compareDefinitions(doc([before]), doc([after]))
+    expect(diff.changes.map(change => [change.kind, change.tone, change.summary])).toEqual([["panel-failure-handling-changed", tone, summary]])
+    expect(diff.unmodelled).toEqual([])
+  })
+
+  it("is silent when no panel ever declared failure handling", () => {
+    expect(compareDefinitions(doc(), doc()).changes).toEqual([])
+    // A block that routes nowhere is the absence of a declaration, not a change.
+    expect(compareDefinitions(doc(), doc([panel({ on_failure: {} })])).changes).toEqual([])
+    expect(compareDefinitions(doc([panel({ on_failure: { issue: "" } })]), doc()).changes).toEqual([])
+  })
+
+  const iconCases: Array<{ what: string; before: Dict; after: Dict; summary: string }> = [
+    { what: "set", before: panel(), after: panel({ icon: "memory" }), summary: 'Panel "ops" sets its icon to memory.' },
+    {
+      what: "dropped",
+      before: panel({ icon: "memory" }),
+      after: panel(),
+      summary: 'Panel "ops" drops its memory icon and falls back to the one its schema implies.',
+    },
+    {
+      what: "swapped",
+      before: panel({ icon: "memory" }),
+      after: panel({ icon: "database" }),
+      summary: 'Panel "ops" changes icon from memory to database.',
+    },
+  ]
+  it.each(iconCases)("states plainly that an icon was $what", ({ before, after, summary }) => {
+    const diff = compareDefinitions(doc([before]), doc([after]))
+    expect(diff.changes.map(change => [change.kind, change.tone, change.summary])).toEqual([["panel-icon-changed", "change", summary]])
+  })
+
+  it("treats an absent icon and an empty one as the same declaration", () => {
+    expect(compareDefinitions(doc(), doc([panel({ icon: "" })])).changes).toEqual([])
+    expect(compareDefinitions(doc([panel({ icon: "" })]), doc()).changes).toEqual([])
+  })
+})
+
 describe("panels and actions", () => {
   const withAction = (patch: Dict = {}) => panel({ actions: [{ id: "restart", kind: "call", label: "Restart", routine: "ops-restart", ...patch }] })
 
@@ -197,11 +262,19 @@ describe("evidence, not narrative", () => {
     expect(compareDefinitions(doc(), reordered).identical).toBe(true)
   })
 
-  it("shows an unmodelled field in raw as well as naming it", () => {
-    const diff = compareDefinitions(doc(), doc([panel({ experimental_thing: { rate: 2 } })]))
-    expect(diff.unmodelled).toEqual(["spec.panels[].experimental_thing"])
-    expect(diff.raw).toContain("experimental_thing")
-    expect(diff.identical).toBe(false)
+  it("shows an unmodelled field in raw as well as naming it, in both directions", () => {
+    const withField = doc([panel({ experimental_thing: { rate: 2 } })])
+    for (const [before, after] of [
+      [doc(), withField],
+      [withField, doc()],
+    ]) {
+      const diff = compareDefinitions(before, after)
+      // A key the candidate DELETES is walked too: the unmodelled list reads
+      // both documents, so dropping a field cannot make it disappear quietly.
+      expect(diff.unmodelled).toEqual(["spec.panels[].experimental_thing"])
+      expect(diff.raw).toContain("experimental_thing")
+      expect(diff.identical).toBe(false)
+    }
   })
 
   it("every derived change carries a tone and an English sentence", () => {

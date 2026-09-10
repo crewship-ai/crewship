@@ -24,8 +24,11 @@
  *   · `AccessCard`, `WebhooksCard`, `SharingCard`, `ExportCard`, `DangerCard`
  *                                                → Access
  *
- * `GeneralCard` survives as the thin composition of the first two, because
- * "the page's facts, then its versions" is still a shape a caller may want.
+ * A `GeneralCard` stacking the first two survived the modal for a while, so
+ * that splitting them would not break an importer. Nothing imported it: the
+ * sections mount the halves directly, a whole section apart. It is deleted
+ * rather than kept "in case" — an export with no caller is a component
+ * nobody maintains and everybody has to read.
  *
  * Four things here are load-bearing and none of them are decoration:
  *
@@ -940,28 +943,6 @@ export function PanelVersionsCard({
         </AlertDialogContent>
       </AlertDialog>
     </SectionCard>
-  )
-}
-
-/**
- * The facts and the version log, stacked — the shape the deleted settings
- * modal showed. Kept so a caller that wants both does not have to know they
- * were ever one component, and so this split is not a breaking change.
- */
-export function GeneralCard({
-  workspaceId,
-  slug,
-  page,
-}: {
-  workspaceId: string
-  slug: string
-  page: WirePageDetail | null
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <PageFactsCard slug={slug} page={page} />
-      <PanelVersionsCard workspaceId={workspaceId} slug={slug} />
-    </div>
   )
 }
 

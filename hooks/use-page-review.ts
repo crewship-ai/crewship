@@ -125,6 +125,24 @@ export function normalizeSla(value: unknown): string | undefined {
   return `${text.startsWith("-") ? -total : total}s`
 }
 
+/**
+ * The manifest envelope every Crewship kind carries.
+ *
+ * `internal/pages/spec.go:32` defines it and `Document.Validate` (`:407`)
+ * refuses any other value, so a document that reaches this screen always has
+ * exactly this string. Getting it wrong is not cosmetic: the live side and the
+ * candidate side then differ in a top-level field on every single review,
+ * `identical` is never true, and the one honest reassurance this screen can
+ * give — "nothing in the declaration changed" — becomes unreachable.
+ *
+ * Spelled here rather than imported from `page-editor.tsx`'s
+ * `PAGE_DOCUMENT_API_VERSION`: this is a hook, and pulling a large client
+ * component into it (and into its unit test) to read one string is the wrong
+ * trade. Both copies name the Go constant so a grep finds all three.
+ */
+const PAGE_DOCUMENT_API_VERSION = "crewship/v1"
+const PAGE_DOCUMENT_KIND = "Page"
+
 function isDict(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -146,7 +164,15 @@ export function hiddenPanelIds(page: WirePageDetail | null): string[] {
 
 function livePanel(panel: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { id: panel.id, schema: panel.schema, owner: panel.owner, producer: panel.producer }
-  for (const key of ["title", "span", "public", "tab", "actions", "refresh", "wake"]) {
+  // `icon` and `on_failure` are carried for opposite reasons, and both matter.
+  // Dropping `icon` made every Page that declares one show a phantom addition
+  // in `raw` plus a spurious "does not model" note. Dropping `on_failure` was
+  // worse and silent: a candidate REMOVING it — the declaration that turns a
+  // quietly stale panel into work for a human — produced no derived change, no
+  // unmodelled entry and no line in the raw diff, because neither side carried
+  // the field at all. Both are on `PanelSpec` (`internal/pages/spec.go:103,153`)
+  // and on the wire (`internal/api/pages_handler.go:160,192`).
+  for (const key of ["title", "span", "public", "tab", "actions", "refresh", "wake", "icon", "on_failure"]) {
     if (panel[key] !== undefined) out[key] = panel[key]
   }
   const sla = normalizeSla(panel.sla ?? panel.sla_seconds)
@@ -158,8 +184,8 @@ export function liveDefinitionFromPage(page: WirePageDetail | null): unknown {
   if (!page) return null
   const panels = Array.isArray(page.panels) ? page.panels : []
   return {
-    apiVersion: "crewship.ai/v1",
-    kind: "Page",
+    apiVersion: PAGE_DOCUMENT_API_VERSION,
+    kind: PAGE_DOCUMENT_KIND,
     metadata: { name: page.name ?? "", slug: page.slug ?? "", description: page.description ?? "" },
     spec: {
       panels: panels.filter((panel): panel is Record<string, unknown> => isDict(panel) && panel.sealed !== true).map(livePanel),
@@ -290,12 +316,22 @@ export function usePageReview(workspaceId: string, slug: string, enabled: boolea
         expected_publication: snap.baseline.publication_version,
         reviewed_code: true,
         expected_definition_digest: snap.baseline.definition_digest,
-        // Only routines whose current hash the snapshot actually carries. A
-        // routine with an unreadable hash cannot be fenced, and inventing an
-        // empty string for it would fence against a value nobody reviewed;
-        // the screen shows it as `unknown` instead.
+        // Two filters, and they exclude different mistakes.
+        //
+        // `in_candidate` keeps out routines that only the LIVE publication
+        // calls. The list is a union so a reviewer can see a routine being
+        // dropped; fencing on a dropped one asks the server to compare a key
+        // it does not recompute, which answers 409 naming a routine nobody
+        // moved — and refetching never clears it, because the next snapshot
+        // says exactly the same thing.
+        //
+        // The digest check keeps out a routine whose current hash could not be
+        // read. Inventing an empty string would fence against a value nobody
+        // reviewed; the row on screen says it is uncovered instead.
         expected_routine_digests: Object.fromEntries(
-          snap.routines.filter(r => typeof r.current_digest === "string" && r.current_digest !== "").map(r => [r.routine, r.current_digest as string]),
+          snap.routines
+            .filter(r => r.in_candidate && typeof r.current_digest === "string" && r.current_digest !== "")
+            .map(r => [r.routine, r.current_digest as string]),
         ),
       }
       const response = await apiFetch(`${endpoint}/project/publish?${params}`, {

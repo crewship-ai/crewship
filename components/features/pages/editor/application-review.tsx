@@ -41,6 +41,29 @@ import {
  *     none; the copy says so instead of pretending otherwise.
  */
 
+/**
+ * Candidate-controlled text, made safe to put in a sentence.
+ *
+ * `compareDefinitions` promises one line of plain text for `summary` and for
+ * nothing else. `before`, `after` and every name in `unmodelled` are values
+ * and keys lifted straight out of a document an agent wrote: a 400-character
+ * title with newlines in it, a stringified `wake` or `confirm` blob, or a key
+ * literally named "nothing — this candidate is unchanged". Rendered raw they
+ * either wreck the layout of the list or read as this screen's own copy,
+ * which in the block whose whole job is to say the review is INCOMPLETE is
+ * the worst place in the product to be impersonated.
+ *
+ * Flattened to one line, control characters removed, hard length cap.
+ */
+function oneLine(value: string, max = 80): string {
+  const flat = value.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ").replace(/\s+/g, " ").trim()
+  if (flat === "") return "(empty)"
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`
+}
+
+/** Names, capped in count as well as in length: an unmodelled list is evidence, not a dump. */
+const UNMODELLED_SHOWN = 12
+
 const TONE_MARK: Readonly<Record<DefinitionChangeTone, string>> = { add: "+", remove: "−", change: "~" }
 const TONE_WORD: Readonly<Record<DefinitionChangeTone, string>> = { add: "Added", remove: "Removed", change: "Changed" }
 const STATUS_MARK: Readonly<Record<SourceFileStatus, string>> = { added: "A", modified: "M", removed: "D" }
@@ -82,20 +105,35 @@ interface ConsentBasis {
   readonly definition: string
   readonly publication: string
   readonly routines: string
+  /**
+   * The live definition the change list on screen was actually computed from.
+   *
+   * The fence uses `snapshot.baseline.definition_digest`, which comes from the
+   * review endpoint; the change list is derived from the Page detail query,
+   * which is a different endpoint on a different cache entry. After a realtime
+   * reconnect those two can disagree for as long as the detail query lags —
+   * long enough for someone to re-consent to a list computed against a live
+   * definition that no longer exists, and for the publish to then SUCCEED,
+   * because the digest the fence checks did move back into agreement. Binding
+   * consent to what was rendered closes that window without depending on which
+   * query refetches first.
+   */
+  readonly live: string
 }
 
-function consentBasisOf(snapshot: ReviewSnapshotWire | undefined): ConsentBasis {
+function consentBasisOf(snapshot: ReviewSnapshotWire | undefined, live: string): ConsentBasis {
   return {
     revision: snapshot?.candidate ? `${snapshot.candidate.revision}:${snapshot.candidate.git_commit}:${snapshot.candidate.source_digest}` : "no-candidate",
     build: snapshot?.candidate?.build ? `${snapshot.candidate.build.id}:${snapshot.candidate.build.state}:${snapshot.candidate.build.artifact_digest}` : "no-build",
     definition: snapshot?.baseline.definition_digest ?? "no-definition",
     publication: `${snapshot?.baseline.publication_version ?? 0}:${snapshot?.baseline.published ?? false}`,
-    routines: (snapshot?.routines ?? []).map(r => `${r.routine}=${r.current_digest ?? "?"}/${r.published_digest ?? "?"}`).join(","),
+    routines: (snapshot?.routines ?? []).map(r => `${r.routine}=${r.current_digest ?? "?"}/${r.published_digest ?? "?"}/${r.in_candidate}`).join(","),
+    live,
   }
 }
 
 function basisKey(basis: ConsentBasis): string {
-  return [basis.revision, basis.build, basis.definition, basis.publication, basis.routines].join("|")
+  return [basis.revision, basis.build, basis.definition, basis.publication, basis.routines, basis.live].join("|")
 }
 
 export function EditorApplicationReview(props: EditorSectionProps) {
@@ -115,13 +153,22 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     return () => onDirtyChange(false)
   }, [onDirtyChange])
 
-  const basis = useMemo(() => consentBasisOf(snapshot), [snapshot])
+  const liveDefinition = useMemo(() => liveDefinitionFromPage(page), [page])
+  const liveKey = useMemo(() => JSON.stringify(liveDefinition) ?? "no-live-definition", [liveDefinition])
+  const basis = useMemo(() => consentBasisOf(snapshot, liveKey), [snapshot, liveKey])
   const basisRef = useRef<ConsentBasis | null>(null)
+  const published = review.publish.isSuccess
   useEffect(() => {
     if (!snapshot) return
     const previous = basisRef.current
     basisRef.current = basis
     if (!previous || basisKey(previous) === basisKey(basis)) return
+    // A successful publish moves every one of these on purpose — the draft is
+    // consumed and the snapshot comes back with no candidate. Announcing "the
+    // candidate changed while this review was open, read the new candidate"
+    // directly above "Published as version 4" is a false account of what the
+    // person just did.
+    if (published) return
     setConsent(false)
     if (previous.revision !== basis.revision) {
       setResetReason(`The candidate changed while this review was open. Your review consent was cleared; read the new candidate before publishing.`)
@@ -129,10 +176,12 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       setResetReason("A new build of this candidate landed. Your review consent was cleared; consent applies to one build.")
     } else if (previous.definition !== basis.definition || previous.publication !== basis.publication) {
       setResetReason("A base you were comparing against moved. Your review consent was cleared; read the new baseline before publishing.")
+    } else if (previous.live !== basis.live) {
+      setResetReason("The live Page changed while you were reviewing, so the change list above was recomputed. Your review consent was cleared; read it again before publishing.")
     } else {
       setResetReason("A routine this application calls changed while this review was open. Your review consent was cleared; read the dependency again before publishing.")
     }
-  }, [basis, snapshot])
+  }, [basis, snapshot, published])
 
   // Returning from the preview ends consent: the person is coming back to make
   // a decision, not carrying one across a detour.
@@ -173,6 +222,13 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   }, [snapshot, review.baselineUnavailable, review.candidateMoved, conflict])
 
   const blocked = blockers.length > 0
+  // Disabling the box is not the same as clearing it. A blocker that appears
+  // and then goes away again — a transient `baseline.isError`, say — would
+  // otherwise leave the box ticked from before and Publish live the moment the
+  // blocker cleared, on a review nobody looked at again.
+  useEffect(() => {
+    if (blocked) setConsent(false)
+  }, [blocked])
 
   // Panels this viewer may not read are excluded from BOTH sides. Leaving them
   // on the live side reports each as removed by the candidate; leaving them on
@@ -182,8 +238,8 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   const definitionDiff = useMemo(() => {
     const candidateDefinition = review.candidate.data?.definition
     if (candidateDefinition === undefined) return null
-    return compareDefinitions(liveDefinitionFromPage(page), candidateDefinitionForComparison(candidateDefinition, hidden))
-  }, [review.candidate.data, page, hidden])
+    return compareDefinitions(liveDefinition, candidateDefinitionForComparison(candidateDefinition, hidden))
+  }, [review.candidate.data, liveDefinition, hidden])
 
   const initial = snapshot?.initial_publication === true
   const comparisonUnavailable = review.baselineUnavailable
@@ -199,6 +255,29 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     if (baselineProject === undefined) return null
     return compareSources(baselineProject, candidateProject)
   }, [comparisonUnavailable, initial, review.candidate.data, review.baseline.data])
+
+  // The shell today gates on `capabilities.hasApplication`, and those
+  // capabilities are derived from `detail.raw` while `page` arrives as
+  // `detail.error ? null : detail.raw` (`pages-layout.tsx:263`) — the two can
+  // disagree. With no live Page there is no definition to compare against, so
+  // every existing panel would list as ADDED under a "there was no live
+  // definition" note, and nothing in `blockers` would stop the publish.
+  if (!page) {
+    return (
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold">Review application changes</h2>
+        <p role="alert" className="text-sm">
+          This Page&apos;s current definition could not be loaded, so there is nothing to compare the candidate against. Reload before reviewing: publishing from here would
+          approve a change list computed against nothing.
+        </p>
+        <div>
+          <Button variant="outline" className="min-h-11" onClick={review.refresh}>
+            Try again
+          </Button>
+        </div>
+      </section>
+    )
+  }
 
   if (pane === "preview") {
     return (
@@ -235,6 +314,40 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         <p role="status" className="text-sm text-muted-foreground">
           Loading this application&apos;s review…
         </p>
+      </section>
+    )
+  }
+
+  // Independent review §5 rule 6: with no draft, or a draft identical to the
+  // live publication, this screen must not present itself as a pending review.
+  // The candidate query is never enabled in that state, so the two "Reading…"
+  // placeholders below would sit there for ever.
+  if (!snapshot.candidate) {
+    return (
+      <section className="flex flex-col gap-3" aria-labelledby="application-review-heading">
+        <h2 id="application-review-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+          {published ? "Application published" : "Nothing to review"}
+        </h2>
+        {published && review.publish.data ? (
+          <p role="status" className="text-sm">
+            Published as version {review.publish.data.version}. The draft that was reviewed is now the live application.
+          </p>
+        ) : (
+          <p className="text-sm">
+            This Page&apos;s application has no draft awaiting review: there is either no draft at all, or the draft is identical to the live publication. Nothing here needs a
+            decision.
+          </p>
+        )}
+        {snapshot.blockers.map(blocker => (
+          <p key={blocker.code} className="text-sm text-muted-foreground" data-blocker={blocker.code}>
+            {blocker.message}
+          </p>
+        ))}
+        <div>
+          <Button variant="outline" className="min-h-11" onClick={() => props.onNavigate("content")}>
+            Go to Page content
+          </Button>
+        </div>
       </section>
     )
   }
@@ -313,7 +426,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
                 {change.summary}
                 {(change.before !== undefined || change.after !== undefined) && (
                   <span className="ml-1 text-muted-foreground">
-                    ({change.before ?? "not set"} → {change.after ?? "not set"})
+                    ({change.before === undefined ? "not set" : oneLine(change.before)} → {change.after === undefined ? "not set" : oneLine(change.after)})
                   </span>
                 )}
               </li>
@@ -337,7 +450,10 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         )}
         {definitionDiff !== null && definitionDiff.unmodelled.length > 0 && (
           <div role="note" className="mt-3 rounded-md border border-dashed p-3 text-sm">
-            <strong>Fields this comparison does not model: {definitionDiff.unmodelled.join(", ")}</strong>
+            <strong>
+              Fields this comparison does not model: {definitionDiff.unmodelled.slice(0, UNMODELLED_SHOWN).map(name => oneLine(name, 60)).join(", ")}
+              {definitionDiff.unmodelled.length > UNMODELLED_SHOWN ? ` and ${definitionDiff.unmodelled.length - UNMODELLED_SHOWN} more` : ""}
+            </strong>
             <p className="mt-1">A field that is not modelled has not been checked. It must not be read as unchanged — read the raw definition diff below.</p>
             <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">{definitionDiff.raw}</pre>
           </div>
@@ -529,8 +645,18 @@ export function EditorApplicationReview(props: EditorSectionProps) {
  * instead of leaving it in a design note nobody reading this screen can see.
  */
 function RoutineRow({ routine }: { routine: ReviewRoutineWire }) {
-  const fenced = typeof routine.current_digest === "string" && routine.current_digest !== ""
-  const gap = fenced ? null : (
+  const hasDigest = typeof routine.current_digest === "string" && routine.current_digest !== ""
+  const fenced = routine.in_candidate && hasDigest
+  // Two different reasons a row is outside the fence, and they are not the
+  // same news. A routine the candidate no longer calls is outside it because
+  // it is being dropped — that is the point. A routine the candidate DOES call
+  // is outside it only because its hash could not be read, which is a gap.
+  const gap = fenced ? null : !routine.in_candidate ? (
+    <p className="mt-1">
+      The candidate does not call this routine; it is listed because the live publication calls it. It is not part of the publish check, and publishing this candidate stops
+      calling it.
+    </p>
+  ) : (
     <p className="mt-1">
       This dependency is not covered by the publish check: no current hash was recorded for it, so publishing will not be refused if this routine changes between now and
       the publication.

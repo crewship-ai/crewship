@@ -25,7 +25,7 @@ type Dict = Record<string, unknown>
 const DOCUMENT_KEYS = new Set(["apiVersion", "kind", "metadata", "spec"])
 const METADATA_KEYS = new Set(["name", "slug", "description"])
 const SPEC_KEYS = new Set(["panels"])
-const PANEL_KEYS = new Set(["id", "title", "schema", "owner", "producer", "sla", "span", "public", "tab", "actions", "refresh", "wake"])
+const PANEL_KEYS = new Set(["id", "title", "schema", "icon", "owner", "producer", "sla", "span", "public", "tab", "actions", "refresh", "wake", "on_failure"])
 const ACTION_KEYS = new Set(["id", "kind", "label", "routine", "confirm"])
 
 /** A panel that declares no span gets the full grid (`pages.DefaultSpan`). */
@@ -227,8 +227,42 @@ function comparePanel(live: ModelledPanel, candidate: ModelledPanel, changes: De
       candidate.wake.digest,
     )
   }
+  if (live.failure.digest !== candidate.failure.digest) {
+    // Written as the consequence, not the field: what a reviewer needs to know
+    // is whether this panel going quiet still produces work for a human.
+    const gone = candidate.failure.issue === ""
+    const arrived = live.failure.issue === ""
+    changes.push({
+      kind: "panel-failure-handling-changed",
+      tone: gone ? "remove" : arrived ? "add" : "change",
+      panelId: candidate.id,
+      summary: gone
+        ? `Panel ${id} going quiet no longer raises an issue for ${bare(live.failure.issue)}: from now on it fails silently.`
+        : arrived
+          ? `Panel ${id} going quiet now raises an issue for ${bare(candidate.failure.issue)}.`
+          : live.failure.issue !== candidate.failure.issue
+            ? `Panel ${id} going quiet now raises an issue for ${bare(candidate.failure.issue)} instead of ${bare(live.failure.issue)}.`
+            : `Panel ${id} changes what happens when it goes quiet, still raising an issue for ${bare(candidate.failure.issue)}.`,
+      before: live.failure.digest,
+      after: candidate.failure.digest,
+    })
+  }
   if (live.span !== candidate.span) {
     field("panel-span-changed", `Panel ${id} changes width from ${bare(live.span)} to ${bare(candidate.span)} columns.`, live.span, candidate.span)
+  }
+  if (live.icon !== candidate.icon) {
+    // Cosmetic, and the sentence says so by being plain: a panel that declares
+    // no icon falls back to the one its schema implies.
+    field(
+      "panel-icon-changed",
+      live.icon === ""
+        ? `Panel ${id} sets its icon to ${bare(candidate.icon)}.`
+        : candidate.icon === ""
+          ? `Panel ${id} drops its ${bare(live.icon)} icon and falls back to the one its schema implies.`
+          : `Panel ${id} changes icon from ${bare(live.icon)} to ${bare(candidate.icon)}.`,
+      live.icon,
+      candidate.icon,
+    )
   }
 
   for (const action of candidate.actions) {
@@ -320,10 +354,24 @@ interface ModelledAction {
   confirm: string
 }
 
+/**
+ * `on_failure` normalised. A block that routes nowhere is not a declaration:
+ * absent, null, `{}` and `{issue: ""}` all mean the panel going quiet raises
+ * nothing, and none of them may read as a change against the others.
+ */
+interface ModelledFailure {
+  /** The crew an issue is raised for, "" when nothing is raised. */
+  issue: string
+  /** Stable JSON of the whole block, "" when it declares nothing. */
+  digest: string
+}
+
 interface ModelledPanel {
   id: string
   title: string
   schema: string
+  icon: string
+  failure: ModelledFailure
   owner: string
   producer: string
   sla: string
@@ -419,10 +467,13 @@ function model(input: unknown, unmodelled: Set<string>, side: "before" | "after"
 
 function modelPanel(id: string, entry: Dict, unmodelled: Set<string>): ModelledPanel {
   const wake = entry.wake
+  const failure = modelFailure(entry.on_failure)
   const panel: ModelledPanel = {
     id,
     title: text(entry.title),
     schema: text(entry.schema),
+    icon: text(entry.icon),
+    failure,
     owner: text(entry.owner),
     producer: text(entry.producer),
     sla: text(entry.sla),
@@ -464,6 +515,15 @@ function modelPanel(id: string, entry: Dict, unmodelled: Set<string>): ModelledP
     panel.actionsById.set(actionId, action)
   }
   return panel
+}
+
+function modelFailure(value: unknown): ModelledFailure {
+  if (!isDict(value)) return { issue: "", digest: "" }
+  const issue = text(value.issue)
+  const digest = stableStringify(value)
+  // `{}` and `{issue: ""}` declare nothing; treat them as the absence they are.
+  if (issue === "" && Object.keys(value).every(key => text(value[key]) === "")) return { issue: "", digest: "" }
+  return { issue, digest }
 }
 
 // ── Text helpers ─────────────────────────────────────────────────────────────

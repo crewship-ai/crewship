@@ -59,7 +59,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     source_available: true,
     source_unavailable_reason: null,
   },
-  routines: [{ routine: "ops-restart", published_digest: "sha256:old", current_digest: "sha256:new", state: "changed" }],
+  routines: [{ routine: "ops-restart", published_digest: "sha256:old", current_digest: "sha256:new", state: "changed", in_candidate: true }],
   capabilities: { may_edit_spec: true, may_publish: true },
   blockers: [],
   initial_publication: false,
@@ -293,8 +293,8 @@ describe("EditorApplicationReview", () => {
   it("renders an unknown routine hash as unknown and never as unchanged", () => {
     const snapshot = clone(baseSnapshot)
     snapshot.routines = [
-      { routine: "ops-collect", published_digest: null, current_digest: "sha256:new", state: "unknown" },
-      { routine: "ops-quiet", published_digest: "sha256:a", current_digest: "sha256:a", state: "unchanged" },
+      { routine: "ops-collect", published_digest: null, current_digest: "sha256:new", state: "unknown", in_candidate: true },
+      { routine: "ops-quiet", published_digest: "sha256:a", current_digest: "sha256:a", state: "unchanged", in_candidate: true },
     ]
     setReview(snapshot)
     const { container } = render(<EditorApplicationReview {...props} />)
@@ -307,8 +307,8 @@ describe("EditorApplicationReview", () => {
   it("says on the row when a routine is not covered by the publish check", () => {
     const snapshot = clone(baseSnapshot)
     snapshot.routines = [
-      { routine: "ops-collect", published_digest: null, current_digest: null, state: "unknown" },
-      { routine: "ops-restart", published_digest: null, current_digest: "sha256:new", state: "unknown" },
+      { routine: "ops-collect", published_digest: null, current_digest: null, state: "unknown", in_candidate: true },
+      { routine: "ops-restart", published_digest: null, current_digest: "sha256:new", state: "unknown", in_candidate: true },
     ]
     setReview(snapshot)
     const { container } = render(<EditorApplicationReview {...props} />)
@@ -376,6 +376,127 @@ describe("EditorApplicationReview", () => {
     render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/There was no live definition to compare against\./)).toBeTruthy()
     expect(screen.getByText(/not a statement that nothing else changed/)).toBeTruthy()
+  })
+
+
+  it("does not present a Page with no candidate as a pending review", () => {
+    // Independent review §5 rule 6. The candidate query is never enabled here,
+    // so the two "Reading…" placeholders would otherwise sit there for ever.
+    const snapshot = clone(baseSnapshot)
+    snapshot.candidate = null
+    snapshot.blockers = [{ code: "candidate_matches_live", message: "The current draft is identical to the live publication; there is nothing new to review." }]
+    setReview(snapshot, { candidate: { data: undefined }, baseline: { data: undefined } })
+    render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByRole("heading", { name: "Nothing to review" })).toBeTruthy()
+    expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
+    expect(screen.queryByText(/Reading the source of both sides/)).toBeNull()
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Publish application" })).toBeNull()
+    // The server's own reason is carried through, alongside the plain-English one.
+    expect(document.querySelector('[data-blocker="candidate_matches_live"]')!.textContent).toMatch(/nothing new to review/)
+  })
+
+  it("reports a successful publish as a publication, not as the candidate changing under the reviewer", () => {
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+    fireEvent.click(consentBox())
+
+    // What the server actually sends back after the draft is consumed.
+    const after = clone(baseSnapshot)
+    after.candidate = null
+    setReview(after, {
+      candidate: { data: undefined },
+      publish: { mutate: vi.fn(), isPending: false, isError: false, isSuccess: true, error: null, data: { version: 4, build_id: "build-7", source_revision: 7 } },
+    })
+    rerender(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByRole("heading", { name: "Application published" })).toBeTruthy()
+    expect(screen.getByRole("status").textContent).toMatch(/Published as version 4/)
+    expect(screen.queryByText(/The candidate changed while this review was open/)).toBeNull()
+    expect(screen.queryByText(/read the new candidate before publishing/)).toBeNull()
+  })
+
+  it("refuses to review a candidate when the live Page could not be loaded", () => {
+    // `pages-layout.tsx:263` passes `detail.error ? null : detail.raw` while
+    // capabilities come from `detail.raw`, so the two can disagree and this
+    // screen can be mounted with no live definition at all.
+    render(<EditorApplicationReview {...props} page={null} />)
+    expect(screen.getByRole("alert").textContent).toMatch(/could not be loaded, so there is nothing to compare the candidate against/)
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Publish application" })).toBeNull()
+  })
+
+  it("clears consent, not merely disables it, when a blocker appears mid-review", () => {
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+    fireEvent.click(consentBox())
+    expect(consentBox().checked).toBe(true)
+
+    // A transient failure: the baseline read errors, then recovers.
+    setReview(clone(baseSnapshot), { baselineUnavailable: "The baseline source could not be read just now." })
+    rerender(<EditorApplicationReview {...props} />)
+    expect(consentBox().checked).toBe(false)
+
+    setReview(clone(baseSnapshot))
+    rerender(<EditorApplicationReview {...props} />)
+    // Recovered — and the box must not come back ticked from before.
+    expect(consentBox().disabled).toBe(false)
+    expect(consentBox().checked).toBe(false)
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("clears consent when the live Page moves, even though the review snapshot has not caught up", () => {
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+    fireEvent.click(consentBox())
+
+    // Only the detail query moved. `snapshot.baseline.definition_digest` is
+    // unchanged, so a basis built from the snapshot alone would miss this and
+    // the publish would then succeed against a list nobody reviewed.
+    const moved = { ...props.page!, panels: [{ id: "services", schema: "status.v1", owner: "crew/ops", producer: "routine/hourly", sla_seconds: 300 }] }
+    rerender(<EditorApplicationReview {...props} page={moved as EditorSectionProps["page"]} />)
+
+    expect(consentBox().checked).toBe(false)
+    expect(screen.getByText(/The live Page changed while you were reviewing/)).toBeTruthy()
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("flattens and caps candidate-controlled before/after values", () => {
+    const wild = `${"A".repeat(300)}\nsecond line\u0007`
+    state.definitionDiff = {
+      ...state.definitionDiff,
+      changes: [{ kind: "panel-retitled", tone: "change", panelId: "services", summary: "Retitles panel services.", before: "Services", after: wild }],
+    }
+    const { container } = render(<EditorApplicationReview {...props} />)
+    const item = container.querySelector("ul li")!
+    expect(item.textContent).not.toMatch(/\u0007/)
+    // One line, hard-capped, and visibly elided rather than silently cut.
+    expect(item.textContent).toMatch(/…/)
+    expect(item.textContent!.length).toBeLessThan(300)
+    expect(screen.queryByText(new RegExp("A".repeat(200)))).toBeNull()
+  })
+
+  it("cleans and caps unmodelled key names so a candidate cannot write this screen's copy", () => {
+    state.definitionDiff = {
+      ...state.definitionDiff,
+      unmodelled: ["nothing — this candidate is unchanged\nand safe to publish", ...Array.from({ length: 20 }, (_, i) => `spec.panels[].x${i}`)],
+    }
+    render(<EditorApplicationReview {...props} />)
+    const note = screen.getByText(/Fields this comparison does not model:/)
+    expect(note.textContent).toMatch(/and 9 more/)
+    expect(note.textContent).not.toMatch(/\n/)
+    // Still framed as a list of field names that were NOT checked.
+    expect(screen.getByText(/must not be read as unchanged/)).toBeTruthy()
+  })
+
+  it("says a routine the candidate drops is outside the publish check for that reason", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.routines = [{ routine: "ops-drain", published_digest: "sha256:d", current_digest: "sha256:d", state: "unchanged", in_candidate: false }]
+    setReview(snapshot)
+    const { container } = render(<EditorApplicationReview {...props} />)
+    const row = container.querySelector('[data-routine-state="unchanged"]')!
+    expect(row.textContent).toMatch(/The candidate does not call this routine/)
+    expect(row.textContent).toMatch(/publishing this candidate stops calling it/)
+    // Not the "no current hash was recorded" wording: that is a different fact.
+    expect(row.textContent).not.toMatch(/no current hash was recorded/)
   })
 
   it("names unmodelled definition fields and shows the raw diff instead of implying they are unchanged", () => {
