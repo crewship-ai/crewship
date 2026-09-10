@@ -49,3 +49,18 @@ func TestDraftPublicationDocumentsConflictAndProofErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendarDocumentsPinnedVersion(t *testing.T) {
+	_, components := routinesWorkspaceSchemaCatalog()
+	event := components["RoutineCalendarEvent"].(map[string]any)
+	props := event["properties"].(map[string]any)
+	version, ok := props["pinned_version"].(map[string]any)
+	if !ok || version["type"] != "integer" {
+		t.Fatalf("calendar's accepted archive version is undocumented: %v", version)
+	}
+	for _, required := range event["required"].([]string) {
+		if required == "pinned_version" {
+			t.Fatal("legacy calendar rows have no pin")
+		}
+	}
+}
