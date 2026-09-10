@@ -693,3 +693,72 @@ func TestWaiting_FreesTheSlotButNotTheSession(t *testing.T) {
 		t.Fatalf("claimed %s, want the queued turn %s", next.Item.ID, second.WorkID)
 	}
 }
+
+// Recovery returns an abandoned attempt to the queue without consulting the
+// attempt count, so an item that loses its lease on its LAST attempt comes back
+// eligible and out of budget. It must be failed and stepped over — not left
+// queued forever, and above all not allowed to stall the work behind it.
+//
+// The first version of Claim returned ErrNoWork from inside that branch, which
+// rolled the failure back with the transaction AND stopped the scan. One
+// exhausted item then blocked the whole queue, permanently, on every poll.
+func TestClaim_ExhaustedItemIsFailedAndDoesNotStallTheQueue(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := context.Background()
+
+	doomed := accept(t, s, db, backgroundReq("agent-doomed"))
+	healthy := accept(t, s, db, backgroundReq("agent-healthy"))
+
+	// Burn every attempt but the last through ordinary retries.
+	for attempt := 1; attempt < MaxAttempts; attempt++ {
+		c, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w", AgentID: "agent-doomed"})
+		if err != nil {
+			t.Fatalf("claim attempt %d: %v", attempt, err)
+		}
+		if err := s.Transition(ctx, TransitionRequest{
+			WorkID: doomed.WorkID, RunID: c.RunID, Generation: c.Generation,
+			To: StateRetryWait, Reason: "transient",
+		}); err != nil {
+			t.Fatalf("retry %d: %v", attempt, err)
+		}
+	}
+
+	// The last attempt is claimed and then abandoned: lease expires with no
+	// runtime locator, so recovery puts it back on the queue.
+	last, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w", AgentID: "agent-doomed"})
+	if err != nil {
+		t.Fatalf("final claim: %v", err)
+	}
+	if last.Attempt != MaxAttempts {
+		t.Fatalf("final attempt = %d, want %d", last.Attempt, MaxAttempts)
+	}
+	clock.Advance(LeaseDuration + time.Second)
+	out, err := s.RecoverExpiredLeases(ctx)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if len(out.Requeued) != 1 {
+		t.Fatalf("requeued = %+v, want the exhausted item back on the queue", out.Requeued)
+	}
+
+	// The next claim must skip the doomed item and hand back the healthy one.
+	c, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("claim after exhaustion: %v — an exhausted item must not stall the queue", err)
+	}
+	if c.Item.ID != healthy.WorkID {
+		t.Fatalf("claimed %s, want the healthy item %s", c.Item.ID, healthy.WorkID)
+	}
+
+	// And the failure must be durable, not rolled back with the scan.
+	it, err := s.Get(ctx, doomed.WorkID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if it.State != StateFailed {
+		t.Errorf("exhausted item = %q, want failed", it.State)
+	}
+	if it.TerminalAt == nil {
+		t.Error("exhausted item has no terminal_at, so the failure did not commit")
+	}
+}

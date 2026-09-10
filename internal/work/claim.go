@@ -79,6 +79,10 @@ type Claimed struct {
 // condition; a dispatcher polls and gets it most of the time.
 var ErrNoWork = errors.New("work: nothing claimable")
 
+// errAttemptsExhausted is internal: it tells the claim scan that this candidate
+// was just failed in the current transaction and the scan should move on.
+var errAttemptsExhausted = errors.New("work: attempts exhausted")
+
 // Claim atomically reserves capacity and starts one attempt.
 //
 // Capacity is counted and the row is taken in ONE immediate transaction, so two
@@ -170,6 +174,13 @@ func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) 
 			continue
 		}
 		claimed, err := s.startAttemptTx(ctx, tx, it, opts.LeaseOwner, now)
+		if errors.Is(err, errAttemptsExhausted) {
+			// startAttemptTx already wrote the failure into this transaction.
+			// Keep scanning rather than returning: this candidate is dead, but
+			// the work behind it is not, and abandoning the scan here would let
+			// one exhausted item stall the whole queue.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -250,12 +261,17 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner string, now time.Time) (*Claimed, error) {
 	attempt := it.Attempts + 1
 	if attempt > MaxAttempts {
-		// Reaching here means retry accounting let an over-limit item stay
-		// eligible. Fail it rather than start a sixth attempt.
+		// Reachable: recovery returns an abandoned attempt to the queue without
+		// consulting the attempt count, so an item that lost its lease on its
+		// last attempt arrives here eligible and out of budget. Fail it in this
+		// transaction and tell the caller to keep scanning — an earlier version
+		// returned ErrNoWork straight out of Claim, which rolled the failure
+		// back AND stopped the dispatcher, so one exhausted item stalled
+		// everything behind it forever.
 		if err := s.setStateTx(ctx, tx, it, StateFailed, "", it.Generation, "max attempts exhausted", now); err != nil {
 			return nil, err
 		}
-		return nil, ErrNoWork
+		return nil, errAttemptsExhausted
 	}
 
 	generation := it.Generation + 1
