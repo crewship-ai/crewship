@@ -370,6 +370,15 @@ In order. The first two are what the release commitment actually waits on.
   ledger; both are now indexed, because retention does hard-delete the parents.
 - `internal/database` and `internal/api` both take many minutes. Use `-run`
   filters while iterating, and never conclude "green" from a run that timed out.
+- **`internal/api` is close to the CI cap and this branch is not why.** Measured
+  724.6 s on crewship-dev while seven agents were competing for the box, against
+  CI's 12-minute per-package `-timeout`. Everything this programme added to that
+  package — the work API, the delivery API, the acceptance tests, the memory
+  mutation endpoint, the credential path tests — totals **~15 s**. The other
+  ~710 s predates it. So a timeout there is a load or hardware signal, not a
+  reason to go deleting new coverage; the same suite measured 543 s and 613 s on
+  a quieter box earlier the same day. If it does start failing in CI, the lever
+  is the package's existing bulk, not this branch's tests.
 - Published Standard Webhooks test vectors trip gitleaks. `.gitleaks.toml` has a
   narrow entry for that file, and the "these are public vectors" claim is enforced
   by a test that verifies each published signature against its secret.
