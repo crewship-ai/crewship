@@ -183,7 +183,8 @@ var manifestMCPValidateSchema = json.RawMessage(`{
 var routineMCPTools = []memoryMCPToolDescriptor{
 	{
 		Name: "save_routine",
-		Description: "Author a Crewship routine (a durable, versioned, schedulable pipeline). " +
+		Description: "Legacy direct publication of a Crewship routine (a durable, versioned, schedulable pipeline). " +
+			"For Chat authoring that a user will review first, use get_routine_draft and save_routine_draft instead. " +
 			"Supply the routine name, a short description, the DSL `definition` object, and " +
 			"`sample_inputs` for the mandatory test_run. The routine is test-run inline before " +
 			"saving: on success the saved routine is returned; on a DSL or validation error the " +
@@ -261,6 +262,8 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"to state that already exists in the workspace are rechecked when an apply plan is built.",
 		InputSchema: manifestMCPValidateSchema,
 	},
+	{Name: "get_routine_draft", Description: "Load the saved draft or a revision-zero baseline before authoring. Keep the returned revision envelope for save_routine_draft; do not overwrite another editor's revision. This does not run or publish work.", InputSchema: routineMCPGetDraftSchema},
+	{Name: "save_routine_draft", Description: "Save unpublished routine edits using the exact revision envelope returned by get_routine_draft. Put slug, name, definition and the proposed trigger inside draft.document. Never changes the live recipe or activates schedules. Return the editor_url to the user for Recipe / Test / Publish. A conflict preserves the existing draft; do not reload and blindly overwrite it. Prefer this for authoring in Chat; legacy save_routine publishes directly.", InputSchema: routineMCPSaveDraftSchema},
 }
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
@@ -387,6 +390,13 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	var status int
 	var bodyBytes []byte
 	switch params.Name {
+	case "get_routine_draft", "save_routine_draft":
+		var args routineDraftArguments
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest, mustJSON(map[string]string{"error": "invalid draft arguments"}))
+			return
+		}
+		status, bodyBytes = s.routineDraft(r.Context(), args, actingAgentID, params.Name == "save_routine_draft")
 	case "save_routine":
 		var save pipelinesSaveRequest
 		if len(params.Arguments) > 0 {

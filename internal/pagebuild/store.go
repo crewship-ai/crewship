@@ -14,6 +14,8 @@ import (
 )
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var errCorruptArtifact = errors.New("corrupt Page artifact")
+
 var ErrStoreFull = errors.New("Page artifact storage quota reached")
 
 type Store struct {
@@ -60,7 +62,7 @@ func (s *Store) Put(ctx context.Context, ws string, a *Artifact) (string, error)
 	defer r.Close()
 	if _, err := s.Get(ctx, ws, digest); err == nil {
 		return digest, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
+	} else if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errCorruptArtifact) {
 		return "", err
 	}
 	dir, err := r.Open(".")
@@ -72,18 +74,24 @@ func (s *Store) Put(ctx context.Context, ws string, a *Artifact) (string, error)
 	if err != nil && err != io.EOF {
 		return "", err
 	}
-	if len(entries) >= 256 {
+	if len(entries) > 256 {
 		return "", ErrStoreFull
 	}
 	var size int64
+	count := 0
 	for _, e := range entries {
+		// Atomic replacement consumes no extra retained slot.
+		if e.Name() == digest+".json" {
+			continue
+		}
+		count++
 		info, err := e.Info()
 		if err != nil {
 			return "", err
 		}
 		size += info.Size()
 	}
-	if size+int64(len(b)) > 128<<20 {
+	if count >= 256 || size+int64(len(b)) > 128<<20 {
 		return "", ErrStoreFull
 	}
 	tmp := ".staging-" + rand.Text()
@@ -136,18 +144,18 @@ func (s *Store) Get(ctx context.Context, ws, digest string) (*Artifact, error) {
 		return nil, err
 	}
 	if len(b) > MaxArtifactDocumentBytes {
-		return nil, errors.New("artifact exceeds limit")
+		return nil, fmt.Errorf("%w: artifact exceeds limit", errCorruptArtifact)
 	}
 	var a Artifact
 	if err := json.Unmarshal(b, &a); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errCorruptArtifact, err)
 	}
 	_, actual, err := a.Encode()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errCorruptArtifact, err)
 	}
 	if actual != digest {
-		return nil, errors.New("artifact digest mismatch")
+		return nil, fmt.Errorf("%w: artifact digest mismatch", errCorruptArtifact)
 	}
 	return &a, nil
 }

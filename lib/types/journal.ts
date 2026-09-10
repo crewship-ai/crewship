@@ -103,6 +103,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // reads that Go file directly, so this list cannot fall behind silently
   // again.
   // Routines
+  "pipeline.published",
   "pipeline.run.started",
   "pipeline.run.completed",
   "pipeline.run.failed",

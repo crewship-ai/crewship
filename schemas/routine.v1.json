@@ -512,6 +512,21 @@
         }
       }
     },
+    "DecisionForm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fields", "actions"],
+      "properties": {
+        "fields": {"type": "array", "maxItems": 50, "items": {"$ref": "#/$defs/InputSpec"}},
+        "actions": {"type": "array", "minItems": 2, "maxItems": 20, "items": {
+          "type": "object", "additionalProperties": false, "required": ["id", "label", "approved"],
+          "properties": {
+            "id": {"type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"},
+            "label": {"type": "string", "minLength": 1},
+            "approved": {"type": "boolean", "description": "True continues with structured output; false denies using the existing failure path."}
+          }
+        }}
+      }
+    },
     "WaitStep": {
       "type": "object",
       "required": ["kind"],
@@ -519,6 +534,7 @@
       "properties": {
         "kind": { "type": "string", "enum": ["approval", "datetime", "event"] },
         "approval_prompt": { "type": "string" },
+        "decision_form": { "$ref": "#/$defs/DecisionForm" },
         "approval_title": {
           "type": "string",
           "description": "One-line label for the inbox row — what this approval would DO, e.g. \"Scale payments-api to 12 replicas\". Templated like approval_prompt. Without it the row falls back to the prompt's first line, which is identical on every invocation."

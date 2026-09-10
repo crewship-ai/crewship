@@ -178,6 +178,47 @@ crewship routine save \
 
 ---
 
+## `crewship routine draft`
+
+Keep edits separate from the published recipe. These commands require MANAGER
+or above in the selected workspace. A saved draft survives editor closure and
+server restart; it does not start work or activate its proposed schedule.
+
+```bash
+crewship routine draft list
+crewship routine draft get digest -f json > draft.json
+# Edit draft.json.document, preserving the outer revision/base fields.
+crewship routine draft save draft.json -f json > saved.json
+crewship routine draft publish saved.json
+```
+
+`get` returns either the saved draft or a revision-zero baseline. For a new
+recipe, fill `document.slug`, `document.name`, and `document.definition`; the
+slug must match the envelope. `save` returns the new revision envelope. Use a
+separate output file so shell redirection cannot truncate the input file.
+
+`publish` validates the exact definition without running its steps, then
+publishes the exact saved ID/revision. Capability changes that require review
+need an explicit `--approve-risk`. A stale editor, changed published recipe or
+incompatible recurring-plan preset returns a conflict; the draft stays saved.
+Unpinned recurring plans follow the newly published recipe. Accepted runs and
+pinned plans keep their version.
+
+```bash
+crewship routine draft publish saved.json --approve-risk
+crewship routine draft discard saved.json
+```
+
+`discard` deletes only the revision named by the file. Legacy `routine save`
+continues to publish directly; it has not become a draft-save command.
+
+Chat authoring uses `get_routine_draft` and `save_routine_draft` against the
+same revision envelope. The agent returns an `editor_url` containing the
+saved draft ID. Open it in Routines to review Recipe / Test / Publish.
+A discarded-and-recreated draft rejects the old link. Neither agent draft
+tool publishes or activates a trigger; legacy `save_routine` still publishes
+directly. Crew/workspace/acting-agent identity is checked by the server.
+
 ## `crewship routine delete <slug>`
 
 Soft-delete a routine after a confirmation prompt. The row is preserved for
@@ -1604,7 +1645,12 @@ crewship routine waitpoints approve wpt_abc123 --comment "LGTM"
 crewship routine waitpoints reject  wpt_abc123 --comment "needs revision"
 ```
 
-The decision comment is forwarded to the parked run as the wait step's output, so downstream steps can read approval rationale via `{{ steps.<wait_step_id>.output }}`.
+An approved legacy wait returns the literal `waited:approval:approved`; its
+comment is stored with the decision and does not replace that output. An
+approved typed wait returns serialized `DecisionAnswer` JSON with `action_id`,
+`data`, and optional `comment`. Downstream steps can parse it from
+`{{ steps.<wait_step_id>.output }}`. Rejection follows the wait step's failure
+behavior.
 
 The decision is attributed to the person whose CLI token made it. An agent cannot decide a waitpoint — an attempt with an agent's internal token is refused (`401` before the route, `403` from the resolve door), the waitpoint stays pending, and the attempt is listed by `crewship audit --action waitpoint.decision_refused`.
 
@@ -1714,3 +1760,60 @@ All routine subcommands accept these global flags:
 - [Routines guide](/guides/routines) — concepts, DSL spec, two-tier execution, troubleshooting
 - [CLI overview](/cli/overview) — global flags + auth
 - [Scheduling guide](/guides/scheduling) — recurring background work primitives
+
+## `crewship routine fixture-test <recipe.json|recipe.yaml>`
+
+Test a selected top-level step without contacting Crewship or executing external
+work. This is separate from `validate` (no step computation) and `step-run`
+(real execution). The HTTP API exposes the same implementation at `POST /workspaces/{workspaceId}/pipelines/fixture_test`. Editor integration follows separately.
+
+```bash
+crewship routine fixture-test invoice.json --step normalize \
+  --input @sample-inputs.json --outputs @captured-outputs.json
+crewship routine fixture-test invoice.json --step fetch \
+  --fixture-output-file sample-response.json
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--step` | Required top-level step ID. |
+| `--input` | Typed JSON object, inline or `@file`; recipe defaults apply. |
+| `--outputs` | JSON object keyed by upstream step ID, inline or `@file`. |
+| `--fixture-output-file` | Explicit replacement output for an agent, HTTP or script step. An empty file is an empty fixture. |
+
+Transforms use the same pure Go transform implementation as a live run and
+refuse missing template values. Agent/HTTP/script steps only validate the
+supplied replacement; without it they fail closed. Other types are not
+supported. Output schema validation blocks file and remote schema references;
+local fragment references remain supported.
+
+The report includes `execution_mode: fixtures`, `output_source`, exact
+`definition_hash`, `fixture_hash`, output, `valid`, `validation_declared`, and
+limitations. No declared checks is explicitly distinguished from passing a
+real output contract. A failed output check returns a nonzero CLI exit code.
+
+This does not run the DAG, conditions, retries, outcome graders or real model
+calls, does not prove credentials/service behavior, and does not mint a
+publication token. Test data is supplied per request/file; there is no shared
+production fixture cache or persistent fixture store. Editing a definition or
+input changes its evidence hash. Existing run exports can be used as input
+files subject to their normal workspace access.
+
+In the editor's Test section, **Load captured data** copies a run's recorded
+inputs and available outputs on request. The source run/hash remain visible.
+The archive and output read must both be available; failures never become empty
+fixtures. For agent/HTTP/script steps, **Use captured output for this step** is
+an explicit replacement choice. Import does not resume the source or run work.
+
+Runtime references in offline step tests use explicit samples: `--env` supplies
+`env.*` and `run.*` values, `--metadata` supplies `run.metadata.*`, and `--secrets`
+supplies fake secret values. Each accepts a JSON object or `@file.json`; env and
+secret values must be strings. No server environment or credential vault is read.
+### Answer a typed waitpoint
+
+`crewship routine waitpoints approve <token> --action <id> --input '{"count":0,"enabled":false}'`
+sends a named decision with typed fields through the authenticated workspace
+endpoint. Use `routine waitpoints reject <token>` for an action whose `approved` value is false. The server
+checks action consistency and the frozen form; malformed values fail without
+resolving the waitpoint. The authenticated user's identity is recorded separately
+from the answer. Legacy approvals still work without `--action` or `--input`.

@@ -51,6 +51,8 @@ func waitpointDeciderFromRequest(r *http.Request) pipeline.WaitpointDecider {
 // a 500.
 func replyWaitpointDecideError(w http.ResponseWriter, logger *slog.Logger, op, token string, err error) {
 	switch {
+	case errors.Is(err, pipeline.ErrDecisionInput):
+		replyError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, pipeline.ErrDeciderNotAllowed):
 		writeJSON(w, http.StatusForbidden, map[string]any{
 			"error":  err.Error(),

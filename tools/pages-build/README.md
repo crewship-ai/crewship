@@ -4,7 +4,7 @@ An opt-in runtime for custom React dashboards. The Go server stores the
 source draft, starts one short-lived Docker compiler, and returns immutable
 JavaScript/CSS. There is no per-Page web server or Vite development server.
 Draft Git checkpoints, reviewed publication/rollback and declared routine actions
-are implemented. Integrated file backup and retention are implemented; browser and operational release gates remain. See [the delivery PRD](../../docs/prd/pages-apps-v1.md).
+are implemented. Integrated file backup and retention are implemented; browser and operational release gates remain. The delivery PRD (`docs/prd/pages-apps-v1.md`) ships in the later documentation layer of #2472.
 
 Users continue to open `/pages/{slug}` on Studio. The runtime hostname is one
 installation setting shared by Pages, not a customer-facing Page URL or a domain
@@ -67,8 +67,8 @@ Studio parent can initialize it. Do not host unrelated applications on this alia
 The browser uses a sandboxed iframe with only `allow-scripts`, a strict CSP and
 a dedicated MessagePort. A separate site passed the Chromium infinite-loop
 isolation test where `srcdoc` froze the Studio tab. This is not a portable
-hard CPU/memory quota: Firefox/WebKit stop-control tests currently fail; see the
-[handoff](../../docs/prd/pages-apps-handoff.md) before claiming browser support.
+hard CPU/memory quota: Firefox/WebKit stop-control tests currently fail; the browser acceptance handoff ships in the later documentation layer of #2472.
+Do not claim support for those engines from rendering alone.
 CSP blocks fetch, external subresources and workers, but is not a complete
 anti-exfiltration boundary (an iframe can navigate itself). Opening custom code
 still requires trusted/reviewed source; never pass secrets as panel data.
@@ -171,8 +171,8 @@ not proof that execution stopped. Queue status is separate from actual run statu
 The source Git commit does not pin the backend routine's implementation: the
 existing routine executor still executes its current definition.
 
-See [the MySQL/Ansible pilots](../../examples/pages-apps/README.md) for source,
-producer and routine examples. The Page's normal producer/realtime path remains in use. Published application
+The MySQL/Ansible pilots (`examples/pages-apps/README.md`) ship in the later
+examples/documentation layer of #2472. The Page's normal producer/realtime path remains in use. Published application
 checks use ETag to avoid retransmitting unchanged code; the server rechecks
 permission before every 304, and no public artifact cache bypasses that check.
 

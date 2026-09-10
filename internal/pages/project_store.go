@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 )
+
+var errCorruptSource = errors.New("corrupt Page source")
 
 var ErrProjectStoreFull = errors.New("Page source storage quota reached")
 
@@ -72,7 +75,7 @@ func (s *ProjectStore) Put(ctx context.Context, workspace string, p *SourceProje
 	name := digest + ".yaml"
 	if existing, err := s.Get(ctx, workspace, digest); err == nil && existing != nil {
 		return digest, nil
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errCorruptSource) {
 		return "", err
 	}
 	// Bound both bytes and inode count, including crash leftovers. No automatic
@@ -92,6 +95,10 @@ func (s *ProjectStore) Put(ctx context.Context, workspace string, p *SourceProje
 	var total int64
 	count := 0
 	for _, entry := range entries {
+		// Atomic replacement keeps the existing slot.
+		if entry.Name() == name {
+			continue
+		}
 		if (entry.Name() == ".maintenance.lock" || entry.Name() == ".git-maintenance.lock") || (entry.Name() == "git" && entry.IsDir()) {
 			continue
 		}
@@ -156,16 +163,20 @@ func (s *ProjectStore) Get(ctx context.Context, workspace, digest string) (*Sour
 		return nil, fmt.Errorf("open Page source %s: %w", digest, err)
 	}
 	defer f.Close()
-	p, err := ParseSourceProject(f)
+	b, err := io.ReadAll(io.LimitReader(f, MaxProjectDocumentBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	p, err := ParseSourceProject(bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errCorruptSource, err)
 	}
 	actual, err := p.Digest()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", errCorruptSource, err)
 	}
 	if actual != digest {
-		return nil, errors.New("Page source digest mismatch")
+		return nil, fmt.Errorf("%w: Page source digest mismatch", errCorruptSource)
 	}
 	return p, nil
 }

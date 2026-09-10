@@ -74,6 +74,22 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 		}
 		return nil, fmt.Errorf("Page build failed: %s", logs.String())
 	}
+	a, err := decodeWorkerArtifact(out, logs)
+	if err != nil {
+		return nil, err
+	}
+	a.Toolchain = d.Image
+	if _, _, err := a.Encode(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+func decodeWorkerArtifact(out, logs *boundedOutput) (*Artifact, error) {
+	// An exit-zero worker can race cancellation; truncation is still an error.
+	if out.overflow || logs.overflow {
+		return nil, errors.New("Page build exceeded its output limit")
+	}
 	var a Artifact
 	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
 	dec.DisallowUnknownFields()
@@ -86,10 +102,6 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 	}
 	if a.ProfileSHA256 != pageprofile.Fingerprint() {
 		return nil, errors.New("Pages tools image does not match this server release; rebuild and install the image from tools/pages-build")
-	}
-	a.Toolchain = d.Image
-	if _, _, err := a.Encode(); err != nil {
-		return nil, err
 	}
 	return &a, nil
 }

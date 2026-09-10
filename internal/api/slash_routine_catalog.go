@@ -95,10 +95,10 @@ func slashWidgetForInputType(inputType string) string {
 		return "boolean"
 	case "array", "object":
 		return "textarea"
-	default:
-		// Empty (undeclared) or a type from a newer DSL than this build.
-		// A text box the server can validate beats rendering nothing.
+	case "":
 		return "text"
+	default:
+		return "unsupported"
 	}
 }
 
@@ -325,6 +325,14 @@ func (h *SlashCommandsHandler) routineSlashCommands(ctx context.Context, workspa
 }
 
 func routineInputWidget(in pipeline.InputSpec) string {
+	if slashWidgetForInputType(in.Type) == "unsupported" {
+		return "unsupported"
+	}
+	switch in.Widget {
+	case "", "text", "textarea", "select", "multiselect", "boolean", "number":
+	default:
+		return "unsupported"
+	}
 	if len(in.Options) > 0 {
 		if in.Type == "array" {
 			return "multiselect"

@@ -1567,8 +1567,30 @@ jobs:
   # would just vanish from its effect, and in the shard's case would take its
   # coverage with it while both jobs stayed green. The step below fails if
   # any entry in either list stops resolving against `go list ./...`.
-  go-race:
+  # The CLI package has its own race runner after repeated aggregate 25m
+  # timeouts on September 10 (run 34466543067, both attempts). The same
+  # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
+  # fresh-database regression passes in 45–51s locally. Keep the full suite
+  # and its 25m bound; remove competition with other package binaries.
+  # go-race depends on this shard, so deleting it fails workflow validation
+  # and Binary Build cannot become green without CLI race coverage.
+  go-race-cli:
     needs: [merge-conflict-markers]
+    name: Go Race (CLI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Go test (race, CLI)
+        run: go test ./cmd/crewship -race -count=1 -timeout 25m
+
+  go-race:
+    needs: [merge-conflict-markers, go-race-cli]
     name: Go Race
     runs-on: ubuntu-latest
     # BLOCKING, with no continue-on-error. A red run means a race landed —
@@ -1622,7 +1644,7 @@ jobs:
           #
           #   race-deny.txt  → NOT race-tested anywhere. Needs the
           #                    structural justification in the job comment.
-          #   race-shard.txt → race-tested, by the go-race-api job. Covered,
+          #   race-shard.txt → race-tested by the explicit API/CLI jobs. Covered,
           #                    just not from this binary's timeout budget.
           #
           # cmd/crewship was the second deny entry and is back under -race
@@ -1644,6 +1666,7 @@ jobs:
           shardfile="${RUNNER_TEMP:-/tmp}/race-shard.txt"
           cat > "$shardfile" <<'SHARD'
           github.com/crewship-ai/crewship/internal/api
+          github.com/crewship-ai/crewship/cmd/crewship
           SHARD
           nheld="$(cat "$denyfile" "$shardfile" | grep -c .)"
           total="$(go list ./... | grep -c .)"
@@ -1660,7 +1683,7 @@ jobs:
             cat "$denyfile" "$shardfile"
             exit 1
           fi
-          echo "Race-testing $n of $total packages (2 excluded, 1 sharded to go-race-api; see job comment)."
+          echo "Race-testing $n of $total packages (1 excluded, 2 sharded to dedicated jobs; see job comment)."
           # -timeout 25m per test binary. Was 20m, which cmd/crewship
           # cleared by only 97 seconds (1102.8s then, 940.9s now that the
           # shard is not competing for the same 4 vCPUs) — that was luck,

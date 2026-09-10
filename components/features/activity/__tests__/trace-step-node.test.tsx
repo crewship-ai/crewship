@@ -59,6 +59,31 @@ const approveBtn = () => screen.queryByRole("button", { name: /approve waitpoint
 const denyBtn = () => screen.queryByRole("button", { name: /deny waitpoint/i })
 
 describe("<TraceStepNode> waitpoint actions", () => {
+  it("N5 directs a typed decision to Inbox instead of sending an empty answer", () => {
+    const data = {
+      step: {
+        id: "gate",
+        type: "wait",
+        wait: {
+          kind: "approval",
+          decision_form: {
+            fields: [],
+            actions: [
+              { id: "go", label: "Go", approved: true },
+              { id: "stop", label: "Stop", approved: false },
+            ],
+          },
+        },
+      },
+      status: "waiting",
+      selected: false,
+      waitpoint: { token: "tok-1", workspaceId: "ws-1" },
+    }
+    render(<TraceStepNode {...({ data } as unknown as NodeProps)} />)
+    expect(screen.getByRole("link", { name: "Answer in Inbox" })).toHaveAttribute("href", "/inbox")
+    expect(approveBtn()).not.toBeInTheDocument()
+    expect(denyBtn()).not.toBeInTheDocument()
+  })
   beforeEach(() => {
     vi.mocked(waitpointDecide).mockResolvedValue({ ok: true })
   })

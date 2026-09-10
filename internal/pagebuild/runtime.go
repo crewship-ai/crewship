@@ -82,7 +82,20 @@ func RuntimeMatchesHost(runtime, host string) bool {
 // served by the existing Go listener via a separate DNS site, not a Vite server.
 func ServeRuntime(w http.ResponseWriter, studio string) {
 	nonce := rand.Text()
-	encodedParent, _ := json.Marshal(strings.TrimSuffix(studio, "/"))
+	// Match the browser's event.origin serialization, including default ports.
+	parent := strings.TrimSuffix(studio, "/")
+	if u, err := url.Parse(parent); err == nil {
+		if (u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
+			host := u.Hostname()
+			if strings.Contains(host, ":") {
+				host = "[" + host + "]"
+			}
+			u.Host = host
+		}
+		u.Host = strings.ToLower(u.Host)
+		parent = u.String()
+	}
+	encodedParent, _ := json.Marshal(parent)
 	w.Header().Del("X-Frame-Options")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
