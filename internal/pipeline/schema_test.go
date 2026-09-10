@@ -298,3 +298,27 @@ func schemaPath(t *testing.T) string {
 	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	return filepath.Join(repoRoot, "schemas", "routine.v1.json")
 }
+
+func TestStepNameRoundTripPreservesExecutionIdentity(t *testing.T) {
+	dsl, err := Parse([]byte(`{"name":"named","steps":[{"id":"internal_id","name":"Ask for the decision","type":"wait","wait":{"kind":"approval"}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dsl.Steps[0].Name != "Ask for the decision" || dsl.Steps[0].ID != "internal_id" {
+		t.Fatalf("name changed identity: %+v", dsl.Steps[0])
+	}
+	raw, err := json.Marshal(dsl.Steps[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"name":"Ask for the decision"`) {
+		t.Fatalf("name lost: %s", raw)
+	}
+	raw, err = json.Marshal(Step{ID: "legacy", Type: StepTransform})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"name"`) {
+		t.Fatalf("legacy unnamed step gained a name: %s", raw)
+	}
+}

@@ -1,5 +1,6 @@
 "use client"
 
+import { describeStep } from "@/lib/routine-step-describe"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -30,7 +31,15 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { FileText, Activity, Square, Clock, CheckCircle2, AlertCircle, History } from "lucide-react"
+import {
+  FileText,
+  Activity,
+  Square,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  History,
+} from "lucide-react"
 import { DetailCard, Pill, StatStrip } from "@/components/ui/detail"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { RoutineNavigation, routineViewHref } from "./routine-navigation"
@@ -46,7 +55,15 @@ import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 const EMPTY = new Map()
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
-export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; runId: string }) {
+interface RoutineRunDetailProps {
+  workspaceId: string
+  runId: string
+}
+
+export function RoutineRunDetail({
+  workspaceId,
+  runId,
+}: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
@@ -262,7 +279,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
       } as Record<string, string>
     )[run.triggered_via] || readableFieldName(run.triggered_via || "Unknown trigger")
   const resultPanel = run.output && (
-    <DetailCard title="Recorded result" icon={FileText}>
+    <DetailCard title="Results" icon={FileText}>
       {declaredResult && <p className="mb-3 text-sm font-medium">{declaredResult}</p>}
       {["true", "false"].includes(run.output.trim()) && !declaredResult && (
         <p className="mb-3 text-xs text-muted-foreground">
@@ -295,6 +312,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     outputsAvailable: run.step_outputs_available !== false,
     subSpans: run.sub_spans as Record<string, unknown> | undefined,
     currentStepId: run.current_step_id,
+    failedStepId: run.failed_at_step,
     active,
     executionsError: executions.error,
     executionsTruncated: executions.truncated,
@@ -358,7 +376,9 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-medium">{explanation.title}</h2>
             <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer hover:text-foreground">What this means</summary>
+              <summary className="cursor-pointer hover:text-foreground">
+                What this means
+              </summary>
               <p className="mt-2 max-w-[85ch] leading-relaxed">{explanation.detail}</p>
             </details>
           </div>
@@ -370,16 +390,28 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
             Open in Activity ↗
           </Link>
         </div>
-        {run.error_message && (
-          <details className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
-            <summary className="cursor-pointer text-destructive">
-              Recorded error
-              {run.failed_at_step ? ` · ${readableFieldName(run.failed_at_step)}` : ""}
-            </summary>
-            <p className="mt-2 whitespace-pre-wrap break-words" role="alert">
-              {run.error_message}
-            </p>
-          </details>
+        {(run.error_message || run.failed_at_step) && (
+          <div className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
+            {run.failed_at_step && (
+              <p className="font-medium text-destructive">
+                Failed step:{" "}
+                {dsl?.steps?.some((step) => step.id === run.failed_at_step)
+                  ? describeStep(
+                      dsl.steps.find((step) => step.id === run.failed_at_step),
+                      1,
+                    ).title
+                  : "Name unavailable"}
+                <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
+                  {run.failed_at_step}
+                </span>
+              </p>
+            )}
+            {run.error_message && (
+              <p className="mt-1 whitespace-pre-wrap break-words" role="alert">
+                {run.error_message}
+              </p>
+            )}
+          </div>
         )}
         {run.issue_identifier && (
           <Link
@@ -390,6 +422,30 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           </Link>
         )}
       </div>
+      {approval.waitpoint && (
+        <div className="space-y-2">
+          <RoutineApprovalBanner
+            waitpoint={approval.waitpoint}
+            deciding={approval.deciding}
+            onDecide={approval.decide}
+          />
+          {approval.waitpoint.inbox_item_id && (
+            <Link
+              className="text-xs text-primary"
+              href={`/inbox?item=${encodeURIComponent(approval.waitpoint.inbox_item_id)}`}
+            >
+              Open the same decision in Inbox ↗
+            </Link>
+          )}
+        </div>
+      )}
+      {approval.error && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not load or update the decision.{" "}
+          <button onClick={approval.refresh}>Retry</button>
+        </p>
+      )}
+
       <StatStrip
         items={[
           {
@@ -475,29 +531,6 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           <button onClick={refresh}>Retry</button>
         </p>
       )}
-      {approval.waitpoint && (
-        <div className="space-y-2">
-          <RoutineApprovalBanner
-            waitpoint={approval.waitpoint}
-            deciding={approval.deciding}
-            onDecide={approval.decide}
-          />
-          {approval.waitpoint.inbox_item_id && (
-            <Link
-              className="text-xs text-primary"
-              href={`/inbox?item=${encodeURIComponent(approval.waitpoint.inbox_item_id)}`}
-            >
-              Open the same decision in Inbox ↗
-            </Link>
-          )}
-        </div>
-      )}
-      {approval.error && (
-        <p role="alert" className="text-sm text-destructive">
-          Could not load or update the decision. <button onClick={approval.refresh}>Retry</button>
-        </p>
-      )}
-
       {run.step_outputs_available === false && (
         <p
           role="alert"
@@ -511,20 +544,13 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         </p>
       )}
       {resultPanel}
-      {!run.output && (
-        <DetailCard title="Recorded result" icon={FileText}>
-          <p className="text-sm text-muted-foreground">
-            No final response has been recorded{active ? " yet" : ""}. Step responses and files
-            below may still hold the work.
-          </p>
-        </DetailCard>
-      )}
       <RoutineRunArtifacts
         key={`artifacts-${runId}`}
         workspaceId={workspaceId}
         runId={runId}
         active={active}
         compact
+        noFinalResult={!run.output && run.step_outputs_available !== false}
       />
 
       {dsl ? (
@@ -532,7 +558,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           workspaceId={workspaceId}
           definition={dsl}
           record={spineRecord}
-          initialLimit={8}
+          initialLimit={12}
           map={({ openStep }) => (
             <div className="overflow-hidden" style={{ height: mapHeight }}>
               <TraceCanvas
@@ -624,7 +650,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         <summary className="cursor-pointer">Technical details</summary>
         <dl className="mt-2 space-y-1">
           <div>Run: {run.id}</div>
-          <div>Definition: {run.definition_hash || "unavailable"}</div>
+          <div>Recipe hash: {run.definition_hash || "unavailable"}</div>
           <div>Cost: ${run.cost_usd.toFixed(4)}</div>
           <div>Mode: {run.mode}</div>
         </dl>

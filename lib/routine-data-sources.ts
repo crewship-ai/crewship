@@ -1,3 +1,4 @@
+import { describeStep } from "@/lib/routine-step-describe"
 type Row = Record<string, unknown>
 export interface RoutineDataSource {
   value: string
@@ -65,7 +66,7 @@ export function routineDataSources(
     const type = typeof schema.type === "string" ? schema.type : "string"
     sources.push({
       value: `{{ steps.${step.id}.output }}`,
-      label: `Step result → ${step.name || step.id} · ${schema.type ? `declared ${type}` : "output text"}`,
+      label: `Step result → ${describeStep(step, 1).title} · ${schema.type ? `declared ${type}` : "output text"}`,
       stepId: step.id,
       valueType: type,
     })
@@ -75,7 +76,7 @@ export function routineDataSources(
       if (!safeID.test(key) || typeof property.type !== "string") continue
       sources.push({
         value: `{{ steps.${step.id}.output.${key} }}`,
-        label: `Step result → ${step.name || step.id} → ${property.title || key} · declared ${property.type}`,
+        label: `Step result → ${describeStep(step, 1).title} → ${property.title || key} · declared ${property.type}`,
         stepId: step.id,
         valueType: property.type,
       })

@@ -19,10 +19,11 @@ export function RoutinePublicationReview({
   if (!draft)
     return (
       <p role="alert" className="text-sm text-destructive">
-        Fix the definition in Code before reviewing publication.
+        Fix the recipe in Code before reviewing publication.
       </p>
     )
-  const changes = published || !existing ? routinePublicationChanges(published ?? {}, draft) : null
+  const changes =
+    published || !existing ? routinePublicationChanges(published ?? {}, draft) : null
   const count = (key: string) => (Array.isArray(draft[key]) ? draft[key].length : 0)
   return (
     <section className="space-y-5" aria-label="Publication review">
@@ -45,7 +46,7 @@ export function RoutinePublicationReview({
       <div className="grid grid-cols-3 divide-x divide-hairline overflow-hidden rounded-2xl border border-hairline bg-card">
         {[
           ["Steps", count("steps")],
-          ["Questions", count("inputs")],
+          ["Inputs", count("inputs")],
           ["Results", count("outputs")],
         ].map(([label, value]) => (
           <div key={label} className="min-w-0 p-3 sm:p-4">
@@ -61,7 +62,7 @@ export function RoutinePublicationReview({
         </h4>
         {!changes && (
           <p className="text-sm text-muted-foreground">
-            The published definition is unavailable here. Open the published recipe to compare it;
+            The published recipe is unavailable here. Open the published recipe to compare it;
             this review cannot confirm which fields changed.
           </p>
         )}
@@ -69,7 +70,9 @@ export function RoutinePublicationReview({
           <div key={group.label} className="space-y-2 border-t border-hairline pt-3">
             <p className="text-sm font-medium">{group.label}</p>
             {!group.readable ? (
-              <p className="text-xs text-muted-foreground">This structure needs review in Code.</p>
+              <p className="text-xs text-muted-foreground">
+                This structure needs review in Code.
+              </p>
             ) : (
               <>
                 {(
@@ -121,13 +124,13 @@ export function RoutinePublicationReview({
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="size-4 shrink-0" />
           {validated
-            ? "Definition validation passed. Publication checks the current draft again before updating the live recipe."
+            ? "Test passed. Publication checks the current draft again before updating the live recipe."
             : "Publication validates this draft without running agents or external actions."}
         </p>
       </div>
       <details className="rounded-xl border border-hairline p-3">
         <summary className="cursor-pointer text-xs text-muted-foreground">
-          Technical definition comparison
+          Technical details
         </summary>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {[

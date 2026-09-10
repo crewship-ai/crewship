@@ -26,6 +26,7 @@ export function RoutineSavedInputs({ values, definition }: { values?: Record<str
   const [showJson, setShowJson] = useState(false)
   const specs = routineInputSpecs(definition as Record<string, unknown> | null)
   const names = [...new Set([...specs.map(s => s.name), ...Object.keys(values ?? {})])]
+  if (values != null && !names.length) return <p aria-label="Inputs used for this run" className="flex items-center gap-2 rounded-lg border border-border px-4 py-3 text-xs text-muted-foreground"><ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />This run has no saved inputs.</p>
   return <DetailCard title="Inputs used for this run" icon={ArrowDownToLine} subtitle={values ? `${Object.keys(values).length} saved` : undefined}>
     <p className="mb-5 text-xs text-muted-foreground">Saved at execution time. Editing the recipe does not change these values.</p>
     {values == null ? <p role="status" className="text-sm text-muted-foreground">Saved inputs are unavailable for this run.</p> : !names.length ? <p className="rounded-xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">This run has no saved inputs.</p> : <div className="space-y-4">{names.map(name => {

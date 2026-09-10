@@ -14,6 +14,7 @@ import {
 } from "@/components/layout/create-surface"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
@@ -26,8 +27,6 @@ import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineCreateDialog } from "./routine-create-dialog"
-import { BottomPanel } from "@/components/features/crews/bottom-panel"
-import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
 // Keep the shared explorer mounted across overview, definition and historical
 // run views. The URL identifies the routine and optional execution; filters
@@ -41,7 +40,8 @@ interface RoutinesLayoutProps {
 const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
-  const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const { pipelines: loadedPipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const pipelines = useRoutinePurposes(workspaceId, loadedPipelines)
   const isMobile = useIsMobile()
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   // On a phone the sidebar is 280px of a 390px screen — it does not
@@ -60,7 +60,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   })
   const visiblePipelines = useMemo(
     () =>
-      filters.showTestRoutines ? pipelines : pipelines.filter((p) => !isRoutineTestFixture(p.slug)),
+      filters.showTestRoutines
+        ? pipelines
+        : pipelines.filter((p) => !isRoutineTestFixture(p.slug)),
     [pipelines, filters.showTestRoutines],
   )
   // The selected routine lives in the URL: /routines?slug=<slug>.
@@ -88,7 +90,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       const target = e.target as HTMLElement | null
       const isInputContext =
         target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
       if (e.key === "/" && !isInputContext) {
         const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
@@ -152,27 +156,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // The detail panel does its own fetch for the full DSL body.
   const selectedRoutine = selectedSlug ? pipelines.find((p) => p.slug === selectedSlug) : null
 
-  // Context for the bottom dock — runs / logs / schedule / spec of the
-  // routine in focus. MEMOIZED: this layout re-renders on every poll tick,
-  // and a fresh context object each render makes the dock tabs (logs/yaml)
-  // re-fetch + flash "Loading…" forever. Identity must only change when the
-  // routine actually changes.
-  const routineCtx: BottomPanelContext = useMemo(
-    () =>
-      selectedSlug
-        ? {
-            kind: "routine",
-            slug: selectedSlug,
-            pipelineId: selectedRoutine?.id ?? null,
-            name: selectedRoutine?.name,
-          }
-        : null,
-    [selectedSlug, selectedRoutine?.id, selectedRoutine?.name],
-  )
-
-  // Live sub-bar description — derived from the loaded pipelines list.
-  // `pipelines.length` = routines in the workspace; `totalRuns` sums each
-  // routine's invocation_count (Pipeline.invocation_count from use-pipelines).
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
@@ -204,7 +187,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             <SubBarPrimary
               icon={Plus}
               onClick={() => setCreateDialogOpen(true)}
-              title="Create a new routine — DSL editor with starter templates + Test & Save"
+              title="Create a routine"
             >
               New routine
             </SubBarPrimary>
@@ -264,7 +247,11 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           <AnimatePresence mode="wait">
             {selectedRun ? (
               <div key={selectedRun} className="absolute inset-0 overflow-auto">
-                <RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} />
+                <RoutineRunDetail
+                  key={selectedRun}
+                  workspaceId={workspaceId}
+                  runId={selectedRun}
+                />
               </div>
             ) : selectedSlug ? (
               <motion.div
@@ -322,6 +309,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 className="absolute inset-0 overflow-hidden"
               >
                 <RoutinesWorkspace
+                  search={search}
+                  filters={filters}
                   workspaceId={workspaceId}
                   routines={visiblePipelines}
                   loading={loading}
@@ -336,17 +325,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
           </AnimatePresence>
         </div>
       </div>
-
-      {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
-           routine. Appears once a routine is selected, pairing the
-           definition above with its run console below. ---- */}
-      {routineCtx && !selectedRun && (
-        <BottomPanel
-          workspaceId={workspaceId}
-          context={routineCtx}
-          tabs={["runs", "logs", "schedule", "yaml"]}
-        />
-      )}
 
       {/* Import dialog */}
       {importDialogOpen && (

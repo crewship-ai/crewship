@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
 import {
   CreateSurface,
@@ -416,6 +416,22 @@ describe("what the migrations caught", () => {
 
     fireEvent.keyDown(document.activeElement!, { key: "Enter", metaKey: true })
     expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns focus to an external opener after the surface unmounts", async () => {
+    const opener = document.createElement("button")
+    opener.textContent = "Edit"
+    document.body.append(opener)
+    opener.focus()
+    const { unmount } = render(
+      <CreateSurface open restoreOpenerFocus onOpenChange={vi.fn()}>
+        <CreateSurfaceHeader title="Edit routine" onClose={vi.fn()} />
+      </CreateSurface>,
+    )
+    expect(document.activeElement).toBe(screen.getByRole("dialog"))
+    unmount()
+    await waitFor(() => expect(document.activeElement).toBe(opener))
+    opener.remove()
   })
 
   it("names every step, which is how an e2e selector finds one", () => {

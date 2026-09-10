@@ -83,7 +83,7 @@ export function RoutineDefinitionCanvas({
   const dsl = React.useMemo<PipelineDSL | null>(() => {
     if (!definition || typeof definition !== "object") return null
     const steps = (definition as { steps?: unknown }).steps
-    return Array.isArray(steps) ? ({ steps } as PipelineDSL) : null
+    return Array.isArray(steps) ? ({ ...definition, steps } as PipelineDSL) : null
   }, [definition])
 
   const handleSelect = React.useCallback(

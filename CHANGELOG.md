@@ -24,9 +24,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
 - **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
+- Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
+
 - Routines: comparison starts survive closing the page and recognize interrupted runs. One-time starts pin their accepted version and new start times no longer reuse an earlier run. Optional nested inputs remain optional; failed artifact capture no longer fails successful work or overwrites another attempt's evidence. Execution pagination remains available during polling, and schedule cancellation works while presets load.
 
 ### Changed
+
+- Routines opens on a searchable list with visible purposes and step counts. Steps have optional human names. Edit is one recipe document with step-level Edit/Test tools; run failures show their reason and open the affected step.
 
 - Routine authoring saves durable drafts, reviews publication changes, tests steps with explicit samples and compares archived versions with recorded run evidence. Run details group attempts and outputs by step. Proxy errors and obsolete draft loads preserve the user's work.
 

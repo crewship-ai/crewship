@@ -37,7 +37,8 @@ vi.mock("@/components/features/crews/crew-picker", () => ({
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: vi.fn(async (url: string, init?: RequestInit) => {
     h.calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} })
-    if (init?.method === "DELETE" && h.discardFails) return new Response("<html>Bad gateway</html>", { status: 502 })
+    if (init?.method === "DELETE" && h.discardFails)
+      return new Response("<html>Bad gateway</html>", { status: 502 })
     if (h.savedDrafts && url.endsWith("/drafts") && !init?.method)
       return new Response(
         JSON.stringify([
@@ -150,22 +151,18 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 describe("shared routine editor", () => {
-  it("navigates the shared wizard without saving or losing edits", async () => {
+  it("keeps one recipe document and preserves edits when opening Code", async () => {
     render(<RoutineCreateDialog {...props} />)
-    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } })
-    fireEvent.click(screen.getByRole("button", { name: "Continue", exact: true }))
-    expect(screen.getByRole("button", { name: "Step 2: Steps" })).toHaveAttribute(
-      "aria-current",
-      "step",
+    await waitFor(() =>
+      expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } })
+    expect(screen.getByText("Existing schedules")).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Continue", exact: true }),
+    ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
-    expect(screen.getByRole("button", { name: "Step 2: Steps" })).toHaveAttribute(
-      "aria-current",
-      "step",
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Back", exact: true }))
     expect(screen.getByLabelText("Name")).toHaveValue("Draft name")
     expect(h.calls.some((c) => c.url.endsWith("/publish") || c.url.includes("/test_run"))).toBe(
       false,
@@ -178,11 +175,8 @@ describe("shared routine editor", () => {
     await screen.findByText("Worker")
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Edited recipe" } })
     fireEvent.click(screen.getByText("Icon: clock"))
-    fireEvent.click(screen.getByRole("button", { name: "Step 3: Schedule", exact: true }))
     expect(screen.getByText("Existing schedules")).toBeInTheDocument()
-    if (!screen.queryByRole("button", { name: "Validate & Publish" }))
-      fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith("existing"))
     const saved = h.calls.find((c) => c.url.endsWith("/drafts") && c.body.document)!.body
       .document as Record<string, unknown>
@@ -204,16 +198,14 @@ describe("shared routine editor", () => {
   it("retries an appearance failure without saving the recipe or scheduling twice", async () => {
     h.appearanceFails = true
     render(<RoutineCreateDialog {...props} />)
-    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
-    if (!screen.queryByRole("button", { name: "Validate & Publish" }))
-      fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }))
+    await waitFor(() =>
+      expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
     await screen.findByText(/The recipe was saved, but its icon could not be saved/)
     expect(props.onCreated).not.toHaveBeenCalled()
     h.appearanceFails = false
-    if (!screen.queryByRole("button", { name: "Validate & Publish" }))
-      fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     expect(h.calls.filter((c) => c.url.endsWith("/publish"))).toHaveLength(1)
   })
@@ -222,9 +214,7 @@ describe("shared routine editor", () => {
     const view = render(<RoutineCreateDialog {...creation} />)
     fireEvent.click(screen.getByText("Write it yourself", { exact: true }))
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "First recipe" } })
-    if (!screen.queryByRole("button", { name: "Validate & Publish" }))
-      fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     view.rerender(<RoutineCreateDialog {...creation} open={false} />)
     view.rerender(<RoutineCreateDialog {...creation} open />)
@@ -234,10 +224,12 @@ describe("shared routine editor", () => {
   })
   it("saves a durable draft without validating or publishing work", async () => {
     render(<RoutineCreateDialog {...props} />)
-    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
+    )
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unfinished draft" } })
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
-    await screen.findByText(/Saved draft · revision 1/)
+    await screen.findByText(/Saved draft/)
     expect(
       h.calls.some(
         (c) =>
@@ -252,7 +244,9 @@ describe("shared routine editor", () => {
   it("keeps local work after an editor conflict and does not publish", async () => {
     h.draftConflict = true
     render(<RoutineCreateDialog {...props} />)
-    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
+    )
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Keep my edit" } })
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     await screen.findByText(/Another editor saved this draft/)
@@ -262,15 +256,16 @@ describe("shared routine editor", () => {
   it("links a blocked publication to the schedule while preserving the saved draft", async () => {
     h.scheduleConflict = true
     render(<RoutineCreateDialog {...props} />)
-    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: "Validate & Publish" }))
+    await waitFor(() =>
+      expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
     const link = await screen.findByRole("link", { name: "Review schedule: Daily" })
     expect(link).toHaveAttribute("href", "/routines?slug=existing&view=plan#schedule-plan1")
     expect(link).toHaveAttribute("target", "_blank")
     expect(props.onCreated).not.toHaveBeenCalled()
     expect(props.onClose).not.toHaveBeenCalled()
-    expect(screen.getByText(/Saved draft · revision 1/)).toBeInTheDocument()
+    expect(screen.getByText(/Saved draft/)).toBeInTheDocument()
   })
   it("opens the same saved AI draft without creating a second recipe", async () => {
     h.linked = true
@@ -286,7 +281,9 @@ describe("shared routine editor", () => {
     await waitFor(() =>
       expect(h.calls.some((c) => c.url.endsWith("/drafts") && c.body.document)).toBe(true),
     )
-    expect(h.calls.find((c) => c.url.endsWith("/drafts") && c.body.document)?.body).toMatchObject({
+    expect(
+      h.calls.find((c) => c.url.endsWith("/drafts") && c.body.document)?.body,
+    ).toMatchObject({
       id: "ai-draft-1",
       revision: 4,
       slug: "existing",
@@ -304,11 +301,12 @@ describe("shared routine editor", () => {
     )
     await screen.findByText(/draft link is no longer current/)
     expect(screen.getByRole("button", { name: "Save draft", exact: true })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Continue", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Publish", exact: true })).toBeDisabled()
   })
   it("opens a historical version as an unsaved draft", () => {
-    render(<RoutineCreateDialog {...props} initialDraft={{ ...routine.definition, steps: [] }} />)
-    fireEvent.click(screen.getByRole("button", { name: "Step 2: Steps", exact: true }))
+    render(
+      <RoutineCreateDialog {...props} initialDraft={{ ...routine.definition, steps: [] }} />,
+    )
     expect(screen.queryByText("1. work")).not.toBeInTheDocument()
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)
   })
@@ -347,10 +345,18 @@ it("explains a non-JSON discard failure without losing the draft", async () => {
   const confirm = window.confirm
   window.confirm = vi.fn(() => true)
   try {
-    render(<RoutineCreateDialog {...props} routine={undefined} savedDraftLink={{ slug: "existing", id: "ai-draft-1" }} />)
+    render(
+      <RoutineCreateDialog
+        {...props}
+        routine={undefined}
+        savedDraftLink={{ slug: "existing", id: "ai-draft-1" }}
+      />,
+    )
     await screen.findByDisplayValue("Draft from Chat")
     fireEvent.click(screen.getByRole("button", { name: "Discard saved draft" }))
     await screen.findByText(/Could not discard the draft/)
     expect(screen.getByDisplayValue("Draft from Chat")).toBeInTheDocument()
-  } finally { window.confirm = confirm }
+  } finally {
+    window.confirm = confirm
+  }
 })

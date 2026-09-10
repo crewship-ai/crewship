@@ -29,6 +29,7 @@ import type { RoutineDetail } from "../routines-detail-panel"
 const h = vi.hoisted(() => ({
   automations: [] as unknown[],
   records: [] as unknown[],
+  schedules: [] as unknown[],
 }))
 
 // Spreads the rest of the props: the real Link forwards data-* to the anchor,
@@ -82,7 +83,12 @@ vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
   }),
 }))
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
-  usePipelineSchedules: () => ({ schedules: [], loading: false, error: null, refresh: vi.fn() }),
+  usePipelineSchedules: () => ({
+    schedules: h.schedules,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }))
 vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
@@ -133,6 +139,7 @@ function renderCard(r: RoutineDetail = routine()) {
 beforeEach(() => {
   h.automations = []
   h.records = []
+  h.schedules = []
 })
 
 /** Opens the Automations pane of the Triggers card. */
@@ -285,11 +292,16 @@ describe("what a routine writes back to Crewship", () => {
 })
 
 describe("routine access and starting points", () => {
+  it("does not claim zero starts for a schedule bound by slug", () => {
+    h.schedules = [{id:"schedule-1", target_pipeline_slug:"daily-triage", enabled:true, cron_expr:"0 9 * * *"}]
+    renderCard()
+    expect(screen.queryByText("Schedule · 0")).not.toBeInTheDocument()
+  })
+
   it("distinguishes timed starts from webhook starts and opens their management", () => {
     renderCard()
-    expect(screen.getByText("When it runs")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^schedules$/i }).querySelector("svg")).not.toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Edit schedules", exact: true }))
+    expect(screen.getByText("Schedule · 0")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Edit schedule", exact: true }))
     expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
     fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))

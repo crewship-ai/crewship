@@ -746,7 +746,14 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// substituted, so the status gate above and the author-identity
 	// rules below still read the current row. A missing version is a
 	// hard, legible failure — see ErrPinnedVersionNotFound.
-	if in.PinnedVersion != nil {
+	if in.resume && in.resumeDefinitionJSON != "" {
+		// Resume the exact effective recipe captured before the first step. Keep
+		// current governance and identity fields, but do not reapply new overrides.
+		captured := *p
+		captured.DefinitionJSON = in.resumeDefinitionJSON
+		captured.DefinitionHash = in.resumeDefinitionHash
+		p = &captured
+	} else if in.PinnedVersion != nil {
 		v, verr := e.store.GetVersion(ctx, p.ID, *in.PinnedVersion)
 		if verr != nil {
 			if errors.Is(verr, ErrNotFound) {
@@ -772,7 +779,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// Apply per-step prompt/model overrides (v121) over the versioned
 	// DSL. No-op when the store isn't wired or has no rows for this
 	// pipeline — the run then executes exactly as authored.
-	if e.stepOverrides != nil {
+	if e.stepOverrides != nil && !(in.resume && in.resumeDefinitionJSON != "") {
 		if ov, oerr := e.stepOverrides.OverridesFor(ctx, in.PipelineID); oerr == nil {
 			applyStepOverrides(dsl.Steps, ov)
 		} else {
@@ -1109,6 +1116,7 @@ type RunInput struct {
 	// resume re-entry (the scan-time gate alone leaves a TOCTOU
 	// window — see resumeDefinitionDrift). Set only by runResumedRun.
 	resumeDefinitionHash string
+	resumeDefinitionJSON string
 	resumeCurrentStepID  string
 	// resumeReason names the resume cause for the journal summary:
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
