@@ -2,6 +2,8 @@
 
 import * as React from "react"
 
+import { useNavigationGuard, type NavigationGuard } from "@/hooks/use-navigation-guard"
+
 import {
   DEFAULT_EDITOR_SECTION,
   editorRouteHref,
@@ -77,21 +79,18 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
   const [dirty, setDirty] = React.useState(false)
   const [pending, setPending] = React.useState<EditorNavigation["pending"]>(null)
 
-  // The route prop wins when the route genuinely changes under us — arriving
-  // from another surface entirely, or a full reload.
-  React.useEffect(() => {
-    setRouteState((current) => (current.slug === initialSlug ? current : { ...current, slug: initialSlug, mode: "view", pane: "section" }))
-  }, [initialSlug])
-
   const routeRef = React.useRef(route)
   routeRef.current = route
   const dirtyRef = React.useRef(dirty)
   dirtyRef.current = dirty
+  const pendingRef = React.useRef(pending)
+  pendingRef.current = pending
 
   const apply = React.useCallback((next: EditorRoute, replace: boolean) => {
     setRouteState(next)
     setDirty(false)
-    const href = editorRouteHref(next)
+    // Read the live search each time: the tab bar rewrites it behind us.
+    const href = editorRouteHref(next, window.location.search)
     if (replace) window.history.replaceState(null, "", href)
     else window.history.pushState(null, "", href)
   }, [])
@@ -101,39 +100,57 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
    * asked in exactly one place rather than at each caller.
    */
   const navigate = React.useCallback(
-    (next: EditorRoute, options?: { replace?: boolean; alreadyMoved?: boolean }) => {
+    (next: EditorRoute, options?: { replace?: boolean; alreadyMoved?: boolean; onDiscard?: () => void }) => {
       const current = routeRef.current
-      if (sameRoute(current, next)) return
-      if (!dirtyRef.current) {
+      if (sameRoute(current, next) && options?.onDiscard === undefined) return
+      const perform = () => {
         if (options?.alreadyMoved) {
           setRouteState(next)
           setDirty(false)
         } else {
           apply(next, options?.replace === true)
         }
+        options?.onDiscard?.()
+      }
+      if (!dirtyRef.current) {
+        perform()
         return
       }
+      // A second Back while the question is open would otherwise drop the
+      // first navigation on the floor and later push an address two entries
+      // stale. The person answers the question they were asked.
+      if (pendingRef.current !== null) return
       setPending({
         route: next,
         discard: () => {
           setPending(null)
-          if (options?.alreadyMoved) {
-            setRouteState(next)
-            setDirty(false)
-          } else {
-            apply(next, options?.replace === true)
-          }
+          perform()
         },
         keep: () => {
           setPending(null)
           // Back already moved the browser. Put the entry we were on back at
           // the top so the address and the screen agree again.
-          if (options?.alreadyMoved) window.history.pushState(null, "", editorRouteHref(current))
+          if (options?.alreadyMoved) window.history.pushState(null, "", editorRouteHref(current, window.location.search))
         },
       })
     },
     [apply],
   )
+
+  // The route prop wins when the route genuinely changes under us — arriving
+  // from another surface entirely, or a full reload.
+  //
+  // It goes through `navigate` rather than straight into state, because Back
+  // across two Pages arrives here as well as at `popstate`: App Router treats
+  // it as a navigation, `useUrlSegment` re-reads the location and the prop
+  // changes. Writing state directly here skipped the unsaved-work question,
+  // and the screen jumped to the other Page with the dialog still open over
+  // it, pointing at the one that had been left.
+  React.useEffect(() => {
+    const current = routeRef.current
+    if (current.slug === initialSlug) return
+    navigate({ ...current, slug: initialSlug, mode: "view", pane: "section" }, { alreadyMoved: true })
+  }, [initialSlug, navigate])
 
   // Back and Forward. The location is the only authority: reading state we
   // pushed ourselves drifts the moment somebody navigates with the keyboard.
@@ -154,6 +171,30 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
   }, [dirty])
+
+  // Switching workspace is client state, not a navigation: nothing routes and
+  // nothing reloads, so the editor was simply re-keyed and unsaved edits went
+  // with it. The guard refuses the switch, asks here, and performs it on the
+  // way out of the dialog.
+  const guard = React.useCallback<NavigationGuard>((retry) => {
+    if (!dirtyRef.current) return true
+    if (pendingRef.current !== null) return false
+    setPending({
+      route: routeRef.current,
+      discard: () => {
+        setPending(null)
+        setDirty(false)
+        dirtyRef.current = false
+        // The switch the guard just refused, performed now that the person
+        // has answered. It passes the guard on the way through because the
+        // flag above is already clear.
+        retry()
+      },
+      keep: () => setPending(null),
+    })
+    return false
+  }, [])
+  useNavigationGuard(guard, dirty)
 
   const openPage = React.useCallback(
     (slug: string | null) => navigate({ slug, mode: "view", section: DEFAULT_EDITOR_SECTION, pane: "section" }),

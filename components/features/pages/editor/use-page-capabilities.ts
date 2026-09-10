@@ -45,11 +45,12 @@ export function derivePageCapabilities(
   if (page == null) return NO_PAGE_CAPABILITIES
   const sealed = sealedPanelCount(page)
   // `has_application` has no `omitempty` on the wire (internal/api/pages_handler.go
-  // `pageWire`), so the server always states it. Absent therefore means a
-  // fixture or a caller that did not, and `!== false` is the convention the
-  // live application view already uses — the cost of the other default is
-  // hiding the review screen on a Page that really has an application.
-  const hasApplication = page.has_application !== false
+  // `pageWire`), so the server always states it, and the editor takes it at
+  // its word. The looser `!== false` the live application view uses is right
+  // there — it only decides whether to *try* loading an application and falls
+  // back to panels — but here an absent field would route an ordinary panel
+  // Page into the application surface, which is a much worse guess to make.
+  const hasApplication = page.has_application === true
   return {
     loaded: true,
     // Name and description go through PATCH /pages/{slug}, which does not

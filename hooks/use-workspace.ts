@@ -1,6 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useSyncExternalStore } from "react"
+
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
@@ -151,9 +153,14 @@ export function useWorkspace(): UseWorkspaceReturn {
     }
   }, [])
 
-  const setWorkspaceId = useCallback((id: string) => {
+  const setWorkspaceId = useCallback(function setWorkspaceId(id: string) {
     if (!snapshot.workspaces.some((w) => w.id === id)) return
     if (snapshot.currentId === id) return
+    // A surface holding unsaved work refuses here and asks the person itself,
+    // then calls this again once they agree. Switching workspaces is not a
+    // navigation and does not reload, so without this the editor was simply
+    // re-keyed and typed edits vanished with no prompt.
+    if (!navigationAllowed(() => setWorkspaceId(id))) return
     persistId(id)
     setSnapshot({ ...snapshot, currentId: id })
   }, [])

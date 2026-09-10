@@ -60,8 +60,10 @@ describe("derivePageCapabilities", () => {
   it("an application is only claimed when the record says so", () => {
     expect(derivePageCapabilities(page([plain], { has_application: false })).hasApplication).toBe(false)
     expect(derivePageCapabilities(page([plain], { has_application: true })).hasApplication).toBe(true)
-    // Absent means "the index did not say"; the application query decides.
-    expect(derivePageCapabilities(page([plain])).hasApplication).toBe(true)
+    // The field has no `omitempty` on the wire, so the server always states
+    // it. Absent therefore means a fixture, and guessing "yes" would route an
+    // ordinary panel Page into the application review surface.
+    expect(derivePageCapabilities(page([plain])).hasApplication).toBe(false)
   })
 
   it("never offers publishing on a Page with no application", () => {

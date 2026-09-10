@@ -164,15 +164,25 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
       </div>
 
       {/* Only this column scrolls, and wide content scrolls inside its own
-          container — the document itself must never move sideways. */}
+          container — the document itself must never move sideways.
+          
+          Padding and the readable measure live here rather than in each
+          section, so there is one answer instead of four that drift: three
+          sections had rendered flush against the container, and the review —
+          the surface someone spends the most time on — had no maximum width
+          at all, so its diff and its prose stretched the full span of an
+          ultrawide monitor. Sections narrow further where a form wants it;
+          none of them widens past this. */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {loading && page == null ? (
-          <p role="status" className="p-4 text-sm text-muted-foreground">
-            Loading this Page…
-          </p>
-        ) : (
-          <Section {...sectionProps} />
-        )}
+        <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+          {loading && page == null ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              Loading this Page…
+            </p>
+          ) : (
+            <Section {...sectionProps} />
+          )}
+        </div>
       </div>
 
       <UnsavedWorkDialog pending={pending} />

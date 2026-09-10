@@ -85,7 +85,10 @@ export function readEditorRoute(pathname: string, search: string): EditorRoute {
   // Edit mode without a page is not a state; it would render a header for
   // nothing. The overview wins.
   const mode: EditorMode = slug !== null && params.get("mode") === "edit" ? "edit" : "view"
-  const pane: EditorPane = mode === "edit" && params.get("pane") === "preview" ? "preview" : "section"
+  // The preview is a workspace inside Content, so `pane=preview` anywhere
+  // else is an address claiming a state the screen does not have.
+  const pane: EditorPane =
+    mode === "edit" && section === "content" && params.get("pane") === "preview" ? "preview" : "section"
   return { slug, mode, section, pane }
 }
 
@@ -93,14 +96,22 @@ export function readEditorRoute(pathname: string, search: string): EditorRoute {
  * The address for a route. Only non-default keys are written, so viewing a
  * Page keeps the plain `/pages/<slug>` link people already share.
  */
-export function editorRouteHref(route: EditorRoute): string {
+export function editorRouteHref(route: EditorRoute, currentSearch = ""): string {
   if (route.slug === null) return "/pages"
   const path = `/pages/${encodeURIComponent(route.slug)}`
-  if (route.mode !== "edit") return path
-  const params = new URLSearchParams({ mode: "edit" })
-  if (route.section !== DEFAULT_EDITOR_SECTION) params.set("section", route.section)
-  if (route.pane === "preview") params.set("pane", "preview")
-  return `${path}?${params}`
+  // Everything the editor does not own is carried through. The panel tab bar
+  // writes `?tab=` with its own replaceState, and rebuilding the query from
+  // scratch dropped it — so opening a Page on its third tab and clicking Edit
+  // came back to the first one.
+  const params = new URLSearchParams(currentSearch)
+  for (const key of ["mode", "section", "pane"]) params.delete(key)
+  if (route.mode === "edit") {
+    params.set("mode", "edit")
+    if (route.section !== DEFAULT_EDITOR_SECTION) params.set("section", route.section)
+    if (route.pane === "preview") params.set("pane", "preview")
+  }
+  const query = params.toString()
+  return query === "" ? path : `${path}?${query}`
 }
 
 // ── Capabilities ─────────────────────────────────────────────────────────────
@@ -170,6 +181,13 @@ export type DefinitionChangeKind =
   | "panel-sla-changed"
   | "panel-tab-changed"
   | "panel-span-changed"
+  | "panel-icon-changed"
+  /**
+   * `on_failure` is the declaration that turns a panel going quiet into work
+   * for a human. A candidate removing it makes the Page fail silently, which
+   * is exactly the change a reviewer must be shown rather than left to find.
+   */
+  | "panel-failure-handling-changed"
   | "panel-refresh-changed"
   | "panel-wake-changed"
   | "action-added"
@@ -351,6 +369,18 @@ export interface ReviewRoutineWire {
   readonly published_digest: string | null
   readonly current_digest: string | null
   readonly state: ReviewRoutineState
+  /**
+   * This routine is declared by the candidate being published, so it is part
+   * of the key set the server recomputes and compares.
+   *
+   * The list is a union: it also carries routines the *live publication*
+   * called, so a reviewer can see one being dropped. Sending a dropped
+   * routine in `expected_routine_digests` produces a 409 naming a routine
+   * nobody moved — and no amount of refetching clears it, because the
+   * snapshot says the same thing again. Only rows with this flag belong in
+   * the fence.
+   */
+  readonly in_candidate: boolean
 }
 
 /**
@@ -364,6 +394,13 @@ export type ReviewBlockerCode =
   | "build_failed"
   | "build_stale"
   | "baseline_unavailable"
+  /**
+   * The candidate declares an action calling a routine that no longer
+   * resolves. Publishing refuses it with a 422, so the review has to as
+   * well — reporting the routine as merely `unknown` told the reviewer that
+   * publishing was available when it was not.
+   */
+  | "routine_unresolved"
   | "definition_moved"
   | "not_permitted"
   | "storage_unavailable"

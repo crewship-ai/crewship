@@ -29,21 +29,15 @@ export function usePageApplication(workspace: string, slug: string, enabled = tr
     refetchInterval: query => query.state.data?.publication ? 60_000 : false,
     refetchIntervalInBackground: false,
   })
-  const check = useMutation({ mutationFn: async ({ build, revision }: { build: string; revision: number }) => {
-    const response = await apiFetch(`${endpoint}/project/check?${params}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ build_id: build, expected_revision: revision }) })
-    const body = await response.json(); if (!response.ok) throw new Error(body?.error ?? "Application check failed."); return body
-  } })
-  // The two digests are required by the type as well as by the server. They
-  // are what the person reviewed, and the server compares them inside the
-  // publishing transaction — the three compare-and-swap points that were
-  // already there fence the publication counter, the draft revision and a
-  // definition read moments earlier in the same request, none of which can
-  // notice that the baseline someone actually read moved underneath them.
-  // Leaving them optional here would turn that into a 400 at the click
-  // instead of an error at the keyboard.
+  // `POST .../project/check` is not called from the browser any more. The
+  // review snapshot reports the same refusals as named blockers before a
+  // person consents, and publish re-runs the full candidate check anyway, so
+  // a second button that says "checks passed" would be a third place for the
+  // same fact to be stated and to go stale. The endpoint and its CLI command
+  // (`crewship page project check`) are unchanged.
   const publish = useMutation({ mutationFn: async (request: FencedPublishRequest) => {
     const response = await apiFetch(`${endpoint}/project/publish?${params}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) })
     const body = await response.json(); if (!response.ok) throw new Error(body?.error ?? "Publication failed."); return body as PagePublication
   }, onSettled: () => { invalidate(); void client.invalidateQueries({ queryKey: ["page-publications", workspace, slug] }); void client.invalidateQueries({ queryKey: ["pages", workspace] }) } })
-  return { query, check, publish }
+  return { query, publish }
 }

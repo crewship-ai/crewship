@@ -63,6 +63,7 @@ import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
 import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
 import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
+import { usePageGrants } from "@/hooks/use-page-grants"
 import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
 
 export interface PagesLayoutProps {
@@ -151,8 +152,24 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // carried one panel this viewer may not see — three of which the server
   // would have answered (V01). What a sealed panel actually makes unsafe is
   // replacing the DOCUMENT, and that is now the only thing it closes.
-  const capabilities = usePageCapabilities(detail.raw)
-  const editing = nav.mode === "edit" && selectedSlug != null
+  // `?mode=edit` on a slug that does not exist used to open the whole editor:
+  // the buttons were gated on the record, the address was not, so Access
+  // rendered its grant and mint forms and fired reads against a Page that is
+  // not there. The address is not allowed to reach a state the data does not
+  // support.
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+
+  // One capability we can lower honestly without a second request: React
+  // Query shares this key with the Access section's own read, so asking here
+  // costs nothing extra, and only while the editor is open — a Page being
+  // looked at has no reason to fetch its ACL. The rest stay optimistic and
+  // the server's refusal renders at the control, which is the rule: a
+  // refusal must be visible where the action was, not turned into an absence
+  // that reads as "this product cannot do that".
+  const grants = usePageGrants(workspaceId, selectedSlug, editing)
+  const capabilities = usePageCapabilities(detail.raw, {
+    mayManageAccess: grants.refusal === null,
+  })
 
   return (
     <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
