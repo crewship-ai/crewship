@@ -276,6 +276,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   // needs to find these", so they share the chip rather than sitting in
   // System where they would be filed and forgotten. Same call
   // lib/activity-stream.ts's "Routines" facet already makes.
+  "pipeline.published": "routine",
   "pipeline.run.started": "routine",
   "pipeline.run.completed": "routine",
   "pipeline.run.failed": "routine",

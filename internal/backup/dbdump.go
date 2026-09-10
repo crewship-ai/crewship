@@ -194,6 +194,7 @@ var BackupTables = []string{
 	"approvals_queue",
 	"pipelines",
 	"pipeline_versions",
+	"pipeline_drafts",
 	"pipeline_schedules",
 	"pipeline_webhooks",
 	"pipeline_runs",

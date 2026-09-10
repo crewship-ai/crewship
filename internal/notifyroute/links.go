@@ -34,7 +34,7 @@ func notificationFacts(kind string, payload map[string]any) ([]notify.Link, map[
 	// Vars is the payload itself, not a per-kind allowlist. A producer that
 	// starts recording a new fact gets a new template variable for free;
 	// an allowlist would silently lag every producer that ever changes.
-	vars := make(map[string]any, len(payload)+1)
+	vars := make(map[string]any, len(payload))
 	for k, v := range payload {
 		vars[k] = v
 	}
