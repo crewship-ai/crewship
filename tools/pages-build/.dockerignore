@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!build.mjs
+!sdk.ts

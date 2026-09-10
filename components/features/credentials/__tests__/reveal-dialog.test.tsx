@@ -48,20 +48,25 @@ describe("bounded reveal lifetime", () => {
     } finally { hidden.mockRestore() }
   })
   it("hides a value after 30 seconds and requires a new reason", async () => {
-    renderDialog()
-    fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    // Capture the timer without advancing the test framework's own timers.
-    const timer = vi.spyOn(window, "setTimeout")
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const { unmount } = renderDialog()
     try {
-      fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
-      await screen.findByTestId("revealed-value")
-      const call = timer.mock.calls.find(([, delay]) => delay === REVEAL_VISIBLE_MS)
-      expect(call).toBeDefined()
-      act(() => { (call![0] as () => void)() })
+      fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
+      // Flush the resolved request and React effects before measuring lifetime.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+      })
+      expect(screen.getByTestId("revealed-value")).toBeInTheDocument()
+      act(() => { vi.advanceTimersByTime(REVEAL_VISIBLE_MS - 1) })
+      expect(screen.getByTestId("revealed-value")).toBeInTheDocument()
+      act(() => { vi.advanceTimersByTime(1) })
       expect(screen.queryByTestId("revealed-value")).not.toBeInTheDocument()
       expect(screen.getByLabelText(/reason/i)).toHaveValue("")
       expect(screen.getByRole("button", { name: /reveal the existing value/i })).toBeDisabled()
-    } finally { timer.mockRestore() }
+    } finally {
+      unmount()
+      vi.useRealTimers()
+    }
   })
 
   it("does not carry a pending reveal into a different credential", async () => {
