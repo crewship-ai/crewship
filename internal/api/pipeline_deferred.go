@@ -147,16 +147,23 @@ func (h *PipelineHandler) ListPendingRuns(w http.ResponseWriter, r *http.Request
 		return
 	}
 	type dto struct {
-		PinnedVersion *int   `json:"pinned_version"`
-		ID            string `json:"id"`
-		PipelineSlug  string `json:"pipeline_slug"`
-		DebounceKey   string `json:"debounce_key,omitempty"`
-		Priority      int    `json:"priority"`
-		FireAt        string `json:"fire_at"`
+		Inputs        map[string]any `json:"inputs"`
+		PinnedVersion *int           `json:"pinned_version"`
+		ID            string         `json:"id"`
+		PipelineSlug  string         `json:"pipeline_slug"`
+		DebounceKey   string         `json:"debounce_key,omitempty"`
+		Priority      int            `json:"priority"`
+		FireAt        string         `json:"fire_at"`
 	}
 	out := make([]dto, 0, len(rows))
 	for _, pr := range rows {
+		inputs, err := planPresetInputs(pr.InputsJSON)
+		if err != nil {
+			replyError(w, 500, "read pending inputs")
+			return
+		}
 		out = append(out, dto{
+			Inputs:        inputs,
 			PinnedVersion: pr.PinnedVersion,
 			ID:            pr.ID,
 			PipelineSlug:  pr.PipelineSlug,

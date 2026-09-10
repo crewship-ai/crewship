@@ -292,7 +292,7 @@ func (s *PendingRunStore) ListPending(ctx context.Context, workspaceID string, l
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, pipeline_id, pipeline_slug, COALESCE(debounce_key,''), priority, fire_at, pinned_version
+SELECT id, workspace_id, pipeline_id, pipeline_slug, COALESCE(debounce_key,''), priority, fire_at, pinned_version, inputs_json
 FROM pending_runs WHERE workspace_id = ? AND status = 'pending'
 ORDER BY fire_at ASC LIMIT ?`, workspaceID, limit)
 	if err != nil {
@@ -304,7 +304,7 @@ ORDER BY fire_at ASC LIMIT ?`, workspaceID, limit)
 		var pr PendingRun
 		var fireAt string
 		if err := rows.Scan(&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
-			&pr.DebounceKey, &pr.Priority, &fireAt, &pr.PinnedVersion); err != nil {
+			&pr.DebounceKey, &pr.Priority, &fireAt, &pr.PinnedVersion, &pr.InputsJSON); err != nil {
 			return nil, err
 		}
 		pr.FireAt, _ = time.Parse(time.RFC3339Nano, fireAt)
