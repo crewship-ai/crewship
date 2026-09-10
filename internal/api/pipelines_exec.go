@@ -1064,8 +1064,10 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// docs/api-reference/workspaces.mdx "Defaults differ from the
 	// public callback".
 	var body struct {
-		Approved bool   `json:"approved"`
-		Comment  string `json:"comment"`
+		ActionID string         `json:"action_id"`
+		Data     map[string]any `json:"data"`
+		Approved bool           `json:"approved"`
+		Comment  string         `json:"comment"`
 	}
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
@@ -1090,6 +1092,14 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// all is refused too. See waitpointDeciderFromRequest.
 	decider := waitpointDeciderFromRequest(r)
 	payload := body.Comment
+	if body.ActionID != "" || body.Data != nil {
+		raw, err := json.Marshal(pipeline.DecisionAnswer{ActionID: body.ActionID, Data: body.Data, Comment: body.Comment})
+		if err != nil {
+			replyError(w, 400, "invalid decision data")
+			return
+		}
+		payload = string(raw)
+	}
 	// Workspace isolation (#1415): resolve the token strictly within the
 	// caller's own workspace — mirrors SignalRun's rec.WorkspaceID check
 	// in pipeline_run_metadata.go. Without this, a MANAGER of workspace A
@@ -1130,7 +1140,7 @@ func (h *PipelineHandler) ListPendingWaitpoints(w http.ResponseWriter, r *http.R
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(), `
 SELECT wp.token, wp.pipeline_run_id, wp.step_id, wp.kind, COALESCE(wp.prompt, ''), COALESCE(wp.invoking_crew_id, ''),
-       wp.timeout_at, wp.created_at,
+       wp.timeout_at, wp.created_at, wp.decision_form_json,
        COALESCE((SELECT i.id FROM inbox_items i WHERE i.workspace_id=wp.workspace_id AND i.kind='waitpoint' AND i.source_id=wp.token LIMIT 1), '')
 FROM pipeline_waitpoints wp
 WHERE wp.workspace_id = ? AND wp.status = 'pending'
@@ -1143,30 +1153,44 @@ LIMIT 200`, workspaceID)
 	}
 	defer rows.Close()
 	type wpRow struct {
-		InboxItemID    string `json:"inbox_item_id,omitempty"`
-		Token          string `json:"token"`
-		PipelineRunID  string `json:"pipeline_run_id"`
-		StepID         string `json:"step_id"`
-		Kind           string `json:"kind"`
-		Prompt         string `json:"prompt"`
-		InvokingCrewID string `json:"invoking_crew_id,omitempty"`
-		TimeoutAt      string `json:"timeout_at"`
-		CreatedAt      string `json:"created_at"`
+		DecisionForm   json.RawMessage `json:"decision_form,omitempty"`
+		InboxItemID    string          `json:"inbox_item_id,omitempty"`
+		Token          string          `json:"token"`
+		PipelineRunID  string          `json:"pipeline_run_id"`
+		StepID         string          `json:"step_id"`
+		Kind           string          `json:"kind"`
+		Prompt         string          `json:"prompt"`
+		InvokingCrewID string          `json:"invoking_crew_id,omitempty"`
+		TimeoutAt      string          `json:"timeout_at"`
+		CreatedAt      string          `json:"created_at"`
 		// CallbackURL is the PUBLIC completion endpoint for this
 		// waitpoint — an external system holding it can complete the
 		// waitpoint without a workspace JWT (the token is the auth).
 		// Hand it to a third-party task/approval service to drive a
 		// human-in-the-loop or external-completion wait.
-		CallbackURL string `json:"callback_url"`
+		CallbackURL string `json:"callback_url,omitempty"`
 	}
 	base := InstanceURLFromRequest(r, "")
 	out := make([]wpRow, 0, 50)
 	for rows.Next() {
 		var row wpRow
-		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt, &row.InboxItemID); err == nil {
-			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
-			out = append(out, row)
+		var form string
+		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt, &form, &row.InboxItemID); err != nil {
+			h.logger.Error("waitpoints list: scan", "error", err)
+			replyError(w, http.StatusInternalServerError, "list waitpoints")
+			return
 		}
+		if form != "" {
+			row.DecisionForm = json.RawMessage(form)
+		} else {
+			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("waitpoints list: iterate", "error", err)
+		replyError(w, http.StatusInternalServerError, "list waitpoints")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -647,6 +647,7 @@ type WaitpointStatusReader interface {
 // WaitpointApprovalRequest is the metadata stored alongside the
 // waitpoint so the inbox/UI can render a meaningful approval card.
 type WaitpointApprovalRequest struct {
+	DecisionForm  *DecisionForm
 	WorkspaceID   string
 	PipelineRunID string
 	StepID        string

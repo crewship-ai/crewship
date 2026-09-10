@@ -39,6 +39,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "run.agent_span",
   ],
   routine: [
+    "pipeline.published",
     "pipeline.run.started",
     "pipeline.run.completed",
     "pipeline.run.failed",
