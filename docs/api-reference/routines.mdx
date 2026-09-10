@@ -137,7 +137,9 @@ at all.
 
 The calendar merges three kinds of event into one list: `planned` occurrences
 computed from schedules, `pending` runs already queued, and `run` rows that
-have executed. `truncated` is true when the window held more than the endpoint
+have executed. Both `planned` and `pending` events carry their stored `inputs`
+object (`{}` when empty); historical `run` events omit it. Planned presets
+are not run results or a guarantee of success. `truncated` is true when the window held more than the endpoint
 will return, in which case narrow `from`/`to` rather than paging.
 
 | Method | Path | Auth | Request | Response | Status |

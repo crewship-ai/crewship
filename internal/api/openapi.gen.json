@@ -11230,6 +11230,10 @@
           "id": {
             "type": "string"
           },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "kind": {
             "enum": [
               "planned",
@@ -14299,20 +14303,28 @@
       "WorkspacePendingRunsResponseV1": {
         "items": {
           "properties": {
-            "created_at": {
+            "debounce_key": {
+              "type": "string"
+            },
+            "fire_at": {
               "type": "string"
             },
             "id": {
               "type": "string"
             },
-            "pipeline_id": {
-              "type": "string"
+            "inputs": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "pinned_version": {
+              "nullable": true,
+              "type": "integer"
             },
             "pipeline_slug": {
               "type": "string"
             },
-            "status": {
-              "type": "string"
+            "priority": {
+              "type": "integer"
             }
           },
           "type": "object"

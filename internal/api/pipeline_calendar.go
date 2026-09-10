@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -45,6 +46,11 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		if err != nil || p.Status == "disabled" || p.Status == "proposed" {
 			continue
 		}
+		inputs, err := planPresetInputs(s.InputsJSON)
+		if err != nil {
+			replyError(w, 500, "read schedule inputs")
+			return
+		}
 		// Bound dense schedules per routine as well as the total response.
 		occurrences, err := pipeline.NextOccurrences(s.CronExpr, s.Timezone, 1001, from)
 		if err != nil {
@@ -62,7 +68,7 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			events = append(events, routineCalendarEvent{
 				ID: s.ID + ":" + at.UTC().Format(time.RFC3339), Kind: "planned",
 				At: at.UTC().Format(time.RFC3339), Slug: p.Slug, Name: p.Name,
-				ScheduleID: s.ID, Timezone: s.Timezone, PinnedVersion: s.TargetPipelineVersion,
+				Inputs: &inputs, ScheduleID: s.ID, Timezone: s.Timezone, PinnedVersion: s.TargetPipelineVersion,
 			})
 		}
 		if len(occurrences) > 0 && !occurrences[len(occurrences)-1].IsZero() && occurrences[len(occurrences)-1].Before(end) {
@@ -71,7 +77,7 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 	}
 	// Filter before limiting: the generic pending list caps at 200 and falls
 	// back to 50 for larger requests, hiding later months in busy workspaces.
-	pending, err := h.db.QueryContext(r.Context(), `SELECT q.id,q.pipeline_slug,COALESCE(p.name,q.pipeline_slug),q.fire_at,q.pinned_version
+	pending, err := h.db.QueryContext(r.Context(), `SELECT q.id,q.pipeline_slug,COALESCE(p.name,q.pipeline_slug),q.fire_at,q.pinned_version,q.inputs_json
  FROM pending_runs q LEFT JOIN pipelines p ON p.id=q.pipeline_id AND p.workspace_id=q.workspace_id
  WHERE q.workspace_id=? AND q.status='pending' AND julianday(q.fire_at)>=julianday(?) AND julianday(q.fire_at)<julianday(?)
  ORDER BY julianday(q.fire_at),q.id LIMIT 1001`, ws, start.Format(time.RFC3339), end.Format(time.RFC3339))
@@ -80,11 +86,17 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		return
 	}
 	for pending.Next() {
-		var id, slug, name, at string
+		var id, slug, name, at, inputsJSON string
 		var version *int
-		if err := pending.Scan(&id, &slug, &name, &at, &version); err != nil {
+		if err := pending.Scan(&id, &slug, &name, &at, &version, &inputsJSON); err != nil {
 			pending.Close()
 			replyError(w, 500, "read pending runs")
+			return
+		}
+		inputs, err := planPresetInputs(inputsJSON)
+		if err != nil {
+			pending.Close()
+			replyError(w, 500, "read pending inputs")
 			return
 		}
 		// One budget for the whole response, not one per source: the planned
@@ -94,7 +106,7 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 			truncated = true
 			break
 		}
-		events = append(events, routineCalendarEvent{ID: id, Kind: "pending", At: at, Slug: slug, Name: name, PinnedVersion: version})
+		events = append(events, routineCalendarEvent{ID: id, Kind: "pending", Inputs: &inputs, At: at, Slug: slug, Name: name, PinnedVersion: version})
 	}
 	if err := pending.Err(); err != nil {
 		pending.Close()
@@ -125,4 +137,19 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, 200, routineCalendarResponse{Events: events, Truncated: truncated})
+}
+
+// Stored legacy empty/null presets mean no overrides; malformed JSON is an
+// error, never an apparently empty plan.
+func planPresetInputs(raw string) (map[string]any, error) {
+	var inputs map[string]any
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &inputs); err != nil {
+			return nil, err
+		}
+	}
+	if inputs == nil {
+		inputs = map[string]any{}
+	}
+	return inputs, nil
 }
