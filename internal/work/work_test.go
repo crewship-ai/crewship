@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -760,5 +761,348 @@ func TestClaim_ExhaustedItemIsFailedAndDoesNotStallTheQueue(t *testing.T) {
 	}
 	if it.TerminalAt == nil {
 		t.Error("exhausted item has no terminal_at, so the failure did not commit")
+	}
+}
+
+// The review found this one: recovery parked A for reconciliation, and the
+// admission counts only looked at starting/running — so B for the same agent
+// and the same session could start while A's runtime may well still have been
+// alive under its recorded locator. The comment claimed a stronger guarantee
+// than the code delivered.
+//
+// needs_reconciliation holds its conflicting capacity until somebody resolves
+// it. That is the difference between "we lost track of a process" and "there is
+// no process".
+func TestNeedsReconciliation_HoldsCapacityUntilResolved(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := context.Background()
+
+	// A and B are the same agent and the same session — every gate that could
+	// stop B is exercised at once.
+	a := accept(t, s, db, chatReq("agent-jamie", "session-1"))
+	b := accept(t, s, db, chatReq("agent-jamie", "session-1"))
+
+	claimA, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker-a"})
+	if err != nil {
+		t.Fatalf("claim A: %v", err)
+	}
+	if claimA.Item.ID != a.WorkID {
+		t.Fatalf("claimed %s, want A", claimA.Item.ID)
+	}
+	// A reaches a real runtime and records where it is. This is what makes its
+	// disappearance ambiguous rather than clean.
+	locator := "crew-1/tmux:agent-jamie-" + claimA.RunID
+	if err := s.StartRunning(ctx, a.WorkID, claimA.RunID, claimA.Generation, locator); err != nil {
+		t.Fatalf("start running: %v", err)
+	}
+
+	clock.Advance(LeaseDuration + time.Second)
+	out, err := s.RecoverExpiredLeases(ctx)
+	if err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if len(out.Reconciliation) != 1 || out.Reconciliation[0] != a.WorkID {
+		t.Fatalf("reconciliation = %+v, want [%s]", out.Reconciliation, a.WorkID)
+	}
+
+	// B must NOT start. Its agent may still be executing A.
+	if _, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker-b"}); !errors.Is(err, ErrNoWork) {
+		t.Fatalf("claim B while A is unreconciled = %v, want ErrNoWork", err)
+	}
+	itB, err := s.Get(ctx, b.WorkID)
+	if err != nil {
+		t.Fatalf("get B: %v", err)
+	}
+	if itB.State != StateQueued {
+		t.Errorf("B = %q, want queued", itB.State)
+	}
+
+	// Nor may an unrelated agent's work exceed the server total because the
+	// reconciling item was counted as free. Fill every remaining slot and check
+	// the ledger agrees with the cap.
+	lim := DefaultLimits()
+	for i := 0; i < lim.ServerTotal+2; i++ {
+		accept(t, s, db, backgroundReq(fmt.Sprintf("agent-filler-%d", i)))
+	}
+	for {
+		if _, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker-fill"}); errors.Is(err, ErrNoWork) {
+			break
+		} else if err != nil {
+			t.Fatalf("fill claim: %v", err)
+		}
+	}
+	var holding int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM work_items WHERE state IN ('starting','running','needs_reconciliation')`,
+	).Scan(&holding); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if holding > lim.ServerTotal {
+		t.Errorf("%d items hold execution slots, cap is %d — the reconciling item was counted as free",
+			holding, lim.ServerTotal)
+	}
+
+	// Resolving it explicitly is what frees the capacity, and only then does B run.
+	if err := s.Transition(ctx, TransitionRequest{
+		WorkID: a.WorkID, RunID: claimA.RunID, Generation: claimA.Generation,
+		To: StateFailed, Reason: "operator verified the runtime was gone",
+	}); err != nil {
+		t.Fatalf("resolve A: %v", err)
+	}
+	claimB, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker-b", AgentID: "agent-jamie"})
+	if err != nil {
+		t.Fatalf("claim B after A was resolved: %v", err)
+	}
+	if claimB.Item.ID != b.WorkID {
+		t.Fatalf("claimed %s, want B", claimB.Item.ID)
+	}
+}
+
+// The other half of the review's first finding: `waiting` must keep the session
+// but give the execution slot back, and needs_reconciliation must keep both.
+func TestStateSets_HoldExactlyWhatTheyClaim(t *testing.T) {
+	tests := []struct {
+		state    State
+		slot     bool
+		session  bool
+		terminal bool
+	}{
+		{StateQueued, false, false, false},
+		{StateStarting, true, true, false},
+		{StateRunning, true, true, false},
+		{StateWaiting, false, true, false},
+		{StateRetryWait, false, false, false},
+		{StateNeedsReconciliation, true, true, false},
+		{StateSucceeded, false, false, true},
+		{StateFailed, false, false, true},
+		{StateExpired, false, false, true},
+		{StateCancelled, false, false, true},
+	}
+	seen := map[State]bool{}
+	for _, tc := range tests {
+		seen[tc.state] = true
+		t.Run(string(tc.state), func(t *testing.T) {
+			if got := tc.state.HoldsExecutionSlot(); got != tc.slot {
+				t.Errorf("HoldsExecutionSlot() = %v, want %v", got, tc.slot)
+			}
+			if got := tc.state.OccupiesSession(); got != tc.session {
+				t.Errorf("OccupiesSession() = %v, want %v", got, tc.session)
+			}
+			if got := tc.state.Terminal(); got != tc.terminal {
+				t.Errorf("Terminal() = %v, want %v", got, tc.terminal)
+			}
+		})
+	}
+	for _, st := range allStates {
+		if !seen[st] {
+			t.Errorf("state %q is not covered by this table; a new state must declare what it holds", st)
+		}
+	}
+	// The SQL fragments must agree with the predicates, since four queries read
+	// them and a divergence would be invisible until a capacity bug.
+	if !strings.Contains(sqlHoldsExecutionSlot, string(StateNeedsReconciliation)) {
+		t.Errorf("sqlHoldsExecutionSlot = %q, must include needs_reconciliation", sqlHoldsExecutionSlot)
+	}
+	if strings.Contains(sqlHoldsExecutionSlot, string(StateWaiting)) {
+		t.Errorf("sqlHoldsExecutionSlot = %q, must NOT include waiting — a parked runtime gives its slot back", sqlHoldsExecutionSlot)
+	}
+	if !strings.Contains(sqlOccupiesSession, string(StateWaiting)) {
+		t.Errorf("sqlOccupiesSession = %q, must include waiting", sqlOccupiesSession)
+	}
+}
+
+// The review's second finding. The scan used to select the oldest 200 rows and
+// then filter them in Go, so a queue whose first 200 items were all blocked hid
+// the claimable work behind them — and re-polling walked the same dead prefix
+// forever. The fix is not a bigger limit; it is applying the per-row rules in
+// SQL so the limit selects from rows that are actually claimable.
+//
+// Constructing this needs care. The fairness ordering added alongside the fix
+// would rescue the obvious version of this test on its own: an item whose agent
+// has nothing running sorts ahead of one whose agent is busy, so a free agent's
+// work floats to the front regardless of the limit. So the blockers here are
+// blocked by their SESSION and carry no agent at all, and everything shares one
+// workspace — which makes every ordering key equal and leaves acceptance order
+// to decide. The claimable item is then genuinely last, behind 200 others.
+func TestClaim_FindsWorkBehindAFullBatchOfBlockedItems(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	ctx := context.Background()
+
+	const blocked = 200
+	if blocked <= candidateBatch {
+		t.Fatalf("this test is meaningless unless it exceeds the batch size (%d)", candidateBatch)
+	}
+
+	sessionItem := func() AcceptRequest {
+		return AcceptRequest{
+			WorkspaceID: "ws1", Source: SourceChat, Class: ClassChat,
+			SessionID: "session-busy",
+		}
+	}
+
+	// One turn holds the session. It is the only item with an agent, so every
+	// candidate below sees the same zero agent-live-count.
+	holder := sessionItem()
+	holder.AgentID = "agent-holder"
+	held := accept(t, s, db, holder)
+
+	// 200 further turns for that same session: all permanently blocked while the
+	// held one runs, all agentless, all in ws1.
+	for i := 0; i < blocked; i++ {
+		accept(t, s, db, sessionItem())
+	}
+
+	// Accepted last, in the same workspace, so acceptance order puts it at
+	// position 202 and no ordering key lifts it.
+	free := backgroundReq("agent-free")
+	free.WorkspaceID = "ws1"
+	reachable := accept(t, s, db, free)
+
+	first, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("claim the session holder: %v", err)
+	}
+	if first.Item.ID != held.WorkID {
+		t.Fatalf("claimed %s, want the session holder %s", first.Item.ID, held.WorkID)
+	}
+
+	got, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("claim behind %d blocked items: %v — a blocked prefix must not hide claimable work", blocked, err)
+	}
+	if got.Item.ID != reachable.WorkID {
+		t.Fatalf("claimed %s (agent %q, session %q), want the free item %s",
+			got.Item.ID, got.Item.AgentID, got.Item.SessionID, reachable.WorkID)
+	}
+}
+
+// §6's fairness, now that the scan can express it: a workspace already using
+// capacity yields to one using none, even when its work is older.
+func TestClaim_RoundRobinsAcrossWorkspaces(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	ctx := context.Background()
+
+	busy := func(agent string) AcceptRequest {
+		r := backgroundReq(agent)
+		r.WorkspaceID = "ws-busy"
+		return r
+	}
+	quiet := func(agent string) AcceptRequest {
+		r := backgroundReq(agent)
+		r.WorkspaceID = "ws-quiet"
+		return r
+	}
+
+	// ws-busy queues first and therefore wins on every FIFO tiebreak.
+	first := accept(t, s, db, busy("agent-b1"))
+	accept(t, s, db, busy("agent-b2"))
+	later := accept(t, s, db, quiet("agent-q1"))
+
+	got, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if got.Item.ID != first.WorkID {
+		t.Fatalf("first claim took %s, want the oldest item %s", got.Item.ID, first.WorkID)
+	}
+
+	// ws-busy now has a run in flight. The next slot goes to the workspace with
+	// none, even though ws-busy's remaining item was accepted earlier.
+	got, err = s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if got.Item.ID != later.WorkID {
+		t.Fatalf("second claim took %s from %q; §6 round-robin should have picked %s from ws-quiet",
+			got.Item.ID, got.Item.WorkspaceID, later.WorkID)
+	}
+}
+
+// Aging: a long-waiting item sorts ahead of younger work in the same class, so
+// a steady arrival of new work cannot lap it forever.
+func TestClaim_AgedWorkOvertakesYoungerWorkOfEqualPriority(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := context.Background()
+
+	// The old item belongs to a workspace that is about to look "busier", so
+	// only the aging term can put it first.
+	old := backgroundReq("agent-old")
+	old.WorkspaceID = "ws-old"
+	aged := accept(t, s, db, old)
+
+	clock.Advance(AgingThreshold + time.Second)
+
+	young := backgroundReq("agent-young")
+	young.WorkspaceID = "ws-young"
+	accept(t, s, db, young)
+
+	got, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if got.Item.ID != aged.WorkID {
+		t.Fatalf("claimed %s, want the aged item %s — work eligible for more than %s must sort ahead of younger work",
+			got.Item.ID, aged.WorkID, AgingThreshold)
+	}
+}
+
+// The SQL filter and the Go re-check must agree. They are two expressions of
+// one rule set, and a divergence would show up as work that the scan offers and
+// admission silently drops — which reads exactly like an empty queue.
+func TestClaim_SQLFilterAndGoAdmissionAgree(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// A mixture that exercises every per-row rule: a busy session, an agent at
+	// its chat cap, an agent at its total cap, and free work.
+	accept(t, s, db, chatReq("agent-session", "session-x"))
+	accept(t, s, db, chatReq("agent-session", "session-x"))
+	accept(t, s, db, chatReq("agent-both", "session-y"))
+	accept(t, s, db, backgroundReq("agent-both"))
+	accept(t, s, db, backgroundReq("agent-both"))
+	for i := 0; i < 5; i++ {
+		accept(t, s, db, backgroundReq(fmt.Sprintf("agent-free-%d", i)))
+	}
+
+	// Claim until nothing is left, checking at every step that each row the SQL
+	// offered was also admitted by the Go rules.
+	for {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		live, err := s.countLiveTx(ctx, tx)
+		if err != nil {
+			t.Fatalf("count live: %v", err)
+		}
+		classes, ok := live.admissibleClasses(DefaultLimits(), "")
+		if !ok {
+			_ = tx.Rollback()
+			break
+		}
+		candidates, err := s.scanCandidatesTx(ctx, tx, ClaimOptions{Limits: DefaultLimits()}, classes, s.now().UTC())
+		if err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		for _, it := range candidates {
+			admitted, err := s.admitsTx(ctx, tx, it, DefaultLimits(), live)
+			if err != nil {
+				t.Fatalf("admits: %v", err)
+			}
+			if !admitted {
+				t.Fatalf("SQL offered %s (agent %q, class %q, session %q) but the Go rules refused it — "+
+					"the two rule sets have drifted apart, and the symptom is work that looks like an empty queue",
+					it.ID, it.AgentID, it.Class, it.SessionID)
+			}
+		}
+		_ = tx.Rollback()
+		if len(candidates) == 0 {
+			break
+		}
+		if _, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"}); errors.Is(err, ErrNoWork) {
+			break
+		} else if err != nil {
+			t.Fatalf("claim: %v", err)
+		}
 	}
 }

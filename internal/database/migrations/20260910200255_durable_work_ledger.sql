@@ -73,10 +73,19 @@ CREATE INDEX idx_work_items_dispatch
     ON work_items(state, class, eligible_at, priority, created_at)
     WHERE state IN ('queued','retry_wait');
 CREATE INDEX idx_work_items_workspace ON work_items(workspace_id, created_at, id);
+-- One active turn per session. The predicate is wider than the capacity one:
+-- `waiting` gives back its execution slot but the conversation is still
+-- mid-turn.
 CREATE INDEX idx_work_items_session ON work_items(session_id, state) WHERE session_id != '';
+-- The per-agent and per-workspace capacity counts the claim scan runs for every
+-- candidate row. needs_reconciliation is in the predicate on purpose: it holds
+-- an execution slot, because the runtime under its locator may still be alive.
 CREATE INDEX idx_work_items_agent_live
     ON work_items(agent_id, class)
-    WHERE state IN ('starting','running');
+    WHERE state IN ('starting','running','needs_reconciliation');
+CREATE INDEX idx_work_items_workspace_live
+    ON work_items(workspace_id)
+    WHERE state IN ('starting','running','needs_reconciliation');
 CREATE INDEX idx_work_items_deadline ON work_items(deadline_at) WHERE deadline_at IS NOT NULL;
 -- replay_of points at another work item, and retention DOES hard-delete terminal
 -- work. Without this index each such delete full-scans work_items to enforce the

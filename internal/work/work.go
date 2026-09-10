@@ -32,6 +32,7 @@ package work
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -81,8 +82,67 @@ func (s State) Terminal() bool {
 	return false
 }
 
+// HoldsExecutionSlot reports whether s occupies one of the server's execution
+// slots.
+//
+// needs_reconciliation is in this set on purpose, and that is the whole point of
+// the state. It means a runtime MAY still be alive under a locator nobody has
+// verified. Counting it as free would let a second process start for work whose
+// first process was never confirmed stopped — the two-live-runtimes case the
+// contract calls out and T08 exists to catch. It stops holding the slot when
+// somebody resolves it, not when a timer fires.
+func (s State) HoldsExecutionSlot() bool {
+	return s == StateStarting || s == StateRunning || s == StateNeedsReconciliation
+}
+
+// OccupiesSession reports whether s means the session already has a turn, so a
+// later message must wait.
+//
+// It is a superset of HoldsExecutionSlot: `waiting` gives back its execution
+// slot when its runtime is confirmed parked, but the conversation is still
+// mid-turn and a second turn must not overtake it.
+func (s State) OccupiesSession() bool {
+	return s.HoldsExecutionSlot() || s == StateWaiting
+}
+
 // Live reports whether s holds an execution slot.
+//
+// Deprecated in spirit: prefer HoldsExecutionSlot, which says which resource is
+// held. Kept because "is this thing running" reads better at a call site that
+// only wants the ordinary two states.
 func (s State) Live() bool { return s == StateStarting || s == StateRunning }
+
+// SQL fragments for the two sets above. They are derived from the same
+// predicates rather than typed out again, because the first version of this
+// package wrote the list inline in four queries and one of them disagreed with
+// the other three.
+var (
+	sqlHoldsExecutionSlot = stateList(func(s State) bool { return s.HoldsExecutionSlot() })
+	sqlOccupiesSession    = stateList(func(s State) bool { return s.OccupiesSession() })
+)
+
+// allStates is every state, in a fixed order, so the SQL fragments above are
+// deterministic.
+var allStates = []State{
+	StateQueued, StateStarting, StateRunning, StateWaiting, StateRetryWait,
+	StateSucceeded, StateFailed, StateExpired, StateCancelled, StateNeedsReconciliation,
+}
+
+func stateList(pred func(State) bool) string {
+	var b strings.Builder
+	for _, s := range allStates {
+		if !pred(s) {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString("'")
+		b.WriteString(string(s))
+		b.WriteString("'")
+	}
+	return b.String()
+}
 
 func (s State) valid() bool {
 	switch s {

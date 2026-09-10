@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -40,6 +41,11 @@ func DefaultLimits() Limits {
 		AgentBackground:  1,
 	}
 }
+
+// AgingThreshold is §6's: work that has been eligible for longer than this
+// sorts ahead of younger work, so a steady arrival of new items cannot lap an
+// old one indefinitely.
+const AgingThreshold = 60 * time.Second
 
 // SerialAgentLimits is what an adapter gets before it has passed T06/T07: one
 // run at a time, of either class.
@@ -91,11 +97,8 @@ var errAttemptsExhausted = errors.New("work: attempts exhausted")
 // explicit about that, and it is also the only way the transaction stays short
 // enough not to hold the single SQLite writer.
 //
-// Known gap, stated rather than papered over: ordering here is priority, then
-// eligible_at, then created_at — which gives oldest-first within a class and so
-// subsumes §6's 60s aging rule. §6's round-robin ACROSS workspaces and agents is
-// NOT implemented; a workspace with many eligible items will currently be served
-// ahead of a workspace with one older item of equal priority.
+// Candidate selection and its ordering live in scanCandidatesTx; read that for
+// how §6's aging and round-robin are applied and what they cost.
 func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) {
 	if opts.LeaseOwner == "" {
 		return nil, errors.New("work: claim requires a lease owner")
@@ -111,7 +114,6 @@ func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) 
 	defer func() { _ = tx.Rollback() }()
 
 	now := s.now().UTC()
-	nowStr := tsformat.Format(now)
 
 	// A deadline that passed while the work waited expires it here, before it
 	// can consume a slot. Work without a deadline never lands in this branch.
@@ -119,58 +121,36 @@ func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) 
 		return nil, err
 	}
 
-	// Server-wide live counts, by class.
-	var liveTotal, liveChat, liveBackground int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*),
-			COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
-		FROM work_items WHERE state IN ('starting','running')`,
-	).Scan(&liveTotal, &liveChat, &liveBackground); err != nil {
-		return nil, fmt.Errorf("work: count live: %w", err)
-	}
-
-	args := []any{nowStr}
-	q := `SELECT ` + itemColumns + ` FROM work_items
-	      WHERE state IN ('queued','retry_wait') AND eligible_at <= ?`
-	if opts.Class != "" {
-		q += ` AND class = ?`
-		args = append(args, string(opts.Class))
-	}
-	if opts.AgentID != "" {
-		q += ` AND agent_id = ?`
-		args = append(args, opts.AgentID)
-	}
-	// The scan is bounded: with per-agent and per-session limits, a long run of
-	// blocked candidates from one busy agent must not hide an eligible item
-	// behind it, but neither should one claim walk the whole queue.
-	q += ` ORDER BY priority DESC, eligible_at ASC, created_at ASC, id ASC LIMIT 200`
-
-	rows, err := tx.QueryContext(ctx, q, args...)
+	live, err := s.countLiveTx(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("work: scan candidates: %w", err)
+		return nil, err
 	}
-	var candidates []*Item
-	for rows.Next() {
-		it, err := scanItem(rows)
-		if err != nil {
-			rows.Close()
-			return nil, err
+
+	// Server-level gates do not vary per row, so they are settled before the
+	// scan rather than rejecting candidates one at a time inside it.
+	classes, ok := live.admissibleClasses(opts.Limits, opts.Class)
+	if !ok {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("work: commit claim scan: %w", err)
 		}
-		candidates = append(candidates, it)
+		return nil, ErrNoWork
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+
+	candidates, err := s.scanCandidatesTx(ctx, tx, opts, classes, now)
+	if err != nil {
 		return nil, err
 	}
 
 	for _, it := range candidates {
-		ok, err := s.admitsTx(ctx, tx, it, opts.Limits, liveTotal, liveChat, liveBackground)
+		ok, err := s.admitsTx(ctx, tx, it, opts.Limits, live)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
+			// The scan already filtered on every per-row rule, so this branch
+			// means the SQL and the Go rules disagree. Keep going — but see the
+			// divergence check after the loop, which refuses to report it as
+			// "nothing to do".
 			continue
 		}
 		claimed, err := s.startAttemptTx(ctx, tx, it, opts.LeaseOwner, now)
@@ -196,21 +176,155 @@ func (s *Store) Claim(ctx context.Context, opts ClaimOptions) (*Claimed, error) 
 	return nil, ErrNoWork
 }
 
-// admitsTx applies every limit to one candidate. All counts are read inside the
-// claiming transaction, so the answer cannot go stale between check and take.
-func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, liveTotal, liveChat, liveBackground int) (bool, error) {
-	if liveTotal >= lim.ServerTotal {
+// liveCounts is one snapshot of what currently holds execution slots, read
+// inside the claiming transaction so it cannot go stale between check and take.
+type liveCounts struct {
+	total      int
+	chat       int
+	background int
+}
+
+func (s *Store) countLiveTx(ctx context.Context, tx *sql.Tx) (liveCounts, error) {
+	var c liveCounts
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
+		FROM work_items WHERE state IN (`+sqlHoldsExecutionSlot+`)`,
+	).Scan(&c.total, &c.chat, &c.background)
+	if err != nil {
+		return c, fmt.Errorf("work: count live: %w", err)
+	}
+	return c, nil
+}
+
+// admissibleClasses returns the classes that could start right now given the
+// server-wide caps, narrowed by an explicit request. ok is false when nothing
+// can start at all.
+func (c liveCounts) admissibleClasses(lim Limits, only Class) ([]Class, bool) {
+	if c.total >= lim.ServerTotal {
+		return nil, false
+	}
+	var out []Class
+	if only == "" || only == ClassChat {
+		// Chat draws on its reservation first, so the server total is its only
+		// server-level gate.
+		out = append(out, ClassChat)
+	}
+	if only == "" || only == ClassBackground {
+		if c.background < lim.ServerBackground &&
+			// Background may not eat into the chat reservation. Without this a
+			// busy queue starves a person out of their own conversation.
+			c.total+1 <= lim.ServerTotal-lim.ServerChatReserv+c.chat {
+			out = append(out, ClassBackground)
+		}
+	}
+	return out, len(out) > 0
+}
+
+// candidateBatch bounds one scan. It is small on purpose: scanCandidatesTx
+// filters on every per-row rule in SQL, so a row that comes back is claimable
+// unless the Go re-check disagrees, and taking the first is correct.
+const candidateBatch = 50
+
+// scanCandidatesTx returns the fairest claimable work, cheapest first.
+//
+// Every per-row blocking rule is applied in SQL — session occupancy and both
+// per-agent caps — and NOT in Go after a LIMIT. That ordering matters: an
+// earlier version selected the oldest 200 rows and then filtered them in Go, so
+// two hundred items belonging to one busy agent hid the claimable work of every
+// other agent behind them, and re-polling walked the same dead prefix forever.
+//
+// Ordering implements §6:
+//   - priority first
+//   - then aging: anything eligible for longer than AgingThreshold sorts ahead
+//     of younger work, so a long-waiting item cannot be lapped indefinitely
+//   - then round-robin across workspaces and then agents, by how much capacity
+//     each is already using — a workspace with nothing running goes before one
+//     that already has a run in flight
+//   - then FIFO by eligible_at and acceptance order, with the id as a stable
+//     tiebreak so the scan is deterministic
+func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOptions, classes []Class, now time.Time) ([]*Item, error) {
+	args := []any{tsformat.Format(now)}
+	q := `SELECT ` + itemColumns + ` FROM work_items w
+	      WHERE w.state IN ('queued','retry_wait') AND w.eligible_at <= ?`
+
+	placeholders := make([]string, 0, len(classes))
+	for _, c := range classes {
+		placeholders = append(placeholders, "?")
+		args = append(args, string(c))
+	}
+	q += ` AND w.class IN (` + strings.Join(placeholders, ",") + `)`
+
+	if opts.AgentID != "" {
+		q += ` AND w.agent_id = ?`
+		args = append(args, opts.AgentID)
+	}
+
+	// One active turn per session (I3). needs_reconciliation counts here: the
+	// previous turn's runtime may still be alive.
+	q += ` AND (w.session_id = '' OR NOT EXISTS (
+	          SELECT 1 FROM work_items s
+	          WHERE s.session_id = w.session_id AND s.state IN (` + sqlOccupiesSession + `)))`
+
+	// Per-agent total and per-class caps.
+	q += ` AND (w.agent_id = '' OR (
+	          SELECT COUNT(*) FROM work_items a
+	          WHERE a.agent_id = w.agent_id AND a.state IN (` + sqlHoldsExecutionSlot + `)) < ?)`
+	args = append(args, opts.Limits.AgentTotal)
+
+	q += ` AND (w.agent_id = '' OR (
+	          SELECT COUNT(*) FROM work_items a
+	          WHERE a.agent_id = w.agent_id AND a.class = w.class
+	            AND a.state IN (` + sqlHoldsExecutionSlot + `))
+	          < CASE w.class WHEN 'chat' THEN ? ELSE ? END)`
+	args = append(args, opts.Limits.AgentChat, opts.Limits.AgentBackground)
+
+	q += ` ORDER BY
+	        w.priority DESC,
+	        CASE WHEN w.eligible_at <= ? THEN 0 ELSE 1 END ASC,
+	        (SELECT COUNT(*) FROM work_items ws
+	           WHERE ws.workspace_id = w.workspace_id AND ws.state IN (` + sqlHoldsExecutionSlot + `)) ASC,
+	        (SELECT COUNT(*) FROM work_items ag
+	           WHERE ag.agent_id = w.agent_id AND ag.state IN (` + sqlHoldsExecutionSlot + `)) ASC,
+	        w.eligible_at ASC, w.created_at ASC, w.id ASC
+	      LIMIT ?`
+	args = append(args, tsformat.Format(now.Add(-AgingThreshold)), candidateBatch)
+
+	rows, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("work: scan candidates: %w", err)
+	}
+	defer rows.Close()
+	var out []*Item
+	for rows.Next() {
+		it, err := scanItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// admitsTx re-applies every limit to one candidate.
+//
+// scanCandidatesTx already filtered on the per-row rules in SQL, so this is a
+// second, authoritative pass rather than the only one. Keeping both is
+// deliberate: the SQL is where a rule has to live to be usable as a filter, and
+// this is where it can be read. TestClaimSQLAndGoAgree pins that they do not
+// drift apart.
+func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, live liveCounts) (bool, error) {
+	if live.total >= lim.ServerTotal {
 		return false, nil
 	}
 	switch it.Class {
 	case ClassBackground:
-		if liveBackground >= lim.ServerBackground {
+		if live.background >= lim.ServerBackground {
 			return false, nil
 		}
-		// Background may not eat into the chat reservation. Without this a busy
-		// queue starves a person out of their own conversation, which §6 forbids
-		// and which is the whole point of reserving.
-		if liveTotal+1 > lim.ServerTotal-lim.ServerChatReserv+liveChat {
+		if live.total+1 > lim.ServerTotal-lim.ServerChatReserv+live.chat {
 			return false, nil
 		}
 	case ClassChat:
@@ -218,12 +332,13 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 		// server total allows.
 	}
 
-	// I3: one active turn per session. A second message for the same session
-	// waits in the mailbox rather than starting a competing turn.
+	// I3: one active turn per session. needs_reconciliation is in this set
+	// because the previous turn's runtime may still be alive under a locator
+	// nobody has checked.
 	if it.SessionID != "" {
 		var n int
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM work_items WHERE session_id = ? AND state IN ('starting','running','waiting')`,
+			`SELECT COUNT(*) FROM work_items WHERE session_id = ? AND state IN (`+sqlOccupiesSession+`)`,
 			it.SessionID).Scan(&n); err != nil {
 			return false, fmt.Errorf("work: count session turns: %w", err)
 		}
@@ -239,7 +354,7 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 				COUNT(*),
 				COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
-			FROM work_items WHERE agent_id = ? AND state IN ('starting','running')`,
+			FROM work_items WHERE agent_id = ? AND state IN (`+sqlHoldsExecutionSlot+`)`,
 			it.AgentID).Scan(&agentTotal, &agentChat, &agentBackground); err != nil {
 			return false, fmt.Errorf("work: count agent runs: %w", err)
 		}
