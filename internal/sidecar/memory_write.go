@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/memory/memdiff"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -36,12 +37,65 @@ type MemoryWriteRequest struct {
 	File    string `json:"file"`
 	Content string `json:"content"`
 	Scope   string `json:"scope,omitempty"`
+
+	// Mode ∈ {"replace", "append"}. Defaults to "replace", which is what
+	// this endpoint has always done — before this field existed EVERY write
+	// here was an unconditional whole-file overwrite, with no read of the
+	// current content at all. Two agents writing the same file through this
+	// endpoint lost one of the two writes with no record that it happened.
+	Mode string `json:"mode,omitempty"`
+
+	// OperationID is stable across retries of the same logical write.
+	// Recorded on every write; it only DEDUPLICATES where a mutation ledger
+	// is reachable, which it is not from inside an agent container — see
+	// the ledgerless note in internal/memory/mutate.go. RevisionChecked in
+	// the response says which of the two happened.
+	OperationID string `json:"operation_id,omitempty"`
+
+	// ExpectedSHA256 is the compare-and-set that works without the ledger:
+	// the content_sha256 GET /memory/read returned must still be the hash of
+	// the file. A mismatch is 409 Conflict, not a silent overwrite.
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+
+	// Removals are the line spans a replace deletes, in the base's
+	// normalised 1-based numbering ({start_line, line_count, old_sha256}).
+	// Absent means "not declared" and the write is unverified; an EMPTY
+	// array means "this replace deletes nothing" and is checked — see
+	// buildTarget in internal/memory/mutate.go on why the distinction is
+	// load-bearing.
+	Removals []memdiff.Removal `json:"removals,omitempty"`
 }
 
 // MemoryWriteResponse is the success envelope (201 Created).
 type MemoryWriteResponse struct {
 	BytesWritten int    `json:"bytes_written"`
 	Path         string `json:"path"`
+
+	// ContentSHA256 hashes the exact bytes now on disk — the value to pass
+	// back as ExpectedSHA256 on the next write of this file.
+	ContentSHA256 string `json:"content_sha256"`
+	// Revision is §8's monotonic per-key revision, and RevisionChecked says
+	// whether it means anything. Inside an agent container there is no
+	// handle to the mutation ledger, so Revision is 0 and RevisionChecked is
+	// false; a caller must not describe such a write as revision-checked.
+	Revision        int64 `json:"revision"`
+	RevisionChecked bool  `json:"revision_checked"`
+	// MergedFinalLine reports an append onto a file that did not end in a
+	// newline: the first appended bytes joined the previous last line rather
+	// than starting a new one.
+	MergedFinalLine bool `json:"merged_final_line,omitempty"`
+	// OperationID echoes the id this write was recorded under, synthesised
+	// when the request did not carry one.
+	OperationID string `json:"operation_id"`
+}
+
+// MemoryWriteConflict is the 409 envelope for the §8 error vocabulary:
+// memory_conflict, undeclared_removal, operation_conflict.
+type MemoryWriteConflict struct {
+	Error         string `json:"error"`
+	Code          string `json:"code"`
+	CurrentSHA256 string `json:"current_sha256,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 // MemoryWriteRejection is the 422 envelope when the writer refuses
@@ -157,35 +211,125 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Mode == "" {
+		req.Mode = "replace"
+	}
+	op := memory.OpReplace
+	switch req.Mode {
+	case "replace":
+	case "append":
+		op = memory.OpAppend
+	default:
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "mode must be 'replace' or 'append'",
+		})
+		return
+	}
+
+	operationID := req.OperationID
+	if strings.TrimSpace(operationID) == "" {
+		var err error
+		operationID, err = memory.NewOperationID()
+		if err != nil {
+			s.logger.Error("memory write: operation id", "error", err)
+			writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
+			return
+		}
+	}
+
 	cfg := memory.WriteConfig{
 		MaxBytes:     cap,
 		Scrubber:     s.memoryScrubber(),
 		ScrubberMode: scrubber.ModeBlock,
 	}
 
-	res, err := memory.WriteFile(r.Context(), target, []byte(req.Content), cfg)
+	// memory.Mutate, not memory.WriteFile. Three things change, and all three
+	// were real defects rather than style:
+	//
+	//   1. WriteFile checked the cap BEFORE taking the lock (writer.go:99 vs
+	//      :183), so the cap was never safe against a concurrent writer on
+	//      this path — only on the MCP tool path, which had its own lock.
+	//   2. Every write here was a whole-file replace with no read of the
+	//      current content, so an "append a line to my daily log" through
+	//      this endpoint was expressed as "overwrite the whole file", and a
+	//      concurrent write was lost silently. mode=append now means append.
+	//   3. There was no CAS of any kind. ExpectedSHA256 gives one that works
+	//      without a database, which matters because there is no database
+	//      reachable from inside the container.
+	//
+	// The ledger is nil here on purpose and the response says so: the sidecar
+	// runs inside the agent container and holds no handle to the host
+	// database. Revisions, operation-id idempotency and crash recovery are
+	// therefore NOT in force on this path. See the ledgerless section of
+	// internal/memory/mutate.go.
+	res, err := memory.Mutate(r.Context(), nil, memory.MutateRequest{
+		// Legacy, declared rather than defaulted. The sidecar runs inside the
+		// agent container and has no handle on the host ledger, so it cannot
+		// offer revisions, operation-id idempotency, crash recovery or
+		// run/generation verification. Reaching the guaranteed profile from
+		// here needs a host mutation endpoint to call; until that exists this
+		// says what it is, and every response carries revision_checked: false.
+		Profile:        memory.ProfileLegacy,
+		OperationID:    operationID,
+		ActorType:      "agent",
+		ActorID:        s.memoryAgentSlug,
+		Source:         "sidecar:/memory/write",
+		Scope:          req.Scope,
+		Path:           target,
+		AuditPath:      req.Scope + ":" + req.File,
+		Op:             op,
+		Content:        req.Content,
+		ExpectedSHA256: req.ExpectedSHA256,
+		Removals:       req.Removals,
+		// A replace discards the base, so importing a non-canonical one
+		// changes no bytes on disk; it only lets a declared-removal check
+		// diff against a normalised base instead of refusing outright.
+		Import: op == memory.OpReplace,
+		Cfg:    cfg,
+	})
 	if err != nil {
+		if code, ok := memoryConflictCode(err); ok {
+			s.emitJournal(r.Context(), "memory.write_rejected",
+				"write rejected: "+code,
+				map[string]any{
+					"scope":        req.Scope,
+					"file":         req.File,
+					"reason":       code,
+					"operation_id": operationID,
+				}, nil)
+			writeJSONResponse(w, http.StatusConflict, MemoryWriteConflict{
+				Error:         code,
+				Code:          code,
+				CurrentSHA256: res.BaseSHA256,
+				Message:       err.Error(),
+			})
+			return
+		}
+		if errors.Is(err, memory.ErrNotCanonical) || errors.Is(err, memory.ErrContentTooLarge) {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		s.logger.Error("memory write failed", "error", err, "scope", req.Scope, "file", req.File)
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "write failed"})
 		return
 	}
 
-	if res.Rejected {
+	if res.Rejection != nil {
 		s.emitJournal(r.Context(), "memory.write_rejected",
-			"write rejected: "+res.RejectionKind,
+			"write rejected: "+res.Rejection.Kind,
 			map[string]any{
 				"scope":  req.Scope,
 				"file":   req.File,
-				"reason": res.RejectionKind,
-				"detail": res.RejectionDetail,
-				"hits":   len(res.Hits),
+				"reason": res.Rejection.Kind,
+				"detail": res.Rejection.Detail,
+				"hits":   len(res.Rejection.Hits),
 			}, nil)
 		writeJSONResponse(w, http.StatusUnprocessableEntity, MemoryWriteRejection{
 			Rejected: true,
-			Kind:     res.RejectionKind,
-			Detail:   res.RejectionDetail,
-			Hits:     res.Hits,
-			Message:  res.RejectionKind + " policy rejected this write",
+			Kind:     res.Rejection.Kind,
+			Detail:   res.Rejection.Detail,
+			Hits:     res.Rejection.Hits,
+			Message:  res.Rejection.Kind + " policy rejected this write",
 		})
 		return
 	}
@@ -255,9 +399,32 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, http.StatusCreated, MemoryWriteResponse{
-		BytesWritten: bytesWritten,
-		Path:         target,
+		BytesWritten:    bytesWritten,
+		Path:            target,
+		ContentSHA256:   res.ContentSHA256,
+		Revision:        res.Revision,
+		RevisionChecked: res.LedgerRecorded,
+		MergedFinalLine: res.MergedFinalLine,
+		OperationID:     operationID,
 	})
+}
+
+// memoryConflictCode maps the §8 error vocabulary onto the string the HTTP
+// client branches on. Returns ok=false for anything that is not one of the
+// three conflict codes, so an unrelated failure cannot be reported as a
+// conflict the client is supposed to retry differently.
+func memoryConflictCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, memory.ErrMemoryConflict):
+		return "memory_conflict", true
+	case errors.Is(err, memory.ErrUndeclaredRemoval):
+		return "undeclared_removal", true
+	case errors.Is(err, memory.ErrOperationConflict):
+		return "operation_conflict", true
+	case errors.Is(err, memory.ErrProtectedRemoval):
+		return "protected_removal", true
+	}
+	return "", false
 }
 
 // memoryReindexTimeout bounds the off-thread reindex + journal emit so a

@@ -525,8 +525,12 @@ func TestEveryDispatchSiteSetsRunID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve repo root: %v", err)
 	}
+	// Fatal, not Skip. If ../../go.mod is not there the checkout is broken,
+	// and reporting "ok" would quietly delete this guard on exactly the machine
+	// where something is already wrong. It also keeps the repo's skip budget
+	// where it is: a skip that can never legitimately fire is pure debt.
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
-		t.Skipf("repo root not resolvable from the package dir (%v)", err)
+		t.Fatalf("repo root not resolvable from the package dir (%v); this guard cannot run and must not report ok", err)
 	}
 
 	type violation struct{ file, fn string }
