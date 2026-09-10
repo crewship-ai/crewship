@@ -374,3 +374,85 @@ Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavk
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
+
+## 13. Závěr pro nezávislou AI oponenturu — 10. září 2026
+
+**Stav: opravy jsou integrované, čitelnost je připravená v PR, produktová
+přejímka není hotová.** Předmětem oponentury je
+[PR #2485](https://github.com/crewship-ai/crewship/pull/2485), aplikační head
+`71725f860724647bdb1dc20e290fa66bc7f13b2d`. Tato část je podklad k revizi,
+nikoli tvrzení o dokončeném nasazení nebo přijatém UX.
+
+### Co se podařilo
+
+Opravy byly rozděleny a sloučeny v předepsaném pořadí: A draft/publish,
+B vzorová testovací data, C lidská rozhodnutí, D běhy/plány/porovnání.
+Všechny čtyři PR prošly CI. Zásadní opravy chrání bajty publikačního důkazu,
+asynchronní a idempotentní start, uložené vstupy, připnutou verzi běhu,
+souběžné drafty a rozhodnutí a integritu zachycených výsledků. Doplněné
+T1–T5 pokrývají skutečné HTTP bajty, tvar odpovědi rozhodnutí, všechny start
+cesty, upgrade starší databáze a zrušené jednorázové starty. Mapa skutečného
+CodeRabbit pokrytí a ručních dodatků při kvótě je v §12 a příslušných PR.
+
+Následná čitelnost v #2485 používá data, která už aplikace měla: viditelné
+popisy a počet kroků v hlavním seznamu, lidské názvy kroků a činnost jako
+fallback. Přidává pouze nepovinné `Step.Name` a `step_count` v odpovědi API;
+engine se nepřepisuje. Editor je jeden dokument s panelem kroku Edit/Test.
+Publikace zůstává explicitní, porovnání publikovaných verzí je ve Versions.
+Chyba a identifikace selhaného kroku jsou nahoře; důležitý krok se otevře i
+za limitem prvních 12. Prázdné sekce se sbalí, duplicitní spodní dok zmizí.
+Vzorky, publikační review, rozhodovací formuláře ani porovnání nebyly odstraněny.
+
+### Jak silné jsou důkazy
+
+- Úplný lokální Go běh: **138 testovaných balíků prošlo**, dalších 10 nemá
+  testy. API 1 215,677 s, databáze 1 014,954 s, pipeline 15,369 s. Vet prošel.
+- Úplný frontendový běh před posledním drobným dodatkem: **8 441 testů v 710
+  souborech prošlo**. Dodatek zachovává ID kroku při nedostupném historickém
+  receptu a dokončuje slovník; jeho nový test a všech 314 testů komponent
+  Routines prošly, stejně jako typy a lint dotčených souborů. Aktuální CI
+  celého PR ještě není dokončené.
+- Produkční frontendové sestavení prošlo. Celý lint měl nula chyb a 30
+  upozornění mimo změněný kód Routines. Strict docs inventory, parita schémat,
+  migrační lint a agent invariants prošly.
+- Funkce pro názvy pokrývá zmrazený vzorek všech **81 kroků / 27 rutin** bez
+  neznámého typu. **Živé zobrazení všech 81 kroků zatím ověřeno není.**
+- Na dev1 je zachycena původní chyba publikace: uložení 200, test 200,
+  publikace 422 `invalid_save_token`. Pozitivní průchod opraveným nasazením
+  ještě nebyl proveden. Přípravné skripty nejsou důkaz jeho úspěchu.
+- #2485 zatím nemá dokončené nezávislé CodeRabbit review: první pokus skončil
+  oznámením o kvótě. Vlastní revize autora tuto skutečnost nenahrazuje.
+
+### Co netvrdíme
+
+Dev1 zatím nebyl přepnut na tuto implementaci. Původní pracovní kopie je
+zachovaná; integrační postup musí zachovat i nesouvisející WIP. Neproběhla
+nová přihlášená přejímka pěti úloh, restartu a souběhu. Nemáme měření
+zrychlení po změně ani uživatelskou studii. Počet nejvýše čtyř pracovních
+ploch je návrhový limit s metodikou v §5.4, nikoli nezávisle přepočítaný
+výsledek. **Zelené testy nedokládají, že klient Edit/Test rozumí.**
+
+Typovaná rozhodnutí ve vlastní autentizované schránce jsou produktová
+hypotéza diferenciace. Tržní rešerše vychází z veřejné dokumentace, nikoli
+z přihlášeného srovnávacího testování. Nedokazuje obchodní převahu.
+
+### Zadání oponentovi
+
+Projděte změny a jejich testy, nehodnoťte jen tento souhrn. U nálezu uveďte
+soubor/řádek, konkrétní reprodukci, dopad a chybějící důkaz.
+
+1. Dokládají testy skutečné klient↔server kontrakty a historické snapshoty?
+   Který test by přežil návrat původní chyby nebo pouze opakuje implementaci?
+2. Je rozdíl mezi Test routine, vzorovým testem kroku a skutečným Run či
+   porovnáním zřejmý před akcí? Neslibuje některý text neexistující izolaci?
+3. Je editor skutečně jednodušší při stejné metodě počítání ploch, nebo jsme
+   ovládání pouze schovali? Zachovávají Edit, Code a Test rozpracovaná data?
+4. Jsou odvozené názvy a účely pravdivé u podmínek, DAG a neúplných dat?
+   Neztratí se chyba, čekající rozhodnutí nebo důležitý krok při stránkování?
+5. Jsou odklady R2, R5/R9 a R10 v §11 obhajitelné pro Release 1.0? Který
+   chybějící průchod je překážkou vydání a který pouze další iterací?
+
+Po oponentuře následuje vypořádání nálezů, zelené CI a merge #2485, bezpečné
+přepnutí dev1 na úplný integrovaný zdroj, pět přihlášených úloh s konkrétními
+run IDs, restart/souběh a nové měření. Poslední bránu tvoří uživatelovo
+vysvětlení pěti rutin a výslovné potvrzení srozumitelnosti Edit/Test.
