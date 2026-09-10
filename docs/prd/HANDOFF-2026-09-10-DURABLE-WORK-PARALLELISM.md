@@ -26,6 +26,11 @@ runtimes, overlapping in wall-clock time) has not been attempted.
 | `d44a837` | an exhausted item no longer stalls the whole queue (found by self-review) |
 | `fdab316` | the acceptance budget guard: a handle whose `busy_timeout` sits under its budget |
 | `a6cceaf` | `needs_reconciliation` holds capacity; a blocked prefix stops hiding claimable work; §6 aging and round-robin |
+| `4afab60` | the baseline re-measured under the daemon's managed WAL — FULL costs ~3× what the first run said |
+| `1b78aa8` | the delivery ledger, and a crash harness that SIGKILLs a real child mid-acceptance |
+| `4b4aedc` | **E0 mechanical half** — per-run tmux/args/env/script/FIFO/exit, run-scoped cancel and attach, and the credential file unlinked the instant it is read |
+| `4433755` | **the memory mutation contract** and the profile that refuses to fake a guarantee |
+| `b135692` | §6 retention and ingress capacity |
 
 ### Stage A is closed
 
@@ -134,13 +139,13 @@ way, and T14's evidence needs a separate harness by design.
 
 | | Status |
 |---|---|
-| **I1** no `202` before a durable commit | Mechanism exists (`work.AcceptTx` takes the caller's `*sql.Tx`); **not yet wired to any handler** |
-| **I2** one delivery → at most one work item | Schema enforces it (`UNIQUE(workspace, endpoint, source_delivery_id)` + a partial unique index on the content key); **no handler writes those rows yet** |
+| **I1** no `202` before a durable commit | **Demonstrated at the store level** — `AcceptDeliveryTx` writes delivery and work in one transaction, and a SIGKILL'd child proves the after-commit and before-commit cases. Handler wiring is in flight |
+| **I2** one delivery → at most one work item | **Demonstrated** — duplicates, concurrent duplicates, content-key replay under a fresh id, and same-id-different-body as a conflict |
 | **I3** one active turn per session; atomic claim | **Demonstrated**, including that an unreconciled turn keeps the session |
-| **I4** state/memory/sidecar changes verify the live run | Demonstrated for **state**. Memory and sidecar: not started |
+| **I4** state/memory/sidecar changes verify the live run | Demonstrated for **state**. Memory has the hook (`MutateRequest.Authorize`) and the guaranteed profile REFUSES a write without it — but nothing wires it yet, so no memory write is run-verified today. Sidecar: not started |
 | **I5** an old attempt cannot overwrite a newer one | **Demonstrated**, mutation-checked |
-| **I6** memory writes are not lost under concurrency | Not started (diff primitive only) |
-| **I7** no producer bypasses admission | **Not met.** Three producers still start runs with no shared lock at all |
+| **I6** memory writes are not lost under concurrency | **Demonstrated for the host path** — 100 concurrent replaces from one revision yield exactly one winner, and crash recovery never overwrites a third party's content. NOT reachable from the two agent-facing paths (see below) |
+| **I7** no producer bypasses admission | **Not met.** Six pumps and three unguarded producers remain. Nobody is on it |
 | **I8** rights checked at acceptance and at dispatch | Columns exist; the dispatch-time re-check is not implemented |
 
 ## 3. T01–T14
@@ -149,20 +154,20 @@ Nothing is PASS. Saying otherwise would be the exact error the PRD warns about.
 
 | | State |
 |---|---|
-| T01 signatures, rotation, timestamp edges | Signature half covered by unit tests; HTTP status mapping, oversized and chunked bodies **not** |
-| T02 duplicates under concurrency | Ledger + spike scenario; **no handler**, so not the real path |
-| T03 crash before/after commit | **No process-crash harness exists in the repo.** Must be written |
-| T04 held write lock, checkpoint, FULL everywhere | Measured in the spike; not asserted as a repo test, and no budget guard exists yet |
-| T05 all producers at once, mailbox | Mailbox table exists, unused. Not started |
-| T06 real Claude, chat + background overlapping | **Not attempted.** Admission-level only |
-| T07 start/cleanup/cancel B during A | Not started (E0 in progress) |
-| T08 lost heartbeat, late completion, restart | Lease/fencing/recovery unit-tested; the restart half needs T03's harness |
+| T01 signatures, rotation, timestamp edges | Signature half covered, including both ±5 min boundaries and rotation. HTTP status mapping and oversized/chunked bodies are in flight with the handler wiring |
+| T02 duplicates under concurrency | **Covered at the store level** — 24 concurrent duplicates collapse to one work item and one receipt. Not yet through a handler |
+| T03 crash before/after commit | **Harness written and passing.** A real child SIGKILLs itself mid-acceptance; after the commit the work survives and a resend finds it, before the commit nothing survives. It does NOT cover OS crash — that is T14 |
+| T04 held write lock, checkpoint, FULL everywhere | Measured, and now enforced: the acceptance guard refuses after 452 ms with a 600 ms budget against a lock held 6 s. `FULL` on every pooled connection is asserted |
+| T05 all producers at once, mailbox | Mailbox table exists, unused. Not started — and blocked on I7 |
+| T06 real Claude, chat + background overlapping | **Not attempted.** Admission-level only, and the parallel flag stays off until it is |
+| T07 start/cleanup/cancel B during A | E0's mechanical half proves it for tmux, args, env, script, FIFO, exit and cancel targeting, on generated command strings and the provider fake. HOME/output/secrets/sidecar attribution in flight. No live container |
+| T08 lost heartbeat, late completion, restart | **Fencing, lease loss and recovery demonstrated and mutation-checked.** The restart half now has T03's harness to build on |
 | T09 external success without a receipt | Table exists, unused |
-| T10 memory CAS, append retry, cap race | Diff primitive only |
-| T11 memory crash recovery | Not started |
-| T12 UI reconnect, two streams | Not started |
-| T13 retention, disk full | Retention columns exist; no sweeper |
-| T14 OS/VM crash | Not started, and by design cannot be a `kill -9` |
+| T10 memory CAS, append retry, cap race | **Demonstrated host-side**: 100 concurrent replaces yield one winner; 100 identical append retries yield one increment; the cap race still holds. Unreachable from the agent paths — see §5a |
+| T11 memory crash recovery | **Demonstrated** at five crash points, including that a third party's content is never overwritten |
+| T12 UI reconnect, two streams | In flight |
+| T13 retention, disk full | Retention and ingress limits implemented and mutation-checked; nothing schedules the sweeper and no handler calls the ingress check yet |
+| T14 OS/VM crash | Not started, and deliberately cannot be a `kill -9` — T03's SIGKILL harness is explicitly not this |
 
 ## 4. Corrections to the PRD documents
 
@@ -264,6 +269,33 @@ which also mints no run id and writes no `agent_runs` row), and peer query
 
 `cmd/crewship/cmd_start.go` is where every one of them is wired. **Every branch
 of this programme touches that file** — coordinate before editing it.
+
+## 5a. The gap that matters most right now
+
+**The guaranteed memory profile exists, is tested, and nothing can reach it.**
+
+`memory.Mutate` has two profiles. `ProfileGuaranteed` refuses a write missing a
+caller-supplied operation id, a durable ledger handle, `ExpectedRevision` with
+non-nil `Removals`, or a wired `Authorize`. It does not downgrade — a write that
+cannot be checked fails, because one that succeeds unchecked and is then
+described as revision-checked is worse.
+
+But both agent-facing writers run INSIDE the agent container and have no
+`*sql.DB`: the MCP `memory.write` tool (`internal/memory/tools.go`, constructed
+at `internal/sidecar/memory_mcp.go:308`) and the sidecar's `POST /memory/write`.
+`grep 'sql.DB' internal/sidecar/*.go` returns nothing. Both therefore declare
+`ProfileLegacy` out loud and every response carries `revision_checked: false`.
+
+Closing it needs a host mutation endpoint for the sidecar to call, and an
+`Authorize` closure that genuinely verifies the run's generation against the
+work ledger. That work is in flight. Until it lands, **no agent memory write is
+revision-checked**, and the parallel profile must not be enabled.
+
+Two compatibility choices are legacy-only and deliberate: a missing operation id
+is synthesised rather than refusing every `memory.write` the model has issued
+since the tool shipped, and `Removals == nil` means "undeclared" rather than
+"removes nothing", because the strict reading fails every existing whole-file
+replace. Both are recorded as unverified rather than presented as checked.
 
 ## 6. The next concrete step
 
