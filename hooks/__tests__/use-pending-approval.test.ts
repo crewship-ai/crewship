@@ -40,14 +40,41 @@ describe("usePendingApproval", () => {
     vi.unstubAllGlobals()
   })
 
+  it("T2 sends a flat typed decision with false and zero", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [wp()] })
+    const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
+    await act(async () => {
+      await flushAsync()
+    })
+    mockFetch.mockResolvedValueOnce({ ok: true })
+    await act(async () => {
+      expect(
+        await result.current.decide(true, "", {
+          action_id: "go",
+          data: { count: 0, enabled: false },
+        }),
+      ).toBe(true)
+    })
+    expect(mockFetch).toHaveBeenLastCalledWith(
+      "/api/v1/workspaces/ws-1/pipelines/waitpoints/tok_1/approve",
+      expect.objectContaining({
+        body: '{"approved":true,"comment":"","action_id":"go","data":{"count":0,"enabled":false}}',
+      }),
+    )
+  })
+
   it("does not fetch when workspace or run is missing", async () => {
     const { result } = renderHook(() => usePendingApproval(null, RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint).toBeNull()
     expect(mockFetch).not.toHaveBeenCalled()
 
     const { result: r2 } = renderHook(() => usePendingApproval("ws-1", null))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(r2.current.waitpoint).toBeNull()
   })
 
@@ -57,7 +84,9 @@ describe("usePendingApproval", () => {
       json: async () => [wp({ token: "other", pipeline_run_id: "run_zzz" }), wp()],
     })
     const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
 
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/v1/workspaces/ws-1/pipelines/waitpoints",
@@ -70,13 +99,12 @@ describe("usePendingApproval", () => {
   it("ignores non-approval kinds and other runs", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: async () => [
-        wp({ kind: "event" }),
-        wp({ pipeline_run_id: "run_other" }),
-      ],
+      json: async () => [wp({ kind: "event" }), wp({ pipeline_run_id: "run_other" })],
     })
     const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint).toBeNull()
   })
 
@@ -86,7 +114,9 @@ describe("usePendingApproval", () => {
     // approval behind an auth blip would be worse than a retryable error.
     mockFetch.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
     const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint).toBeNull()
     expect(result.current.error).toContain("503")
   })
@@ -97,26 +127,38 @@ describe("usePendingApproval", () => {
       ({ run }: { run: string }) => usePendingApproval("ws-1", run),
       { initialProps: { run: RUN } },
     )
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint?.token).toBe("tok_1")
 
     // Switch to run B whose fetch is still in flight: the stale A waitpoint must
     // be dropped right away rather than lingering until B resolves.
     let resolveB: (v: unknown) => void = () => {}
-    mockFetch.mockReturnValueOnce(new Promise((r) => { resolveB = r }))
-    await act(async () => { rerender({ run: "run_b" }) })
+    mockFetch.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveB = r
+      }),
+    )
+    await act(async () => {
+      rerender({ run: "run_b" })
+    })
     expect(result.current.waitpoint).toBeNull()
 
     // And A's response, if it ever lands late, is ignored (reqId moved on).
     resolveB({ ok: true, json: async () => [] })
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint).toBeNull()
   })
 
   it("decide() POSTs to the approve endpoint and clears the banner", async () => {
     mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [wp()] })
     const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(result.current.waitpoint?.token).toBe("tok_1")
 
     mockFetch.mockResolvedValueOnce({ ok: true, text: async () => "" })
@@ -139,7 +181,9 @@ describe("usePendingApproval", () => {
   it("re-fetches on the pipeline.waitpoint.created realtime event", async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => [] })
     renderHook(() => usePendingApproval("ws-1", RUN))
-    await act(async () => { await flushAsync() })
+    await act(async () => {
+      await flushAsync()
+    })
     expect(mockFetch).toHaveBeenCalledTimes(1)
 
     await act(async () => {
@@ -148,5 +192,66 @@ describe("usePendingApproval", () => {
     })
     expect(mockFetch).toHaveBeenCalledTimes(2)
     expect(realtimeCallbacks["inbox.updated"]).toBeTypeOf("function")
+  })
+
+  it("sends one decision on a double click and ignores its late completion after navigation", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [wp()] })
+    const { result, rerender } = renderHook(({ run }) => usePendingApproval("ws-1", run), {
+      initialProps: { run: RUN },
+    })
+    await act(flushAsync)
+    let finish!: (value: unknown) => void
+    mockFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    let decision!: Promise<boolean>
+    await act(async () => {
+      decision = result.current.decide(true)
+      expect(await result.current.decide(false)).toBe(false)
+    })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [wp({ token: "tok_b", pipeline_run_id: "run_b" })],
+    })
+    await act(async () => {
+      rerender({ run: "run_b" })
+      await flushAsync()
+    })
+    expect(result.current.waitpoint?.token).toBe("tok_b")
+    await act(async () => {
+      finish({ ok: true })
+      expect(await decision).toBe(true)
+    })
+    expect(result.current.waitpoint?.token).toBe("tok_b")
+    expect(result.current.deciding).toBe(false)
+  })
+
+  it("does not restore an accepted decision from an older list response", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [wp()] })
+    const { result } = renderHook(() => usePendingApproval("ws-1", RUN))
+    await act(flushAsync)
+    let finishList!: (value: unknown) => void
+    mockFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishList = resolve
+      }),
+    )
+    let pendingList!: Promise<void>
+    act(() => {
+      pendingList = result.current.refresh()
+    })
+    mockFetch.mockResolvedValueOnce({ ok: true })
+    await act(async () => {
+      expect(await result.current.decide(true)).toBe(true)
+    })
+    await act(async () => {
+      finishList({ ok: true, json: async () => [wp()] })
+      await pendingList
+    })
+    expect(result.current.waitpoint).toBeNull()
+    expect(result.current.loading).toBe(false)
   })
 })

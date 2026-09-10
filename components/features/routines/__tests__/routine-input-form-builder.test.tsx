@@ -2,12 +2,22 @@ import { useState } from "react"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { describe, it, expect } from "vitest"
 import { RoutineInputFormBuilder } from "../routine-input-form-builder"
-import { type RoutineInputSpec, slashFieldsFromRoutineInputs, routineInputsFromValues, isMissingRequired } from "@/lib/routine-inputs"
+import {
+  type RoutineInputSpec,
+  slashFieldsFromRoutineInputs,
+  routineInputsFromValues,
+  isMissingRequired,
+} from "@/lib/routine-inputs"
 import { FormField } from "@/components/features/chat/asks/form-field"
 
 function Builder() {
   const [inputs, setInputs] = useState<RoutineInputSpec[]>([])
-  return <><RoutineInputFormBuilder inputs={inputs} onChange={setInputs} /><output data-testid="definition">{JSON.stringify(inputs)}</output></>
+  return (
+    <>
+      <RoutineInputFormBuilder inputs={inputs} onChange={setInputs} />
+      <output data-testid="definition">{JSON.stringify(inputs)}</output>
+    </>
+  )
 }
 
 describe("Routine input surveys", () => {
@@ -17,22 +27,47 @@ describe("Routine input surveys", () => {
     fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Which teams?" } })
     fireEvent.change(screen.getByLabelText("Variable name"), { target: { value: "teams" } })
     fireEvent.change(screen.getByLabelText("Answer type"), { target: { value: "multi" } })
-    fireEvent.change(screen.getByLabelText("Prepared answers — one per line"), { target: { value: "Support\nResearch, Europe" } })
-    fireEvent.click(within(screen.getByRole("group", { name: "Default answer (optional)" })).getByLabelText("Support"))
+    fireEvent.change(screen.getByLabelText("Prepared answers — one per line"), {
+      target: { value: "Support\nResearch, Europe" },
+    })
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Default answer (optional)" })).getByLabelText(
+        "Support",
+      ),
+    )
     const [input] = JSON.parse(screen.getByTestId("definition").textContent!)
-    expect(input).toMatchObject({ name: "teams", label: "Which teams?", type: "array", widget: "multiselect", options: ["Support", "Research, Europe"], default: ["Support"] })
+    expect(input).toMatchObject({
+      name: "teams",
+      label: "Which teams?",
+      type: "array",
+      widget: "multiselect",
+      options: ["Support", "Research, Europe"],
+      default: ["Support"],
+    })
     expect(screen.getByText(/inputs.teams/)).toBeInTheDocument()
   })
 
   it("preserves comma-containing choices as JSON through the shared field", () => {
-    const field = slashFieldsFromRoutineInputs([{ name: "teams", type: "array", options: ["A,B", "C"], required: true }])[0]
-    function Field() { const [value, setValue] = useState("[]"); return <><FormField field={field} value={value} onChange={e => setValue(e.target.value)} /><output data-testid="value">{value}</output></> }
+    const field = slashFieldsFromRoutineInputs([
+      { name: "teams", type: "array", options: ["A,B", "C"], required: true },
+    ])[0]
+    function Field() {
+      const [value, setValue] = useState("[]")
+      return (
+        <>
+          <FormField field={field} value={value} onChange={(e) => setValue(e.target.value)} />
+          <output data-testid="value">{value}</output>
+        </>
+      )
+    }
     render(<Field />)
     fireEvent.click(screen.getByLabelText("A,B"))
     const raw = screen.getByTestId("value").textContent!
     expect(routineInputsFromValues([field], { teams: raw })).toEqual({ teams: ["A,B"] })
     expect(isMissingRequired(field, "[]")).toBe(true)
-    expect(() => routineInputsFromValues([field], { teams: '["unknown"]' })).toThrow("available answer")
+    expect(() => routineInputsFromValues([field], { teams: '["unknown"]' })).toThrow(
+      "available answer",
+    )
   })
 
   it("offers custom text only when the recipe permits it", () => {
@@ -40,7 +75,34 @@ describe("Routine input surveys", () => {
     const field = slashFieldsFromRoutineInputs([input])[0]
     render(<FormField field={field} value="" onChange={() => {}} />)
     expect(screen.getByRole("combobox")).toHaveAttribute("list", "period-choices")
-    expect(routineInputsFromValues([field], { period: "My custom period" })).toEqual({ period: "My custom period" })
-    expect(() => routineInputsFromValues([{ ...field, allow_custom: false }], { period: "My custom period" })).toThrow()
+    expect(routineInputsFromValues([field], { period: "My custom period" })).toEqual({
+      period: "My custom period",
+    })
+    expect(() =>
+      routineInputsFromValues([{ ...field, allow_custom: false }], { period: "My custom period" }),
+    ).toThrow()
   })
+})
+
+it("preserves unsupported file and credential fields instead of coercing them to text", () => {
+  const original: RoutineInputSpec[] = [
+    { name: "document", type: "file", widget: "file" },
+    { name: "account", type: "string", widget: "credential", options: ["existing"] },
+  ]
+  function MixedBuilder() {
+    const [inputs, setInputs] = useState(original)
+    return (
+      <>
+        <RoutineInputFormBuilder inputs={inputs} onChange={setInputs} />
+        <output data-testid="mixed-definition">{JSON.stringify(inputs)}</output>
+      </>
+    )
+  }
+  render(<MixedBuilder />)
+  expect(screen.getAllByText(/unsupported type or widget/)).toHaveLength(2)
+  fireEvent.click(screen.getByRole("button", { name: "+ Add question" }))
+  fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Supported question" } })
+  expect(JSON.parse(screen.getByTestId("mixed-definition").textContent!).slice(0, 2)).toEqual(
+    original,
+  )
 })

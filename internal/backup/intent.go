@@ -488,6 +488,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,
 	"pipeline_versions": IntentInclude,
+	"pipeline_drafts":   IntentInclude,
 	// pipeline_waitpoints holds suspended-workflow state (pending
 	// approval tokens, event-wait, decision_payload, timeout_at).
 	// These are DURABLE state — a "pending" waitpoint is a real

@@ -119,6 +119,7 @@ var AllEntryTypes = []EntryType{
 	EntryPeerConversation,
 	EntryPeerEscalation,
 	EntryPipelineDryRun,
+	EntryPipelinePublished,
 	EntryPipelineRunCompleted,
 	EntryPipelineRunFailed,
 	EntryPipelineRunStarted,

@@ -77,6 +77,7 @@ DELETE /api/v1/workspaces/{workspaceId}/members/{memberId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug} roleManage
+DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft roleCreate
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key} roleManage
 DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/steps/{stepId}/override roleCreate
@@ -299,6 +300,8 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-schedules roleInline
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/drafts roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/import roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay roleCreate
@@ -311,6 +314,7 @@ POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable roleManage
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback roleManage
 POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run roleInline

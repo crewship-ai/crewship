@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -99,6 +100,7 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		}
 		if token == "" {
 			created, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
+				DecisionForm:   step.Wait.DecisionForm,
 				WorkspaceID:    in.WorkspaceID,
 				PipelineRunID:  runID,
 				StepID:         step.ID,
@@ -189,7 +191,18 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 			}
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (approval) denied", step.ID)
 		}
-		return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil
+		// Binary approvals already carry their complete result in WaitFor.
+		// A second database read must not turn a confirmed approval into failure.
+		if step.Wait.DecisionForm == nil {
+			return "waited:approval:approved", 0, time.Since(stepStart).Milliseconds(), nil
+		}
+		if reader, ok := e.waitpoints.(interface {
+			ApprovalOutput(context.Context, string, string) (string, error)
+		}); ok {
+			output, err := readApprovedDecision(ctx, reader, in.WorkspaceID, token)
+			return output, 0, time.Since(stepStart).Milliseconds(), err
+		}
+		return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("waitpoint store does not support decision forms")
 
 	case "event":
 		// Input-stream injection (Wave 4.3): wait for an external caller
@@ -266,4 +279,25 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 
 	return "", 0, time.Since(stepStart).Milliseconds(),
 		fmt.Errorf("wait step %q unknown kind %q", step.ID, step.Wait.Kind)
+}
+
+// The answer was committed before WaitFor signalled approval. Retry an
+// intermittent read failure without repeating the human action. A missing or
+// foreign answer remains an integrity error; never fabricate form data.
+func readApprovedDecision(ctx context.Context, reader interface {
+	ApprovalOutput(context.Context, string, string) (string, error)
+}, workspaceID, token string) (string, error) {
+	for attempt := 0; ; attempt++ {
+		output, err := reader.ApprovalOutput(ctx, workspaceID, token)
+		if err == nil || errors.Is(err, ErrAlreadyDecided) || errors.Is(err, ErrDecisionInput) || attempt == 2 {
+			return output, err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return "", ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

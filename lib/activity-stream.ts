@@ -70,6 +70,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
     hint: "Scheduled and triggered routine runs, step by step",
     token: "--notice",
     types: [
+      "pipeline.published",
       "pipeline.run.started",
       "pipeline.run.completed",
       "pipeline.run.failed",

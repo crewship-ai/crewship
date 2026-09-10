@@ -106,7 +106,7 @@ export function optionValue(option: FormFieldOption): string {
 }
 
 export function optionLabel(option: FormFieldOption): string {
-  return typeof option === "string" ? option : option.label ?? option.value
+  return typeof option === "string" ? option : (option.label ?? option.value)
 }
 
 /** The text of a field's label. Exported because the sheet's validation says
@@ -172,13 +172,26 @@ export function FormField({
 
   // Rendered under any field that carries one. Slash fields never do, so the
   // modal's markup is unchanged.
-  const help = field.help ? (
-    <p className="text-xs text-muted-foreground">{field.help}</p>
-  ) : null
+  const help = field.help ? <p className="text-xs text-muted-foreground">{field.help}</p> : null
 
   const options = field.options ?? []
 
   switch (field.type) {
+    case "unsupported":
+      return (
+        <div className="space-y-1">
+          <span className={cn("text-sm leading-none font-medium", !explicitLabel && "capitalize")}>
+            {fieldLabelText(field)}
+            {field.required && <span className="ml-1 text-destructive">*</span>}
+          </span>
+          <p role="alert" className="text-sm text-destructive">
+            This form does not support the declared type {field.value_type || "unknown"}. Open Edit
+            to review the input schema.
+          </p>
+          {help}
+        </div>
+      )
+
     case "textarea":
       return (
         <div className="space-y-1">
@@ -293,13 +306,7 @@ export function FormField({
       return (
         <div className="space-y-1">
           {label}
-          <Input
-            id={id}
-            type="password"
-            value={value}
-            onChange={onChange}
-            autoComplete="off"
-          />
+          <Input id={id} type="password" value={value} onChange={onChange} autoComplete="off" />
           {help}
         </div>
       )
@@ -368,7 +375,27 @@ export function FormField({
       )
 
     case "select":
-      if (field.allow_custom) return <div className="space-y-1">{label}<Input id={id} list={`${id}-choices`} value={value} onChange={onChange} placeholder={field.placeholder ?? "Choose or type an answer"} /><datalist id={`${id}-choices`}>{options.map(o => <option key={optionValue(o)} value={optionValue(o)}>{optionLabel(o)}</option>)}</datalist>{help}</div>
+      if (field.allow_custom)
+        return (
+          <div className="space-y-1">
+            {label}
+            <Input
+              id={id}
+              list={`${id}-choices`}
+              value={value}
+              onChange={onChange}
+              placeholder={field.placeholder ?? "Choose or type an answer"}
+            />
+            <datalist id={`${id}-choices`}>
+              {options.map((o) => (
+                <option key={optionValue(o)} value={optionValue(o)}>
+                  {optionLabel(o)}
+                </option>
+              ))}
+            </datalist>
+            {help}
+          </div>
+        )
       return (
         <div className="space-y-1">
           {label}
@@ -391,7 +418,14 @@ export function FormField({
     case "multiselect": {
       let selectedValues = splitMulti(value)
       if (field.value_type === "array") {
-        try { const parsed: unknown = JSON.parse(value || "[]"); selectedValues = Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [] } catch { selectedValues = [] }
+        try {
+          const parsed: unknown = JSON.parse(value || "[]")
+          selectedValues = Array.isArray(parsed)
+            ? parsed.filter((v): v is string => typeof v === "string")
+            : []
+        } catch {
+          selectedValues = []
+        }
       }
       const selected = new Set(selectedValues)
       const toggle = (v: string, on: boolean) => {
@@ -400,7 +434,7 @@ export function FormField({
         else next.delete(v)
         // Emit in schema order, not click order — the rendered message must
         // not depend on which box the user happened to tick first.
-        const ordered = options.map(optionValue).filter(o => next.has(o))
+        const ordered = options.map(optionValue).filter((o) => next.has(o))
         emit(field.value_type === "array" ? JSON.stringify(ordered) : ordered.join(MULTI_SEPARATOR))
       }
       return (
@@ -411,7 +445,11 @@ export function FormField({
             {fieldLabelText(field)}
             {field.required && <span className="ml-1 text-destructive">*</span>}
           </span>
-          <div role="group" aria-label={fieldLabelText(field)} className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+          <div
+            role="group"
+            aria-label={fieldLabelText(field)}
+            className="flex flex-wrap gap-x-4 gap-y-2 pt-1"
+          >
             {options.map((o) => {
               const v = optionValue(o)
               const optionId = `${id}-${v}`

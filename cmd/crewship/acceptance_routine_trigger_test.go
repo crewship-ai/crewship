@@ -83,6 +83,10 @@ func startRoutineTriggerAcceptanceServer(t *testing.T) (cfgPath, authorCrewID st
 	router.PipelinesHandler.SetSaveTokenSecret([]byte("acceptance-test-save-token-secret-32b"))
 	router.PipelinesHandler.SetScheduleStore(pipeline.NewScheduleStore(db))
 	router.PipelinesHandler.SetRunner(unusedAgentRunner{})
+	router.PipelinesHandler.SetRunStore(pipeline.NewRunStore(db))
+	waitpoints := pipeline.NewSQLWaitpointStore(db)
+	t.Cleanup(waitpoints.Close)
+	router.PipelinesHandler.SetWaitpointStore(waitpoints)
 
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

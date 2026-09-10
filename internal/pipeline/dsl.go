@@ -985,22 +985,31 @@ func stringify(v any) string {
 // (markdown fence, prose preamble, trailing chatter) so a path lookup
 // against an upstream agent output stays consistent with what the
 // validator accepted.
-func jsonPath(raw, path string) string {
-	var v any
-	if err := DecodeAgentJSON(raw, &v); err != nil {
-		return ""
+func jsonPath(raw, path string) string { value, _ := jsonPathFound(raw, path); return value }
+
+// jsonPathFound preserves existence separately from an explicit empty/null value.
+func jsonPathFound(raw, path string) (string, bool) {
+	value, found := jsonPathValueFound(raw, path)
+	return stringify(value), found
+}
+
+// jsonPathValueFound retains JSON types and distinguishes null from absence.
+func jsonPathValueFound(raw, path string) (any, bool) {
+	var value any
+	if err := DecodeAgentJSON(raw, &value); err != nil {
+		return nil, false
 	}
 	for _, key := range strings.Split(path, ".") {
-		m, ok := v.(map[string]any)
+		fields, ok := value.(map[string]any)
 		if !ok {
-			return ""
+			return nil, false
 		}
-		v, ok = m[key]
+		value, ok = fields[key]
 		if !ok {
-			return ""
+			return nil, false
 		}
 	}
-	return stringify(v)
+	return value, true
 }
 
 // walkNestedTemplates recursively descends into a map / slice tree
@@ -1032,4 +1041,27 @@ func walkNestedTemplates(v any, walk func(string) error) error {
 	}
 	// Other scalar types (int, float, bool) carry no templates — skip.
 	return nil
+}
+
+// referenceValueExists checks projections strictly while legacy Render remains lenient.
+func referenceValueExists(ref string, render RenderContext) bool {
+	parts := strings.SplitN(ref, ".", 3)
+	if len(parts) == 3 && parts[0] == "steps" && strings.HasPrefix(parts[2], "output.") {
+		raw, ok := render.StepOutputs[parts[1]]
+		if !ok {
+			return false
+		}
+		_, found := jsonPathFound(raw, strings.TrimPrefix(parts[2], "output."))
+		return found
+	}
+	if len(parts) == 3 && parts[0] == "inputs" {
+		value, ok := render.Inputs[parts[1]].(map[string]any)
+		if !ok {
+			return false
+		}
+		_, found := value[parts[2]]
+		return found
+	}
+	_, ok := resolveRef(ref, render)
+	return ok
 }

@@ -39,3 +39,22 @@ func TestWorkflowRequestSchemasWireThroughDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestDraftPublicationDocumentsConflictAndProofErrors(t *testing.T) {
+	operations := loadSpecOperations(t)
+	operation := operations["/api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish"]["post"]
+	for _, code := range []string{"201", "400", "401", "403", "409", "422", "500"} {
+		if len(operation.Responses[code]) == 0 {
+			t.Errorf("publish response %s is undocumented", code)
+		}
+	}
+}
+
+func TestFixtureRequestBodyIsRequired(t *testing.T) {
+	const path = "/api/v1/workspaces/{workspaceId}/pipelines/fixture_test"
+	doc := buildDocument([]route{{method: "POST", path: path}})
+	body := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)["requestBody"].(map[string]any)
+	if body["required"] != true {
+		t.Fatalf("fixture request body is optional: %#v", body)
+	}
+}
