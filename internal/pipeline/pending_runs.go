@@ -242,7 +242,7 @@ LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
 			&pr.ChainOrigin, &pr.PinnedVersion, &fireAt); err != nil {
 			return nil, err
 		}
-		pr.FireAt, err = time.Parse(time.RFC3339Nano, fireAt)
+		pr.FireAt, err = time.Parse(time.RFC3339Nano, fireAt) // tsformat:allow: parsing a persisted timestamp, not writing or comparing SQL text
 		if err != nil {
 			return nil, fmt.Errorf("pending_runs: parse fire_at for %s: %w", pr.ID, err)
 		}
