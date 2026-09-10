@@ -737,8 +737,8 @@ export function RoutineCreateDialog({
       setTestResult({
         passed,
         details: passed
-          ? `Passed${data.output ? ` (output: ${truncate(String(data.output), 120)})` : ""}`
-          : (data.error ?? "test_run reported failure"),
+          ? "Recipe checks passed."
+          : (data.error ?? "The recipe did not pass its checks."),
       })
       const token = passed && data.save_token ? data.save_token : null
       if (token) {
