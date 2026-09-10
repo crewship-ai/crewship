@@ -117,7 +117,7 @@ function channelHint(...parts: string[]): string | undefined {
 
 export function describeStep(step: unknown, position: number): ReadableStep {
   const described = describeStepAction(step, position)
-  const name = isRecord(step) ? asString(step.name).trim() : ""
+  const name = isRecord(step) ? firstLine(asString(step.name)) : ""
   return name ? { ...described, title: name } : described
 }
 

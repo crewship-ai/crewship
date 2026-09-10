@@ -71,6 +71,24 @@ const runRecord = (
 })
 
 describe("routine step spine", () => {
+  it("shows DAG dependencies on closed rows without claiming execution positions", () => {
+    render(
+      <RoutineStepSpine
+        definition={{
+          steps: [
+            { id: "join", type: "transform", needs: ["left", "right"] },
+            { id: "left", type: "transform" },
+            { id: "right", type: "transform" },
+          ],
+        }}
+      />,
+    )
+    const summary = document.querySelector('[data-step-id="join"] > summary')!
+    expect(summary).toHaveTextContent("Depends on: left, right")
+    expect(screen.getByText(/not execution order/)).toBeVisible()
+    expect(summary.querySelector("[data-step-kind]")).not.toHaveTextContent("1")
+  })
+
   it("opens a failed step beyond the initial limit and respects a manual close during polling", async () => {
     const long = {
       steps: Array.from({ length: 16 }, (_, index) => ({

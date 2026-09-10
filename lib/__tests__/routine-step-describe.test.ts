@@ -54,6 +54,11 @@ describe("describeStep (canonical)", () => {
 })
 
 describe("human step names", () => {
+  it("limits generated names to one readable line without mutating the saved name", () => {
+    const step = { name: "\n " + "x".repeat(400) + "\nSecond line", type: "transform" }
+    expect(describeStep(step, 1).title).toBe("x".repeat(99) + "…")
+    expect(step.name).toContain("Second line")
+  })
   it("prefers the explicit name, then the action instead of an internal ID", () => {
     const step = { id: "red_state", type: "agent_run", agent_slug: "sam" }
     expect(describeStep(step, 1).title).toBe("Ask sam")

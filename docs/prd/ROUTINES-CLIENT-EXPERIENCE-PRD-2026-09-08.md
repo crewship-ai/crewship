@@ -418,7 +418,7 @@ Vzorky, publikační review, rozhodovací formuláře ani porovnání nebyly ods
 - Funkce pro názvy pokrývá zmrazený vzorek všech **81 kroků / 27 rutin** bez
   neznámého typu. **Živé zobrazení všech 81 kroků zatím ověřeno není.**
 - Na dev1 je zachycena původní chyba publikace: uložení 200, test 200,
-  publikace 422 `invalid_save_token`. Pozitivní průchod opraveným nasazením
+  publikace 422 `save_token invalid (expired, malformed, or signed for a different definition/user)`. Samotný status příčinu nedokazuje. Pozitivní průchod opraveným nasazením
   ještě nebyl proveden. Přípravné skripty nejsou důkaz jeho úspěchu.
 - #2485 zatím nemá dokončené nezávislé CodeRabbit review: první pokus skončil
   oznámením o kvótě. Vlastní revize autora tuto skutečnost nenahrazuje.
@@ -456,3 +456,26 @@ Po oponentuře následuje vypořádání nálezů, zelené CI a merge #2485, bez
 přepnutí dev1 na úplný integrovaný zdroj, pět přihlášených úloh s konkrétními
 run IDs, restart/souběh a nové měření. Poslední bránu tvoří uživatelovo
 vysvětlení pěti rutin a výslovné potvrzení srozumitelnosti Edit/Test.
+
+
+### Dodatek po oponentuře
+
+`step_count` znamená počet definovaných kroků **vrchní úrovně**. Nezahrnuje
+vnořené definice uvnitř foreach, počet položek ani pokusy; foreach s osmi
+vnořenými kroky tedy má v seznamu jeden vrchní krok. Není to měřítko objemu práce.
+
+Původní zkratka `invalid_save_token` byla chybná citace; výše je opravená
+na přesnou odpověď. Dochovaný log `/tmp/crewship-1-go.log` obsahuje pro stejný
+jedinečný slug `work-order-proof-mtvcinau` v čase `2026-09-10T09:49:34.749446989Z`
+`pipeline save: save_token rejected`, `err="save_token: HMAC mismatch"`.
+To upřesňuje odmítnutí na neshodu podpisu, nikoli expiraci. Pozorování je
+ze starého nasazení; samo nedokazuje úspěch opravy. Reprodukční skript ukládá,
+testuje a publikuje jednu definici s doslovnými `&`, `<`, `>` ve stejném
+přihlášeném kontextu. Pozitivní opakování po nasazení zůstává povinné.
+
+Závislosti `needs` byly už před oponenturou v rozbaleném detailu editoru i
+spine; chyběly v zavřeném řádku. Dodatek je zobrazuje přímo v řádku a u
+závislostí či automatického paralelismu odstraňuje pořadová čísla a vysvětluje
+rozdíl mezi pořadím receptu a spuštění. Vlastní názvy se zkracují stejně jako
+odvozené; uložený název a ID se nemění. Počet celé testové sady zůstává
+regresní kontrolou, nikoli důkazem použitelnosti nebo pokrytí všech změn.

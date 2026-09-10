@@ -174,6 +174,8 @@ export function RoutineStepSpine({
     [dsl.steps],
   )
   const running = record?.currentStepId ?? null
+  const dependencies = steps.some((step) => Array.isArray(step.needs) && step.needs.length > 0)
+  const sourceOrder = dependencies || dsl.parallelism === "auto"
   const importantIds = steps
     .filter((step) => {
       const id = String(step.id)
@@ -247,6 +249,12 @@ export function RoutineStepSpine({
         <p className="text-sm text-muted-foreground">This recipe has no steps yet.</p>
       ) : (
         <>
+          {sourceOrder && (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Steps are listed in recipe order, not execution order. Independent steps may run
+              in parallel unless parallelism is turned off.
+            </p>
+          )}
           {record?.executionsError && (
             <p role="alert" className="mb-3 text-xs text-destructive">
               Recorded step executions could not be loaded, so per-step state is missing below.{" "}
@@ -262,6 +270,7 @@ export function RoutineStepSpine({
               key={String(step.id || index)}
               step={step}
               index={steps.indexOf(step)}
+              sourceOrder={sourceOrder}
               workspaceId={workspaceId}
               agents={agents}
               record={record}
@@ -306,6 +315,7 @@ type AgentDirectory = ReturnType<typeof useWorkspaceAgentDirectory>["agents"]
 function SpineRow({
   step,
   index,
+  sourceOrder,
   workspaceId,
   agents,
   record,
@@ -316,6 +326,7 @@ function SpineRow({
 }: {
   step: Record<string, unknown>
   index: number
+  sourceOrder: boolean
   workspaceId?: string
   agents: AgentDirectory
   record: RoutineStepSpineProps["record"]
@@ -418,13 +429,15 @@ function SpineRow({
           ) : (
             <Icon className="h-4 w-4" aria-hidden="true" />
           )}
-          <span className="absolute -bottom-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-border bg-card px-0.5 text-[9px] tabular-nums text-muted-foreground">
-            {index + 1}
-          </span>
+          {!sourceOrder && (
+            <span className="absolute -bottom-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-border bg-card px-0.5 text-[9px] tabular-nums text-muted-foreground">
+              {index + 1}
+            </span>
+          )}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex flex-wrap items-center gap-2">
-            <span className="text-[13px] font-medium capitalize text-foreground">{name}</span>
+            <span className="text-[13px] font-medium break-all text-foreground">{name}</span>
             <span className="font-mono text-[10px] text-muted-foreground">{stepId}</span>
             {Boolean(step.if) && (
               <Pill tone="warn">
@@ -436,6 +449,12 @@ function SpineRow({
           <span className="mt-0.5 block truncate text-xs text-muted-foreground">
             {description.detail || (action !== name ? action : "")}
           </span>
+          {Array.isArray(step.needs) && step.needs.length > 0 && (
+            <span className="mt-1 block break-all text-xs text-muted-foreground">
+              Depends on:{" "}
+              {step.needs.filter((id): id is string => typeof id === "string").join(", ")}
+            </span>
+          )}
         </span>
         {/* Hidden on a phone: the row's name and action are what a narrow
             column has room for, and the disclosure carries the same fact. */}

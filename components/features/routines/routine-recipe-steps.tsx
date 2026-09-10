@@ -200,6 +200,13 @@ export function RoutineRecipeSteps({
   }
   return (
     <section className="space-y-4" aria-label="Recipe workflow">
+      {(definition.parallelism === "auto" ||
+        steps.some((step) => Array.isArray(step.needs) && step.needs.length > 0)) && (
+        <p className="text-xs text-muted-foreground">
+          Steps are listed in recipe order, not execution order. Independent steps may run in
+          parallel unless parallelism is turned off.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
           <Play className="h-3.5 w-3.5" />
@@ -288,7 +295,7 @@ export function RoutineRecipeSteps({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                      <span className="text-sm font-medium">
+                      <span className="text-sm font-medium break-all">
                         {describeStep(step, index + 1).title}
                       </span>
                       <span className="text-[11px] text-muted-foreground">
@@ -299,6 +306,14 @@ export function RoutineRecipeSteps({
                     <span className="mt-2 line-clamp-2 break-words text-xs leading-relaxed text-foreground/75">
                       {recipeStepSummary(step, inputs)}
                     </span>
+                    {Array.isArray(step.needs) && step.needs.length > 0 && (
+                      <span className="mt-1 block break-all text-xs text-muted-foreground">
+                        Depends on:{" "}
+                        {step.needs
+                          .filter((id): id is string => typeof id === "string")
+                          .join(", ")}
+                      </span>
+                    )}
                     {condition && (
                       <span className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md bg-warn/10 px-2 py-1 text-[11px] text-warn">
                         <GitBranch className="h-3 w-3 shrink-0" />
