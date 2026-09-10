@@ -282,3 +282,19 @@ func TestPageProjectDefinitionUpdateIsDraftOnly(t *testing.T) {
 		t.Fatalf("disabled source export: %d", w.Code)
 	}
 }
+
+func TestPageProjectSaveRejectsUnsupportedCompilerPath(t *testing.T) {
+	h, _, _, ws, user := newPagesFixture(t)
+	h.SetProjectStore(&pages.ProjectStore{Directory: t.TempDir()})
+	pagesCreate(t, h, ws, user, "health")
+	p := projectTestSource()
+	p.Files = append(p.Files, pages.ProjectFile{Path: "src/čísla.tsx", Encoding: "utf8", Content: "export {};"})
+	response := projectPut(t, h, ws, user, "OWNER", "health", 0, p)
+	if response.Code != 422 || !strings.Contains(response.Body.String(), "src/čísla.tsx") {
+		t.Fatalf("save accepted unsupported path: %d %s", response.Code, response.Body.String())
+	}
+	p.Files = p.Files[:len(p.Files)-1]
+	if response := projectPut(t, h, ws, user, "OWNER", "health", 0, p); response.Code != 200 {
+		t.Fatalf("rejected save advanced draft: %d %s", response.Code, response.Body.String())
+	}
+}
