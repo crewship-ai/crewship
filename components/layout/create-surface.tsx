@@ -216,6 +216,8 @@ export interface CreateSurfaceProps {
   onSubmit?: () => void
   /** Accessible name when the header title is not the whole story. */
   ariaLabel?: string
+  /** Restore the opener when the caller does not use a Radix DialogTrigger. */
+  restoreOpenerFocus?: boolean
   className?: string
   children: React.ReactNode
 }
@@ -228,10 +230,12 @@ export function CreateSurface({
   size = "md",
   onSubmit,
   ariaLabel,
+  restoreOpenerFocus = false,
   className,
   children,
 }: CreateSurfaceProps) {
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const openerRef = React.useRef<HTMLElement | null>(null)
   const [confirmingDiscard, setConfirmingDiscard] = React.useState(false)
   // What to run once the person confirms. Held in a ref rather than state so
   // confirming does not depend on a render landing first.
@@ -293,7 +297,16 @@ export function CreateSurface({
         // wins, so this is a floor, not an override.
         onOpenAutoFocus={(e) => {
           e.preventDefault()
+          openerRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
           contentRef.current?.focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          if (restoreOpenerFocus && openerRef.current?.isConnected) {
+            e.preventDefault()
+            openerRef.current.focus({ preventScroll: true })
+          }
         }}
         className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
       >

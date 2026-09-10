@@ -1,3 +1,4 @@
+import type { Pipeline } from "@/hooks/use-pipelines"
 // Which routines survive the explorer's filters.
 //
 // Extracted from the layout because two of the buckets stopped being a
@@ -91,4 +92,17 @@ export function matchesRoutineFilters(
 /** Reserved prefixes used by release verification fixtures, not client examples. */
 export function isRoutineTestFixture(slug: string): boolean {
   return slug.startsWith("test-routines-") || slug.startsWith("test-issue-")
+}
+
+export function routineFilterInput(p: Pipeline): RoutineFilterInput {
+  return {
+    slug: p.slug,
+    name: p.name,
+    description: p.description,
+    authorAgentId: p.author_agent_id,
+    authorAgentName: p.author_agent_name,
+    invocationCount: p.invocation_count,
+    lastStatus: p.last_invocation_status,
+    ephemeral: p.ephemeral,
+  }
 }

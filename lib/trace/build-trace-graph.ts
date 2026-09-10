@@ -179,13 +179,12 @@ export function buildTraceGraph(
     })
   }
 
-  // ---- Sequencing edges ----
-  // Two cases:
-  //   A) Step declares `needs: [...]` → edges from each predecessor
-  //      to this step.
-  //   B) No needs declared → infer linear chain from DSL order. The
-  //      executor's default execution order is DSL order, so a chain
-  //      with no explicit needs renders as step1 → step2 → step3.
+  // The scheduler chooses a mode for the entire recipe, not per step.
+  // Roots in a DAG connect to the trigger, never to their source-order neighbour.
+  const auto = dsl?.parallelism === "auto" && !effectiveSteps.some((s) => s.type === "call_pipeline")
+  const sequential = dsl?.parallelism === "off" ||
+    (dsl?.parallelism === "auto" && !auto) ||
+    (!auto && !effectiveSteps.some((s) => s.needs?.length))
   const edges: Edge[] = []
   const stepIndex = new Map(effectiveSteps.map((s, i) => [s.id, i]))
 
@@ -198,12 +197,16 @@ export function buildTraceGraph(
 
   for (let i = 0; i < effectiveSteps.length; i++) {
     const step = effectiveSteps[i]
-    const needs = step.needs ?? []
+    // Mirror deriveAutoNeeds: explicit dependencies win, otherwise inspect
+    // references across the saved step, excluding unknown/self references.
+    const declared = step.needs ?? []
+    const needs = sequential ? [] : declared.length || !auto ? declared :
+      [...new Set([...JSON.stringify(step).matchAll(/steps\.([a-zA-Z0-9_-]+)/g)]
+        .map((match) => match[1]).filter((id) => id !== step.id && stepIndex.has(id)))].sort()
 
     if (needs.length === 0) {
-      // Inferred linear chain — predecessor is either the previous
-      // step or the trigger when this is the first step.
-      const sourceId = i === 0 ? "__trigger__" : effectiveSteps[i - 1].id
+      // Sequential predecessor, or an independent DAG root.
+      const sourceId = !sequential || i === 0 ? "__trigger__" : effectiveSteps[i - 1].id
       const pairKey = `${sourceId}->${step.id}`
       if (!dataFlowPairs.has(pairKey)) {
         edges.push(makeSequencingEdge(sourceId, step.id, run, effectiveSteps))

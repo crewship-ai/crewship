@@ -114,7 +114,41 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	typedDecision["required"] = []string{"action_id"}
 	waitpoint := map[string]any{"oneOf": []any{legacyDecision, typedDecision}}
 
-	publishResponse := obj(map[string]any{"head_version": integer(), "last_recorded_run_id": str(), "last_run_outcome": str(), "id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(), "definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(), "invocation_count": integer(), "last_invoked_at": str(), "last_invocation_status": str(), "author_crew_id": str(), "author_agent_id": str(), "author_agent_name": str(), "author_user_id": str(), "authored_via": str(), "status": str(), "icon": str(), "color": str(), "risk_reasons": arr(str()), "inbox_item_id": str(), "created_at": str(), "updated_at": str(), "linked_issue_count": integer(), "linked_issues": arr(str()), "integrations_required": arr(str()), "manifest": anyObject(), "definition": anyObject(), "trigger": anyObject()})
+	publishResponse := obj(map[string]any{
+		"step_count":             integer(),
+		"head_version":           integer(),
+		"last_recorded_run_id":   str(),
+		"last_run_outcome":       str(),
+		"id":                     str(),
+		"slug":                   str(),
+		"name":                   str(),
+		"description":            str(),
+		"dsl_version":            str(),
+		"definition_hash":        str(),
+		"ephemeral":              boolean(),
+		"workspace_visible":      boolean(),
+		"invocation_count":       integer(),
+		"last_invoked_at":        str(),
+		"last_invocation_status": str(),
+		"author_crew_id":         str(),
+		"author_agent_id":        str(),
+		"author_agent_name":      str(),
+		"author_user_id":         str(),
+		"authored_via":           str(),
+		"status":                 str(),
+		"icon":                   str(),
+		"color":                  str(),
+		"risk_reasons":           arr(str()),
+		"inbox_item_id":          str(),
+		"created_at":             str(),
+		"updated_at":             str(),
+		"linked_issue_count":     integer(),
+		"linked_issues":          arr(str()),
+		"integrations_required":  arr(str()),
+		"manifest":               anyObject(),
+		"definition":             anyObject(),
+		"trigger":                anyObject(),
+	})
 	publishResponse["required"] = []string{"id", "slug", "name", "dsl_version", "definition_hash", "ephemeral", "workspace_visible", "invocation_count", "authored_via", "status", "created_at", "updated_at", "linked_issue_count"}
 	draftListEntry := obj(map[string]any{"slug": str(), "revision": integer(), "updated_at": str()})
 	draftListEntry["required"] = []string{"slug", "revision", "updated_at"}

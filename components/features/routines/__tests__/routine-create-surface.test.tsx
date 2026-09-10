@@ -86,12 +86,14 @@ describe("New routine on CreateSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     const saves = () => h.calls.filter((call) => call.url.endsWith("/drafts") && call.body)
     await waitFor(() => expect(saves()).toHaveLength(1))
-    await screen.findByText(/Saved draft · revision 1/)
+    await screen.findByText(/Saved draft/)
     fireEvent.change(screen.getByTestId("editor"), {
       target: {
         value: JSON.stringify({
           name: "renamed",
-          steps: [{ id: "work", type: "transform", transform: { input: "ok", expression: "." } }],
+          steps: [
+            { id: "work", type: "transform", transform: { input: "ok", expression: "." } },
+          ],
         }),
       },
     })
@@ -126,8 +128,7 @@ describe("New routine on CreateSurface", () => {
   it("still test-runs inline and spends the minted save_token on save", async () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.click(screen.getByRole("button", { name: "Step 3: Publish" }))
-    fireEvent.click(screen.getByRole("button", { name: /validate & publish/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Publish$/i }))
 
     await waitFor(() => {
       expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(true)
@@ -154,15 +155,18 @@ describe("New routine on CreateSurface", () => {
     )
   })
 
-  it("opens on Overview with navigable recipe sections and no bypass", () => {
+  it("opens one recipe document with selected-step Test and no bypass", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    expect(screen.getByRole("navigation", { name: "Recipe sections" })).toBeVisible()
+    expect(
+      screen.queryByRole("navigation", { name: "Recipe sections" }),
+    ).not.toBeInTheDocument()
     expect(screen.getByLabelText("Name")).toBeVisible()
     expect(screen.queryByLabelText(/skip test-run gate/i)).not.toBeInTheDocument()
-    expect(screen.getByText("No questions · Edit")).toBeVisible()
-    fireEvent.click(screen.getByRole("button", { name: "Step 2: Test", exact: true }))
-    expect(screen.getByText("Ready for a real run?")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Test", exact: true }))
+    expect(screen.getByRole("button", { name: "Test routine" })).toBeVisible()
+    expect(screen.getAllByRole("button", { name: "Publish", exact: true })).toHaveLength(1)
   })
 })
 
@@ -180,7 +184,9 @@ describe("Import routine bundle on CreateSurface", () => {
 
   it("posts the parsed bundle to the same endpoint", async () => {
     const onImported = vi.fn()
-    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={onImported} />)
+    render(
+      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={onImported} />,
+    )
     fireEvent.change(screen.getByPlaceholderText(/"slug"/), {
       target: { value: '{"slug":"nightly","definition":{"name":"nightly"}}' },
     })

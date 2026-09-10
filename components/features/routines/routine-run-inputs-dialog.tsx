@@ -134,7 +134,7 @@ export function InputsForm({
   inputs: RoutineInputSpec[]
   submitLabel?: string
   submitting?: boolean
-  onCancel: () => void
+  onCancel?: () => void
   onRun: (inputs: Record<string, unknown>) => void
 }) {
   const fields = slashFieldsFromRoutineInputs(inputs)
@@ -150,7 +150,9 @@ export function InputsForm({
     // Clear this field's error as soon as it is edited — leaving it up
     // while the user fixes it reads as "still wrong".
     setErrors((prev) =>
-      name in prev ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== name)) : prev,
+      name in prev
+        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== name))
+        : prev,
     )
   }
 
@@ -190,16 +192,21 @@ export function InputsForm({
             idPrefix="routine-input-"
           />
           {errors[f.name] && (
-            <p data-testid={`routine-input-error-${f.name}`} className="text-xs text-destructive">
+            <p
+              data-testid={`routine-input-error-${f.name}`}
+              className="text-xs text-destructive"
+            >
               {errors[f.name]}
             </p>
           )}
         </div>
       ))}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
+        {onCancel && (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
+            Cancel
+          </Button>
+        )}
         <Button type="submit" disabled={submitting}>
           {submitting
             ? submitLabel === "Run"

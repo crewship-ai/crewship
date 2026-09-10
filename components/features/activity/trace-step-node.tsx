@@ -1,5 +1,6 @@
 "use client"
 
+import { describeStep } from "@/lib/routine-step-describe"
 import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
@@ -283,7 +284,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${visual.label} step ${step.id}, status ${status}`}
+      aria-label={`${describeStep(step, 1).title}, status ${status}`}
       aria-pressed={selected}
       onKeyDown={(e) => {
         // Only fire when the wrapper itself is focused — keydown
@@ -328,12 +329,15 @@ function TraceStepNodeBase({ data }: NodeProps) {
         <span className={cn("flex h-5 w-5 items-center justify-center rounded", visual.tint)}>
           <Icon className="h-3.5 w-3.5" />
         </span>
-        <span className="truncate font-mono text-xs text-foreground">{step.id}</span>
+        <span className="truncate text-xs font-medium text-foreground">
+          {describeStep(step, 1).title}
+        </span>
         <span className="ml-auto rounded bg-white/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
           {visual.label}
         </span>
       </div>
 
+      <div className="mt-1 font-mono text-[10px] text-muted-foreground">{step.id}</div>
       <div className="mt-1 flex items-center gap-1 text-[10px]">{subtitleFor(step)}</div>
 
       {/* Rich badges — model / tool / artifact + the drill-down count.
@@ -590,7 +594,10 @@ function TriggerNodeBase({ data }: NodeProps) {
       />
       <div className="flex items-center gap-1.5">
         <span
-          className={cn("flex h-5 w-5 items-center justify-center rounded", TRIGGER_VISUAL.tint)}
+          className={cn(
+            "flex h-5 w-5 items-center justify-center rounded",
+            TRIGGER_VISUAL.tint,
+          )}
         >
           <Icon className="h-3.5 w-3.5" />
         </span>

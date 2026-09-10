@@ -20,6 +20,11 @@ export type ReadableStepKind =
   | "wait"
   | "code"
   | "call_pipeline"
+  | "script"
+  | "notify"
+  | "query"
+  | "foreach"
+  | "crewship"
   | "unknown"
 
 export interface ReadableStep {
@@ -87,8 +92,7 @@ function knownIntegrationLabel(host: string): string | null {
   // Anchored host match: the host must EQUAL the domain or be a subdomain of it
   // (suffix at a dot boundary). A substring test (`h.includes("slack.com")`)
   // is unsafe — "slack.com.evil.com" and "evilslack.com" would both match.
-  const is = (...domains: string[]) =>
-    domains.some((d) => h === d || h.endsWith("." + d))
+  const is = (...domains: string[]) => domains.some((d) => h === d || h.endsWith("." + d))
   if (is("slack.com")) return "Slack"
   if (is("github.com")) return "GitHub"
   if (is("discord.com", "discordapp.com")) return "Discord"
@@ -112,6 +116,12 @@ function channelHint(...parts: string[]): string | undefined {
  * ------------------------------------------------------------------ */
 
 export function describeStep(step: unknown, position: number): ReadableStep {
+  const described = describeStepAction(step, position)
+  const name = isRecord(step) ? firstLine(asString(step.name)) : ""
+  return name ? { ...described, title: name } : described
+}
+
+function describeStepAction(step: unknown, position: number): ReadableStep {
   if (!isRecord(step)) {
     return { position, kind: "unknown", title: "Step" }
   }
@@ -150,9 +160,7 @@ export function describeStep(step: unknown, position: number): ReadableStep {
           title = channel ? `${label} → ${channel}` : `Send to ${label}`
         }
       } else {
-        title = isRead
-          ? `Fetch from ${host || "a URL"}`
-          : `Send to ${host || "a URL"}`
+        title = isRead ? `Fetch from ${host || "a URL"}` : `Send to ${host || "a URL"}`
       }
       return {
         position,
@@ -216,6 +224,71 @@ export function describeStep(step: unknown, position: number): ReadableStep {
         kind: "code",
         title: runtime ? `Run ${runtime} code` : "Run code",
         technical: runtime ? `code · ${runtime}` : "code",
+      }
+    }
+
+    case "script": {
+      const script = isRecord(step.script) ? step.script : {}
+      const path = asString(script.path)
+      const file = path
+        .split("/")
+        .pop()
+        ?.replace(/\.[^.]+$/, "")
+        .replace(/[_-]+/g, " ")
+      return {
+        position,
+        kind: "script",
+        title: file ? `Run script ${file}` : "Run a script",
+        technical: path || "script",
+      }
+    }
+    case "notify": {
+      const notify = isRecord(step.notify) ? step.notify : {}
+      return {
+        position,
+        kind: "notify",
+        title: "Send a notification",
+        detail: firstLine(asString(notify.title)) || undefined,
+        technical: asString(notify.to) || "notify",
+      }
+    }
+    case "query": {
+      const query = isRecord(step.query) ? step.query : {}
+      const source = asString(query.source).replace(/[_-]+/g, " ")
+      return {
+        position,
+        kind: "query",
+        title: source ? `Read ${source}` : "Read workspace data",
+        technical: asString(query.source) || "query",
+      }
+    }
+    case "foreach": {
+      const loop = isRecord(step.foreach) ? step.foreach : {}
+      const count = Array.isArray(loop.steps) ? loop.steps.length : 0
+      return {
+        position,
+        kind: "foreach",
+        title: "Process each item",
+        detail: count ? `${count} steps for each item` : undefined,
+        technical: "foreach",
+      }
+    }
+    case "crewship": {
+      const action = asString(step.action)
+      const names: Record<string, string> = {
+        "page.write": "Write a page",
+        "issue.create": "Create an issue",
+        "issue.update": "Update an issue",
+        "issue.comment": "Comment on an issue",
+        "issue.link": "Link issues",
+        "assignment.create": "Create an assignment",
+        "escalation.create": "Request help",
+      }
+      return {
+        position,
+        kind: "crewship",
+        title: names[action] || "Update Crewship",
+        technical: action || "crewship",
       }
     }
 
