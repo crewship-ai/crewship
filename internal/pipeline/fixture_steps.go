@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -41,17 +42,20 @@ type FixtureStepResult struct {
 // validator. It never dispatches a step and has no store, runner, credentials,
 // HTTP client, emitter, clock, or container wiring. Adding another executable
 // type here requires proving that its implementation is effect-free.
-func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
+func TestStepWithFixtures(ctx context.Context, in FixtureStepInput) (*FixtureStepResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	raw, err := ToCanonicalJSON(in.Definition)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("canonicalize fixture recipe: %w", err)
 	}
 	dsl, err := Parse(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse fixture recipe: %w", err)
 	}
 	if err = Validate(dsl, nil, nil); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate fixture recipe: %w", err)
 	}
 	var selected *Step
 	seen := map[string]bool{}
@@ -68,7 +72,7 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 		return nil, fmt.Errorf("step %q is not a top-level step in this recipe", in.StepID)
 	}
 	if err = ValidateFormInputs(dsl, in.Inputs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate fixture inputs: %w", err)
 	}
 	inputs := mergeInputs(in.Inputs, dsl)
 	result := &FixtureStepResult{ExecutionMode: "fixtures", StepID: selected.ID, StepType: selected.Type,
@@ -88,9 +92,12 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 				return nil, fmt.Errorf("missing fixture value for %s", match[1])
 			}
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		result.Output, _, _, err = (&Executor{}).runTransformStep(*selected, render)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("execute fixture transform: %w", err)
 		}
 		result.OutputSource = "transform"
 	case StepAgentRun, StepHTTP, StepScript:
@@ -102,7 +109,14 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 	default:
 		return nil, fmt.Errorf("fixture testing does not support %s steps; no work was executed", selected.Type)
 	}
+	// Pure operations are synchronous; cancellation is checked between them.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result.Valid, result.ValidationReason = validateFixtureOutput(result.Output, selected.Validation)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if v := selected.Validation; v != nil {
 		result.ValidationDeclared = len(v.Schema) > 0 || len(v.MustContain) > 0 || len(v.MustNotContain) > 0 || v.MinLength != nil || v.MaxLength != nil
 	}
@@ -117,7 +131,7 @@ func TestStepWithFixtures(in FixtureStepInput) (*FixtureStepResult, error) {
 		Secrets        map[string]string `json:"secrets"`
 	}{result.DefinitionHash, in.StepID, inputs, in.StepOutputs, in.FixtureOutput, in.Env, in.Metadata, in.Secrets})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode fixture evidence: %w", err)
 	}
 	result.FixtureHash = fmt.Sprintf("%x", sha256.Sum256(evidence))
 	return result, nil

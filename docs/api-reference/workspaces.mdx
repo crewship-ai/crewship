@@ -41,6 +41,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#get-pipeline) | One pipeline with full `definition` |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#delete-pipeline) | Soft-delete a pipeline |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/save`](#save-pipeline) | Create or update a pipeline |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/fixture_test`](#test-a-routine-step-with-sample-data) | Test one step with explicit sample data; no external actions |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report + manifest, no agent runs |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`](#run-pipeline) | Invoke a saved pipeline |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs`](#list-pipeline-runs-journal-backed) | Journal-backed run entries |

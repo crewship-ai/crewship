@@ -16,7 +16,7 @@ func (h *PipelineHandler) FixtureTest(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "invalid fixture test body")
 		return
 	}
-	result, err := pipeline.TestStepWithFixtures(body)
+	result, err := pipeline.TestStepWithFixtures(r.Context(), body)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return

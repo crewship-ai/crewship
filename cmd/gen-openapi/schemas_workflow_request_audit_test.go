@@ -49,3 +49,12 @@ func TestDraftPublicationDocumentsConflictAndProofErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestFixtureRequestBodyIsRequired(t *testing.T) {
+	const path = "/api/v1/workspaces/{workspaceId}/pipelines/fixture_test"
+	doc := buildDocument([]route{{method: "POST", path: path}})
+	body := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)["requestBody"].(map[string]any)
+	if body["required"] != true {
+		t.Fatalf("fixture request body is optional: %#v", body)
+	}
+}
