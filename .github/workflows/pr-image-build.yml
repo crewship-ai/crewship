@@ -42,6 +42,8 @@ on:
       - "prisma/**"
       - "cmd/**"
       - "internal/**"
+      - "examples/**"
+      - "tools/**"
       - "config/**"
       - "schemas/**"
       - "config/**"

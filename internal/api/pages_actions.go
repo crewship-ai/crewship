@@ -120,16 +120,17 @@ type dispatchRequest struct {
 // page, so there is nothing here to withhold from somebody already entitled to
 // see the panel.
 type actionWire struct {
-	ID      string                    `json:"id"`
-	Kind    string                    `json:"kind"`
-	Label   string                    `json:"label"`
-	Style   string                    `json:"style"`
-	Confirm *pages.PanelActionConfirm `json:"confirm,omitempty"`
-	Routine string                    `json:"routine,omitempty"`
-	Params  map[string]any            `json:"params,omitempty"`
-	Inputs  []actionInputWire         `json:"inputs,omitempty"`
-	Target  []string                  `json:"target,omitempty"`
-	Ref     *pages.PanelEntityRef     `json:"ref,omitempty"`
+	RoutineChanged *bool                     `json:"routine_changed_since_publication,omitempty"`
+	ID             string                    `json:"id"`
+	Kind           string                    `json:"kind"`
+	Label          string                    `json:"label"`
+	Style          string                    `json:"style"`
+	Confirm        *pages.PanelActionConfirm `json:"confirm,omitempty"`
+	Routine        string                    `json:"routine,omitempty"`
+	Params         map[string]any            `json:"params,omitempty"`
+	Inputs         []actionInputWire         `json:"inputs,omitempty"`
+	Target         []string                  `json:"target,omitempty"`
+	Ref            *pages.PanelEntityRef     `json:"ref,omitempty"`
 }
 
 // actionInputWire is one collected parameter as the form renderer reads it.
@@ -292,6 +293,9 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	for i := range spec.Actions {
 		out = append(out, actionToWire(&spec.Actions[i]))
 	}
+	if !h.annotateApplicationRoutines(w, r, rec, out) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"page":    rec.Slug,
 		"panel":   panelID,
@@ -377,6 +381,9 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 	// on (pipeline_id, debounce_key) that backs the check also makes a genuinely
 	// concurrent pair coalesce rather than fire twice.
 	debounceKey := pageActionDebounceKey(res.page.ID, panelID, actionID)
+	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
+		debounceKey += fmt.Sprintf(":%s:%d", user.ID, fence.version)
+	}
 	if pendingID, busy, err := h.actionInFlight(r.Context(), pipelineID, debounceKey); err != nil {
 		replyInternalError(w, h.logger, "check page action in flight", err)
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
@@ -400,7 +407,7 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
 		return
 	}
-	pendingID, coalesced, err := pipeline.NewPendingRunStore(h.db).Enqueue(r.Context(), pipeline.PendingRun{
+	pendingID, coalesced, err := h.enqueuePageAction(r.Context(), pipeline.PendingRun{
 		ID:           keys.pendingID,
 		WorkspaceID:  wsID,
 		PipelineID:   pipelineID,
@@ -423,6 +430,10 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
+		if errors.Is(err, errPageApplicationChanged) {
+			replyError(w, 409, err.Error())
+			return
+		}
 		replyInternalError(w, h.logger, "enqueue page action run", err)
 		return
 	}

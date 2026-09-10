@@ -129,9 +129,14 @@ type ContainerConfig struct {
 
 // StorageConfig holds file storage settings for agent outputs and logs.
 type StorageConfig struct {
-	Provider string `yaml:"provider"` // "localfs" (s3 on the v0.2 roadmap; see validStorageProviders)
-	BasePath string `yaml:"base_path"`
-	LogPath  string `yaml:"log_path"`
+	PageStudioOrigin                 string `yaml:"page_studio_origin"`                   // Public browser origin; independent of internal API transport.
+	PageRuntimeDevelopmentSameOrigin bool   `yaml:"page_runtime_development_same_origin"` // Reviewed demos only; no process isolation guarantee.
+	PageBuildImage                   string `yaml:"page_build_image"`                     // Pinned image digest; empty disables builds.
+	PageRuntimeOrigin                string `yaml:"page_runtime_origin"`                  // Separate-site public bootstrap origin.
+	PageProjectsPath                 string `yaml:"page_projects_path"`                   // Protected host directory; empty disables custom project storage.
+	Provider                         string `yaml:"provider"`                             // "localfs" (s3 on the v0.2 roadmap; see validStorageProviders)
+	BasePath                         string `yaml:"base_path"`
+	LogPath                          string `yaml:"log_path"`
 	// MemoryRoot is the parent directory for workspace-tier memory.
 	// Each workspace gets a subdirectory MemoryRoot/{workspace_id}
 	// that holds AGENT.md / CREW.md / topics/ etc. for the cross-
@@ -372,6 +377,15 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if err := validatePageRuntime(c.Storage.PageRuntimeOrigin, c.PageStudioOrigin(), c.Storage.PageRuntimeDevelopmentSameOrigin); err != nil {
+		return err
+	}
+	if err := validatePageBuildImage(c.Storage.PageBuildImage, c.Storage.PageProjectsPath); err != nil {
+		return err
+	}
+	if err := validatePageProjectPath(c.Storage.PageProjectsPath, c.Storage.BasePath); err != nil {
+		return err
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
 	}
@@ -461,6 +475,21 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_STORAGE_PROVIDER"); v != "" {
 		cfg.Storage.Provider = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN"); ok {
+		cfg.Storage.PageRuntimeDevelopmentSameOrigin = v == "true"
+	}
+	if v := os.Getenv("CREWSHIP_PAGE_STUDIO_ORIGIN"); v != "" {
+		cfg.Storage.PageStudioOrigin = v
+	}
+	if v := os.Getenv("CREWSHIP_PAGE_RUNTIME_ORIGIN"); v != "" {
+		cfg.Storage.PageRuntimeOrigin = v
+	}
+	if v := os.Getenv("CREWSHIP_PAGE_BUILD_IMAGE"); v != "" {
+		cfg.Storage.PageBuildImage = v
+	}
+	if v := os.Getenv("CREWSHIP_PAGE_PROJECTS_PATH"); v != "" {
+		cfg.Storage.PageProjectsPath = v
 	}
 	if v := os.Getenv("CREWSHIP_STORAGE_BASE_PATH"); v != "" {
 		cfg.Storage.BasePath = v

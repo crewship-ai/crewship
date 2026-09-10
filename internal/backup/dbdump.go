@@ -281,11 +281,17 @@ var BackupTables = []string{
 	// page_panels.owner_crew_id and page_panel_data.producer_run_id are
 	// real foreign keys, and pages.owner_user_id is ON DELETE RESTRICT.
 	"pages",
-	"page_panels",        // FK page_id → pages; FK owner_crew_id → crews
-	"page_panel_data",    // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
-	"page_versions",      // FK page_id → pages
-	"page_grants",        // FK page_id → pages; FK granted_by_user_id → users
-	"page_public_tokens", // FK page_id → pages
+	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
+	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
+	"page_versions",             // FK page_id → pages
+	"page_project_builds",       // FK page_id → pages; nullable requested_by → users
+	"page_project_publications", // Build and Page rows precede immutable publications.
+	"page_project_live",
+	"page_project_withdrawals",
+	"page_project_drafts",    // FK page_id → pages; nullable updated_by → users
+	"page_project_revisions", // FK page_id → pages; nullable actor_user_id → users
+	"page_grants",            // FK page_id → pages; FK granted_by_user_id → users
+	"page_public_tokens",     // FK page_id → pages
 	// page_webhooks FKs into page_panels (the one panel a token may write) and
 	// users (the human who issued it) — both are dumped above this line, which
 	// is what makes this position FK-safe with PRAGMA foreign_keys ON during
@@ -414,6 +420,9 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	case "pipeline_run_step_outputs", "pipeline_step_executions", "pipeline_run_artifacts":
 		// No workspace_id column — scoped via its run.
 		return "run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ?)", []any{workspaceID}, true
+	case "page_project_withdrawals", "page_project_publications", "page_project_live", "page_project_builds", "page_project_drafts", "page_project_revisions":
+		// Scope through the owning page, never the nullable (or cross-workspace) editor.
+		return "page_id IN (SELECT id FROM pages WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "page_versions":
 		// Scoped through the page, not through the author. author_agent_id is
 		// NULL for every version a HUMAN saved — which is most of them — and

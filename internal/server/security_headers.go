@@ -21,8 +21,16 @@ import (
 //     exposed user apps — the upstream owns its own policy. api.SecurityHeaders
 //     also matches this path and skips CSP so the API router doesn't re-stamp
 //     the lockdown after this middleware bowed out.
-func securityHeadersMiddleware(next http.Handler) http.Handler {
+func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		frameSrc := pages.FrameSrcDirective()
+		if len(pageRuntimeOrigin) > 0 && pageRuntimeOrigin[0] != "" {
+			if frameSrc == "frame-src 'none'" {
+				frameSrc = "frame-src " + pageRuntimeOrigin[0]
+			} else {
+				frameSrc += " " + pageRuntimeOrigin[0]
+			}
+		}
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -125,7 +133,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 					// is every instance that has not opted in. Nothing a
 					// producer sends can widen it: a payload names a source,
 					// the policy names the origins.
-					pages.FrameSrcDirective()+"; "+
+					frameSrc+"; "+
 					"frame-ancestors 'none'; "+
 					"base-uri 'self'; "+
 					"form-action 'self'")

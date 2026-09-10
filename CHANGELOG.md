@@ -12,6 +12,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
 
 ### Fixed
+- **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
+- **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
 - Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
 
@@ -51,6 +53,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
 
 ### Added
+
+- **Pages application API** — workspace-scoped drafts, builds and reviewed publications, transactional action authorization, agent MCP authoring, recoverable storage quotas, integrity checks and protected backup/restore. Publication retries report the current live version.
 
 - **Pages application foundation** — portable source projects, immutable bounded Git checkpoints, protected storage maintenance and an offline React compiler bound to the server release. API and authoring UI follow separately.
 

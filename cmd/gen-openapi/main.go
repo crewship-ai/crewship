@@ -336,7 +336,7 @@ func buildDocument(routes []route) map[string]any {
 				success[status] = true
 			}
 			for status := range info.statuses {
-				if status[0] != '2' {
+				if status[0] != '2' && status != "304" {
 					success[status] = true
 				}
 			}
@@ -390,7 +390,7 @@ func buildDocument(routes []route) map[string]any {
 		// handler reached for. Success responses retain the generic schema
 		// until endpoint-specific schemas are added.
 		for status, response := range responses {
-			if status[0] != '2' {
+			if status[0] != '2' && status != "304" {
 				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
 			}
 			if status[0] == '2' {
@@ -446,6 +446,9 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	for key, schema := range pageProjectSchemaCatalog() {
+		result[key] = schema
+	}
 	for _, domain := range operationalDomainSchemaCatalog() {
 		for key, schema := range domain {
 			result[key] = mergeDomainSchema(result[key], schema)
@@ -765,7 +768,7 @@ func responseComponents() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": scalar("string"), "name": scalar("string"), "slug": scalar("string"),
-		"logo_url": nullable("string"), "preferred_language": nullable("string"),
+		"logo_url": nullable("string"), "preferred_language": nullable("string"), "pages_theme": pagesThemeSchema(),
 		"created_at": scalar("string"), "updated_at": scalar("string"),
 		"currentUserRole": nullable("string"), "currentUserCapabilities": array(scalar("string")),
 		"allow_privileged_credentials": scalar("boolean"), "run_retention_days": nullable("integer"),
