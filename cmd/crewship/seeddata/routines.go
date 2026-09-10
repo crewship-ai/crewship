@@ -1317,21 +1317,22 @@ var routineLibrary = []RoutineDef{
 // older transformation recipes remain in routineLibrary as source examples,
 // while model regression coverage is available through `seed --with-evals`.
 // A fresh product demo should read like an operating team, not a test fixture.
-var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), packRoutines...))
+var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), append(packRoutines, operationsRoutine())...))
 
 func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 	wanted := map[string]bool{
-		"website-content-audit": true, // live Crewship website content audit
-		"incident-timeline":     true, // incident evidence normalisation
-		"classify-ticket":       true, // support intake with a closed taxonomy
-		"morning-briefing":      true, // lead-generated workspace briefing
-		"pr-review-structured":  true, // QA review with a semantic grader
-		"feed-watch-probe":      true, // token-zero GitHub Status wake gate
-		"feed-change-report":    true, // incident brief only after the gate wakes
-		"workspace-digest":      true, // token-zero workspace activity digest
-		"approval-gate-demo":    true, // production change plan + human decision
-		"cost-spike-probe":      true, // budget wake gate
-		"page-watch":            true, // routine-produced operational page
+		"pages-operations-sample": true,
+		"website-content-audit":   true, // live Crewship website content audit
+		"incident-timeline":       true, // incident evidence normalisation
+		"classify-ticket":         true, // support intake with a closed taxonomy
+		"morning-briefing":        true, // lead-generated workspace briefing
+		"pr-review-structured":    true, // QA review with a semantic grader
+		"feed-watch-probe":        true, // token-zero GitHub Status wake gate
+		"feed-change-report":      true, // incident brief only after the gate wakes
+		"workspace-digest":        true, // token-zero workspace activity digest
+		"approval-gate-demo":      true, // production change plan + human decision
+		"cost-spike-probe":        true, // budget wake gate
+		"page-watch":              true, // routine-produced operational page
 		// Deterministic recipes the test harness, the walkthrough and the
 		// CLI docs address by slug (test-determinism.sh, walkthrough.sh,
 		// docs/cli/routine.mdx) — a fresh seed must keep answering them.
