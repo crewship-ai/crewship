@@ -1,8 +1,18 @@
 "use client"
 
+import { HumanDecisionForm } from "@/components/features/approvals/human-decision-form"
+import { isDecisionForm } from "@/lib/decision-form"
 import { useState } from "react"
 import Link from "next/link"
-import { CheckCircle2, CircleDot, MessageSquare, Play, Power, ScrollText, XCircle } from "lucide-react"
+import {
+  CheckCircle2,
+  CircleDot,
+  MessageSquare,
+  Play,
+  Power,
+  ScrollText,
+  XCircle,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -87,14 +97,20 @@ export function KindActions({
       // This also makes the inbox's dedupe honest: the merged feed suppresses
       // the approvals row whose decision this inbox row projects, which was
       // only defensible once this row could actually take the decision.
-      const autonomyApprovalID = item.payload?.kind === "autonomy_gate" && typeof item.payload?.approval_id === "string"
-        ? item.payload.approval_id
-        : ""
+      const autonomyApprovalID =
+        item.payload?.kind === "autonomy_gate" && typeof item.payload?.approval_id === "string"
+          ? item.payload.approval_id
+          : ""
       if (autonomyApprovalID) {
         const decide = (approved: boolean) =>
           wrap(approved ? "approved" : "denied", async () => {
             try {
-              await decideApproval(autonomyApprovalID, approved ? "approved" : "denied", "", item.workspace_id)
+              await decideApproval(
+                autonomyApprovalID,
+                approved ? "approved" : "denied",
+                "",
+                item.workspace_id,
+              )
             } catch (error) {
               const message = error instanceof Error ? error.message : "Decision failed"
               if (isAlreadyDecidedError(409, message)) {
@@ -165,13 +181,18 @@ export function KindActions({
                       },
                     )
                   } catch (e) {
-                    toast.error(e instanceof Error ? `Approve failed: ${e.message}` : "Approve failed (network error)")
+                    toast.error(
+                      e instanceof Error
+                        ? `Approve failed: ${e.message}`
+                        : "Approve failed (network error)",
+                    )
                     return
                   }
                   if (!res.ok) {
-                    const body = (await res.json().catch(() => null)) as
-                      | { error?: string; reason?: string }
-                      | null
+                    const body = (await res.json().catch(() => null)) as {
+                      error?: string
+                      reason?: string
+                    } | null
                     toast.error(body?.error ?? `Approve failed (${res.status})`)
                     return
                   }
@@ -213,7 +234,14 @@ export function KindActions({
             ) : (
               <span className="text-[11px] text-muted-foreground">
                 To deny, fire the agent from{" "}
-                {crewHref ? <Link href={crewHref} className="text-primary-hover hover:underline">its crew page</Link> : "its crew page"}.
+                {crewHref ? (
+                  <Link href={crewHref} className="text-primary-hover hover:underline">
+                    its crew page
+                  </Link>
+                ) : (
+                  "its crew page"
+                )}
+                .
               </span>
             )}
             {crewHref && (
@@ -222,6 +250,28 @@ export function KindActions({
               </Button>
             )}
           </div>
+        )
+      }
+      if (isDecisionForm(item.payload?.decision_form)) {
+        return (
+          <HumanDecisionForm
+            key={item.source_id}
+            form={item.payload.decision_form}
+            disabled={disabled}
+            onDecide={async (approved, answer) => {
+              const res = await waitpointDecide(item.workspace_id, item.source_id, approved, answer)
+              if (!res.ok) {
+                if (isAlreadyDecidedError(res.status, res.error)) {
+                  await onRefresh("resolved")
+                  return true
+                }
+                toast.error(res.error)
+                return false
+              }
+              await onRefresh(approved ? "approved" : "denied")
+              return true
+            }}
+          />
         )
       }
       // Both Approve and Deny hit the same /approve endpoint —
@@ -304,8 +354,10 @@ export function KindActions({
       // (tagged GENERATED); the server resolves this inbox row via
       // ResolveBySource so it leaves the queue.
       if (item.payload?.kind === "skill_proposal") {
-        const crewId = typeof item.payload?.crew_id === "string" ? (item.payload.crew_id as string) : ""
-        const fileName = typeof item.payload?.file_name === "string" ? (item.payload.file_name as string) : ""
+        const crewId =
+          typeof item.payload?.crew_id === "string" ? (item.payload.crew_id as string) : ""
+        const fileName =
+          typeof item.payload?.file_name === "string" ? (item.payload.file_name as string) : ""
         const resolveSkill = (action: "approve" | "reject") =>
           wrap(action, async () => {
             let res: Response
@@ -319,7 +371,9 @@ export function KindActions({
                 },
               )
             } catch (e) {
-              toast.error(e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`)
+              toast.error(
+                e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`,
+              )
               return
             }
             if (!res.ok) {
@@ -384,7 +438,9 @@ export function KindActions({
                 { method: "POST" },
               )
             } catch (e) {
-              toast.error(e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`)
+              toast.error(
+                e instanceof Error ? `${action} failed: ${e.message}` : `${action} failed`,
+              )
               return
             }
             if (!res.ok) {
@@ -494,12 +550,20 @@ export function KindActions({
 
         return (
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="soft" disabled={disabled || busy !== null}
-              onClick={() => void resolveKeeper("approve")}>
+            <Button
+              size="sm"
+              variant="soft"
+              disabled={disabled || busy !== null}
+              onClick={() => void resolveKeeper("approve")}
+            >
               {busy === "approve" ? "Approving…" : "Approve"}
             </Button>
-            <Button size="sm" variant="soft" disabled={disabled || busy !== null}
-              onClick={() => void resolveKeeper("reject")}>
+            <Button
+              size="sm"
+              variant="soft"
+              disabled={disabled || busy !== null}
+              onClick={() => void resolveKeeper("reject")}
+            >
               {busy === "reject" ? "Denying…" : "Deny"}
             </Button>
           </div>
@@ -659,12 +723,13 @@ export function KindActions({
                 // Only a real slug is accepted now. Without one there is
                 // nothing to re-fire, and saying so beats a button that
                 // pretends.
-                const slug = typeof item.payload?.pipeline_slug === "string"
-                  ? item.payload.pipeline_slug
-                  : ""
+                const slug =
+                  typeof item.payload?.pipeline_slug === "string" ? item.payload.pipeline_slug : ""
                 const inputs = (item.payload?.inputs ?? {}) as Record<string, unknown>
                 if (!slug) {
-                  toast.error("This run cannot be retried from here — open the routine and run it again")
+                  toast.error(
+                    "This run cannot be retried from here — open the routine and run it again",
+                  )
                   return
                 }
                 // Same try/catch pattern as approve-hire above: fetch()
@@ -683,7 +748,11 @@ export function KindActions({
                     },
                   )
                 } catch (e) {
-                  toast.error(e instanceof Error ? `Retry failed: ${e.message}` : "Retry failed (network error)")
+                  toast.error(
+                    e instanceof Error
+                      ? `Retry failed: ${e.message}`
+                      : "Retry failed (network error)",
+                  )
                   return
                 }
                 if (!res.ok) {
@@ -715,7 +784,8 @@ export function KindActions({
       // /consolidate/proposed/{id}/approve and /reject have existed since the
       // consolidator shipped, and proposal_id is in the payload — the inbox
       // simply never called them, so the only offered action was Dismiss.
-      const proposalID = typeof item.payload?.proposal_id === "string" ? item.payload.proposal_id : ""
+      const proposalID =
+        typeof item.payload?.proposal_id === "string" ? item.payload.proposal_id : ""
       if (!proposalID) {
         return (
           <Button
@@ -776,7 +846,8 @@ export function KindActions({
       // The schedule turned itself off after N consecutive failures. Turning it
       // back on is PATCH pipeline-schedules/{id} {enabled:true} — the same call
       // `crewship routine schedules enable` makes, and OWNER/ADMIN like it.
-      const scheduleID = typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
+      const scheduleID =
+        typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
       if (!scheduleID) {
         return (
           <Button
@@ -807,7 +878,11 @@ export function KindActions({
                     },
                   )
                 } catch (e) {
-                  toast.error(e instanceof Error ? `Re-enable failed: ${e.message}` : "Re-enable failed (network error)")
+                  toast.error(
+                    e instanceof Error
+                      ? `Re-enable failed: ${e.message}`
+                      : "Re-enable failed (network error)",
+                  )
                   return
                 }
                 if (!res.ok) {
@@ -836,7 +911,8 @@ export function KindActions({
     case "schedule_missed": {
       // The occurrences are gone; what a person wants is to fire it now, which
       // is the same out-of-cycle run the CLI's `schedules now` performs.
-      const scheduleID = typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
+      const scheduleID =
+        typeof item.payload?.schedule_id === "string" ? item.payload.schedule_id : ""
       return (
         <div className="flex flex-wrap items-center gap-2">
           {scheduleID !== "" && (
@@ -852,7 +928,11 @@ export function KindActions({
                       { method: "POST", headers: { "Content-Type": "application/json" } },
                     )
                   } catch (e) {
-                    toast.error(e instanceof Error ? `Run failed: ${e.message}` : "Run failed (network error)")
+                    toast.error(
+                      e instanceof Error
+                        ? `Run failed: ${e.message}`
+                        : "Run failed (network error)",
+                    )
                     return
                   }
                   if (!res.ok) {
@@ -887,7 +967,9 @@ export function KindActions({
       // server performs them (answer / take_over / dismiss, B15). Falling
       // through to the generic Dismiss below PATCHed the row and never
       // reached the session that asked — which is the whole point.
-      return <RunNeedsHumanActions item={item} onAct={onAct} onRefresh={onRefresh} disabled={disabled} />
+      return (
+        <RunNeedsHumanActions item={item} onAct={onAct} onRefresh={onRefresh} disabled={disabled} />
+      )
     case "message":
       // Messages from the orchestrator (e.g. "ENG-1 ready for review")
       // carry the issue identifier in payload so the inbox can offer
@@ -897,18 +979,16 @@ export function KindActions({
       return (
         <div className="flex flex-wrap items-center gap-2">
           {!hideMessageLinks && safeChatURL(item) && (
-              <Button asChild size="sm" className="gap-1.5">
-                <Link href={safeChatURL(item) as string}>
-                  <MessageSquare className="h-3 w-3" />
-                  Open chat
-                </Link>
-              </Button>
-            )}
+            <Button asChild size="sm" className="gap-1.5">
+              <Link href={safeChatURL(item) as string}>
+                <MessageSquare className="h-3 w-3" />
+                Open chat
+              </Link>
+            </Button>
+          )}
           {!hideMessageLinks && typeof item.payload?.issue_identifier === "string" && (
             <Button asChild size="sm" className="gap-1.5">
-              <Link
-                href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}
-              >
+              <Link href={`/issues/${encodeURIComponent(item.payload.issue_identifier as string)}`}>
                 <CircleDot className="h-3 w-3" />
                 Open {item.payload.issue_identifier}
               </Link>

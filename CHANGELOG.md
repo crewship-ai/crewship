@@ -9,6 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
+- Add typed human decision forms to routine waits, Inbox and CLI; preserve rejection and approved-answer recovery (N5, N10, N15; #2473).
+
+- Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).
+
+
 ### Changed
 - Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
 - Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.

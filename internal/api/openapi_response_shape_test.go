@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // The spec's `required` list must be DERIVED from the response struct, not
@@ -40,6 +41,10 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "RoutineFixtureResult", pointer: "/components/schemas/RoutineFixtureResult", value: pipeline.FixtureStepResult{}},
+	{name: "RoutineDraft", pointer: "/components/schemas/RoutineDraft", value: pipeline.Draft{}},
+	{name: "RoutineDraftList", pointer: "/components/schemas/RoutineDraftList/items", value: routineDraftListEntry{}},
+	{name: "RoutinePublishResponse", pointer: "/components/schemas/RoutinePublishResponse", value: pipelineSaveResponse{}},
 	{
 		name:    "GET .../pipelines/calendar",
 		pointer: "/components/schemas/RoutineCalendarResponse",

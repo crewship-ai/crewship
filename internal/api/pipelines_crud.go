@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
@@ -679,6 +680,10 @@ func denyNonPrivilegedFlag(w http.ResponseWriter, role, flagName string, set boo
 //
 // POST /api/v1/workspaces/{wsId}/pipelines/save
 func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
+	h.saveWithPublication(w, r, nil)
+}
+
+func (h *PipelineHandler) saveWithPublication(w http.ResponseWriter, r *http.Request, publication *pipeline.DraftPublication) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -807,6 +812,15 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 				"user_id", user.ID, "role", role, "slug", body.Slug, "risk_reasons", riskReasons)
 		}
 	}
+	if publication != nil && saveStatus == "proposed" {
+		if !publication.ApproveRisk {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "Review the capability changes before publishing. The draft and live recipe are unchanged.", "risk_reasons": riskReasons})
+			return
+		}
+		// Same MANAGER+ reviewer authority as Approve, requested explicitly for
+		// this exact draft revision; ordinary draft saves never grant approval.
+		saveStatus = "active"
+	}
 	risky := saveStatus == "proposed"
 
 	description := ""
@@ -814,6 +828,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 		description = *body.Description
 	}
 	in := pipeline.SaveInput{
+		Publication:         publication,
 		WorkspaceID:         workspaceID,
 		Slug:                body.Slug,
 		Name:                body.Name,
@@ -869,6 +884,15 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
+	var scheduleConflict *pipeline.ScheduleDraftConflict
+	if errors.As(err, &scheduleConflict) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "schedule_conflict": scheduleConflict})
+		return
+	}
+	if errors.Is(err, pipeline.ErrDraftConflict) {
+		replyError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if errors.Is(err, pipeline.ErrTestRunGateFailed) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error": "save requires a fresh, passing test_run within 5 minutes (or skip_test_gate for OWNER/ADMIN)",
@@ -896,7 +920,7 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// airbag invariant) must not spawn a misleading "awaiting approval" item.
 	if risky && saved.Status == "proposed" {
 		h.proposeRoutineInbox(r.Context(), workspaceID, saved, riskReasons, "Routine author ("+user.Email+")")
-	} else if body.SkipGovernanceGate && saved.Status == "active" {
+	} else if (body.SkipGovernanceGate || (publication != nil && publication.ApproveRisk)) && saved.Status == "active" {
 		// The trusted OWNER/ADMIN override supersedes maker-checker review. If
 		// this slug had a pending "awaiting approval" escalation from an earlier
 		// risky save, resolve it now — otherwise a stale approval card lingers
@@ -910,6 +934,13 @@ func (h *PipelineHandler) Save(w http.ResponseWriter, r *http.Request) {
 	// receipt pinning the version the trigger was created against.
 	if sched != nil && sched.Activation == pipeline.TriggerActivationDraft {
 		h.proposeTriggerActivationInbox(r.Context(), workspaceID, saved, sched, "Routine author ("+user.Email+")")
+	}
+	if publication != nil && h.emitter != nil {
+		payload := map[string]any{"slug": saved.Slug, "definition_hash": saved.DefinitionHash, "draft_id": publication.ID, "draft_revision": publication.Revision, "capabilities_approved": publication.ApproveRisk}
+		refs := map[string]any{"pipeline_id": saved.ID, "pipeline_slug": saved.Slug}
+		if _, err := h.emitter.Emit(r.Context(), journal.Entry{WorkspaceID: workspaceID, Type: journal.EntryPipelinePublished, Severity: journal.SeverityNotice, ActorType: journal.ActorUser, ActorID: user.ID, Summary: "Published routine " + saved.Slug, Payload: payload, Refs: refs}); err != nil {
+			h.logger.Error("journal routine publication", "pipeline_id", saved.ID, "error", err)
+		}
 	}
 	h.broadcastRoutinesChanged(workspaceID, "saved")
 	writeJSON(w, http.StatusCreated, pipelineSaveResponse{

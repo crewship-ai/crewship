@@ -337,6 +337,7 @@ const (
 	EntryPipelineStepFailed     EntryType = "pipeline.step.failed"
 	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
 	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
+	EntryPipelinePublished      EntryType = "pipeline.published"
 
 	// EntryPipelineStepSkipped / EntryPipelineStepRetrying make the two
 	// non-terminal step outcomes first-class instead of overloading
