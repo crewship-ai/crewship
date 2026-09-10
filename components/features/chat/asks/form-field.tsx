@@ -180,7 +180,10 @@ export function FormField({
     case "unsupported":
       return (
         <div className="space-y-1">
-          {label}
+          <span className={cn("text-sm leading-none font-medium", !explicitLabel && "capitalize")}>
+            {fieldLabelText(field)}
+            {field.required && <span className="ml-1 text-destructive">*</span>}
+          </span>
           <p role="alert" className="text-sm text-destructive">
             This form does not support the declared type {field.value_type || "unknown"}. Open Edit
             to review the input schema.

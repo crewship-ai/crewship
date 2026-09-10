@@ -98,3 +98,17 @@ describe("human decisions", () => {
     )
   })
 })
+
+it("unsupported fields explain the problem without orphaned labels", () => {
+  const { container } = render(
+    <HumanDecisionForm
+      form={{ ...form, fields: [{ name: "unknown", label: "Unsupported answer", type: "credential", required: true }] }}
+      onDecide={vi.fn()}
+    />,
+  )
+  expect(screen.getByText("Unsupported answer")).toBeVisible()
+  expect(screen.getByRole("alert")).toHaveTextContent("does not support")
+  for (const label of container.querySelectorAll("label[for]")) {
+    expect(document.getElementById(label.getAttribute("for")!)).not.toBeNull()
+  }
+})

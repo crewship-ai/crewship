@@ -1409,7 +1409,12 @@ Completes a pending approval. Decider identity is taken from the request's auth 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `approved` | boolean | **effectively yes** | Always send it explicitly (the CLI and UI always do). If the field is omitted entirely, it defaults to **`false`** — a body-less `POST` to this URL **denies** the waitpoint rather than approving it, despite the endpoint being named `.../approve` (`internal/api/pipelines_exec.go`, `Approved bool` — the Go zero value). See **Defaults differ from the public callback**, below, before relying on omission either way. |
-| `comment` | string | no | Forwarded to the parked run as the wait step's output. |
+| `comment` | string | no | Stored with the decision. Included in typed decision output; it does not replace legacy wait output. |
+
+An approved legacy wait returns the literal `waited:approval:approved` as its
+step output. An approved typed wait returns serialized `DecisionAnswer` JSON
+with `action_id`, `data`, and optional `comment`; downstream steps can parse
+that JSON. Rejected decisions follow the wait step's failure behavior.
 
 **Response:** `200 OK`
 

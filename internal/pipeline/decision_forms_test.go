@@ -6,6 +6,9 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func richDecisionFixture() *DecisionForm {
@@ -111,7 +114,9 @@ func TestDecisionFormSnapshotRaceAndRestart(t *testing.T) {
 		t.Fatal(out)
 	}
 	var count int
-	store.db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints`).Scan(&count)
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_waitpoints`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
 	if count != 1 {
 		t.Fatalf("restart minted %d tokens", count)
 	}
@@ -145,5 +150,38 @@ func TestDecisionFormRequiresFieldsArray(t *testing.T) {
 				t.Fatalf("valid=%v, error=%v", tc.valid, err)
 			}
 		})
+	}
+}
+
+func TestDecisionCrossingDeadlineCannotCommit(t *testing.T) {
+	store, cleanup := openWaitpointsTestDB(t)
+	defer cleanup()
+	ctx := t.Context()
+	token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{WorkspaceID: "ws_test", PipelineRunID: "run_deadline", StepID: "gate", DecisionForm: richDecisionFixture()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Hour)
+	if _, err := store.db.ExecContext(ctx, `UPDATE pipeline_waitpoints SET timeout_at=? WHERE token=?`, tsformat.Format(deadline), token); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	clock := func() time.Time {
+		calls++
+		if calls == 1 {
+			return deadline.Add(-time.Second)
+		}
+		return deadline.Add(time.Second)
+	}
+	err = store.completeApproval(ctx, "ws_test", token, true, "user", `{"action_id":"ship","data":{"note":"ok"}}`, clock)
+	if !errors.Is(err, ErrAlreadyDecided) {
+		t.Fatalf("decision crossed its deadline but was accepted: %v", err)
+	}
+	var status string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM pipeline_waitpoints WHERE token=?`, token).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "timed_out" {
+		t.Fatalf("expired decision remained %s", status)
 	}
 }

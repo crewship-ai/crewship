@@ -632,7 +632,11 @@ func (s *SQLWaitpointStore) WaitpointStatus(ctx context.Context, token string) (
 // status (or belongs to a different workspace) — protects against
 // double-decide races and cross-tenant completion alike.
 func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string) error {
-	now := tsformat.Format(time.Now())
+	return s.completeApproval(ctx, workspaceID, token, approved, deciderUserID, payload, time.Now)
+}
+
+func (s *SQLWaitpointStore) completeApproval(ctx context.Context, workspaceID, token string, approved bool, deciderUserID, payload string, clock func() time.Time) error {
+	now := tsformat.Format(clock())
 	var formJSON string
 	var expired bool
 	if err := s.db.QueryRowContext(ctx, `SELECT decision_form_json, julianday(timeout_at) <= julianday(?) FROM pipeline_waitpoints WHERE token=? AND workspace_id=? AND status='pending'`, now, token, workspaceID).Scan(&formJSON, &expired); err != nil {
@@ -661,6 +665,8 @@ func (s *SQLWaitpointStore) CompleteApproval(ctx context.Context, workspaceID, t
 	}
 	// Expiry is part of the decision CAS, not dependent on the 30-second
 	// sweeper having run. julianday handles historical timezone/fraction forms.
+	// Form decoding may have crossed the deadline since the initial read.
+	now = tsformat.Format(clock())
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_waitpoints
 SET status = ?, decided_at = ?, decided_by_user_id = ?, decision_payload = ?
@@ -673,7 +679,7 @@ WHERE token = ? AND workspace_id = ? AND status = 'pending'
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return ErrAlreadyDecided
+		return s.settleExpiredApproval(ctx, workspaceID, token, now)
 	}
 	// Mirror the decision into the unified inbox so the row drops
 	// from "needs action" into the resolved feed in real time. The

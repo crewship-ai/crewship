@@ -103,7 +103,7 @@ func executionSchemaComponents() map[string]any {
 	replayRequest := obj(map[string]any{"pinned_version": integer()})
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})
-	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str()})
+	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str(), "action_id": str(), "data": anyMap})
 	// Appearance is a two-column write, so both fields are optional and an
 	// explicit "" clears the stored value while an absent field keeps it —
 	// the distinction the handler's pointer fields exist for.
