@@ -199,4 +199,67 @@ test("PR browser contract subset", async ({ page }) => {
 
     await page.unrouteAll({ behavior: "ignoreErrors" })
   })
+
+  // ── The phone contract ───────────────────────────────────────────────────
+  //
+  // Nothing in the PR gate ran at a phone width before #2483, which is how a
+  // navigation missing seven of fifteen destinations, an Admin Console with no
+  // mobile layout, and a search field that made iOS zoom the page and stay
+  // zoomed all shipped green. This is the smallest set of assertions that
+  // would have caught every one of them.
+  //
+  // A step inside the existing test rather than a test of its own: this config
+  // runs one browser context on purpose (see the header), and a second test
+  // would take a second one and eventually meet NextAuth's rate limit.
+  await test.step("the phone contract", async () => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    try {
+      await page.goto("/")
+      await page.waitForLoadState("networkidle")
+
+      // The page itself never scrolls sideways.
+      const sideways = await page.evaluate(
+        () => document.documentElement.scrollWidth > window.innerWidth + 1,
+      )
+      expect(sideways, "the page scrolls sideways at 390px").toBe(false)
+
+      // The bottom bar is the way around, and it clears the home indicator.
+      const tabs = page.getByRole("navigation", { name: "Primary" })
+      await expect(tabs).toBeVisible()
+      for (const label of ["Dashboard", "Inbox", "Chat", "More"]) {
+        await expect(tabs.getByText(label, { exact: true })).toBeVisible()
+      }
+
+      // More opens the full navigation — every destination the rail carries,
+      // which is the property that drifted before.
+      await tabs.getByRole("button", { name: "More" }).click()
+      const sheet = page.getByRole("dialog")
+      await expect(sheet).toBeVisible()
+      for (const label of ["Inbox", "Issues", "Routines", "Pages", "Activity", "Journal", "Integrations"]) {
+        await expect(sheet.getByText(label, { exact: true })).toBeVisible()
+      }
+
+      // Back closes it in place instead of leaving the page underneath.
+      const before = new URL(page.url()).pathname
+      await page.goBack()
+      await expect(sheet).toBeHidden()
+      expect(new URL(page.url()).pathname, "back left the page instead of closing the sheet").toBe(before)
+
+      // Nothing you can type into renders under 16px, which is what makes iOS
+      // zoom the page on focus and never zoom back out.
+      await page.goto("/settings")
+      await page.waitForLoadState("networkidle")
+      const small = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>(
+          "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select",
+        )]
+          .filter((el) => el.getBoundingClientRect().width > 0)
+          .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+          .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.tagName),
+      )
+      expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 900 })
+    }
+  })
 })

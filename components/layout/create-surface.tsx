@@ -399,12 +399,76 @@ export function CreateSurfaceFrame({
   )
 }
 
-/** The sheet's drag affordance. Phone only — a card does not need a handle. */
+/**
+ * The sheet's drag affordance. Phone only — a card does not need a handle.
+ *
+ * It used to be decoration: an `aria-hidden` bar with no handler on it, so
+ * every bottom sheet in the app advertised a gesture that did not exist
+ * anywhere in the codebase (#2483). It drags now.
+ *
+ * The gesture starts on the handle only, never on the body, so it cannot
+ * steal a scroll from the content — which is the usual way a hand-rolled
+ * sheet drag goes wrong. Release past a third of the sheet's height, or with
+ * enough speed to mean it, dismisses; anything less springs back.
+ *
+ * It dismisses by asking Radix to close rather than by calling a close
+ * function: the grabber is rendered outside the surface's own CloseGuard
+ * provider, and `Dialog`'s `onOpenChange` is guarded anyway — so Escape is the
+ * one route that already carries the unsaved-work prompt, and the one the back
+ * button uses too.
+ */
+const DISMISS_FRACTION = 0.33
+const DISMISS_VELOCITY = 0.5 // px per ms
+
 function SheetGrabber() {
+  const drag = React.useRef<{ startY: number; startedAt: number; sheet: HTMLElement } | null>(null)
+
+  const setOffset = (sheet: HTMLElement, dy: number | null) => {
+    sheet.style.transition = dy === null ? "transform 180ms ease-out" : "none"
+    sheet.style.transform = dy === null ? "" : `translateY(${dy}px)`
+  }
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const sheet = e.currentTarget.closest<HTMLElement>('[data-slot="dialog-content"]')
+    if (!sheet) return
+    drag.current = { startY: e.clientY, startedAt: performance.now(), sheet }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return
+    // Downward only: dragging a bottom sheet up is not a gesture, and letting
+    // it follow would lift the sheet off the bottom edge it is anchored to.
+    setOffset(drag.current.sheet, Math.max(0, e.clientY - drag.current.startY))
+  }
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    const dy = Math.max(0, e.clientY - d.startY)
+    const velocity = dy / Math.max(1, performance.now() - d.startedAt)
+    const far = dy > d.sheet.getBoundingClientRect().height * DISMISS_FRACTION
+    setOffset(d.sheet, null)
+    if (far || velocity > DISMISS_VELOCITY) {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      )
+    }
+  }
+
   return (
     <div
+      // Still aria-hidden, deliberately. It is a pointer-only convenience that
+      // duplicates the header's ×, and giving it a button role while leaving
+      // it out of the tab order would announce a control nobody can reach by
+      // keyboard. Assistive technology gets the labelled × instead.
       aria-hidden
-      className="hidden shrink-0 justify-center pt-2 pb-0.5 max-sm:flex group-data-[mobile=true]/surface:flex"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className="hidden shrink-0 cursor-grab touch-none justify-center pt-2 pb-0.5 active:cursor-grabbing max-sm:flex group-data-[mobile=true]/surface:flex"
     >
       <span className="h-1 w-9 rounded-full bg-foreground/20" />
     </div>

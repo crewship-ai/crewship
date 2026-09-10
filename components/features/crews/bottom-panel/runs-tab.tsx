@@ -82,6 +82,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
 
   return (
     <div className="h-full overflow-y-auto p-3 text-xs">
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-muted-foreground-soft text-[10px] uppercase tracking-wide">
@@ -118,6 +119,7 @@ export function RunsTab({ workspaceId, context }: { workspaceId: string; context
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
