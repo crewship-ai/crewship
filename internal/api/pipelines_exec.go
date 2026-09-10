@@ -1175,15 +1175,22 @@ LIMIT 200`, workspaceID)
 	for rows.Next() {
 		var row wpRow
 		var form string
-		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt, &form, &row.InboxItemID); err == nil {
-			if form != "" {
-				row.DecisionForm = json.RawMessage(form)
-			}
-			if form == "" {
-				row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
-			}
-			out = append(out, row)
+		if err := rows.Scan(&row.Token, &row.PipelineRunID, &row.StepID, &row.Kind, &row.Prompt, &row.InvokingCrewID, &row.TimeoutAt, &row.CreatedAt, &form, &row.InboxItemID); err != nil {
+			h.logger.Error("waitpoints list: scan", "error", err)
+			replyError(w, http.StatusInternalServerError, "list waitpoints")
+			return
 		}
+		if form != "" {
+			row.DecisionForm = json.RawMessage(form)
+		} else {
+			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("waitpoints list: iterate", "error", err)
+		replyError(w, http.StatusInternalServerError, "list waitpoints")
+		return
 	}
 	writeJSON(w, http.StatusOK, out)
 }

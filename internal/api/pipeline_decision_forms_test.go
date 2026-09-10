@@ -62,3 +62,25 @@ func TestDecisionFormAPIRequiresNamedTypedAnswerAcrossDoors(t *testing.T) {
 		t.Fatalf("output: %s %v", output, err)
 	}
 }
+
+func TestPendingWaitpointScanFailureIsNotAnEmptySuccess(t *testing.T) {
+	h, user, ws := newPipelineHandlerForCRUDTest(t)
+	store := pipeline.NewSQLWaitpointStore(h.db)
+	defer store.Close()
+	if _, err := store.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: ws, PipelineRunID: "run_bad_row", StepID: "gate"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE pipeline_waitpoints RENAME TO stored_waitpoints`,
+		`CREATE VIEW pipeline_waitpoints AS SELECT NULL AS token, pipeline_run_id, step_id, kind, prompt, invoking_crew_id, timeout_at, created_at, decision_form_json, workspace_id, status FROM stored_waitpoints`,
+	} {
+		if _, err := h.db.ExecContext(t.Context(), stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ListPendingWaitpoints(w, withWorkspaceUser(httptest.NewRequest("GET", "/x", nil), user, ws, "MANAGER"))
+	if w.Code != 500 {
+		t.Fatalf("unreadable waitpoint became successful list: %d %s", w.Code, w.Body)
+	}
+}
