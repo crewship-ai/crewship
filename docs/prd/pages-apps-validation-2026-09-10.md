@@ -40,7 +40,10 @@ ESLint for both changed files passed. Full frontend verification passed:
 New CI runs: [source 34459514236](https://github.com/crewship-ai/crewship/actions/runs/34459514236)
 and [UI 34459629052](https://github.com/crewship-ai/crewship/actions/runs/34459629052).
 The UI stack requires an explicit dispatch because its PR does not target main.
-Do not infer their final result from the earlier green runs.
+Source Frontend Test is now confirmed successful on `04bf425e`, including the
+previously failing test. Source Go lint, Playwright and harness jobs passed.
+Longer Go/race jobs and the full UI run are still in progress; do not infer
+their final result from the earlier green runs.
 
 ## PRD acceptance status
 
