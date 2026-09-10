@@ -103393,7 +103393,8 @@
                 "$ref": "#/components/schemas/WorkflowFixtureTestRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
