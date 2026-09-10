@@ -45,3 +45,18 @@ func TestBuildDocumentUsesCrewWorkspaceGETComponents(t *testing.T) {
 		}
 	}
 }
+
+func TestRoutineGETSchemasExposeOptionalStepCount(t *testing.T) {
+	_, components := crewWorkspaceGETSchemaCatalogV1()
+	for _, name := range []string{"WorkspacePipelinesResponseV1", "WorkspacePipelineResponseV1"} {
+		schema := components[name].(map[string]any)
+		if schema["type"] == "array" {
+			schema = schema["items"].(map[string]any)
+		}
+		properties := schema["properties"].(map[string]any)
+		count, ok := properties["step_count"].(map[string]any)
+		if !ok || count["type"] != "integer" {
+			t.Fatalf("%s does not describe the list DTO step count", name)
+		}
+	}
+}

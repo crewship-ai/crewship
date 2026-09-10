@@ -14376,6 +14376,9 @@
           "slug": {
             "type": "string"
           },
+          "step_count": {
+            "type": "integer"
+          },
           "updated_at": {
             "type": "string"
           },
@@ -14526,6 +14529,9 @@
             },
             "slug": {
               "type": "string"
+            },
+            "step_count": {
+              "type": "integer"
             },
             "updated_at": {
               "type": "string"
