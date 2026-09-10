@@ -1,0 +1,41 @@
+{
+  "deployment": {
+    "pid": "1739749",
+    "sha256": "e2e9ec33735e89002038918191a66922f54b2e1aa94e480e897f0385d85fcc7b",
+    "commit": "078f3381",
+    "health": {
+      "status": "ok"
+    }
+  },
+  "fsck": {
+    "checked_artifacts": 3,
+    "checked_checkpoints": 3,
+    "checked_git_objects": 26,
+    "checked_sources": 3,
+    "failures": [],
+    "healthy": true
+  },
+  "live_mismatch": {
+    "intercepted": true,
+    "versionMismatchShowsPanels": true,
+    "applicationIframeCount": 0,
+    "loadingCount": 0
+  },
+  "ci": {
+    "source": 34469301690,
+    "ui": 34469677510,
+    "state": "in_progress"
+  },
+  "tests": {
+    "pages": "passed",
+    "pagebuild": "passed",
+    "backup": "passed",
+    "vet": "passed",
+    "api_unicode_save": "422; no revision advanced",
+    "ui_files": 46,
+    "ui_tests": 581,
+    "static_build": "passed"
+  },
+  "review": "pending",
+  "safari_decision": "awaiting_user"
+}
