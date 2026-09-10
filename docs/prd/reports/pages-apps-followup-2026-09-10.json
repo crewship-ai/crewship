@@ -25,15 +25,15 @@
   "ci": {
     "source": 34488138789,
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
-    "ui": 34490656928,
-    "ui_sha": "aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad",
+    "ui": 34495835090,
+    "ui_sha": "4b8fdff4990d60069ede1b96d7e5c043074b0d4a",
     "state": "in_progress",
-    "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration",
-    "superseded_ui": 34488992444,
+    "scope": "server fixed history allocation; cumulative UI includes required real CLI publication/restart test",
+    "superseded_ui": 34490656928,
     "superseded_ui_reason": "Go Lint timestamp guard failed; fixed in 187ed2f9",
     "source_state": "success",
-    "server": 34493448807,
-    "server_sha": "53b6e1a0a2c327d7f0ea00106c2c9f3aad3f2344",
+    "server": 34495400146,
+    "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
     "server_state": "in_progress"
   },
   "tests": {
@@ -157,5 +157,23 @@
   "server_review_tests": {
     "mutation": "bypassing guided policy hold failed with held 200; reverted",
     "restored_regressions": "passed (2.310s)"
+  },
+  "restart_acceptance": {
+    "commit": "09aaaa7a",
+    "red": "real daemon refused obsolete HTTP runtime origin",
+    "green": "15.04 seconds; 2 actual daemon boots; publication/artifact preserved with compiler disabled",
+    "required_subtest": "TestAcceptance_PageProjectGitHistoryRestore/restart",
+    "skips": 0,
+    "vet": "passed",
+    "ci_gate": "scripts/test-pages-apps.sh requires restart subtest pass",
+    "limitation": "isolated CLI/daemon fixture; not a live-agent authoring measurement or production DNS/TLS installation"
+  },
+  "history_allocation_review": {
+    "commit": "dc919640",
+    "alert": 906,
+    "finding": "request-derived capacity already validated to 1..20; replaced with fixed capacity 20",
+    "tests": "publication/history regression passed (1.605s), invalid zero/negative/oversized limits rejected",
+    "vet": "passed",
+    "codeql_recheck": "pending CI"
   }
 }
