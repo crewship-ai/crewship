@@ -53,12 +53,13 @@ const sidebarMenuButtonVariants = cva(
           "bg-background shadow-[0_0_0_1px_hsl(var(--sidebar-border))] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:shadow-[0_0_0_1px_hsl(var(--sidebar-accent))]",
       },
       size: {
-        // `coarse:h-11` is the tablet case: on an iPad the desktop rail renders
-        // in icon mode and every row measured 29px, well under the 44px touch
-        // floor. 11 is as tall as the collapsed rail can carry (this repo's
-        // --spacing is 0.23rem, so h-11 is 40px and h-12 would exceed it).
-        default: "h-8 coarse:h-11 text-sm",
-        sm: "h-7 coarse:h-10 text-xs",
+        // The tablet case: on an iPad the desktop rail renders in icon mode and
+        // every row measured 29px. `--spacing` is 0.23rem here, so `h-12` is
+        // the 44px class — `h-11` lands at 40.5px and misses. Icon mode is
+        // handled separately in the base string above, because its size is
+        // forced with `!`.
+        default: "h-8 coarse:h-12 text-sm",
+        sm: "h-7 coarse:h-12 text-xs",
         lg: "h-12 text-sm group-data-[collapsible=icon]:!p-0",
       },
     },
