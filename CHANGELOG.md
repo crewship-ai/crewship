@@ -17,6 +17,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
 
 ### Fixed
+- **Pages in unsupported browsers** (#2472) — show panels immediately in Safari, Firefox and mobile browsers, without waiting for application metadata or requiring a manual switch.
 
 - Pages demo setup leaves time for a full compiler run and publication; invalid container resource limits no longer produce healthy snapshots.
 - **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
@@ -61,6 +62,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
 
 ### Added
+
+- **Pages application Studio** — source editing, previews, reviewed publication history and declared routine actions. Panel-only Pages render immediately; temporary 503s preserve an open application, while withdrawal clears stale code. Desktop Chromium support and routine-definition changes are shown explicitly. Workspace appearance reaches applications without rebuilding them.
 
 - **Pages application CLI and operations starter** — initialize, pack, save, build, review/publish, roll back and withdraw custom applications; inspect Git history, verify integrity and reclaim optional workspace history. Seed and collector examples are covered by real Docker and Node checks.
 

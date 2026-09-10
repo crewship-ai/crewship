@@ -1,5 +1,9 @@
 "use client"
 
+import { PageApplicationView } from "./page-application"
+import { PagePublicationsDialog } from "./page-publications"
+import { PageProjectHistoryDialog } from "./page-project-history"
+
 /**
  * The /pages shell — three zones, exactly as PRD §9b.1 draws them:
  *
@@ -28,7 +32,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { FilePlus2, Pencil, SlidersHorizontal, Upload} from "lucide-react"
+import { FilePlus2, Pencil, SlidersHorizontal, Upload, AppWindow} from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -50,6 +54,7 @@ import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
 import { PageEditor, sealedPanelCount, type PageEditorMode } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
+import { PagePreviewDialog } from "@/components/features/pages/page-preview"
 import { PageSettings } from "@/components/features/pages/page-settings"
 
 export interface PagesLayoutProps {
@@ -173,6 +178,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // things an owner of a partially-sealed page still needs, and the server
   // gates both itself (§7.1 rule 3, and the version route's own refusal).
   const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [previewOpen, setPreviewOpen] = React.useState(false)
+  const [sourceHistoryOpen, setSourceHistoryOpen] = React.useState(false)
+  const [publicationsOpen, setPublicationsOpen] = React.useState(false)
+  React.useEffect(() => { setPreviewOpen(false); setSourceHistoryOpen(false); setPublicationsOpen(false) }, [selectedSlug, workspaceId])
   // A slug change means a different page; a settings sheet left open over it
   // would be showing another page's ACL.
   React.useEffect(() => setSettingsOpen(false), [selectedSlug])
@@ -210,6 +219,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Edit
               </SubBarSecondary>
             )}
+            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setPreviewOpen(true)}>App preview</SubBarSecondary>}
+            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setSourceHistoryOpen(true)}>Source history</SubBarSecondary>}
+            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setPublicationsOpen(true)}>Publications</SubBarSecondary>}
             {/* Import sits beside New page because they are the same intent —
                 "a page that is not here yet" — and it was the one authoring
                 door that existed only as a CLI command. */}
@@ -274,6 +286,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} fallback={
                 <PageView
                   page={detail.page}
                   slug={selectedSlug}
@@ -287,6 +300,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   // on a live socket, never on a timer of its own (epic #1935).
                   live={detail.live}
                 />
+                } />
               </motion.div>
             ) : (
               <motion.div
@@ -337,6 +351,10 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {publicationsOpen && selectedSlug && workspaceId && <PagePublicationsDialog workspaceId={workspaceId} slug={selectedSlug} onClose={() => setPublicationsOpen(false)} />}
+      {sourceHistoryOpen && selectedSlug && workspaceId && <PageProjectHistoryDialog workspaceId={workspaceId} slug={selectedSlug} onClose={() => setSourceHistoryOpen(false)} />}
+      {previewOpen && selectedSlug && <PagePreviewDialog key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} onClose={() => setPreviewOpen(false)} />}
 
       {editor && (
         <PageEditor

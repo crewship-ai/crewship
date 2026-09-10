@@ -266,11 +266,11 @@ describe("what it refuses before the server sees it", () => {
     expect(importCalls(calls)).toHaveLength(0)
   })
 
-  it("refuses a file that is not JSON at all", async () => {
+  it("refuses a scalar YAML document", async () => {
     const { calls } = mount()
     await choose("not json", "notes.txt")
 
-    await waitFor(() => expect(screen.getByText(/not JSON/i)).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/not an export bundle/i)).toBeTruthy())
     expect(importCalls(calls)).toHaveLength(0)
   })
 })
@@ -331,5 +331,18 @@ describe("a 422", () => {
     // Rule 3: never destroy the state a retry needs.
     expect(screen.getByRole("button", { name: "Install" })).toBeEnabled()
     expect(screen.getByText("Fleet health")).toBeTruthy()
+  })
+})
+
+
+describe("source bundle import", () => {
+  it("accepts one YAML file and preserves the source project", async () => {
+    const { calls } = mount()
+    const { stringify } = await import("yaml")
+    const project = { format: "crewship-page-source/v1", runtime: "react-vite-typescript/v1", files: [{ path: "src/main.tsx", encoding: "utf8", content: "// Český dashboard\n" }] }
+    await choose(stringify({ ...BUNDLE, format: "crewship-page-bundle/v2", project }), "health.yaml")
+    fireEvent.click(screen.getByRole("button", { name: "Install" }))
+    await waitFor(() => expect(importCalls(calls)).toHaveLength(1))
+    expect(importCalls(calls)[0].body).toMatchObject({ format: "crewship-page-bundle/v2", project })
   })
 })
