@@ -1,12 +1,12 @@
 {
   "deployment": {
-    "commit": "7e7134bf79fa626dd505c75cf51c36f1c079f8a5",
-    "sha256": "9fc33456205cf86a7618233df1e7bc49285c346ac95baf2ff15f923af2573273",
-    "pid": "2562039",
+    "commit": "15ccf0b25609e6eab225feb7996301b1c9ee07ce",
+    "sha256": "b74208792e6d223041bfe995099edd38b16b002153d662e6d2a8d9bdc63d4064",
+    "pid": "2808742",
     "tools_image": "sha256:a2b33aba4b3338b16053c2166d03c7d19a41e5a8b4ba3b4f0ab0daa4723762fc",
-    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T150945Z",
+    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T161348Z",
     "health": "200",
-    "deployed_at": "2026-09-10T15:09:48.609517+00:00"
+    "deployed_at": "2026-09-10T16:13:51.218565+00:00"
   },
   "fsck": {
     "checked_artifacts": 3,
@@ -25,16 +25,18 @@
   "ci": {
     "source": 34488138789,
     "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
-    "ui": 34495835090,
-    "ui_sha": "4b8fdff4990d60069ede1b96d7e5c043074b0d4a",
+    "ui": 34500518907,
+    "ui_sha": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
     "state": "in_progress",
-    "scope": "server fixed history allocation; cumulative UI includes required real CLI publication/restart test",
-    "superseded_ui": 34490656928,
-    "superseded_ui_reason": "Go Lint timestamp guard failed; fixed in 187ed2f9",
+    "scope": "CLI automatic merge-ref CI after server merge; cumulative UI dispatch includes unsupported-browser fallback",
+    "superseded_ui": 34495835090,
+    "superseded_ui_reason": "cancelled by newer UI dispatch; not recorded as passed",
     "source_state": "success",
     "server": 34495400146,
     "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
-    "server_state": "in_progress"
+    "server_state": "success",
+    "cli": 34500653011,
+    "cli_sha": "ce5f1b9b9696416b88f89950e64ad8b9f0e823c1"
   },
   "tests": {
     "pages": "passed",
@@ -52,22 +54,23 @@
     "previous_ci_go_jobs": "source and cumulative UI passed"
   },
   "review": {
-    "state": "source_manual_fallback_completed; server_manual_review_in_progress; server_coderabbit_throttled",
+    "state": "source and server manual fallback completed; CLI/UI review and CI remain",
     "requested_at": "2026-09-10T11:12:28Z",
     "rejected_at": "2026-09-10T11:12:34Z",
     "retry_notice_minutes": 59,
     "merged": false,
-    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded",
+    "manual_fallback": "server review scope and mutation evidence recorded in PR 2477; CodeRabbit retry refused due to rate limit",
     "merged_prs": [
-      2475
+      2475,
+      2477
     ]
   },
   "safari_decision": "confirmed_panel_only_v1_2026-09-10",
   "integration": {
-    "main_sha": "410563ecab034eb3624ebfa7d56f4b73baa3c959",
-    "state": "resolved_in_review_stack",
-    "server_sha": "187ed2f9a5bb6f6d30f676e2d68583809d3e7976",
-    "ui_sha": "aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad",
+    "main_sha": "59b74522a0151ba14e57b572db0d296b8267e386",
+    "state": "server merged; CLI targets main; cumulative UI dispatch is branch evidence",
+    "server_sha": "dc919640b9f268f30d4c64b6a5f427d572d8b052",
+    "ui_sha": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
     "conflicts": [],
     "openapi_operations": 654,
     "mcp_tools": 10
@@ -152,11 +155,13 @@
     "public_page_http": 200,
     "fsck": "healthy",
     "authoring": "awaiting explicit isolated crew permission; not measured",
-    "production_runtime": "awaiting separate registrable domain/DNS/TLS"
+    "production_runtime": "awaiting separate registrable domain/DNS/TLS",
+    "evidence_deployment": "7e7134bf79fa626dd505c75cf51c36f1c079f8a5"
   },
   "server_review_tests": {
     "mutation": "bypassing guided policy hold failed with held 200; reverted",
-    "restored_regressions": "passed (2.310s)"
+    "restored_regressions": "passed (2.310s)",
+    "receipt_isolation_mutation": "removing invoking_user_id filter caused receipt leaked 200; reverted; restored test passed"
   },
   "restart_acceptance": {
     "commit": "09aaaa7a",
@@ -174,6 +179,27 @@
     "finding": "request-derived capacity already validated to 1..20; replaced with fixed capacity 20",
     "tests": "publication/history regression passed (1.605s), invalid zero/negative/oversized limits rejected",
     "vet": "passed",
-    "codeql_recheck": "pending CI"
+    "codeql_recheck": "fixed on merge ref 7ae5596c0817f212eaca0616bbeb83d3bae1c5a2"
+  },
+  "previous_deployment": {
+    "commit": "7e7134bf79fa626dd505c75cf51c36f1c079f8a5",
+    "sha256": "9fc33456205cf86a7618233df1e7bc49285c346ac95baf2ff15f923af2573273",
+    "pid": "2562039",
+    "tools_image": "sha256:a2b33aba4b3338b16053c2166d03c7d19a41e5a8b4ba3b4f0ab0daa4723762fc",
+    "rollback": "/srv/crewship/dev3-pages-release/rollback-2472-20260910T150945Z",
+    "health": "200",
+    "deployed_at": "2026-09-10T15:09:48.609517+00:00"
+  },
+  "unsupported_browser_fallback": {
+    "commit": "2fd3ce3747a5636f0bacbfbaa73e37e98c160ce0",
+    "red": "Safari, Firefox and mobile Chrome tests failed to find panels before fix",
+    "green": "33 files / 350 tests passed; changed-file ESLint passed; complete make build passed",
+    "behavior": "unsupported browsers show panels immediately even while metadata is pending; application metadata fetch disabled",
+    "deployment": "15ccf0b25609e6eab225feb7996301b1c9ee07ce",
+    "live_validation": "health and public page HTTP 200; fsck healthy (4 artifacts, 3 checkpoints); browser rendering tested by component regressions, not a fresh authenticated live-browser run"
+  },
+  "cli_review_mutation": {
+    "change": "replace extraction Mkdir with MkdirAll",
+    "result": "test rejected overwrite of existing directory; mutation reverted; restored test passed"
   }
 }
