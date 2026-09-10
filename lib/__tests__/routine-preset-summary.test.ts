@@ -16,6 +16,9 @@ describe("routine preset summary", () => {
     expect(text).toContain("…")
     expect(text).not.toContain("second line")
   })
+  it("does not mistake profile text for file contents", () => {
+    expect(routinePresetSummary({ profile: "public", inputFile: "private bytes" })).toBe("Inputs: profile: public · inputFile: File")
+  })
   it("hides secrets and summarizes credentials and files by type", () => {
     expect(routinePresetSummary({ api_key: "secret-value", credential: "vault-private-id" })).toBe("Inputs: api_key: Hidden · credential: Credential reference")
     expect(routinePresetSummary({ file: { name: "invoice.pdf", content: "private-content" } })).toBe("Inputs: file: File (invoice.pdf)")
