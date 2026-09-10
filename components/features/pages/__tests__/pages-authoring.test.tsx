@@ -120,6 +120,10 @@ describe("the /pages shell offers the third door", () => {
   beforeEach(() => {
     cleanup()
     push.mockReset()
+    // The editor's mode and section live in the address now, so a test that
+    // left `?mode=edit` there would hand it to the next one. (resets the
+    // address between tests.)
+    window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -156,8 +160,10 @@ describe("the /pages shell offers the third door", () => {
     expect(screen.getByRole("button", { name: /view page/i })).toBeTruthy()
     // The list is still beside the editor — replacing it with the sections
     // was the review's U05, and the scroll-and-filters promise is the one
-    // that breaks.
-    expect(screen.getByText("Flotila .201")).toBeTruthy()
+    // that breaks. The name appears twice on purpose: once in the rail, once
+    // in the editor's own header, which is what keeps "which Page am I
+    // editing" on screen at every width.
+    expect(screen.getAllByText("Flotila .201").length).toBeGreaterThanOrEqual(2)
   })
 
   it("Share opens the same editor already on Access", async () => {

@@ -37,6 +37,12 @@ export interface EditorNavigation extends EditorRoute {
   openPage: (slug: string | null) => void
   /** Enter or leave the editor on the current page. */
   setMode: (mode: EditorMode) => void
+  /**
+   * Enter the editor directly on a section. One call, because two — a
+   * `setMode` followed by a `setSection` — both read the route as it was at
+   * the start of the event and the second silently overwrites the first.
+   */
+  openEditor: (section?: EditorSection) => void
   setSection: (section: EditorSection) => void
   setPane: (pane: EditorPane) => void
   /**
@@ -157,6 +163,11 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     (mode: EditorMode) => navigate({ ...routeRef.current, mode, pane: "section" }),
     [navigate],
   )
+  const openEditor = React.useCallback(
+    (section?: EditorSection) =>
+      navigate({ ...routeRef.current, mode: "edit", section: section ?? routeRef.current.section, pane: "section" }),
+    [navigate],
+  )
   const setSection = React.useCallback(
     (section: EditorSection) => navigate({ ...routeRef.current, section, pane: "section" }),
     [navigate],
@@ -169,5 +180,5 @@ export function useEditorRoute(initialSlug: string | null): EditorNavigation {
     [navigate],
   )
 
-  return { ...route, dirty, pending, openPage, setMode, setSection, setPane, setDirty }
+  return { ...route, dirty, pending, openPage, setMode, openEditor, setSection, setPane, setDirty }
 }

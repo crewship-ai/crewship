@@ -167,10 +167,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Share2}
-                onClick={() => {
-                  nav.setMode("edit")
-                  nav.setSection("access")
-                }}
+                onClick={() => nav.openEditor("access")}
                 disabled={detail.page == null}
                 title="Who reaches this Page, who may send it data, and its public links"
               >
@@ -180,7 +177,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Pencil}
-                onClick={() => nav.setMode("edit")}
+                onClick={() => nav.openEditor()}
                 disabled={detail.page == null}
                 title="Edit this Page's content, data, access and history"
               >

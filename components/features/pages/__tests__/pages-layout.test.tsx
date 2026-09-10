@@ -93,6 +93,10 @@ describe("PagesLayout", () => {
   beforeEach(() => {
     cleanup()
     push.mockReset()
+    // The editor's mode and section live in the address now, so a test that
+    // left `?mode=edit` there would hand it to the next one. (resets the
+    // address between tests.)
+    window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
 
