@@ -13,6 +13,9 @@ try {
   const limit = limitText === 'max' ? null : Number(limitText)
   const [quotaText, periodText] = (await read('/sys/fs/cgroup/cpu.max')).split(/\s+/)
   const cores = quotaText === 'max' ? null : Number(quotaText)/Number(periodText)
+  if (limit !== null && (!Number.isFinite(limit) || limit <= 0)) throw new Error('invalid cgroup memory limit')
+  if (!Number.isFinite(Number(periodText)) || Number(periodText) <= 0 ||
+      (cores !== null && (!Number.isFinite(cores) || cores <= 0))) throw new Error('invalid cgroup CPU limit')
   const before = await cpu()
   const start = process.hrtime.bigint()
   const samples = []

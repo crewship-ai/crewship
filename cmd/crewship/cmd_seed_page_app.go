@@ -19,7 +19,9 @@ import (
 // Only the reviewed built-in source is automatically published. A reseed never
 // replaces a user draft, advances an existing publication, or undoes withdrawal.
 func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// The worker may use 120s (130s including host cleanup). Leave time for
+	// setup, polling, candidate checks and publication; parent cancellation wins.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	client = client.WithContext(ctx)
 	base := "/api/v1/pages/" + url.PathEscape(page.Slug)
