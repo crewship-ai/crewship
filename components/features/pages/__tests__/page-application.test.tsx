@@ -72,3 +72,16 @@ it("does not revive a withdrawn cached artifact when a different version is publ
  rerender(<PageApplicationView {...props} page={{ ...props.page, has_application: true, publication_version: 2 }} />)
  expect(await screen.findByText("Release 2")).toBeTruthy()
 })
+
+it("shows panels on mismatched versions and opens only after metadata agrees", () => {
+ const page = { ...props.page, has_application: true, publication_version: 2 }
+ const { rerender } = render(<PageApplicationView {...props} page={page} />)
+ expect(screen.getByText("Panel view")).toBeTruthy()
+ expect(screen.getByRole("status")).toHaveTextContent("not synchronized")
+ expect(screen.queryByText("Loading application…")).toBeNull()
+ expect(screen.queryByTestId("application")).toBeNull()
+ state.query.data = release(2)
+ rerender(<PageApplicationView {...props} page={page} />)
+ expect(screen.getByText("Release 2")).toBeTruthy()
+ expect(screen.queryByText("Panel view")).toBeNull()
+})
