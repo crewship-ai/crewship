@@ -22,6 +22,61 @@
     "loadingCount": 0
   },
   "ci": {
+    "source": 34488138789,
+    "source_sha": "39146cdb5561dad82681faf3a9c5af26e83cb40c",
+    "ui": 34488234440,
+    "ui_sha": "832e69fc991d71afdf5fa9e31c41b7a680c8c8b7",
+    "state": "in_progress",
+    "scope": "fresh source PR CI and cumulative UI dispatch after main 6a9857f5 integration"
+  },
+  "tests": {
+    "pages": "passed",
+    "pagebuild": "passed",
+    "backup": "passed",
+    "vet": "passed",
+    "api_unicode_save": "422; no revision advanced",
+    "ui_files": 46,
+    "ui_tests": 581,
+    "static_build": "passed after pnpm exec prisma generate",
+    "local_full_go": "API default timeout; remaining duplicate run stopped after current CI Go success",
+    "local_api_retry": "stopped after current CI Go success",
+    "local_full_vet": "passed",
+    "ui_lint": "passed; zero errors",
+    "previous_ci_go_jobs": "source and cumulative UI passed"
+  },
+  "review": {
+    "state": "rate_limited",
+    "requested_at": "2026-09-10T11:12:28Z",
+    "rejected_at": "2026-09-10T11:12:34Z",
+    "retry_notice_minutes": 59,
+    "merged": false,
+    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded"
+  },
+  "safari_decision": "confirmed_panel_only_v1_2026-09-10",
+  "integration": {
+    "main_sha": "6a9857f5da4558fca082223eafba750de0d76b48",
+    "state": "resolved_in_review_stack",
+    "server_sha": "4122eb356d3497f33fb6b6c510daf4ec3e97988b",
+    "ui_sha": "832e69fc991d71afdf5fa9e31c41b7a680c8c8b7",
+    "conflicts": [],
+    "openapi_operations": 654,
+    "mcp_tools": 10
+  },
+  "storage_review": {
+    "reviewed_sha": "4563f5db",
+    "fix_sha": "79af8b5f",
+    "findings": [
+      "F1",
+      "F2",
+      "F3",
+      "F4"
+    ],
+    "focused_tests": "passed",
+    "red_first_F1_F2": "confirmed",
+    "F3_mutation": "killed",
+    "readme_links": "all local targets exist"
+  },
+  "previous_ci": {
     "source": 34483084330,
     "ui": 34483523993,
     "state": "success",
@@ -42,53 +97,5 @@
       "Binary Build"
     ],
     "source_state": "success"
-  },
-  "tests": {
-    "pages": "passed",
-    "pagebuild": "passed",
-    "backup": "passed",
-    "vet": "passed",
-    "api_unicode_save": "422; no revision advanced",
-    "ui_files": 46,
-    "ui_tests": 581,
-    "static_build": "passed after pnpm exec prisma generate",
-    "local_full_go": "API default timeout; remaining duplicate run stopped after current CI Go success",
-    "local_api_retry": "stopped after current CI Go success",
-    "local_full_vet": "passed",
-    "ui_lint": "passed; zero errors",
-    "current_ci_go_jobs": "source and cumulative UI passed"
-  },
-  "review": {
-    "state": "rate_limited",
-    "requested_at": "2026-09-10T11:12:28Z",
-    "rejected_at": "2026-09-10T11:12:34Z",
-    "retry_notice_minutes": 59,
-    "merged": false,
-    "manual_fallback": "permitted by CONTRIBUTING.md; layer review remains to be completed and recorded"
-  },
-  "safari_decision": "confirmed_panel_only_v1_2026-09-10",
-  "integration": {
-    "main_sha": "6ce5afd4",
-    "state": "resolved_in_review_stack",
-    "server_sha": "d32f8e43",
-    "ui_sha": "c68722da3d8c5d45ef11f19609614b5b0373e5ae",
-    "conflicts": [],
-    "openapi_operations": 654,
-    "mcp_tools": 10,
-    "superseded_by_main": "6a9857f5da4558fca082223eafba750de0d76b48"
-  },
-  "storage_review": {
-    "reviewed_sha": "4563f5db",
-    "fix_sha": "79af8b5f",
-    "findings": [
-      "F1",
-      "F2",
-      "F3",
-      "F4"
-    ],
-    "focused_tests": "passed",
-    "red_first_F1_F2": "confirmed",
-    "F3_mutation": "killed",
-    "readme_links": "all local targets exist"
   }
 }

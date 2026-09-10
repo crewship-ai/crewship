@@ -42,4 +42,9 @@ Go jobs on the exact source/UI heads above. All configured race jobs passed in t
 
 Before merging #2475, main advanced to `6a9857f5` via #2482 (92 files).
 The two successful runs above do not cover that newer base. No PR was merged.
-The newer main is being propagated through the stack and fresh CI is required.
+The newer main is now integrated through the stack without additional conflicts.
+Current code heads: source `39146cdb`, server `4122eb35`, CLI `4740b70b`, UI `832e69fc`.
+Fresh [source PR CI](https://github.com/crewship-ai/crewship/actions/runs/34488138789)
+and [cumulative UI CI](https://github.com/crewship-ai/crewship/actions/runs/34488234440)
+are running. Neither is recorded as passed yet. The older green runs above remain
+valid historical evidence, not a merge gate for these new heads.
