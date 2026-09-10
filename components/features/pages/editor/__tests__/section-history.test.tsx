@@ -93,15 +93,17 @@ const state = vi.hoisted(() => ({
     },
     withdraw: { mutate: vi.fn(), isPending: false, isError: false, isSuccess: false, error: null as Error | null },
   },
-  publish: { mutate: vi.fn(), isPending: false, isError: false, isSuccess: false, error: null as Error | null, data: null },
 }))
 
 vi.mock("@/hooks/use-page-project-history", () => ({ usePageProjectHistory: () => state.history }))
 vi.mock("@/hooks/use-page-publications", () => ({ usePagePublications: () => state.publications }))
-vi.mock("@/hooks/use-page-application", () => ({ usePageApplication: () => ({ publish: state.publish }) }))
 
 import { EditorHistorySection } from "@/components/features/pages/editor/section-history"
-import { NO_PAGE_CAPABILITIES, type PageCapabilities } from "@/lib/pages/editor-contract"
+import {
+  NO_PAGE_CAPABILITIES,
+  type PageCapabilities,
+  type ReviewSnapshotWire,
+} from "@/lib/pages/editor-contract"
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -113,6 +115,49 @@ const VERSIONS = {
     { seq: 3, created_at: "2026-08-02T08:00:00Z", author: "agent/watcher", author_label: "watcher", name: "Flotila", panel_count: 1, current: false },
   ],
 }
+
+/**
+ * `GET .../project/review?publication=N` — what the server says publishing
+ * that retained version would be fenced on. The digests here are the ones the
+ * request must carry back: a test that let the component invent them would
+ * pass while the product published against a base nobody read.
+ */
+function reviewSnapshot(overrides: Partial<ReviewSnapshotWire> = {}): ReviewSnapshotWire {
+  return {
+    issued_at: "2026-09-10T09:00:00Z",
+    candidate: null,
+    baseline: {
+      publication_version: 5,
+      published: true,
+      definition_digest: "sha256:live-definition",
+      source_revision: 6,
+      git_commit: "def1234567",
+      source_available: true,
+      source_unavailable_reason: null,
+    },
+    routines: [
+      { routine: "nightly-close", published_digest: "r1", current_digest: "r1", state: "unchanged" },
+    ],
+    capabilities: { may_edit_spec: true, may_publish: true },
+    blockers: [],
+    initial_publication: false,
+    ...overrides,
+  }
+}
+
+const RECEIPT = {
+  version: 6,
+  build_id: "b2",
+  source_revision: 6,
+  artifact_digest: "sha256:2",
+  git_commit: "def1234567",
+  created_at: "2026-09-10T09:01:00Z",
+}
+
+/** Set per test, before `mount()`. Reset by `resetFixtures`. */
+let reviewResponse: Response | null = null
+let publishResponse: Response | null = null
+let snapshotBody: ReviewSnapshotWire = reviewSnapshot()
 
 const WITH_APPLICATION: PageCapabilities = {
   ...NO_PAGE_CAPABILITIES,
@@ -149,14 +194,33 @@ function section(capabilities: Partial<PageCapabilities>) {
   )
 }
 
+interface Sent {
+  method: string
+  url: string
+  body: Record<string, unknown> | null
+}
+
 function mount(capabilities: Partial<PageCapabilities> = {}) {
+  const sent: Sent[] = []
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) =>
-      String(input).includes("/versions")
-        ? jsonResponse(200, VERSIONS)
-        : jsonResponse(404, { error: `unrouted ${String(input)}` }),
-    ),
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? "GET").toUpperCase()
+      sent.push({
+        method,
+        url,
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      })
+      if (url.includes("/versions")) return jsonResponse(200, VERSIONS)
+      // The publish and its fence go through the real request path on
+      // purpose: the body is the thing under test, and a mocked mutation
+      // would assert the arguments this file chose rather than the ones the
+      // server would receive.
+      if (url.includes("/project/review")) return reviewResponse ?? jsonResponse(200, snapshotBody)
+      if (url.includes("/project/publish")) return publishResponse ?? jsonResponse(200, RECEIPT)
+      return jsonResponse(404, { error: `unrouted ${method} ${url}` })
+    }),
   )
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const view = render(
@@ -170,7 +234,21 @@ function mount(capabilities: Partial<PageCapabilities> = {}) {
    */
   const again = () =>
     view.rerender(<QueryClientProvider client={qc}>{section(capabilities)}</QueryClientProvider>)
-  return { again }
+  return { again, sent }
+}
+
+/** The fenced publish, once the request has actually left. */
+async function publishRequest(sent: Sent[]): Promise<Record<string, unknown>> {
+  await waitFor(() => expect(sent.some((r) => r.url.includes("/project/publish"))).toBe(true))
+  return sent.find((r) => r.url.includes("/project/publish"))!.body!
+}
+
+/** Walk the inspect pane up to a publish that is offered. */
+async function readyToPublish(version: number): Promise<HTMLButtonElement> {
+  fireEvent.click(screen.getByRole("button", { name: `Inspect version ${version}` }))
+  await waitFor(() => expect(document.querySelector("[data-slot='publication-fence']")).toBeTruthy())
+  fireEvent.click(screen.getByLabelText(`I reviewed version ${version} and trust its code.`))
+  return screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement
 }
 
 function sectionText(): string {
@@ -229,7 +307,9 @@ function resetFixtures() {
   }
   state.publications.source.isError = false
   state.publications.withdraw.mutate.mockReset()
-  state.publish.mutate.mockReset()
+  reviewResponse = null
+  publishResponse = null
+  snapshotBody = reviewSnapshot()
 }
 
 beforeEach(() => {
@@ -268,11 +348,8 @@ describe("the three histories", () => {
     expect(source).toContain("The live publication does not change")
 
     // 3. A new publication, going forward.
-    fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
-    fireEvent.click(screen.getByLabelText("I reviewed version 2 and trust its code."))
-    const publication = await confirmationFor(() =>
-      fireEvent.click(screen.getByRole("button", { name: "Publish this version" })),
-    )
+    const publishButton = await readyToPublish(2)
+    const publication = await confirmationFor(() => fireEvent.click(publishButton))
     expect(publication).toContain("makes a new live publication")
     expect(publication).toContain("counter moves forward")
 
@@ -285,7 +362,7 @@ describe("the three histories", () => {
   })
 
   it("restores a source revision without publishing anything", async () => {
-    mount()
+    const { sent } = mount()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='source-revision']")).toHaveLength(2),
     )
@@ -298,17 +375,20 @@ describe("the three histories", () => {
     // dialog this was lifted out of did it.
     expect(state.history.restore.mutate).toHaveBeenCalledWith({ revision: 6, expectedRevision: 7 })
     // And the publication endpoint is not touched: a draft is not a release.
-    expect(state.publish.mutate).not.toHaveBeenCalled()
+    expect(sent.some((r) => r.url.includes("/project/publish"))).toBe(false)
     expect(state.publications.withdraw.mutate).not.toHaveBeenCalled()
   })
 
-  it("fences a publication on the version the reviewer was looking at", async () => {
-    mount()
+  it("fences a publication on every base the reviewer was shown", async () => {
+    const { sent } = mount()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
     )
 
     fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
+    await waitFor(() =>
+      expect(document.querySelector("[data-slot='publication-fence']")).toBeTruthy(),
+    )
     const publish = screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement
     // The per-version review gate survives the move out of the dialog.
     expect(publish.disabled).toBe(true)
@@ -318,10 +398,19 @@ describe("the three histories", () => {
     const dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Publish this version" }))
 
-    expect(state.publish.mutate).toHaveBeenCalledWith({
+    // The fence was asked about THIS version, not about the draft.
+    const asked = sent.find((r) => r.url.includes("/project/review"))!
+    expect(asked.url).toContain("publication=2")
+
+    // Every value in the body came off the snapshot that was on screen. The
+    // two digests are what the server compares inside the publishing
+    // transaction; the three older fences are still here beside them.
+    expect(await publishRequest(sent)).toEqual({
       rollback_version: 2,
       expected_publication: 5,
       reviewed_code: true,
+      expected_definition_digest: "sha256:live-definition",
+      expected_routine_digests: { "nightly-close": "r1" },
     })
     expect(state.history.restore.mutate).not.toHaveBeenCalled()
   })
@@ -494,14 +583,12 @@ describe("inspecting a retained publication", () => {
 
 describe("the publish gate", () => {
   it("throws the review away when the live publication moves under it", async () => {
-    const { again } = mount()
+    const { again, sent } = mount()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
-    fireEvent.click(screen.getByLabelText("I reviewed version 2 and trust its code."))
-    const publish = screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement
+    const publish = await readyToPublish(2)
     expect(publish.disabled).toBe(false)
 
     // Somebody else published while this reviewer was reading. A review of
@@ -512,7 +599,7 @@ describe("the publish gate", () => {
     expect(
       (screen.getByLabelText("I reviewed version 2 and trust its code.") as HTMLInputElement).checked,
     ).toBe(false)
-    expect(state.publish.mutate).not.toHaveBeenCalled()
+    expect(sent.some((r) => r.url.includes("/project/publish"))).toBe(false)
   })
 
   it("refuses a version whose archived source is not the source of that version", async () => {
@@ -525,12 +612,8 @@ describe("the publish gate", () => {
       expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
-    fireEvent.click(screen.getByLabelText("I reviewed version 2 and trust its code."))
     // Ticked, and still shut: what was read is not what would be published.
-    expect(
-      (screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    expect((await readyToPublish(2)).disabled).toBe(true)
   })
 
   it("refuses to republish the version that is already live", async () => {
@@ -552,19 +635,15 @@ describe("the publish gate", () => {
     )
 
     expect(sectionText()).toContain("live now")
-    fireEvent.click(screen.getByRole("button", { name: "Inspect version 5" }))
-    fireEvent.click(screen.getByLabelText("I reviewed version 5 and trust its code."))
     // Publishing what is already live would burn a version number to change
     // nothing.
-    expect(
-      (screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement).disabled,
-    ).toBe(true)
+    expect((await readyToPublish(5)).disabled).toBe(true)
   })
 })
 
 describe("withdrawing the application", () => {
   it("requires a fresh confirmation when the live publication moves, and fences the call on it", async () => {
-    const { again } = mount()
+    const { again, sent } = mount()
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
     )
@@ -582,7 +661,7 @@ describe("withdrawing the application", () => {
     fireEvent.click(screen.getByLabelText("Stop this application for all viewers"))
     fireEvent.click(withdraw)
     expect(state.publications.withdraw.mutate).toHaveBeenCalledWith(6)
-    expect(state.publish.mutate).not.toHaveBeenCalled()
+    expect(sent.some((r) => r.url.includes("/project/publish"))).toBe(false)
   })
 })
 
@@ -614,5 +693,144 @@ describe("a reader who may not publish", () => {
     expect(screen.queryByRole("button", { name: "Withdraw application" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
     expect(screen.queryByRole("button", { name: "Publish this version" })).toBeNull()
+  })
+})
+
+// ── 5. The publication fence ───────────────────────────────────────────────
+//
+// The server compares `expected_definition_digest` and
+// `expected_routine_digests` inside the publishing transaction. Both come off
+// `GET .../project/review?publication=N` — the snapshot the human was shown —
+// because a value re-read at click time is a value nobody reviewed. What is
+// pinned here is that the screen states what is being attested to *before*
+// the click, and that a base which moved comes back as a sentence naming what
+// moved rather than as a failed request.
+
+describe("what the reviewer is attesting to", () => {
+  it("names a routine that changed, refuses to let it pass on the code tick alone, and still fences on it", async () => {
+    snapshotBody = reviewSnapshot({
+      routines: [
+        { routine: "nightly-close", published_digest: "r1", current_digest: "r2", state: "changed" },
+        { routine: "sweep", published_digest: "s1", current_digest: "", state: "unknown" },
+      ],
+    })
+    const { sent } = mount()
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
+    )
+
+    const publish = await readyToPublish(2)
+
+    // Named, and named as the thing it is: old code bound to a routine
+    // nobody approved for this version.
+    const changed = document.querySelector("[data-slot='fence-routine'][data-state='changed']")!
+    expect(changed.textContent).toContain("nightly-close")
+    expect(changed.textContent).toContain("changed since this version was published")
+    expect(sectionText()).toContain("a routine nobody approved for this version")
+
+    // A row with no current digest is not covered by the check, and says so
+    // rather than sitting in the list looking checked.
+    expect(sectionText()).toContain("sweep")
+    expect(sectionText()).toContain("not covered by this check")
+
+    // The code tick alone is not enough: it attests to the code, and the
+    // routine is not in the code.
+    expect(publish.disabled).toBe(true)
+    fireEvent.click(
+      screen.getByLabelText("I understand version 2 will run against the current nightly-close."),
+    )
+    expect(publish.disabled).toBe(false)
+
+    fireEvent.click(publish)
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish this version" }))
+
+    // The changed routine is fenced on its CURRENT digest — that is the
+    // server's own key set, and the uncovered one is absent rather than sent
+    // as an empty string nobody reviewed.
+    const body = await publishRequest(sent)
+    expect(body.expected_routine_digests).toEqual({ "nightly-close": "r2" })
+    expect(body.expected_definition_digest).toBe("sha256:live-definition")
+  })
+
+  it("turns a blocker into a sentence and shuts the control", async () => {
+    snapshotBody = reviewSnapshot({
+      blockers: [
+        { code: "build_missing", message: "The build recorded for version 2 is no longer stored." },
+      ],
+    })
+    mount()
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
+    )
+
+    const publish = await readyToPublish(2)
+    // Not a grey button with no explanation: the server's own sentence, and
+    // the machine-readable code beside it.
+    const blocker = document.querySelector("[data-slot='publish-blocker']")!
+    expect(blocker.getAttribute("data-code")).toBe("build_missing")
+    expect(blocker.textContent).toContain("no longer stored")
+    // Ticked, acknowledged, and still shut.
+    expect(publish.disabled).toBe(true)
+  })
+
+  it("will not publish at all when the fence itself cannot be read", async () => {
+    reviewResponse = jsonResponse(503, { error: "the review store is busy" })
+    const { sent } = mount()
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect version 2" }))
+    await waitFor(() => expect(screen.getByText(/the review store is busy/)).toBeTruthy())
+    fireEvent.click(screen.getByLabelText("I reviewed version 2 and trust its code."))
+
+    // No snapshot, no digests, no publish — a guessed fence is worse than
+    // not publishing.
+    expect(
+      (screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    expect(sent.some((r) => r.url.includes("/project/publish"))).toBe(false)
+  })
+})
+
+describe("when the fence trips", () => {
+  it("names the routines the server refused on, and drops the review tick", async () => {
+    publishResponse = jsonResponse(409, {
+      error: "A base you reviewed changed before this publication was applied.",
+      conflict: "routines",
+      routines: ["nightly-close"],
+    })
+    mount()
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
+    )
+
+    const publish = await readyToPublish(2)
+    fireEvent.click(publish)
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish this version" }))
+
+    const conflict = await waitFor(() => {
+      const node = document.querySelector("[data-slot='publish-conflict']")
+      expect(node).toBeTruthy()
+      return node!
+    })
+    // Which base moved, and which routines — a reviewer cannot parse that
+    // back out of "publication failed".
+    expect(conflict.getAttribute("data-conflict")).toBe("routines")
+    expect(conflict.textContent).toContain("nightly-close")
+    expect(conflict.textContent).toContain("Read them again before you publish")
+
+    // The review went with the base it was taken against.
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("I reviewed version 2 and trust its code.") as HTMLInputElement)
+          .checked,
+      ).toBe(false),
+    )
+    expect(
+      (screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement).disabled,
+    ).toBe(true)
   })
 })

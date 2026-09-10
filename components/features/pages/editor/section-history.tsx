@@ -34,6 +34,7 @@
  */
 
 import * as React from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import {
   AlertDialog,
@@ -52,9 +53,16 @@ import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/layout/empty-state"
 import { AlertTriangle, FileCode2, History, Rocket } from "lucide-react"
 
-import { usePageApplication } from "@/hooks/use-page-application"
+import { apiFetch } from "@/lib/api-fetch"
+import type { PagePublication } from "@/hooks/use-page-application"
 import { usePageProjectHistory } from "@/hooks/use-page-project-history"
 import { usePagePublications, type PublicationReceipt } from "@/hooks/use-page-publications"
+import { PublishFenceError, publishConflictOf } from "@/hooks/use-page-review"
+import type {
+  FencedPublishRequest,
+  PublishConflictWire,
+  ReviewSnapshotWire,
+} from "@/lib/pages/editor-contract"
 import { publicationReceiptMessage } from "@/lib/pages/publication-receipt"
 import { formatDateTime } from "@/lib/time"
 
@@ -251,6 +259,109 @@ function SourceRevisionsCard({ workspaceId, slug }: { workspaceId: string; slug:
   )
 }
 
+// ── The publication fence ───────────────────────────────────────────────────
+
+/**
+ * What publishing THIS retained version would be fenced on.
+ *
+ * `usePageReview` asks the same endpoint about the *draft candidate* and has
+ * no publication parameter; `?publication=N` is the rollback arm of the same
+ * question. The answer carries the digests the server will compare inside the
+ * publishing transaction, so the values sent with the publish are the values
+ * the human was shown — a fence re-read at click time is a fence nobody
+ * reviewed (V04), which is the entire reason the snapshot exists.
+ */
+function usePublicationReview(workspaceId: string, slug: string, version: number | undefined) {
+  return useQuery<ReviewSnapshotWire, Error>({
+    // Deliberately under `page-review`: an invalidation of that prefix after
+    // `page.updated` must reach this read too, because a definition that
+    // moved invalidates exactly this fence.
+    queryKey: ["page-review", workspaceId, slug, "publication", version ?? null],
+    enabled: version !== undefined,
+    retry: false,
+    gcTime: 0,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        publication: String(version),
+        workspace_id: workspaceId,
+      })
+      const response = await apiFetch(
+        `/api/v1/pages/${encodeURIComponent(slug)}/project/review?${params}`,
+        { signal },
+      )
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(
+          body?.error ?? "Could not read what publishing this version would be fenced on.",
+        )
+      }
+      return (await response.json()) as ReviewSnapshotWire
+    },
+  })
+}
+
+/**
+ * The 409 body, typed.
+ *
+ * `hooks/use-page-review.ts` has the same shaping and does not export it, and
+ * `usePageApplication().publish` flattens a 409 into a plain `Error` — which
+ * throws away the `conflict` kind and the routine names this screen has to
+ * put on the page. So the request is made here, and it raises the SHARED
+ * `PublishFenceError` so the shared `publishConflictOf` narrows it. If that
+ * hook ever throws the typed error itself, this whole function and the
+ * mutation under it should collapse into it.
+ */
+function conflictFromBody(body: unknown): PublishConflictWire {
+  const raw = (body ?? {}) as Partial<PublishConflictWire>
+  const kinds = ["definition", "routines", "publication", "draft"] as const
+  const conflict = kinds.find((kind) => kind === raw.conflict)
+  const routines = Array.isArray(raw.routines)
+    ? raw.routines.filter((r): r is string => typeof r === "string")
+    : undefined
+  return {
+    error:
+      typeof raw.error === "string" && raw.error !== ""
+        ? raw.error
+        : "A base you reviewed changed before this publication was applied.",
+    ...(conflict ? { conflict } : {}),
+    ...(routines && routines.length > 0 ? { routines } : {}),
+  }
+}
+
+/** POST the fenced publish, keeping the 409's shape all the way to the screen. */
+function useRetainedVersionPublish(workspaceId: string, slug: string, onFenceTripped: () => void) {
+  const client = useQueryClient()
+  return useMutation<PagePublication, Error, FencedPublishRequest>({
+    mutationFn: async (request) => {
+      const params = new URLSearchParams({ workspace_id: workspaceId })
+      const response = await apiFetch(
+        `/api/v1/pages/${encodeURIComponent(slug)}/project/publish?${params}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      )
+      const body = await response.json().catch(() => null)
+      if (response.status === 409) throw new PublishFenceError(conflictFromBody(body))
+      if (!response.ok) {
+        throw new Error((body as { error?: string } | null)?.error ?? "Publication failed.")
+      }
+      return body as PagePublication
+    },
+    onError: (error) => {
+      // A 409 means a base moved under the review. The tick goes with it:
+      // what was reviewed is no longer what would be published.
+      if (publishConflictOf(error)) onFenceTripped()
+    },
+    onSettled: () => {
+      for (const key of ["page-application", "page-publications", "pages"]) {
+        void client.invalidateQueries({ queryKey: [key, workspaceId] })
+      }
+    },
+  })
+}
+
 // ── Application publications ────────────────────────────────────────────────
 
 /**
@@ -286,11 +397,52 @@ function PublicationsCard({
   const [path, setPath] = React.useState("")
   const [reviewed, setReviewed] = React.useState(false)
   const [reviewedHead, setReviewedHead] = React.useState<number | null>(null)
+  /** The version whose changed routines the reviewer has acknowledged. */
+  const [acknowledgedRoutines, setAcknowledgedRoutines] = React.useState<number | null>(null)
   const [confirmedWithdrawal, setConfirmedWithdrawal] = React.useState<number | null>(null)
   const [publishTarget, setPublishTarget] = React.useState<PublicationReceipt | null>(null)
 
   const { query, source, withdraw } = usePagePublications(workspaceId, slug, selected?.source_revision)
-  const { publish } = usePageApplication(workspaceId, slug)
+  const review = usePublicationReview(workspaceId, slug, selected?.version)
+  const publish = useRetainedVersionPublish(workspaceId, slug, () => {
+    setReviewed(false)
+    setAcknowledgedRoutines(null)
+  })
+
+  const snapshot = review.data
+  const blockers = snapshot?.blockers ?? []
+  const routines = snapshot?.routines ?? []
+  /**
+   * The case this whole panel exists for: restoring old code binds it to the
+   * routine as it is NOW, which is not the routine anybody approved for that
+   * version.
+   */
+  const changedRoutines = routines.filter((r) => r.state === "changed")
+  /** No current digest means the publish cannot fence on it. Say so; never imply it is covered. */
+  const uncoveredRoutines = routines.filter(
+    (r) => typeof r.current_digest !== "string" || r.current_digest === "",
+  )
+  /**
+   * The fence, taken off the snapshot verbatim. The routine key set is the
+   * server's own — deriving it from the archived spec here would be a second
+   * copy of a decision the server already makes for the rollback path.
+   */
+  const fence: Pick<
+    FencedPublishRequest,
+    "expected_definition_digest" | "expected_routine_digests"
+  > | null = snapshot
+    ? {
+        expected_definition_digest: snapshot.baseline.definition_digest,
+        expected_routine_digests: Object.fromEntries(
+          routines
+            .filter((r): r is typeof r & { current_digest: string } =>
+              typeof r.current_digest === "string" && r.current_digest !== "",
+            )
+            .map((r) => [r.routine, r.current_digest]),
+        ),
+      }
+    : null
+  const conflict = publishConflictOf(publish.error)
 
   const state = query.data?.pages[0]
   const receipts = query.data?.pages.flatMap((page) => page.publications) ?? []
@@ -331,8 +483,21 @@ function PublicationsCard({
         {listFailed && (
           <Refusal>{errorMessage(query.error, "Could not load application history.")}</Refusal>
         )}
-        {publish.isError && (
-          <Refusal>{errorMessage(publish.error, "Publication failed.")}</Refusal>
+        {conflict ? (
+          <Refusal>
+            <span data-slot="publish-conflict" data-conflict={conflict.conflict ?? "unknown"}>
+              {conflict.error}
+              {conflict.conflict === "routines" && conflict.routines?.length
+                ? ` The routines that moved: ${conflict.routines.join(", ")}. Read them again before you publish.`
+                : conflict.conflict === "definition"
+                  ? " The Page's definition moved after you reviewed this version."
+                  : conflict.conflict === "publication"
+                    ? " Somebody else published while you were reading this."
+                    : ""}
+            </span>
+          </Refusal>
+        ) : (
+          publish.isError && <Refusal>{errorMessage(publish.error, "Publication failed.")}</Refusal>
         )}
         {withdraw.isError && (
           <Refusal>{errorMessage(withdraw.error, "Could not withdraw the application.")}</Refusal>
@@ -501,6 +666,91 @@ function PublicationsCard({
 
                 {canPublish && state && (
                   <>
+                    {/* What the tick below actually attests to. Ticking "I
+                        reviewed this code" while the routines it calls have
+                        moved is a review of half the thing that will run. */}
+                    {review.isPending && (
+                      <p role="status" className="type-page-meta text-muted-foreground">
+                        Reading what publishing version {selected.version} would be fenced on…
+                      </p>
+                    )}
+                    {review.isError && (
+                      <Refusal>
+                        {errorMessage(
+                          review.error,
+                          "Could not read what publishing this version would be fenced on.",
+                        )}{" "}
+                        Publishing needs those values: the server compares them inside the
+                        publishing transaction, and this screen will not send a fence nobody
+                        reviewed.
+                      </Refusal>
+                    )}
+
+                    {blockers.map((blocker) => (
+                      <Refusal key={blocker.code}>
+                        <span data-slot="publish-blocker" data-code={blocker.code}>
+                          {blocker.message}
+                        </span>
+                      </Refusal>
+                    ))}
+
+                    {snapshot && (
+                      <div data-slot="publication-fence" className="flex flex-col gap-1.5">
+                        <p className="type-page-meta text-muted-foreground">
+                          Publishing version {selected.version} is fenced on this Page&rsquo;s
+                          current definition and on{" "}
+                          {Object.keys(fence?.expected_routine_digests ?? {}).length} routine
+                          {Object.keys(fence?.expected_routine_digests ?? {}).length === 1
+                            ? ""
+                            : "s"}
+                          . If any of them moves before the server applies this, the publication
+                          is refused rather than applied to something you did not read.
+                        </p>
+
+                        {routines.length > 0 && (
+                          <ul className="flex flex-col gap-0.5">
+                            {routines.map((routine) => (
+                              <li
+                                key={routine.routine}
+                                data-slot="fence-routine"
+                                data-state={routine.state}
+                                className="type-page-meta text-muted-foreground-soft"
+                              >
+                                <span className="font-mono text-foreground/85">
+                                  {routine.routine}
+                                </span>
+                                {routine.state === "changed"
+                                  ? " — changed since this version was published"
+                                  : routine.state === "unknown"
+                                    ? " — its current definition could not be read"
+                                    : " — unchanged since this version was published"}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+
+                        {changedRoutines.length > 0 && (
+                          <Refusal>
+                            Version {selected.version} would run against the CURRENT definition of{" "}
+                            {changedRoutines.map((r) => r.routine).join(", ")} — a routine nobody
+                            approved for this version. Old code bound to a new routine is the
+                            failure this check exists for. Read{" "}
+                            {changedRoutines.length === 1 ? "it" : "them"} before you publish.
+                          </Refusal>
+                        )}
+
+                        {uncoveredRoutines.length > 0 && (
+                          <ControlRefusal>
+                            {uncoveredRoutines.map((r) => r.routine).join(", ")}{" "}
+                            {uncoveredRoutines.length === 1 ? "is" : "are"} not covered by this
+                            check: the server could not read a current digest, so the publication
+                            cannot be fenced on{" "}
+                            {uncoveredRoutines.length === 1 ? "it" : "them"}.
+                          </ControlRefusal>
+                        )}
+                      </div>
+                    )}
+
                     <label className="type-page-meta flex items-center gap-2 text-muted-foreground">
                       <input
                         type="checkbox"
@@ -513,6 +763,25 @@ function PublicationsCard({
                       />
                       I reviewed version {selected.version} and trust its code.
                     </label>
+
+                    {/* A changed routine does not pass silently. It is a
+                        second, separate thing to attest to, because it is not
+                        in the code the tick above is about. */}
+                    {changedRoutines.length > 0 && (
+                      <label className="type-page-meta flex items-center gap-2 text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={acknowledgedRoutines === selected.version}
+                          onChange={(event) =>
+                            setAcknowledgedRoutines(event.target.checked ? selected.version : null)
+                          }
+                        />
+                        I understand version {selected.version} will run against the current{" "}
+                        {changedRoutines.map((r) => r.routine).join(", ")}.
+                      </label>
+                    )}
+
                     <div>
                       <Button
                         size="sm"
@@ -523,7 +792,13 @@ function PublicationsCard({
                           busy ||
                           listFailed ||
                           source.data.git_commit !== selected.git_commit ||
-                          (state.published && state.publication_version === selected.version)
+                          (state.published && state.publication_version === selected.version) ||
+                          // No snapshot, no fence, no publish. The two digests
+                          // are required by the server and by the type, and a
+                          // guess at either is worse than not publishing.
+                          fence === null ||
+                          blockers.length > 0 ||
+                          (changedRoutines.length > 0 && acknowledgedRoutines !== selected.version)
                         }
                         onClick={() => setPublishTarget(selected)}
                       >
@@ -562,11 +837,16 @@ function PublicationsCard({
               className="h-7 text-xs"
               disabled={publish.isPending}
               onClick={() => {
-                if (!publishTarget || !state) return
+                // Both fence values come off the snapshot that was rendered
+                // above, never off a fresh read: the point of the fence is
+                // that it is the value the human saw.
+                if (!publishTarget || !state || !fence) return
                 publish.mutate({
                   rollback_version: publishTarget.version,
                   expected_publication: state.publication_version,
                   reviewed_code: true,
+                  expected_definition_digest: fence.expected_definition_digest,
+                  expected_routine_digests: fence.expected_routine_digests,
                 })
                 setPublishTarget(null)
               }}
