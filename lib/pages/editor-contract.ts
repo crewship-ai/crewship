@@ -152,6 +152,14 @@ export const NO_PAGE_CAPABILITIES: PageCapabilities = {
 export type DefinitionChangeKind =
   | "page-renamed"
   | "page-described"
+  /**
+   * The slug is the Page's address. A publication that moves it breaks every
+   * link anyone has shared, which is a change a reviewer has to be told about
+   * in words rather than left to spot in a raw diff.
+   */
+  | "page-slug-changed"
+  /** apiVersion or kind. Rare, and never something to discover afterwards. */
+  | "document-version-changed"
   | "panel-added"
   | "panel-removed"
   | "panel-retitled"
@@ -161,11 +169,18 @@ export type DefinitionChangeKind =
   | "panel-visibility-changed"
   | "panel-sla-changed"
   | "panel-tab-changed"
+  | "panel-span-changed"
   | "panel-refresh-changed"
   | "panel-wake-changed"
   | "action-added"
   | "action-removed"
   | "action-routine-changed"
+  /**
+   * `call` runs a routine on the server; `custom` and `link` do not. Turning
+   * one into the other changes what a button does, so it is a named change
+   * and not a field buried in the raw diff.
+   */
+  | "action-kind-changed"
   | "action-relabelled"
   | "action-confirm-changed"
 
@@ -198,6 +213,13 @@ export interface DefinitionDiff {
   /** Unified diff of both documents pretty-printed as JSON. Text, never HTML. */
   readonly raw: string
   readonly identical: boolean
+  /**
+   * There was no baseline document to compare against. Every panel and action
+   * therefore reads as added, which is true of an initial publication and is
+   * NOT the same statement as "nothing else changed". The consumer must say
+   * which of the two it is instead of rendering the added list on its own.
+   */
+  readonly baselineMissing: boolean
 }
 
 // ── Source comparison ────────────────────────────────────────────────────────
