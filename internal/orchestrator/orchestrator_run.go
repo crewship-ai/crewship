@@ -459,17 +459,27 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// without it the refresher would have no address for a per-run HOME.
 	retainRunHome(req.ContainerID, req.AgentSlug, req.RunID)
 	defer func() {
-		// Released on BOTH paths, including the one that deliberately leaves
-		// the directory in place. The entry answers "may a refreshed
-		// credential still be written here", and once this process has
-		// finished accounting for the run the answer is no — a detached CLI
-		// still holding the old token is a zombie, and feeding it a fresh
-		// credential would be the opposite of what the run-end notification
-		// two lines down is for.
-		releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
 		if agentExecStillRunning {
+			// The CLI outlived this call and is still working — the normal
+			// detached-tmux path, not an anomaly. Its HOME still exists, its
+			// token still authenticates (no run-end notification goes out on
+			// this path either), so the registry entry STAYS: a run that can
+			// still act must still be reachable by a credential refresh, or
+			// its OAuth goes stale mid-flight and the failure looks like a
+			// provider outage.
+			//
+			// The entry then leaks for the life of the process. That is the
+			// same trade the secrets hold makes one block up ("keeps its hold
+			// forever; that fails safe"), for the same reason and with the
+			// same shape — bounded by agents × containers, not by run count,
+			// because only runs that detach reach it.
 			return
 		}
+		// Release and cleanup move together on purpose. Releasing without
+		// ending — the shape this had first — left a run whose token still
+		// worked but that no refresh could reach: authenticating with a
+		// credential nothing was allowed to update.
+		releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
 		o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
 	}()
 
