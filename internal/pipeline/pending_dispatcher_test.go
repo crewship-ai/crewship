@@ -107,6 +107,34 @@ func enqueueDue(t *testing.T, n int) *PendingRunStore {
 	return s
 }
 
+func TestN4RearmedPendingStartHasNewIdempotencyKey(t *testing.T) {
+	s := enqueueDue(t, 1)
+	exec := &fakeExecutor{}
+	d := NewPendingRunDispatcher(s, exec, nil)
+	ctx := context.Background()
+	first := PendingRun{ID: "pa", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s", FireAt: time.Now().Add(-time.Hour).UTC()}
+	d.fireOne(ctx, first)
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.FireAt = first.FireAt.Add(time.Hour)
+	d.fireOne(ctx, second)
+	if len(exec.seen) != 2 {
+		t.Fatalf("dispatches=%d", len(exec.seen))
+	}
+	if exec.seen[0].IdempotencyKey == exec.seen[1].IdempotencyKey {
+		t.Fatal("new scheduled start reuses consumed start identity")
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
+		t.Fatal(err)
+	}
+	d.fireOne(ctx, second)
+	if len(exec.seen) != 3 || exec.seen[2].IdempotencyKey != exec.seen[1].IdempotencyKey {
+		t.Fatal("retry must retain the same scheduled start identity")
+	}
+}
+
 // waitFor polls cond until true or the deadline elapses.
 func waitFor(t *testing.T, d time.Duration, cond func() bool) bool {
 	t.Helper()
@@ -373,5 +401,44 @@ func TestPendingDispatcher_HonoursTheRowsAttribution(t *testing.T) {
 	}
 	if !sawSchedule {
 		t.Error("the unattributed row stopped defaulting to schedule")
+	}
+}
+
+func TestPendingDispatcherPreservesPinnedAndLegacyVersionPolicy(t *testing.T) {
+	s := NewPendingRunStore(newPendingDB(t))
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute)
+	version := 3
+	for _, pr := range []PendingRun{{ID: "pinned", PinnedVersion: &version}, {ID: "legacy"}} {
+		pr.WorkspaceID = "w"
+		pr.PipelineID = "p"
+		pr.PipelineSlug = "s"
+		pr.FireAt = past
+		if _, _, err := s.Enqueue(ctx, pr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.DueRuns(ctx, time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := &fakeExecutor{}
+	d := NewPendingRunDispatcher(s, exec, nil)
+	for _, pr := range rows {
+		d.fireOne(ctx, pr)
+	}
+	if len(exec.seen) != 2 {
+		t.Fatalf("runs=%d", len(exec.seen))
+	}
+	pins, legacy := 0, 0
+	for _, in := range exec.seen {
+		if in.PinnedVersion == nil {
+			legacy++
+		} else if *in.PinnedVersion == 3 {
+			pins++
+		}
+	}
+	if pins != 1 || legacy != 1 {
+		t.Fatalf("pinned=%d legacy=%d", pins, legacy)
 	}
 }

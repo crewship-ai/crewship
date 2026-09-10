@@ -8,11 +8,12 @@ package api
 // before, so the wire is unchanged.
 
 type routineCalendarEvent struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
-	At   string `json:"at"`
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	PinnedVersion *int   `json:"pinned_version,omitempty"`
+	ID            string `json:"id"`
+	Kind          string `json:"kind"`
+	At            string `json:"at"`
+	Slug          string `json:"slug"`
+	Name          string `json:"name"`
 	// Planned occurrences carry the schedule they came from; recorded runs
 	// carry their result. Neither kind emitted the other's fields before.
 	ScheduleID string `json:"schedule_id,omitempty"`

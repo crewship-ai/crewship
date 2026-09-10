@@ -2,11 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import {
-  Workflow,
-  Plus, Upload,
-  ChevronLeft, ChevronRight,
-} from "lucide-react"
+import { Workflow, Plus, Upload, ChevronLeft, ChevronRight } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import {
   CreateSurface,
@@ -62,7 +58,11 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
-  const visiblePipelines = useMemo(() => filters.showTestRoutines ? pipelines : pipelines.filter(p => !isRoutineTestFixture(p.slug)), [pipelines, filters.showTestRoutines])
+  const visiblePipelines = useMemo(
+    () =>
+      filters.showTestRoutines ? pipelines : pipelines.filter((p) => !isRoutineTestFixture(p.slug)),
+    [pipelines, filters.showTestRoutines],
+  )
   // The selected routine lives in the URL: /routines?slug=<slug>.
   //
   // It used to be read from the URL once and then kept in component state,
@@ -76,6 +76,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [linkedDraft, setLinkedDraft] = useUrlSelection("draft")
+  const [linkedDraftId, setLinkedDraftId] = useUrlSelection("draft_id")
+  const [linkedWorkspace, setLinkedWorkspace] = useUrlSelection("workspace")
 
   // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
   // search input, `Esc` clears every filter, `c` opens the create
@@ -83,9 +86,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      const isInputContext = target && (
-        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
-      )
+      const isInputContext =
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
       if (e.key === "/" && !isInputContext) {
         const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
@@ -96,10 +99,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         return
       }
       if (e.key === "Escape" && !isInputContext) {
-        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral || filters.showTestRoutines) {
+        if (
+          search ||
+          filters.status !== "all" ||
+          filters.invocations !== "all" ||
+          filters.authorAgentId ||
+          filters.showEphemeral ||
+          filters.showTestRoutines
+        ) {
           e.preventDefault()
           setSearch("")
-          setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
+          setFilters({
+            status: "all",
+            invocations: "all",
+            authorAgentId: null,
+            showEphemeral: false,
+          })
         }
         return
       }
@@ -110,7 +125,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral, filters.showTestRoutines])
+  }, [
+    search,
+    filters.status,
+    filters.invocations,
+    filters.authorAgentId,
+    filters.showEphemeral,
+    filters.showTestRoutines,
+  ])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -128,9 +150,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // Selected routine — looked up from the loaded pipeline list so the
   // toolbar breadcrumb can show the human name without a second fetch.
   // The detail panel does its own fetch for the full DSL body.
-  const selectedRoutine = selectedSlug
-    ? pipelines.find((p) => p.slug === selectedSlug)
-    : null
+  const selectedRoutine = selectedSlug ? pipelines.find((p) => p.slug === selectedSlug) : null
 
   // Context for the bottom dock — runs / logs / schedule / spec of the
   // routine in focus. MEMOIZED: this layout re-renders on every poll tick,
@@ -138,9 +158,15 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // re-fetch + flash "Loading…" forever. Identity must only change when the
   // routine actually changes.
   const routineCtx: BottomPanelContext = useMemo(
-    () => (selectedSlug
-      ? { kind: "routine", slug: selectedSlug, pipelineId: selectedRoutine?.id ?? null, name: selectedRoutine?.name }
-      : null),
+    () =>
+      selectedSlug
+        ? {
+            kind: "routine",
+            slug: selectedSlug,
+            pipelineId: selectedRoutine?.id ?? null,
+            name: selectedRoutine?.name,
+          }
+        : null,
     [selectedSlug, selectedRoutine?.id, selectedRoutine?.name],
   )
 
@@ -161,8 +187,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         title="Routines"
         description={
           <>
-            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
-            {totalRuns === 1 ? "run" : "runs"}
+            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} ·{" "}
+            {totalRuns} {totalRuns === 1 ? "run" : "runs"}
           </>
         }
         ariaLabel="Routines"
@@ -189,9 +215,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {/* ---- Body: 3-column layout ---- */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Left filter panel — same chrome as the /issues sidebar
-          * (bg-card, not bg-card/30) so the two surfaces feel like
-          * pieces of one app rather than two near-misses. Width unified
-          * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
+         * (bg-card, not bg-card/30) so the two surfaces feel like
+         * pieces of one app rather than two near-misses. Width unified
+         * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
         {/* Overlay on a phone, column everywhere else. The collapsed
             rail stays in flow at both sizes so the expand button never
             moves. */}
@@ -237,7 +263,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
             {selectedRun ? (
-              <div key={selectedRun} className="absolute inset-0 overflow-auto"><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
+              <div key={selectedRun} className="absolute inset-0 overflow-auto">
+                <RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} />
+              </div>
             ) : selectedSlug ? (
               <motion.div
                 key={`detail-${selectedSlug}`}
@@ -262,7 +290,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     Back to routines
                   </button>
                   <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                  <span className="truncate text-xs font-medium text-foreground/85" title={selectedRoutine?.name || selectedSlug}>
+                  <span
+                    className="truncate text-xs font-medium text-foreground/85"
+                    title={selectedRoutine?.name || selectedSlug}
+                  >
                     {selectedRoutine?.name || selectedSlug}
                   </span>
                   {selectedRoutine?.slug && (
@@ -296,7 +327,9 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
-                  onFilter={(status) => setFilters(f => ({ ...f, status: status as RoutineFilters["status"] }))}
+                  onFilter={(status) =>
+                    setFilters((f) => ({ ...f, status: status as RoutineFilters["status"] }))
+                  }
                 />
               </motion.div>
             )}
@@ -330,8 +363,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {/* Create dialog — Test & Save flow with starter templates */}
       <RoutineCreateDialog
         workspaceId={workspaceId}
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
+        open={createDialogOpen || !!linkedDraft}
+        savedDraftLink={
+          linkedDraft
+            ? {
+                slug: linkedDraft,
+                id: linkedDraftId || undefined,
+                workspaceId: linkedWorkspace || undefined,
+              }
+            : undefined
+        }
+        onClose={() => {
+          setCreateDialogOpen(false)
+          void setLinkedDraft(null, { replace: true })
+          void setLinkedDraftId(null, { replace: true })
+          void setLinkedWorkspace(null, { replace: true })
+        }}
         onCreated={(slug) => {
           setSelectedRun(null, { replace: true })
           refresh()
@@ -427,7 +474,10 @@ export function ImportRoutineDialog({
 
       {/* The parse failure and the server's refusal arrive at the same place,
           out of the scrollport, instead of under a 256px textarea. */}
-      <CreateSurfaceRefusal message={err == null ? null : `Error: ${err}`} onDismiss={() => setErr(null)} />
+      <CreateSurfaceRefusal
+        message={err == null ? null : `Error: ${err}`}
+        onDismiss={() => setErr(null)}
+      />
 
       <CreateSurfaceFooter
         onCancel={onClose}

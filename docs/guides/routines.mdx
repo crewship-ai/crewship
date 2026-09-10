@@ -615,7 +615,7 @@ The loop is **cost-aware and predictive**: after each failed attempt it estimate
   "id": "review_summary",
   "type": "call_pipeline",
   "pipeline_slug": "human-approval-step",
-  "nested_inputs": {
+  "inputs": {
     "content": "{{ steps.summarize.output }}",
     "approver_role": "marketing_lead"
   }
@@ -623,6 +623,20 @@ The loop is **cost-aware and predictive**: after each failed attempt it estimate
 ```
 
 Composition primitive. Save-time cycle detection rejects loops; runtime depth limit caps at 10 levels.
+
+A whole input or step-output reference preserves the target input's declared
+`integer`, `number`, `boolean`, `array` or `object` type. For example,
+`"count": "{{ inputs.count }}"` forwards numeric `0` to a child declaring an
+integer `count`; it does not forward text `"0"`. Missing references, incompatible
+types and invalid choices fail before the child dispatches work. Optional null
+stays null. JSON step outputs may include the same markdown fences accepted by
+transform steps.
+
+String and undeclared target inputs keep text interpolation. Mixed text such as
+`"count={{ inputs.count }}"` remains text. Literal objects and lists pass through
+unchanged; templates inside them are not recursively evaluated. Use Code for
+advanced bindings; the visual editor can replace the source of an existing
+child input without changing its other bindings.
 
 A called routine faces the **same dispatch gates** as one run directly: its
 author crew must have the integrations, datastores/tools and credentials the

@@ -407,13 +407,23 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		if string(inputs) == "null" {
 			inputs = []byte("{}")
 		}
+		var pinnedVersion int
+		if err := tx.QueryRowContext(ctx, `SELECT head_version FROM pipelines WHERE id=?`, pipelineID).Scan(&pinnedVersion); err != nil {
+			return nil, fmt.Errorf("pipeline: read head version: %w", err)
+		}
+		if pinnedVersion < 1 {
+			return nil, fmt.Errorf("%w: publish an archived version before scheduling", ErrInvalidTrigger)
+		}
 		id := "pnd_once_" + pipelineID
 		// Stable authoring identity makes a repeated save update one pending
-		// start. A consumed/cancelled start is never rearmed by editing a recipe.
+		// start. A consumed/cancelled start is never rearmed by editing a
+		// recipe. A fired start can be scheduled again for a new future date;
+		// an explicitly cancelled start requires a new scheduling action.
 		result, err := tx.ExecContext(ctx, `INSERT INTO pending_runs
-          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,status,created_at,updated_at)
-          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,'pending',datetime('now','subsec'),datetime('now','subsec'))
-          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,updated_at=excluded.updated_at WHERE pending_runs.status='pending'`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id)
+          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,pinned_version,status,created_at,updated_at)
+          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,?,'pending',datetime('now','subsec'),datetime('now','subsec'))
+          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,status='pending',updated_at=excluded.updated_at
+          WHERE pending_runs.status='pending' OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion)
 		if err != nil {
 			return nil, err
 		}

@@ -207,11 +207,12 @@ func TestRoutineBacktest_ReplaysTheRunTheServerNamed(t *testing.T) {
 	}
 
 	var summary struct {
-		Runs      int    `json:"runs"`
-		Matched   int    `json:"matched"`
-		Errored   int    `json:"errored"`
-		Verdict   string `json:"verdict"`
-		RowsField []struct {
+		ExecutionMode string `json:"execution_mode"`
+		Runs          int    `json:"runs"`
+		Matched       int    `json:"matched"`
+		Errored       int    `json:"errored"`
+		Verdict       string `json:"verdict"`
+		RowsField     []struct {
 			SourceRunID    string `json:"source_run_id"`
 			CandidateRunID string `json:"candidate_run_id"`
 			Verdict        string `json:"verdict"`
@@ -219,6 +220,9 @@ func TestRoutineBacktest_ReplaysTheRunTheServerNamed(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(out), &summary); err != nil {
 		t.Fatalf("backtest --format json does not parse: %v\n%s", err, out)
+	}
+	if summary.ExecutionMode != "live" {
+		t.Errorf("backtest must label real replay effects, got execution_mode=%q", summary.ExecutionMode)
 	}
 	if summary.Verdict != "CLEAN" || summary.Matched != 1 || summary.Errored != 0 {
 		t.Errorf("verdict=%s matched=%d errored=%d, want CLEAN/1/0 — an identical replay is not a regression",
