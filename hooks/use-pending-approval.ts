@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import type { DecisionAnswer, DecisionForm } from "@/lib/decision-form"
 import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
@@ -17,6 +18,7 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 // timeout sweeper) all re-fetch.
 
 export interface PendingWaitpoint {
+  decision_form?: DecisionForm
   inbox_item_id?: string
   token: string
   pipeline_run_id: string
@@ -36,7 +38,7 @@ interface UsePendingApprovalResult {
   /** True while an approve/reject request for this run is in flight. */
   deciding: boolean
   /** Approve or reject the parked run; optional comment becomes the payload. */
-  decide: (approved: boolean, comment?: string) => Promise<boolean>
+  decide: (approved: boolean, comment?: string, answer?: DecisionAnswer) => Promise<boolean>
   refresh: () => Promise<void>
 }
 
@@ -51,6 +53,8 @@ export function usePendingApproval(
   // Guards against a stale response from a previous run overwriting the
   // current one when the user re-runs quickly.
   const reqIdRef = useRef(0)
+  const scopeEpoch = useRef(0)
+  const decisionsInFlight = useRef(new Set<string>())
 
   const refresh = useCallback(async () => {
     if (!workspaceId || !runId) {
@@ -76,7 +80,7 @@ export function usePendingApproval(
       const data: PendingWaitpoint[] = await res.json()
       if (reqIdRef.current !== reqId) return
       const mine = Array.isArray(data)
-        ? data.find((w) => w.pipeline_run_id === runId && w.kind === "approval") ?? null
+        ? (data.find((w) => w.pipeline_run_id === runId && w.kind === "approval") ?? null)
         : null
       setWaitpoint(mine)
     } catch (e) {
@@ -93,10 +97,12 @@ export function usePendingApproval(
   // waitpoint stops the inline Approve/Reject UI from briefly pointing at the
   // old run while run B's fetch is still outstanding.
   useEffect(() => {
+    scopeEpoch.current++
     reqIdRef.current += 1
     setWaitpoint(null)
     setError(null)
     setLoading(false)
+    setDeciding(false)
   }, [workspaceId, runId])
 
   useEffect(() => {
@@ -109,8 +115,12 @@ export function usePendingApproval(
   useRealtimeEvent("inbox.updated", refresh)
 
   const decide = useCallback(
-    async (approved: boolean, comment?: string): Promise<boolean> => {
+    async (approved: boolean, comment?: string, answer?: DecisionAnswer): Promise<boolean> => {
       if (!workspaceId || !waitpoint) return false
+      const key = `${workspaceId}:${waitpoint.token}`
+      if (decisionsInFlight.current.has(key)) return false
+      decisionsInFlight.current.add(key)
+      const epoch = scopeEpoch.current
       setDeciding(true)
       try {
         const res = await apiFetch(
@@ -118,7 +128,7 @@ export function usePendingApproval(
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ approved, comment: comment ?? "" }),
+            body: JSON.stringify({ approved, comment: comment ?? "", ...answer }),
           },
         )
         if (!res.ok) {
@@ -127,13 +137,19 @@ export function usePendingApproval(
         }
         // Drop the banner immediately; the inbox.updated / run events that
         // follow re-confirm against the server.
-        setWaitpoint(null)
+        if (scopeEpoch.current === epoch) {
+          // An older list request must not restore the decision just accepted.
+          reqIdRef.current++
+          setLoading(false)
+          setWaitpoint((current) => (current?.token === waitpoint.token ? null : current))
+        }
         return true
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        if (scopeEpoch.current === epoch) setError(e instanceof Error ? e.message : String(e))
         return false
       } finally {
-        setDeciding(false)
+        decisionsInFlight.current.delete(key)
+        if (scopeEpoch.current === epoch) setDeciding(false)
       }
     },
     [workspaceId, waitpoint],

@@ -98,7 +98,21 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	// Cancelling is not resolving with a different verb: it withdraws the
 	// question rather than answering it, so it carries only a reason.
 	escalationCancel := obj(map[string]any{"reason": str()})
-	waitpoint := obj(map[string]any{"approved": boolean(), "comment": str()})
+	// Legacy decisions default approved to false. Typed decisions also carry
+	// that flag, so action_id/data presence must distinguish the variants.
+	legacyDecision := obj(map[string]any{"approved": boolean(), "comment": str()})
+	legacyDecision["title"] = "Legacy decision"
+	legacyDecision["not"] = map[string]any{"anyOf": []any{
+		map[string]any{"required": []string{"action_id"}},
+		map[string]any{"required": []string{"data"}},
+	}}
+	typedDecision := obj(map[string]any{
+		"approved": boolean(), "comment": str(), "data": anyObject(),
+		"action_id": map[string]any{"type": "string", "minLength": 1},
+	})
+	typedDecision["title"] = "Typed decision"
+	typedDecision["required"] = []string{"action_id"}
+	waitpoint := map[string]any{"oneOf": []any{legacyDecision, typedDecision}}
 
 	publishResponse := obj(map[string]any{"head_version": integer(), "last_recorded_run_id": str(), "last_run_outcome": str(), "id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(), "definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(), "invocation_count": integer(), "last_invoked_at": str(), "last_invocation_status": str(), "author_crew_id": str(), "author_agent_id": str(), "author_agent_name": str(), "author_user_id": str(), "authored_via": str(), "status": str(), "icon": str(), "color": str(), "risk_reasons": arr(str()), "inbox_item_id": str(), "created_at": str(), "updated_at": str(), "linked_issue_count": integer(), "linked_issues": arr(str()), "integrations_required": arr(str()), "manifest": anyObject(), "definition": anyObject(), "trigger": anyObject()})
 	publishResponse["required"] = []string{"id", "slug", "name", "dsl_version", "definition_hash", "ephemeral", "workspace_visible", "invocation_count", "authored_via", "status", "created_at", "updated_at", "linked_issue_count"}

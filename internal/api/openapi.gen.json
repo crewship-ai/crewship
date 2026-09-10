@@ -12489,6 +12489,35 @@
             "format": "date-time",
             "type": "string"
           },
+          "decision_form": {
+            "properties": {
+              "actions": {
+                "items": {
+                  "properties": {
+                    "approved": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "fields": {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
           "invoking_crew_id": {
             "type": "string"
           },
@@ -12516,11 +12545,18 @@
       },
       "WaitpointApprovalRequest": {
         "properties": {
+          "action_id": {
+            "type": "string"
+          },
           "approved": {
             "type": "boolean"
           },
           "comment": {
             "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
           }
         },
         "type": "object"
@@ -13357,15 +13393,57 @@
         "type": "object"
       },
       "WorkflowWaitpointApprovalRequest": {
-        "properties": {
-          "approved": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "action_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "data"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "approved": {
+                "type": "boolean"
+              },
+              "comment": {
+                "type": "string"
+              }
+            },
+            "title": "Legacy decision",
+            "type": "object"
           },
-          "comment": {
-            "type": "string"
+          {
+            "properties": {
+              "action_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "approved": {
+                "type": "boolean"
+              },
+              "comment": {
+                "type": "string"
+              },
+              "data": {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            },
+            "required": [
+              "action_id"
+            ],
+            "title": "Typed decision",
+            "type": "object"
           }
-        },
-        "type": "object"
+        ]
       },
       "WorkflowWaitpointCallbackRequest": {
         "properties": {

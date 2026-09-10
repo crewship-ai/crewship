@@ -27,7 +27,9 @@ vi.mock("@/lib/api/waitpoints", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/waitpoints")>()),
   waitpointDecide: (...a: unknown[]) => waitpointDecide(...a),
 }))
-vi.mock("@/lib/api/escalations", () => ({ escalationResolve: (...a: unknown[]) => escalationResolve(...a) }))
+vi.mock("@/lib/api/escalations", () => ({
+  escalationResolve: (...a: unknown[]) => escalationResolve(...a),
+}))
 vi.mock("sonner", () => ({
   toast: {
     error: (...a: unknown[]) => toastError(...a),
@@ -40,9 +42,15 @@ import { KindActions } from "../kind-actions"
 
 function item(over: Partial<InboxItem> & Pick<InboxItem, "kind">): InboxItem {
   return {
-    id: "i", workspace_id: "ws", source_id: "src", title: "t",
-    state: "unread", priority: "medium", blocking: false,
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    id: "i",
+    workspace_id: "ws",
+    source_id: "src",
+    title: "t",
+    state: "unread",
+    priority: "medium",
+    blocking: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     ...over,
   } as InboxItem
 }
@@ -51,7 +59,9 @@ const onResolve = vi.fn()
 const onRefresh = vi.fn()
 
 function mount(i: InboxItem, disabled = false) {
-  return render(<KindActions item={i} onResolve={onResolve} onRefresh={onRefresh} disabled={disabled} />)
+  return render(
+    <KindActions item={i} onResolve={onResolve} onRefresh={onRefresh} disabled={disabled} />,
+  )
 }
 
 beforeEach(() => {
@@ -69,7 +79,9 @@ describe("hire waitpoints ride a different endpoint", () => {
     mount(hire)
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
-    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith("/api/v1/agents/agt-1/approve-hire", expect.anything()))
+    await waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith("/api/v1/agents/agt-1/approve-hire", expect.anything()),
+    )
     expect(waitpointDecide).not.toHaveBeenCalled()
   })
 
@@ -88,7 +100,11 @@ describe("hire waitpoints ride a different endpoint", () => {
   })
 
   it("surfaces a server refusal", async () => {
-    apiFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "nope" }) })
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "nope" }),
+    })
     mount(hire)
     fireEvent.click(screen.getByRole("button", { name: /Approve hire/ }))
 
@@ -98,17 +114,24 @@ describe("hire waitpoints ride a different endpoint", () => {
 
 describe("credential escalations", () => {
   it("offers one-click approve when the agent already proposed a value", async () => {
-    mount(item({
-      kind: "escalation", source_id: "esc-1",
-      payload: { escalation_type: "CREDENTIAL", has_pending_credential: true },
-    }))
+    mount(
+      item({
+        kind: "escalation",
+        source_id: "esc-1",
+        payload: { escalation_type: "CREDENTIAL", has_pending_credential: true },
+      }),
+    )
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
-    await waitFor(() => expect(escalationResolve).toHaveBeenCalledWith("esc-1", "approve", expect.any(String), "ws"))
+    await waitFor(() =>
+      expect(escalationResolve).toHaveBeenCalledWith("esc-1", "approve", expect.any(String), "ws"),
+    )
   })
 
   it("is reject-only when a human still has to supply the secret", () => {
-    mount(item({ kind: "escalation", source_id: "esc-1", payload: { escalation_type: "CREDENTIAL" } }))
+    mount(
+      item({ kind: "escalation", source_id: "esc-1", payload: { escalation_type: "CREDENTIAL" } }),
+    )
 
     expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Reject/ })).toBeInTheDocument()
@@ -121,7 +144,11 @@ describe("credential escalations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     // A raw "404" tells the reader nothing about what to do next.
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/Resolve this from its source/)))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(
+        expect.stringMatching(/Resolve this from its source/),
+      ),
+    )
   })
 })
 
@@ -187,7 +214,12 @@ describe("routine proposals", () => {
 
 describe("skill proposals", () => {
   it("rejects through the proposed-skills endpoint", async () => {
-    mount(item({ kind: "escalation", payload: { kind: "skill_proposal", crew_id: "c1", file_name: "f.md" } }))
+    mount(
+      item({
+        kind: "escalation",
+        payload: { kind: "skill_proposal", crew_id: "c1", file_name: "f.md" },
+      }),
+    )
     fireEvent.click(screen.getByRole("button", { name: /Reject/ }))
 
     await waitFor(() => {
@@ -196,8 +228,17 @@ describe("skill proposals", () => {
   })
 
   it("reports a refusal from the server", async () => {
-    apiFetch.mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({ error: "boom" }) })
-    mount(item({ kind: "escalation", payload: { kind: "skill_proposal", crew_id: "c1", file_name: "f.md" } }))
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "boom" }),
+    })
+    mount(
+      item({
+        kind: "escalation",
+        payload: { kind: "skill_proposal", crew_id: "c1", file_name: "f.md" },
+      }),
+    )
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("boom"))
@@ -216,7 +257,11 @@ describe("waitpoints are source-managed", () => {
   })
 
   it("treats 'already decided' as somebody else finishing, not as a failure", async () => {
-    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 409, error: "already decided or expired" })
+    waitpointDecide.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      error: "already decided or expired",
+    })
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
 
@@ -228,7 +273,11 @@ describe("waitpoints are source-managed", () => {
   })
 
   it("still reports a decision that genuinely failed", async () => {
-    waitpointDecide.mockResolvedValueOnce({ ok: false, status: 500, error: "waitpoint store unavailable" })
+    waitpointDecide.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      error: "waitpoint store unavailable",
+    })
     mount(item({ kind: "waitpoint", source_id: "tok" }))
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
 
@@ -245,7 +294,9 @@ describe("failed runs", () => {
     // The scheduler writes pipeline_id, not pipeline_slug. Posting to whatever
     // is left over would fire the wrong routine, or none — the old fallback
     // read sender_name, which is the SCHEDULE's name, and 404'd.
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/cannot be retried/i)))
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/cannot be retried/i)),
+    )
     // …and a failed Retry must not quietly resolve the row as cancelled. The
     // user asked to re-run it; Cancel is a separate button, right there.
     expect(onResolve).not.toHaveBeenCalled()
@@ -261,7 +312,11 @@ describe("failed runs", () => {
   })
 
   it("reports a retry the server rejected", async () => {
-    apiFetch.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: "bad inputs" }) })
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: "bad inputs" }),
+    })
     mount(item({ kind: "failed_run", payload: { pipeline_slug: "nightly" } }))
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }))
 
@@ -271,10 +326,15 @@ describe("failed runs", () => {
 
 describe("messages", () => {
   it("links to the chat and to the issue when the payload carries them", () => {
-    mount(item({ kind: "message", payload: { chat_url: "/chat/atlas", issue_identifier: "ENG-6" } }))
+    mount(
+      item({ kind: "message", payload: { chat_url: "/chat/atlas", issue_identifier: "ENG-6" } }),
+    )
 
     expect(screen.getByRole("link", { name: /Open chat/ })).toHaveAttribute("href", "/chat/atlas")
-    expect(screen.getByRole("link", { name: /Open ENG-6/ })).toHaveAttribute("href", "/issues/ENG-6")
+    expect(screen.getByRole("link", { name: /Open ENG-6/ })).toHaveAttribute(
+      "href",
+      "/issues/ENG-6",
+    )
   })
 
   it("ignores a chat_url that is not an in-app path", () => {
@@ -290,7 +350,6 @@ describe("schedule kinds", () => {
 
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith("dismissed"))
   })
-
 })
 
 describe("memory consolidation", () => {
@@ -302,7 +361,11 @@ describe("memory consolidation", () => {
   })
 
   it("reports a consolidation the server refused", async () => {
-    apiFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "owner only" }) })
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "owner only" }),
+    })
     mount(item({ kind: "memory_consolidation", payload: { proposal_id: "p1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Reject/ }))
 
@@ -319,13 +382,20 @@ describe("schedules reach the endpoints the CLI already uses", () => {
       expect(apiFetch).toHaveBeenCalledWith(
         "/api/v1/workspaces/ws/pipeline-schedules/sch-1",
         expect.objectContaining({ method: "PATCH" }),
-      ))
-    expect(JSON.parse((apiFetch.mock.calls[0][1] as { body: string }).body)).toEqual({ enabled: true })
+      ),
+    )
+    expect(JSON.parse((apiFetch.mock.calls[0][1] as { body: string }).body)).toEqual({
+      enabled: true,
+    })
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith("reenabled"))
   })
 
   it("reports a refused re-enable — it is OWNER/ADMIN only", async () => {
-    apiFetch.mockResolvedValueOnce({ ok: false, status: 403, json: async () => ({ error: "Forbidden" }) })
+    apiFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "Forbidden" }),
+    })
     mount(item({ kind: "schedule_circuit_breaker_tripped", payload: { schedule_id: "sch-1" } }))
     fireEvent.click(screen.getByRole("button", { name: /Re-enable schedule/ }))
 
@@ -341,7 +411,8 @@ describe("schedules reach the endpoints the CLI already uses", () => {
       expect(apiFetch).toHaveBeenCalledWith(
         "/api/v1/workspaces/ws/pipeline-schedules/sch-2/run",
         expect.objectContaining({ method: "POST" }),
-      ))
+      ),
+    )
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith("ran"))
   })
 
@@ -385,8 +456,7 @@ describe("keeper credential escalations", () => {
     mount(keeperItem())
     fireEvent.click(screen.getByRole("button", { name: /Deny/ }))
 
-    await waitFor(() =>
-      expect(JSON.parse(apiFetch.mock.calls[0][1].body).decision).toBe("DENY"))
+    await waitFor(() => expect(JSON.parse(apiFetch.mock.calls[0][1].body).decision).toBe("DENY"))
   })
 
   // A 403 here is normally the four-eyes rule, not a permissions mistake, and
@@ -397,14 +467,16 @@ describe("keeper credential escalations", () => {
       ok: false,
       status: 403,
       json: async () => ({
-        detail: "critical credential tier requires a second approver: this escalation was raised by an agent you own",
+        detail:
+          "critical credential tier requires a second approver: this escalation was raised by an agent you own",
       }),
     })
     mount(keeperItem())
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("second approver")))
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("second approver")),
+    )
     expect(onRefresh).not.toHaveBeenCalled()
   })
 
@@ -417,8 +489,36 @@ describe("keeper credential escalations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Approve/ }))
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch")))
+      expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Failed to fetch")),
+    )
     expect(toastSuccess).not.toHaveBeenCalled()
     expect(onRefresh).not.toHaveBeenCalled()
   })
+})
+
+it("answers a rich waitpoint through the shared decision route", async () => {
+  mount(
+    item({
+      kind: "waitpoint",
+      payload: {
+        decision_form: {
+          fields: [{ name: "count", type: "integer", required: true, default: 0 }],
+          actions: [
+            { id: "ship", label: "Ship", approved: true },
+            { id: "stop", label: "Stop", approved: false },
+          ],
+        },
+      },
+    }),
+  )
+  expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Ship" }))
+  await waitFor(() =>
+    expect(waitpointDecide).toHaveBeenCalledWith("ws", "src", true, {
+      action_id: "ship",
+      data: { count: 0 },
+    }),
+  )
+  expect(onResolve).not.toHaveBeenCalled()
+  await waitFor(() => expect(onRefresh).toHaveBeenCalledWith("approved"))
 })

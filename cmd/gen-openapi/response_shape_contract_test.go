@@ -171,3 +171,27 @@ func TestResponseSchemas_WithoutRequired_DoNotGrow(t *testing.T) {
 			"First few: %s", len(loose), budget, strings.Join(loose[:min(len(loose), 8)], ", "))
 	}
 }
+
+func TestWaitpointDecisionRequestVariants(t *testing.T) {
+	schema := compileAt(t, specBytes(t), "/components/schemas/WorkflowWaitpointApprovalRequest")
+	for _, tc := range []struct {
+		name, body string
+		valid      bool
+	}{
+		{"legacy denial", `{}`, true}, {"legacy approval", `{"approved":true}`, true},
+		{"typed approval", `{"approved":true,"action_id":"go","data":{"count":0,"enabled":false}}`, true},
+		{"typed denial", `{"action_id":"stop"}`, true}, {"data without action", `{"data":{}}`, false},
+		{"empty action", `{"action_id":"","data":{}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var value any
+			if err := json.Unmarshal([]byte(tc.body), &value); err != nil {
+				t.Fatal(err)
+			}
+			err := schema.Validate(value)
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v error=%v", tc.valid, err)
+			}
+		})
+	}
+}

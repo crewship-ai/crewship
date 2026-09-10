@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,7 +65,21 @@ const AuditActionWaitpointDecisionRefused = "waitpoint.decision_refused"
 // missing context value from silently becoming an approval.
 func (s *SQLWaitpointStore) Decide(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider, payload string) error {
 	switch decider.Kind {
-	case DeciderUser, DeciderExternal:
+	case DeciderUser:
+		return s.CompleteApproval(ctx, workspaceID, token, approved, decider.ID, payload)
+	case DeciderExternal:
+		var form string
+		err := s.db.QueryRowContext(ctx, `SELECT decision_form_json FROM pipeline_waitpoints WHERE workspace_id=? AND token=?`, workspaceID, token).Scan(&form)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrAlreadyDecided
+		}
+		if err != nil {
+			return fmt.Errorf("waitpoints: check decision audience: %w", err)
+		}
+		if form != "" {
+			s.recordRefusal(ctx, workspaceID, token, approved, decider)
+			return fmt.Errorf("%w: typed decisions require an authenticated workspace user", ErrDeciderNotAllowed)
+		}
 		return s.CompleteApproval(ctx, workspaceID, token, approved, decider.ID, payload)
 	default:
 		s.recordRefusal(ctx, workspaceID, token, approved, decider)

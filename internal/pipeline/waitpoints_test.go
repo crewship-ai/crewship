@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS pipeline_waitpoints (
     timeout_at         TEXT NOT NULL,
     created_at         TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     decided_at         TEXT,
+    decision_form_json TEXT NOT NULL DEFAULT '',
     routine_version    INTEGER
 );`); err != nil {
 		t.Fatalf("waitpoints schema: %v", err)
@@ -67,6 +68,37 @@ func TestWaitpointStore_ApproveDuringWait(t *testing.T) {
 	}
 	if !approved {
 		t.Errorf("expected approved=true")
+	}
+}
+
+func TestWaitpointStore_RejectsExpiredDecisionBeforeSweeper(t *testing.T) {
+	store, cleanup := openWaitpointsTestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+	for _, approved := range []bool{true, false} {
+		token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{WorkspaceID: "ws_test", PipelineRunID: "run-expired", StepID: "review", TimeoutSec: 3600})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expired := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+		if _, err = store.db.Exec(`UPDATE pipeline_waitpoints SET timeout_at=? WHERE token=?`, expired, token); err != nil {
+			t.Fatal(err)
+		}
+		if err = store.CompleteApproval(ctx, "ws_test", token, approved, "late-user", "late answer"); !errors.Is(err, ErrAlreadyDecided) {
+			t.Fatalf("late decision accepted: %v", err)
+		}
+		var status, payload string
+		if err = store.db.QueryRow(`SELECT status,COALESCE(decision_payload,'') FROM pipeline_waitpoints WHERE token=?`, token).Scan(&status, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if status != "timed_out" || payload != "" {
+			t.Fatalf("expiry was not settled immediately: %s %s", status, payload)
+		}
+	}
+	store.sweepOnce()
+	var remaining int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM pipeline_waitpoints WHERE status!='timed_out'`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("sweeper did not finish expiry: %d %v", remaining, err)
 	}
 }
 
