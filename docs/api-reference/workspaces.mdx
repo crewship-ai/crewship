@@ -41,6 +41,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#get-pipeline) | One pipeline with full `definition` |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#delete-pipeline) | Soft-delete a pipeline |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/save`](#save-pipeline) | Create or update a pipeline |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/fixture_test`](#test-a-routine-step-with-sample-data) | Test one step with explicit sample data; no external actions |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report + manifest, no agent runs |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`](#run-pipeline) | Invoke a saved pipeline |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs`](#list-pipeline-runs-journal-backed) | Journal-backed run entries |
@@ -1850,3 +1851,37 @@ The list lives in `internal/api/workspaces.go` and must stay in sync with `lib/l
 - [Routines guide](/guides/routines) -- authoring DSL pipelines end-to-end
 - [Routines cookbook](/guides/routines-cookbook) -- copy-paste pipeline examples
 - [Credentials guide](/guides/credentials) -- required for the `/skills/generate` endpoint
+
+### Test a routine step with sample data
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Request body:** `definition` (object) and `step_id` (string) are required.
+`inputs` is an optional object of recipe input values; `step_outputs` maps
+upstream step IDs to output strings. `fixture_output` supplies a replacement
+output for an agent, HTTP or script step. An empty string is an explicit sample.
+
+Transforms compute with the production transform implementation using the
+supplied inputs and step outputs. External steps only check the supplied output;
+the endpoint never calls agents, services or scripts. Only top-level steps are
+supported. Dependencies, conditions, retries and outcome graders are not run;
+external schema references are blocked. Optional `env` and `secrets` objects map names to sample strings; `metadata`
+supplies sample values for `run.metadata.*`. `run.*` aliases use the `env` map,
+as in live rendering. These are explicit test data, never values read from the
+server environment or credential vault. Use fake values for secret samples.
+Missing references cannot silently become empty values. Runtime samples are
+included in the fixture evidence hash.
+
+**Response:** `200 OK`, `RoutineFixtureResult`: `execution_mode`, `step_id`,
+`step_type`, `definition_hash`, `fixture_hash`, `output_source`, `output`, `valid`,
+`validation_declared`, optional `validation_reason`, and `limitations`.
+`valid: false` reports a failed output check; no declared check is distinguished
+by `validation_declared: false`. These results are not publication proofs.
+
+`400` means invalid definition, unsupported step type, missing sample values or
+malformed input; `403` means insufficient role. A failed output check returns
+`200` with `valid: false` so clients can display its evidence.

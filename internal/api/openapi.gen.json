@@ -11363,6 +11363,59 @@
         ],
         "type": "object"
       },
+      "RoutineFixtureResult": {
+        "properties": {
+          "definition_hash": {
+            "type": "string"
+          },
+          "execution_mode": {
+            "type": "string"
+          },
+          "fixture_hash": {
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "output": {
+            "type": "string"
+          },
+          "output_source": {
+            "type": "string"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "step_type": {
+            "type": "string"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "validation_declared": {
+            "type": "boolean"
+          },
+          "validation_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "execution_mode",
+          "step_id",
+          "step_type",
+          "definition_hash",
+          "fixture_hash",
+          "output_source",
+          "output",
+          "valid",
+          "validation_declared",
+          "limitations"
+        ],
+        "type": "object"
+      },
       "RoutinePublishRequest": {
         "properties": {
           "approve_risk": {
@@ -12571,6 +12624,51 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "WorkflowFixtureTestRequest": {
+        "properties": {
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "fixture_output": {
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "step_outputs": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "definition",
+          "step_id"
+        ],
         "type": "object"
       },
       "WorkflowMilestoneCreateRequest": {
@@ -103121,6 +103219,111 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RoutineDraft"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/fixture_test": {
+      "post": {
+        "operationId": "post_api_v1_workspaces_workspaceId_pipelines_fixture_test",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowFixtureTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineFixtureResult"
                 }
               }
             },

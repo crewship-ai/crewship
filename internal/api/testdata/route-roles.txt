@@ -294,6 +294,7 @@ POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate r
 POST /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/drafts roleCreate
+POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/import roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay roleCreate
