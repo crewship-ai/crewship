@@ -118,7 +118,21 @@ export function ReviewPreview({
           />
         ) : (
           <div className="flex h-full min-h-[24rem] items-center justify-center rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-            {running ? "Preparing the candidate's preview…" : stopped ? "Preview stopped." : job?.state === "failed" ? "This candidate did not build. Its preview cannot be shown." : "Build this candidate to preview it."}
+            {/* Every reason the frame is not mounted, named. A placeholder that
+                says "build this" while the real reason is a revoked permission
+                or a Page whose data vanished teaches the reviewer to click
+                Build at the one moment nothing should be running. */}
+            {running
+              ? "Preparing the candidate's preview…"
+              : stopped
+                ? "Preview stopped."
+                : query.isError
+                  ? "The preview could not be loaded, so nothing is running here."
+                  : !page
+                    ? "This Page's data is not available, so nothing is running here."
+                    : job?.state === "failed"
+                      ? "This candidate did not build. Its preview cannot be shown."
+                      : "Build this candidate to preview it."}
           </div>
         )}
       </div>
