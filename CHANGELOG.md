@@ -9,6 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
+- Add typed human decision forms to routine waits, Inbox and CLI; preserve rejection and approved-answer recovery (N5, N10, N15; #2473).
+
+- Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).
+
 ### Documentation
 - Document experimental Pages application installation, recovery, browser support and the verified limits of the initial release.
 
@@ -19,6 +24,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.
 - Crews and agents share the Routines dashboard visual language, with avatar-based team browsing, server-side purpose search and name sorting, compact crew lists, real run outcome charts, and scoped work/access previews. Create/Edit forms and Memory now expose clearer icon-based navigation and actionable empty states.
 ### Fixed
+- **Pages compiler review** (#2472) — normalize bootstrap default ports, atomically repair corrupt content-addressed snapshots without masking I/O errors, and report output overflow even after a successful worker exit.
 - Agent inbox cost summaries query the actual ledger timestamp, including the beginning of the current month. Memory refresh also reloads personal data; exports identify their scope and report empty scopes and download outcomes. Crew navigation updates the selected canvas reliably. The placeholder agent container restart is replaced by a working, confirmed crew-level action with accurate next-run recreation feedback.
 - Invalidated cache requests cannot overwrite newer results, and failed relation refreshes preserve known cached data. Historical collaboration no longer implies an automatic delegation trigger.
 ### Changed

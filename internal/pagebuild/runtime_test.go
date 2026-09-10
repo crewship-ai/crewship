@@ -105,3 +105,18 @@ func TestRuntimeRejectsCleartextRemoteEvenWithHTTPStudio(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeSerializesDefaultPortsLikeBrowser(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"https://studio.example.com:443/", "https://studio.example.com"},
+		{"http://127.0.0.1:80", "http://127.0.0.1"},
+		{"https://studio.example.com:8443", "https://studio.example.com:8443"},
+		{"http://[::1]:80", "http://[::1]"},
+	} {
+		w := httptest.NewRecorder()
+		ServeRuntime(w, tc.input)
+		if !strings.Contains(w.Body.String(), `const expectedParent="`+tc.want+`";`) {
+			t.Errorf("origin %s was not serialized as %s", tc.input, tc.want)
+		}
+	}
+}

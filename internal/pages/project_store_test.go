@@ -43,8 +43,11 @@ func TestProjectStoreDurabilityIsolationAndCorruption(t *testing.T) {
 	if _, err := s.Get(ctx, "workspace-a", digest); err == nil {
 		t.Fatal("served corrupt source")
 	}
-	if _, err := s.Put(ctx, "workspace-a", p); err == nil {
-		t.Fatal("silently replaced corrupt source")
+	if repaired, err := s.Put(ctx, "workspace-a", p); err != nil || repaired != digest {
+		t.Fatalf("repair: %s %v", repaired, err)
+	}
+	if _, err := s.Get(ctx, "workspace-a", digest); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -65,6 +68,12 @@ func TestProjectStoreBoundsAndSymlinks(t *testing.T) {
 	}
 	if _, err := s.Put(ctx, "ws", p); err != nil {
 		t.Fatal("deduplicated save should not consume quota", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".yaml"), []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(ctx, "ws", p); err != nil {
+		t.Fatalf("repair at quota: %v", err)
 	}
 	p.Files[0].Content += "changed"
 	if _, err := s.Put(ctx, "ws", p); !errors.Is(err, ErrProjectStoreFull) {

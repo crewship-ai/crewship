@@ -31,6 +31,7 @@ CREATE TABLE pending_runs (
     chain_depth INTEGER,
     chain_origin TEXT,
     triggered_by_id TEXT,
+    pinned_version INTEGER CHECK (pinned_version IS NULL OR pinned_version > 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));
 CREATE UNIQUE INDEX idx_pending_runs_debounce ON pending_runs (pipeline_id, debounce_key)

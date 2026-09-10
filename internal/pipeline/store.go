@@ -198,6 +198,9 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if err := s.consumeDraftTx(ctx, tx, in); err != nil {
+			return nil, nil, err
+		}
 
 		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
 		// 'disabled' must stay disabled across an edit. statusForRisk only
@@ -304,6 +307,9 @@ WHERE id = ?`,
 		return nil, nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.consumeDraftTx(ctx, tx, in); err != nil {
+		return nil, nil, err
+	}
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipelines (
