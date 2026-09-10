@@ -22,19 +22,20 @@
     "loadingCount": 0
   },
   "ci": {
-    "source": 34469301690,
-    "ui": 34469677510,
-    "state": "success",
-    "source_sha": "4563f5db38383f1d0064ea2faf48192438583a29",
-    "ui_sha": "08fcfc60c6bcd85c64806b5338da73d50888623b",
-    "scope": "workflow_dispatch branch snapshots; not current-main merge validation",
+    "source": 34483084330,
+    "ui": 34483523993,
+    "state": "in_progress",
+    "source_sha": "6cc3e2d6e8190bec4682427d8a50e03f7237f449",
+    "ui_sha": "c68722da3d8c5d45ef11f19609614b5b0373e5ae",
+    "scope": "source automatic PR CI; cumulative UI dispatch after main integration",
     "pr_bodies_linked": [
       2475,
       2477,
       2479,
       2480,
       2481
-    ]
+    ],
+    "historical_state": "success"
   },
   "tests": {
     "pages": "passed",
@@ -56,12 +57,26 @@
   },
   "safari_decision": "confirmed_panel_only_v1_2026-09-10",
   "integration": {
-    "main_sha": "fa222ad2e1e52ff4a9327f527d5355d8ddb53de8",
-    "check": "git merge-tree --write-tree HEAD origin/main (read-only worktree check)",
-    "conflicts": [
-      "docs/api-reference/openapi.mdx",
-      "internal/api/testdata/route-roles.txt",
-      "internal/sidecar/routine_mcp_test.go"
-    ]
+    "main_sha": "6ce5afd4",
+    "state": "resolved_in_review_stack",
+    "server_sha": "d32f8e43",
+    "ui_sha": "c68722da3d8c5d45ef11f19609614b5b0373e5ae",
+    "conflicts": [],
+    "openapi_operations": 654,
+    "mcp_tools": 10
+  },
+  "storage_review": {
+    "reviewed_sha": "4563f5db",
+    "fix_sha": "79af8b5f",
+    "findings": [
+      "F1",
+      "F2",
+      "F3",
+      "F4"
+    ],
+    "focused_tests": "passed",
+    "red_first_F1_F2": "confirmed",
+    "F3_mutation": "killed",
+    "readme_links": "all local targets exist"
   }
 }

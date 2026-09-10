@@ -1,5 +1,7 @@
 # Pages Apps — current delivery handoff, updated 2026-09-10 11:15 UTC
 
+Latest: [storage/compiler review fixes and main integration](pages-apps-storage-review-response-2026-09-10.md). This supersedes the unresolved-conflict and pending F1–F4 state in earlier snapshots below.
+
 ## Delivery correction — 2026-09-10 12:40 UTC
 
 This update supersedes earlier pending-CI and Safari-decision statements below.
