@@ -38,7 +38,6 @@
  */
 
 import * as React from "react"
-import { useRouter } from "next/navigation"
 
 import { SAVE_EFFECT_NOTE } from "@/lib/pages/editor-contract"
 import {
@@ -73,9 +72,9 @@ export function EditorAccessSection({
   slug,
   page,
   capabilities,
+  onPageDeleted,
   onDirtyChange,
 }: EditorSectionProps) {
-  const router = useRouter()
   const panelIDs = React.useMemo(() => pagePanelIDs(page), [page])
 
   // Nothing on this section is ever unwritten work, so it never raises the
@@ -131,20 +130,24 @@ export function EditorAccessSection({
 
       <ExportCard workspaceId={workspaceId} slug={slug} />
 
-      {/* Deleting is NOT gated on mayManageAccess. Ending a Page is the
-          owner's right (or a workspace admin's), which is a different right
-          from administering its ACL and one the capabilities do not model —
-          deriving it here would be a second, wrong copy of the server's rule.
-          The card already shows the server's own refusal in place when it
-          says no. */}
+      {/* Deliberately NOT gated on `mayManageAccess`, and please leave it
+          that way. Ending a Page is the owner's right (or a workspace
+          admin's) — a DIFFERENT right from administering its ACL, and one
+          `PageCapabilities` does not model. Deriving it from the nearest
+          capability to hand would be a second copy of the server's rule,
+          free to be wrong in either direction: hiding the button from
+          somebody who may delete, or showing it to somebody who may not and
+          calling that a permission check. The server decides, and the card
+          renders its refusal in place when it says no. */}
       <DangerCard
         workspaceId={workspaceId}
         slug={slug}
         // `usePageDelete` invalidates the index and nothing else, on purpose:
         // refetching a deleted Page's grants only produces a 404 to swallow,
-        // and its own comment says the caller navigates away. The overview is
-        // the only address that still exists.
-        onDeleted={() => router.push("/pages")}
+        // and its own comment says the caller navigates away. The shell owns
+        // where to — a section that reached for the router would unmount the
+        // rail the editor is careful not to disturb.
+        onDeleted={onPageDeleted}
       />
     </div>
   )

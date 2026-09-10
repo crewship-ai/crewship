@@ -1,5 +1,13 @@
 /**
- * Page settings — the ACL and the page's own facts (PRD §7.1b, §10b.1).
+ * The Pages card library — the ACL and the page's own facts (PRD §7.1b,
+ * §10b.1).
+ *
+ * These cards used to be reachable only through a `PageSettings` modal, and
+ * this file used to mount that modal to reach them. The modal is deleted: the
+ * editor gives each card a named section instead. Every assertion below is
+ * the same assertion, re-homed onto the card that carries the behaviour, so
+ * the split cost no coverage. Two things went with the modal and are gone
+ * from here: the SubBar button that opened it, and the dialog chrome itself.
  *
  * What is pinned here is what a wrong pixel costs someone:
  *
@@ -26,8 +34,14 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-li
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 
-import { PagesLayout } from "@/components/features/pages/pages-layout"
-import { PageSettings } from "@/components/features/pages/page-settings"
+import * as cards from "@/components/features/pages/page-settings"
+import {
+  AccessCard,
+  GeneralCard,
+  PageFactsCard,
+  PanelVersionsCard,
+  pagePanelIDs,
+} from "@/components/features/pages/page-settings"
 import { toPageGrant, type WirePageDetail } from "@/hooks/use-page-grants"
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -154,9 +168,13 @@ function mount(page: WirePageDetail, routes: Routes = {}) {
   vi.stubGlobal("fetch", mockFetch)
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  // The cards, mounted the way the editor's sections mount them — Access in
+  // one section, the facts and the version log in two others. What used to
+  // stack them was a modal; nothing stacks them now, so the harness does.
   render(
     <QueryClientProvider client={qc}>
-      <PageSettings workspaceId="ws-1" slug={page.slug!} page={page} onClose={() => {}} />
+      <AccessCard workspaceId="ws-1" slug={page.slug!} panelIDs={pagePanelIDs(page)} />
+      <GeneralCard workspaceId="ws-1" slug={page.slug!} page={page} />
     </QueryClientProvider>,
   )
   return { calls, mockFetch }
@@ -362,67 +380,80 @@ describe("the General card", () => {
     expect(rows[1].textContent).toContain("watcher")
   })
 
-  it("asks before rolling back, and names what a rollback does to the data", async () => {
+  it("asks before restoring a panel version, and names what it does to the data", async () => {
     const { calls } = mount(CREW_OWNED)
     await waitFor(() =>
       expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(2),
     )
 
-    fireEvent.click(screen.getByLabelText("Roll back to version 3"))
+    // The control is named for its own effect. History carries three
+    // restores and the other two write a draft and a publication, so no two
+    // of them may share a verb.
+    fireEvent.click(screen.getByLabelText("Restore panel version 3"))
     expect(calls.filter((c) => c.url.includes("/rollback"))).toHaveLength(0)
 
     const dialog = await screen.findByRole("alertdialog")
-    // §10b.1: rollback restores structure, never numbers.
+    // §10b.1: it restores structure, never numbers — and it is the one
+    // restore of the three that writes the live definition.
+    expect(dialog.textContent).toContain("writes the live definition")
     expect(dialog.textContent).toContain("arrives with no data")
     expect(dialog.textContent).toContain("appends a new version")
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Roll back" }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Restore panel version" }))
     await waitFor(() => expect(calls.filter((c) => c.url.includes("/rollback"))).toHaveLength(1))
     expect(calls.find((c) => c.url.includes("/rollback"))!.method).toBe("POST")
   })
 })
 
-// ── 5. Reachable from the shell ────────────────────────────────────────────
+// ── 4b. The split ──────────────────────────────────────────────────────────
 
-describe("the /pages shell", () => {
-  it("opens settings from the SubBar, beside Edit", async () => {
-    const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-      const method = (init?.method ?? "GET").toUpperCase()
-      if (url.includes("/versions")) return jsonResponse(200, VERSIONS)
-      if (url.includes("/grants")) return jsonResponse(200, GRANTS)
-      if (url.includes("/api/v1/pages/")) return jsonResponse(200, CREW_OWNED)
-      if (method === "GET") return jsonResponse(200, [CREW_OWNED])
-      return jsonResponse(404, { error: `unrouted ${method} ${url}` })
-    })
-    vi.stubGlobal("fetch", mockFetch)
+describe("the card library", () => {
+  it("no longer exports a settings modal", () => {
+    // The modal is not deprecated, it is deleted. A build that still has it
+    // has a second, unrouted place to change a page's ACL from.
+    expect((cards as Record<string, unknown>).PageSettings).toBeUndefined()
+  })
 
+  it("splits the facts and the version log into cards that stand alone", async () => {
+    // The two halves now live in different sections — the facts in Content,
+    // the versions in History — so each has to render without the other.
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).includes("/versions")
+          ? jsonResponse(200, VERSIONS)
+          : jsonResponse(404, { error: "unrouted" }),
+      ),
+    )
     render(
       <QueryClientProvider client={qc}>
-        <PagesLayout workspaceId="ws-1" slug="fleet-201" />
+        <PageFactsCard slug="fleet-201" page={CREW_OWNED} />
       </QueryClientProvider>,
     )
+    expect(document.querySelector("[data-fact='owner']")!.textContent).toContain("lookout")
+    expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(0)
 
-    const bar = screen.getByLabelText("Pages")
-    // Enabled only once the page itself has loaded — there is nothing to show
-    // the settings of until then.
-    const settings = await waitFor(() => {
-      const button = within(bar).getByRole("button", { name: /settings/i }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-      return button
-    })
-    // Beside Edit, not inside it: the editor owns one document, this owns
-    // rows in two tables no document can express.
-    expect(within(bar).getByRole("button", { name: /edit/i })).toBeTruthy()
-
-    fireEvent.click(settings)
-    expect(await screen.findByRole("dialog", { name: "Settings for fleet-201" })).toBeTruthy()
-    await waitFor(() => expect(grantRows()).toHaveLength(2))
+    cleanup()
+    render(
+      <QueryClientProvider client={qc}>
+        <PanelVersionsCard workspaceId="ws-1" slug="fleet-201" />
+      </QueryClientProvider>,
+    )
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(2),
+    )
+    expect(document.querySelector("[data-fact='owner']")).toBeNull()
   })
 })
 
-// ── 6. The normaliser's two honesty rules ──────────────────────────────────
+// ── 5. The normaliser's two honesty rules ──────────────────────────────────
+//
+// What was section 5 — "the /pages shell opens settings from the SubBar,
+// beside Edit" — is deleted rather than re-homed. It asserted the modal's
+// chrome and the toolbar button that opened it, and the new design has
+// neither: the cards are reached through the editor's Access and History
+// sections, whose own tests live in components/features/pages/editor.
 
 describe("toPageGrant", () => {
   it("treats an unreadable verdict as inert, never as live", () => {

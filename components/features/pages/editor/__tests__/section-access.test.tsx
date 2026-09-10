@@ -20,7 +20,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
@@ -124,6 +124,16 @@ function mount(capabilities: Partial<PageCapabilities> = {}) {
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
       calls.push({ method, url })
+      // The Page itself. Matched before the sub-resources so a DELETE of one
+      // of those is not mistaken for the end of the Page.
+      if (
+        method === "DELETE" &&
+        !url.includes("/webhooks") &&
+        !url.includes("/public") &&
+        !url.includes("/grants")
+      ) {
+        return jsonResponse(200, {})
+      }
       if (url.includes("/webhooks")) {
         if (method === "POST") {
           return jsonResponse(200, {
@@ -148,6 +158,8 @@ function mount(capabilities: Partial<PageCapabilities> = {}) {
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const onDirtyChange = vi.fn()
+  const onLeaveEditor = vi.fn()
+  const onPageDeleted = vi.fn()
   render(
     <QueryClientProvider client={qc}>
       <EditorAccessSection
@@ -158,11 +170,13 @@ function mount(capabilities: Partial<PageCapabilities> = {}) {
         onNavigate={vi.fn()}
         pane="section"
         onPaneChange={vi.fn()}
+        onLeaveEditor={onLeaveEditor}
+        onPageDeleted={onPageDeleted}
         onDirtyChange={onDirtyChange}
       />
     </QueryClientProvider>,
   )
-  return { calls, onDirtyChange }
+  return { calls, onDirtyChange, onLeaveEditor, onPageDeleted }
 }
 
 function sectionText(): string {
@@ -216,6 +230,40 @@ describe("the Access section", () => {
       "Administering access does not by itself let you edit this Page",
     )
     expect(sectionText()).not.toMatch(/unlocks?/i)
+  })
+
+  it("says what a public link exposes, and that publishing an application is not that", async () => {
+    mount()
+    await waitFor(() => expect(document.querySelectorAll("[data-slot='page-grant']")).toHaveLength(1))
+
+    const text = sectionText()
+    // The public DTO carries panels, never the application artifact, and the
+    // two acts share the word "publish" — which is exactly how somebody ends
+    // up believing their custom application is on the internet.
+    expect(text).toContain("panels marked public")
+    expect(text).toContain("Publishing a custom application is not the same thing")
+    expect(text).toContain("a public link never serves it")
+  })
+
+  it("hands the deleted Page back to the shell instead of routing itself", async () => {
+    const { calls, onPageDeleted } = mount()
+    await waitFor(() => expect(document.querySelectorAll("[data-slot='page-grant']")).toHaveLength(1))
+
+    // Deleting is not gated on mayManageAccess — ending a Page is the
+    // owner's right, which PageCapabilities does not model — so the control
+    // is here for a caller who administers access, and the server decides.
+    fireEvent.click(screen.getByRole("button", { name: /delete this page/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.change(within(dialog).getByLabelText("Type the page slug to confirm"), {
+      target: { value: "fleet-201" },
+    })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    await waitFor(() => expect(onPageDeleted).toHaveBeenCalledTimes(1))
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true)
+    // The section must not navigate on its own: in this shell the router
+    // would unmount the rail the editor is careful not to disturb.
+    expect(sectionText()).toBeTruthy()
   })
 })
 
