@@ -7,6 +7,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func newPendingDB(t *testing.T) *sql.DB {
@@ -214,7 +216,7 @@ func TestPendingRuns_DuePreservesOccurrenceAfterRearm(t *testing.T) {
 	var previousKey string
 	for i, when := range []time.Time{first, first.Add(time.Minute)} {
 		if i > 0 {
-			if _, err := db.ExecContext(ctx, `UPDATE pending_runs SET status='pending', fired_run_id=NULL, fire_at=? WHERE id=?`, when.Format(time.RFC3339Nano), id); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE pending_runs SET status='pending', fired_run_id=NULL, fire_at=? WHERE id=?`, tsformat.Format(when), id); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -225,7 +227,7 @@ func TestPendingRuns_DuePreservesOccurrenceAfterRearm(t *testing.T) {
 		if !due[0].FireAt.Equal(when) {
 			t.Fatalf("occurrence %d: FireAt=%s, want %s", i, due[0].FireAt, when)
 		}
-		key := ScheduledFireIdempotencyKey("pending", due[0].ID, due[0].FireAt.UTC().Format(time.RFC3339Nano))
+		key := ScheduledFireIdempotencyKey("pending", due[0].ID, due[0].FireAt.UTC().Format(time.RFC3339Nano)) // tsformat:allow: dispatcher identity serialization, not a SQL timestamp comparison
 		if key == previousKey {
 			t.Fatal("new occurrence reused the previous dispatch identity")
 		}
