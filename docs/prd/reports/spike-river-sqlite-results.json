@@ -1,0 +1,120 @@
+{
+  "run_at": "2026-09-10T19:55:41.052711248Z",
+  "versions": {
+    "go": "go1.27.1",
+    "modernc_sqlite": "v1.58.0",
+    "pool_size": 5,
+    "river": "v0.47.0",
+    "riversqlite": "v0.47.0",
+    "sqlite_library": "3.53.4",
+    "synchronous": "FULL"
+  },
+  "scenarios": [
+    {
+      "scenario": "tx",
+      "pass": true,
+      "detail": {
+        "after_commit_deliveries": 1,
+        "after_commit_jobs": 1,
+        "after_rollback_deliveries": 0,
+        "after_rollback_jobs": 0,
+        "jobs_visible_before_commit": 0,
+        "river_migrations_applied": 7,
+        "worked_after_commit": 1,
+        "worked_before_commit": 0
+      }
+    },
+    {
+      "scenario": "dup",
+      "pass": true,
+      "detail": {
+        "accepted_new": 1,
+        "concurrency": 32,
+        "delivery_rows": 1,
+        "distinct_receipts": 1,
+        "errors": 0,
+        "reported_duplicate": 31,
+        "river_jobs": 1
+      }
+    },
+    {
+      "scenario": "contention",
+      "pass": true,
+      "detail": {
+        "baseline_p50_ms": 7,
+        "baseline_p95_ms": 13,
+        "baseline_p99_ms": 14,
+        "cancel_budget_ms": 500,
+        "cancel_error": "context deadline exceeded",
+        "cancel_returned_after_ms": 5036,
+        "cancellation_interrupts_busy_wait": false,
+        "cancelled_op_left_row": 0,
+        "contended_committed": 199,
+        "contended_other_error": 1,
+        "contended_p95_ms": 9,
+        "contended_p99_ms": 26,
+        "contended_rejected_within_budget": 1,
+        "contended_sqlite_busy": 0,
+        "lock_held": "5s",
+        "ops": 200,
+        "pool_size": 5,
+        "recovered_after_release": true,
+        "synchronous": "FULL"
+      },
+      "notes": [
+        "context cancellation did NOT interrupt the SQLite busy wait — the acceptance handler needs its own budget guard"
+      ]
+    },
+    {
+      "scenario": "fencing",
+      "pass": true,
+      "detail": {
+        "attempt_after_stale_completion": 2,
+        "fenced_predicate_rows_affected": 0,
+        "fencing_term_rejects_stale_completion": true,
+        "river_accepts_stale_completion": true,
+        "river_predicate_rows_affected": 1,
+        "state_after_stale_completion": "completed"
+      },
+      "notes": [
+        "River's JobSetStateIfRunning predicate (id, state='running') accepted a completion from attempt 1 while attempt 2 was the live one — invariant I5 needs a Crewship-side generation term, whichever queue is chosen"
+      ]
+    },
+    {
+      "scenario": "pool",
+      "pass": true,
+      "detail": {
+        "pool_1_second_conn_err": "context deadline exceeded",
+        "pool_1_second_conn_ms": 3001,
+        "pool_1_second_conn_ok": false,
+        "pool_2_second_conn_err": "",
+        "pool_2_second_conn_ms": 0,
+        "pool_2_second_conn_ok": true,
+        "pool_5_second_conn_err": "",
+        "pool_5_second_conn_ms": 0,
+        "pool_5_second_conn_ok": true,
+        "synchronous": "FULL"
+      },
+      "notes": [
+        "pool=1: a second connection inside an open transaction starved (context deadline exceeded) — River's recommended single-connection pool is incompatible with any acceptance path that reads back through the pool"
+      ]
+    },
+    {
+      "scenario": "durability",
+      "pass": true,
+      "detail": {
+        "ops": 200,
+        "sync_FULL_acceptance_p50_us": 7901,
+        "sync_FULL_acceptance_p95_us": 13807,
+        "sync_FULL_acceptance_p99_us": 21334,
+        "sync_FULL_delivery_only_p50_us": 6371,
+        "sync_FULL_delivery_only_p95_us": 12381,
+        "sync_NORMAL_acceptance_p50_us": 261,
+        "sync_NORMAL_acceptance_p95_us": 459,
+        "sync_NORMAL_acceptance_p99_us": 9702,
+        "sync_NORMAL_delivery_only_p50_us": 20,
+        "sync_NORMAL_delivery_only_p95_us": 32
+      }
+    }
+  ]
+}

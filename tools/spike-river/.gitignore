@@ -1,0 +1,3 @@
+# `go build .` in this directory drops the binary here; it is 13 MB and has no
+# business in the tree. Build to a temp path, or accept this ignore.
+/spike-river
