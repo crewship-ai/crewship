@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { getIssueWorker } from "@/lib/issue-execution"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { IssueCard } from "./issue-card"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
 
 interface IssuesListViewProps {
@@ -237,7 +238,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   }
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden">
+    <div className="@container/issues rounded-lg border border-border overflow-hidden">
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">
@@ -301,6 +302,25 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
           </button>
         </div>
       )}
+      {/*
+       * Nine columns of fixed pixel widths come to roughly 760px, so on a
+       * phone this was a data grid you scrolled sideways through. The same
+       * rows render as cards below the container's `md`, reusing the board's
+       * IssueCard rather than growing a second card layout to keep in step.
+       *
+       * A container query, not a viewport one: this view also renders inside a
+       * narrowed pane next to an open issue, where the width that matters is
+       * the pane's, not the window's — which is the mistake the pages panel
+       * (components/features/pages/panels/table-panel.tsx) already avoided.
+       *
+       * What the card form does not carry: the per-row checkbox and the
+       * sortable headers. Bulk editing and column sorting are desktop
+       * workflows — the board has neither either — and the sort chosen on a
+       * desktop still applies here, since both forms render the same `sorted`
+       * array. What a phone gains over the board is a flat list rather than
+       * one grouped by status.
+       */}
+      <div className="hidden @md/issues:block">
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
@@ -459,6 +479,15 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
           })}
         </TableBody>
       </Table>
+      </div>
+
+      <ul className="flex flex-col gap-2 p-2 @md/issues:hidden">
+        {sorted.map((issue) => (
+          <li key={issue.id}>
+            <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
