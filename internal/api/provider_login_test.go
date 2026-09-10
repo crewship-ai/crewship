@@ -885,7 +885,11 @@ func TestAgentGet_PaysWith(t *testing.T) {
 
 func TestCredSecretPaths_ProviderLogin(t *testing.T) {
 	t.Parallel()
-	if got := credSecretPaths("writer", "OPENAI_API_KEY", "PROVIDER_LOGIN", "OPENAI", "subscription", []string{"refresh_token", "id_token"}); len(got) != 1 || got[0] != "/crew/agents/writer/.codex/auth.json" {
+	// Two paths, not one: HOME is per run now, so the glob reaches every live
+	// run's own copy, and the flat path still covers a container that started
+	// before that change. A revoke naming only one of them leaves the login on
+	// disk while the vault reports it gone.
+	if got := credSecretPaths("writer", "OPENAI_API_KEY", "PROVIDER_LOGIN", "OPENAI", "subscription", []string{"refresh_token", "id_token"}); strings.Join(got, "|") != "/crew/runs/writer/*/.codex/auth.json|/crew/agents/writer/.codex/auth.json" {
 		t.Errorf("codex login paths = %v", got)
 	}
 	if got := credSecretPaths("writer", "OPENAI_API_KEY", "PROVIDER_LOGIN", "OPENAI", "api_key", nil); got != nil {

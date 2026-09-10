@@ -168,6 +168,20 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	if r.hybridSearchHandler != nil {
 		r.mux.Handle("POST /api/v1/internal/memory/search/hybrid", internalAuth(http.HandlerFunc(r.hybridSearchHandler.SearchInternal)))
 	}
+	// The §8 memory contract's host side (memory_mutation.go) — the two routes
+	// that make memory.ProfileGuaranteed reachable at all. Both in-container
+	// writers hold no *sql.DB, so before these the guaranteed profile refused
+	// every caller in the tree and nothing could satisfy it. The mutation route
+	// performs the write against the real ledger on the HOST side of the crew
+	// bind mount; the canonical read is not a convenience next to it but the
+	// other half of the same contract, since a client cannot supply
+	// expected_revision without having been told the revision.
+	//
+	// Acting identity comes from the internal token's binding narrowed by
+	// X-Acting-Agent-Slug, exactly as the hybrid search above.
+	memMut := NewMemoryMutationHandler(r.db, r.storagePath, r.memoryVersionsBlobRoot, r.logger)
+	r.mux.Handle("POST /api/v1/internal/memory/mutation", internalAuth(http.HandlerFunc(memMut.Mutate)))
+	r.mux.Handle("GET /api/v1/internal/memory/canonical", internalAuth(http.HandlerFunc(memMut.Read)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
 	// Sidecar-emitted Crow's Nest journal events (network.egress, file.written).

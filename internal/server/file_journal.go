@@ -3,10 +3,13 @@ package server
 import (
 	"context"
 	"log/slog"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 // fileEmitTimeout caps the per-event journal write so a slow DB write
@@ -53,6 +56,15 @@ func emitFileWrittenEntry(j *journal.Writer, crewID string, ev fileserver.FileEv
 	// agent slug is parsed by the watcher from the relative path's first
 	// segment (extractAgentSlug) so mission-driven runs that write to
 	// /output/<agent>/ get attribution without a DB lookup.
+	//
+	// E0: the SECOND segment is the run id, because a run's working directory
+	// is now /output/<agent>/<runID> (orchestrator.agentRunOutputDir). Parsing
+	// it here rather than in the watcher is deliberate — internal/fileserver
+	// knows nothing about runs, and the attribution question is the journal's.
+	// Without it two concurrent runs of one agent produce an indistinguishable
+	// stream of file.written rows, which is the artifact half of "two run
+	// streams must never merge on agent slug alone".
+	runID := runIDFromEventPath(ev.Path)
 	summary := summarizeFileEvent(verb, ev.Path, ev.Size)
 
 	ctx, cancel := context.WithTimeout(context.Background(), fileEmitTimeout)
@@ -72,6 +84,16 @@ func emitFileWrittenEntry(j *journal.Writer, crewID string, ev fileserver.FileEv
 			"op":    ev.Event,
 		},
 		Refs: map[string]any{"crew_id": crewID},
+	}
+	// TraceID is the journal's run_id column, so an artifact written by a run
+	// joins that run's timeline. Left empty — not faked — for a write this
+	// cannot attribute: a file dropped straight into /output/<agent>/, a
+	// pre-E0 path, or anything the server itself wrote (chat attachments land
+	// under /output/<agent>/attachments/..., whose second segment is
+	// "attachments" and is correctly rejected as a run id).
+	if runID != "" {
+		entry.TraceID = runID
+		entry.Payload["run_id"] = runID
 	}
 
 	// WorkspaceID is required by Validate but we don't have it here. The
@@ -166,4 +188,38 @@ func ftoa(f float64) string {
 		return itoa(whole)
 	}
 	return itoa(whole) + "." + itoa(frac)
+}
+
+// runIDFromEventPath pulls the run id out of a watcher path of the shape
+// <agentSlug>/runs/<runID>/... — the layout an agent run's working directory
+// now has (/output/<agent>/runs/<runID>, orchestrator.agentRunOutputDir).
+//
+// The literal "runs" segment is what makes this exact rather than a guess.
+// Matching <agentSlug>/<runID>/... instead would ask "does this segment look
+// like a run id?", and orchestrator.ValidRunID answers yes for "attachments" —
+// so every chat attachment (/output/<agent>/attachments/<chatID>/<id>/<file>,
+// internal/api/proxy_attachments.go) would have been filed under a run called
+// "attachments". ValidRunID is a SAFETY check for shell interpolation, not a
+// recogniser, and using it as one is how that bug would have got in.
+//
+// Returns "" for anything else — a file written straight into the agent's
+// shared tree, a pre-E0 path, a bare filename at the crew root — and the
+// caller then records no run rather than a wrong one.
+//
+// It deliberately does NOT check that the run exists: this runs on the
+// fsnotify hot path, where a DB lookup per file event is exactly the
+// back-pressure fileEmitTimeout exists to avoid. A syntactically valid id that
+// names no run costs one unjoined journal row; a lookup would cost every
+// burst-write an extra query.
+func runIDFromEventPath(relPath string) string {
+	cleaned := strings.TrimPrefix(path.Clean(strings.ReplaceAll(relPath, "\\", "/")), "./")
+	parts := strings.Split(cleaned, "/")
+	// Need at least <agent>/runs/<runID>/<something>.
+	if len(parts) < 4 || parts[1] != orchestrator.ContainerRunOutputSegment {
+		return ""
+	}
+	if !orchestrator.ValidRunID(parts[2]) {
+		return ""
+	}
+	return parts[2]
 }

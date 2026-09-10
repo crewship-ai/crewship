@@ -20,6 +20,7 @@ func codexAPIKeyReq() AgentRunRequest {
 	return AgentRunRequest{
 		AgentID:       "a1",
 		AgentSlug:     "coder",
+		RunID:         "run-1",
 		CLIAdapter:    "CODEX_CLI",
 		LLMProvider:   "OPENAI",
 		LLMModel:      "gpt-5.5",
@@ -84,8 +85,8 @@ func TestBuildEnvVarsSidecar_Codex_RoutesOpenAIThroughSidecar(t *testing.T) {
 			t.Fatalf("real OpenAI key leaked into agent env: %q", e)
 		}
 	}
-	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/agents/coder/.codex" {
-		t.Errorf("CODEX_HOME = %q (present=%v), want /crew/agents/coder/.codex", got, ok)
+	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/runs/coder/run-1/.codex" {
+		t.Errorf("CODEX_HOME = %q (present=%v), want /crew/runs/coder/run-1/.codex", got, ok)
 	}
 	if got, _ := envValue(env, "CREWSHIP_BILLING_MODE"); got != "metered" {
 		t.Errorf("CREWSHIP_BILLING_MODE = %q, want metered for an API key", got)

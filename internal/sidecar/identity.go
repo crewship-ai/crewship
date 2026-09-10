@@ -40,31 +40,169 @@ func bearerToken(r *http.Request) string {
 //   - present=true, ok=true    → token maps to (agentID, slug); this is the
 //     authoritative acting identity and overrides any request `from`/URL slug.
 func (s *Server) actingIdentity(r *http.Request) (agentID, slug string, present, ok bool) {
+	agentID, slug, _, present, ok = s.actingRunIdentity(r)
+	return agentID, slug, present, ok
+}
+
+// actingRunIdentity is actingIdentity plus the RUN the call belongs to (E0).
+// runID is "" for a v1 (per-agent) token, which carries no run — every route
+// that uses it must therefore treat "" as "unknown run", never as an error.
+//
+// Same return contract as actingIdentity for present/ok, with one addition: a
+// token that verifies but names a run the orchestrator has told us ENDED is
+// present=true, ok=FALSE. A finished run's credentials must stop working;
+// otherwise a zombie runtime — a detached tmux CLI that outlived its run, which
+// orchestrator_run.go's agentExecStillRunning path says happens routinely —
+// keeps writing memory and raising escalations as a live agent.
+func (s *Server) actingRunIdentity(r *http.Request) (agentID, slug, runID string, present, ok bool) {
 	tok := bearerToken(r)
 	if tok == "" {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
-	return s.identityForToken(tok)
+	return s.identityForRunToken(tok)
 }
 
 func (s *Server) identityForToken(tok string) (agentID, slug string, present, ok bool) {
+	agentID, slug, _, present, ok = s.identityForRunToken(tok)
+	return agentID, slug, present, ok
+}
+
+// identityForRunToken resolves a bearer token to an identity by TWO different
+// mechanisms, in order:
+//
+//  1. Cryptographic verification of a per-run token (agtv2) against the crew's
+//     run key. Nothing needs to be rostered for this to work, which is the
+//     entire point: the roster is frozen at the moment the sidecar booted, so a
+//     run that started afterwards can never be in it. This path admits that run
+//     without a restart — and a restart is not a fallback, because it would end
+//     every other run sharing the container.
+//
+//  2. Constant-time equality against the boot roster (agtv1), unchanged. It
+//     still covers the boot agent and every crew member, and it is what a
+//     mid-upgrade container — an orchestrator that already mints v2 talking to
+//     a sidecar binary that predates it, or the reverse — falls back to.
+//
+// Order matters only for clarity; the two token formats are domain-separated in
+// the MAC, so a v1 token can never satisfy the v2 check or vice versa.
+func (s *Server) identityForRunToken(tok string) (agentID, slug, runID string, present, ok bool) {
 	if tok == "" {
-		return "", "", false, false
+		return "", "", "", false, false
 	}
-	// The boot agent's control-plane token lives on IPCConfig.
+
+	// (1) Verified per-run token.
+	if s.ipc != nil && s.ipc.AgentRunKey != "" {
+		if ws, ag, run, valid := internaltoken.ValidateAgentRunToken(s.ipc.AgentRunKey, tok); valid {
+			// The run key is already crew-scoped, so a token verifying under it
+			// belongs to this crew. The workspace check is belt and braces
+			// against a key reused across workspaces by a future caller.
+			if s.ipc.WorkspaceID != "" && ws != s.ipc.WorkspaceID {
+				return "", "", "", true, false
+			}
+			if !s.runs.current(run) {
+				return "", "", run, true, false
+			}
+			// First sight of a run this sidecar did not boot with: record it,
+			// so its identity is stable for the rest of the run and so the
+			// registry can later be told it ended. The chat is unknown on this
+			// path (the token binds workspace/agent/run and deliberately not a
+			// chat id, which is not identity), so runChatID falls back to the
+			// boot chat until the orchestrator supplies one.
+			s.registerRunFromToken(run, ag)
+			return ag, s.slugForAgentID(ag, run), run, true, true
+		}
+	}
+
+	// (2) Boot roster.
 	if s.ipc != nil && s.ipc.AgentToken != "" &&
 		subtle.ConstantTimeCompare([]byte(tok), []byte(s.ipc.AgentToken)) == 1 {
-		return s.ipc.AgentID, s.ipc.AgentSlug, true, true
+		return s.ipc.AgentID, s.ipc.AgentSlug, "", true, true
 	}
-	// Any other crew member sharing this container/sidecar.
 	for i := range s.crewMembers {
 		m := &s.crewMembers[i]
 		if m.AuthToken != "" &&
 			subtle.ConstantTimeCompare([]byte(tok), []byte(m.AuthToken)) == 1 {
-			return m.ID, m.Slug, true, true
+			return m.ID, m.Slug, "", true, true
 		}
 	}
-	return "", "", true, false
+	return "", "", "", true, false
+}
+
+// registerRunFromToken records a run the first time one of its calls arrives.
+// Cheap and idempotent: runRegistry.start is a no-op for a run already known,
+// and refuses to resurrect one already ended.
+//
+// This is what keeps the registry populated WITHOUT an inbound control channel
+// from crewshipd, which does not exist — the sidecar only ever calls out (see
+// s.ipc.BaseURL callers). A run announces itself by using its own token.
+func (s *Server) registerRunFromToken(runID, agentID string) {
+	if _, known := s.runs.lookup(runID); known {
+		return
+	}
+	s.runs.start(runID, runState{AgentID: agentID, AgentSlug: s.slugForAgentID(agentID, "")})
+	s.runs.sweep()
+}
+
+// slugForAgentID resolves a verified agent id to its slug. A v2 token binds the
+// agent ID — which is what authorization needs — but not the slug, which is
+// only ever used for display and for the peer-addressing surface.
+//
+// Three sources, in descending order of how much they know: the run's own
+// registry entry (the orchestrator told us when the run started), the boot
+// roster, then nothing. Returning "" is acceptable and deliberate: no route
+// authorizes on the slug, so an unknown slug degrades a label, not a decision.
+func (s *Server) slugForAgentID(agentID, runID string) string {
+	if st, known := s.runs.lookup(runID); known && st.AgentSlug != "" {
+		return st.AgentSlug
+	}
+	if s.ipc != nil && s.ipc.AgentID == agentID && s.ipc.AgentSlug != "" {
+		return s.ipc.AgentSlug
+	}
+	for i := range s.crewMembers {
+		if s.crewMembers[i].ID == agentID {
+			return s.crewMembers[i].Slug
+		}
+	}
+	return ""
+}
+
+// requestChatID is the chat THIS REQUEST belongs to.
+//
+// Every route that stamps a chat onto an escalation, a peer query, an issue, a
+// pipeline or an exposed port used to read s.ipc.ChatID — the chat of whichever
+// run happened to start the sidecar. The crew shares one sidecar, so every such
+// record from every agent in the container carried that one chat, regardless of
+// who raised it or from where. assignment.go already said so in a comment; this
+// is the fix for it.
+//
+// Degrades to the boot chat, not to empty: a v1 token carries no run, and a
+// record with no chat at all is worse than one with the old, imprecise chat.
+func (s *Server) requestChatID(r *http.Request) string {
+	_, _, runID, _, _ := s.actingRunIdentity(r)
+	return s.runChatID(runID)
+}
+
+// runChatID is the chat a call belongs to, resolved per REQUEST rather than
+// read off the boot-frozen s.ipc.ChatID.
+//
+// s.ipc.ChatID is whichever chat happened to start this sidecar. The crew
+// shares one sidecar, so every escalation, peer query, issue and exposed port
+// raised by ANY agent in the container was stamped with that one chat — a fact
+// the tree already acknowledged in assignment.go ("the crew shares one sidecar
+// and its IPC chat is the boot agent's") without being able to do anything
+// about it. A per-run token can: the run registry knows the chat the run was
+// dispatched for.
+//
+// Falls back to the boot chat when the run is unknown, which keeps a v1 token
+// and a pre-E0 sidecar behaving exactly as before rather than losing the chat
+// reference entirely.
+func (s *Server) runChatID(runID string) string {
+	if st, known := s.runs.lookup(runID); known && st.ChatID != "" {
+		return st.ChatID
+	}
+	if s.ipc != nil {
+		return s.ipc.ChatID
+	}
+	return ""
 }
 
 // llmRouteIdentity extracts the per-agent token embedded in the disposable

@@ -1,10 +1,14 @@
 package sidecar
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +67,38 @@ type MemoryWriteRequest struct {
 	// array means "this replace deletes nothing" and is checked — see
 	// buildTarget in internal/memory/mutate.go on why the distinction is
 	// load-bearing.
-	Removals []memdiff.Removal `json:"removals,omitempty"`
+	//
+	// NOT omitempty, and that is the whole point: `omitempty` drops an empty
+	// slice on the way OUT, so a Go client marshalling this struct with a
+	// deliberate "this replace deletes nothing" declaration would send no
+	// removals field at all and have it read back as "undeclared" — silently
+	// turning the strongest statement the caller can make into the absence of
+	// one, and demoting the write out of the guaranteed profile.
+	Removals []memdiff.Removal `json:"removals"`
+
+	// ExpectedRevision is §8's ledger CAS. It means something only on the
+	// HOST path (memoryHostMutationPath): the revision anchor lives in the
+	// host database, which nothing in this container can reach. Supply the
+	// value GET /memory/read reported — or omit it and supply ExpectedSHA256
+	// instead, in which case this handler derives the revision from the host
+	// under that exact hash (see hostExpectedRevision), which is what makes
+	// the guaranteed profile usable without a second sidecar route.
+	ExpectedRevision int64 `json:"expected_revision,omitempty"`
+
+	// RunID and Generation are I4's fencing pair. The host does not merely
+	// record them: it refuses the write unless the run is this agent's, still
+	// live, and carrying the current generation, so supplying a run the
+	// caller does not own buys nothing. Absent here means the host cannot
+	// verify anything and the write takes the declared legacy path.
+	RunID      string `json:"run_id,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+
+	// RequireGuaranteed makes the downgrade the caller's decision rather
+	// than this handler's. With it set, a write that cannot reach the host
+	// ledger is refused (503) instead of being served under the legacy
+	// profile; without it the fallback below applies and the response says
+	// so. Either way the outcome is declared, never silent.
+	RequireGuaranteed bool `json:"require_guaranteed,omitempty"`
 }
 
 // MemoryWriteResponse is the success envelope (201 Created).
@@ -87,6 +122,27 @@ type MemoryWriteResponse struct {
 	// OperationID echoes the id this write was recorded under, synthesised
 	// when the request did not carry one.
 	OperationID string `json:"operation_id"`
+
+	// Profile names the guarantee this write was ACTUALLY made under —
+	// "guaranteed" when the host ledger performed it, "legacy" when the
+	// in-container path did. It is reported rather than assumed so that no
+	// caller can describe an unchecked write as checked; RevisionChecked
+	// above is the same statement in boolean form and the two always agree.
+	Profile string `json:"profile"`
+
+	// Degraded and DegradedReason are the declared fallback. Degraded is
+	// true exactly when the caller could have had the guaranteed profile and
+	// did not, and the reason names what stopped it. A silent downgrade
+	// would be the failure this whole path exists to remove.
+	Degraded       bool   `json:"degraded,omitempty"`
+	DegradedReason string `json:"degraded_reason,omitempty"`
+
+	// MutationID / BaseRevision / Idempotent are the ledger's own record of
+	// this write, populated only on the guaranteed path. Idempotent means the
+	// host returned a PRIOR operation's stored result and wrote nothing.
+	MutationID   string `json:"mutation_id,omitempty"`
+	BaseRevision int64  `json:"base_revision,omitempty"`
+	Idempotent   bool   `json:"idempotent,omitempty"`
 }
 
 // MemoryWriteConflict is the 409 envelope for the §8 error vocabulary:
@@ -237,6 +293,96 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ── The §8 guaranteed profile, and the DECLARED fallback ──────────────
+	//
+	// memory.ProfileGuaranteed refuses any write lacking a caller-supplied
+	// operation id, a durable ledger handle, ExpectedRevision + non-nil
+	// Removals on a replace, or a wired Authorize. Nothing in this container
+	// can supply the second: `grep 'sql.DB' internal/sidecar/*.go` returns
+	// nothing, and it cannot be made to return something — the host database
+	// is on the other side of the container boundary. So the write is
+	// FORWARDED: POST /api/v1/internal/memory/mutation performs it host-side,
+	// under the real ledger, on the host end of the same bind mount this
+	// process writes through (internal/api/memory_mutation.go).
+	//
+	// The fallback is a stated contract, not an accident:
+	//
+	//   host reachable and the request meets the profile
+	//       → the write happens under ProfileGuaranteed and the response
+	//         reports a real revision with revision_checked: true.
+	//   host reachable and REFUSES (409 conflict, 422 policy, 400, 403)
+	//       → the refusal is relayed verbatim. This is NOT a fallback: a
+	//         conflict the host detected is the contract working, and
+	//         retrying it locally under the legacy profile would perform
+	//         exactly the lost update the CAS just prevented.
+	//   host unreachable, or the request cannot meet the profile
+	//       → the write is served by the in-container legacy path AND the
+	//         response says so: profile "legacy", revision_checked false,
+	//         degraded true, degraded_reason naming what stopped it.
+	//
+	// Why degrade rather than fail closed by default: the legacy path is
+	// exactly today's behaviour, and refusing an agent's memory write because
+	// crewshipd is restarting would discard content the agent cannot get back.
+	// The response is explicit enough that nothing downstream can describe
+	// such a write as revision-checked, which is the property that matters. A
+	// caller that would rather lose the write than lose the guarantee sets
+	// require_guaranteed and gets a 503 instead.
+	degradeReason := s.hostMutationBlocker(r, req, op)
+	if degradeReason == "" {
+		// Screen with THIS sidecar's scrubber before forwarding. The host runs
+		// its own default scrubber inside Mutate, but only this process has the
+		// crew's credential literals registered (registerCredentialLiterals in
+		// server.go), so skipping this would make the guaranteed path the
+		// weaker of the two on the one check that is agent-specific.
+		if rejection := s.screenBeforeHostMutation(req.Content); rejection != nil {
+			s.emitJournal(r.Context(), "memory.write_rejected",
+				"write rejected: "+rejection.Kind,
+				map[string]any{
+					"scope":        req.Scope,
+					"file":         req.File,
+					"reason":       rejection.Kind,
+					"hits":         len(rejection.Hits),
+					"operation_id": operationID,
+				}, nil)
+			writeJSONResponse(w, http.StatusUnprocessableEntity, *rejection)
+			return
+		}
+		out := s.mutateOnHost(r, req, op, operationID)
+		switch {
+		case out.relay != nil:
+			// The host's own §8 envelope, byte for byte. Re-encoding it here
+			// would be a second vocabulary for the same failures.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(out.relay.status)
+			_, _ = w.Write(out.relay.body)
+			return
+		case out.ok:
+			s.finishMemoryWrite(w, r, engine, req.Scope, req.File, MemoryWriteResponse{
+				BytesWritten:    out.res.BytesWritten,
+				Path:            target,
+				ContentSHA256:   out.res.ContentSHA256,
+				Revision:        out.res.Revision,
+				RevisionChecked: out.res.LedgerRecorded,
+				OperationID:     operationID,
+				Profile:         out.res.Profile,
+				MutationID:      out.res.MutationID,
+				BaseRevision:    out.res.BaseRevision,
+				Idempotent:      out.res.Idempotent,
+			})
+			return
+		default:
+			degradeReason = out.degradeReason
+		}
+	}
+	if req.RequireGuaranteed {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
+			"error":  "guaranteed memory profile unavailable: " + degradeReason,
+			"code":   "memory_profile_unmet",
+			"detail": "require_guaranteed was set, so this write was refused rather than served under the legacy profile",
+		})
+		return
+	}
+
 	cfg := memory.WriteConfig{
 		MaxBytes:     cap,
 		Scrubber:     s.memoryScrubber(),
@@ -334,23 +480,44 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The write itself is durable on disk at this point, so the 201 is
-	// honest the moment we return it. The two follow-on side effects —
-	// (1) an immediate FTS reindex so search hits the new content
-	// without waiting for the watcher debounce, and (2) the
-	// memory.updated journal emit — are pushed onto the single-worker,
-	// strict-FIFO background executor so a slow SQLite reindex or a
-	// laggy IPC round-trip can't delay the response the agent is
-	// blocked on. Ordering across turns is preserved: turn N's reindex
-	// always lands before turn N+1's (memory_executor.go).
-	//
-	// We must NOT capture r.Context() here — it is cancelled the instant
-	// this handler returns, which is before the off-thread task runs.
-	// Capture only stable values and build a fresh bounded context
-	// inside the closure.
-	scope := req.Scope
-	file := req.File
-	bytesWritten := res.BytesWritten
+	// The legacy in-container write. It is what the fallback contract above
+	// resolves to, and its result says so: no ledger, no revision, no
+	// operation-id idempotency, no run/generation verification.
+	s.finishMemoryWrite(w, r, engine, req.Scope, req.File, MemoryWriteResponse{
+		BytesWritten:    res.BytesWritten,
+		Path:            target,
+		ContentSHA256:   res.ContentSHA256,
+		Revision:        res.Revision,
+		RevisionChecked: res.LedgerRecorded,
+		MergedFinalLine: res.MergedFinalLine,
+		OperationID:     operationID,
+		Profile:         string(memory.ProfileLegacy),
+		Degraded:        degradeReason != "",
+		DegradedReason:  degradeReason,
+	})
+}
+
+// finishMemoryWrite is the shared tail of BOTH write paths: the follow-on side
+// effects and the 201. Factored out when the host path landed so the guaranteed
+// and legacy writes cannot drift on which of them reindexes and which emits —
+// a divergence there is invisible until search silently stops finding what an
+// agent just wrote.
+//
+// The write itself is durable on disk at this point (on this side of the bind
+// mount for the legacy path, on the host's side for the guaranteed one — same
+// inode either way), so the 201 is honest the moment we return it. The two
+// side effects — (1) an immediate FTS reindex so search hits the new content
+// without waiting for the watcher debounce, and (2) the memory.updated journal
+// emit — are pushed onto the single-worker, strict-FIFO background executor so
+// a slow SQLite reindex or a laggy IPC round-trip can't delay the response the
+// agent is blocked on. Ordering across turns is preserved: turn N's reindex
+// always lands before turn N+1's (memory_executor.go).
+//
+// We must NOT capture r.Context() in the closure — it is cancelled the instant
+// this handler returns, which is before the off-thread task runs. Capture only
+// stable values and build a fresh bounded context inside.
+func (s *Server) finishMemoryWrite(w http.ResponseWriter, r *http.Request, engine *memory.Engine, scope, file string, resp MemoryWriteResponse) {
+	bytesWritten := resp.BytesWritten
 	enqueued := s.memoryExec != nil && s.memoryExec.submit(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), memoryReindexTimeout)
 		defer cancel()
@@ -378,6 +545,8 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 				"scope":         scope,
 				"file":          file,
 				"bytes_written": bytesWritten,
+				"profile":       resp.Profile,
+				"revision":      resp.Revision,
 			}, nil)
 	})
 	if !enqueued {
@@ -395,18 +564,12 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 				"scope":         scope,
 				"file":          file,
 				"bytes_written": bytesWritten,
+				"profile":       resp.Profile,
+				"revision":      resp.Revision,
 			}, nil)
 	}
 
-	writeJSONResponse(w, http.StatusCreated, MemoryWriteResponse{
-		BytesWritten:    bytesWritten,
-		Path:            target,
-		ContentSHA256:   res.ContentSHA256,
-		Revision:        res.Revision,
-		RevisionChecked: res.LedgerRecorded,
-		MergedFinalLine: res.MergedFinalLine,
-		OperationID:     operationID,
-	})
+	writeJSONResponse(w, http.StatusCreated, resp)
 }
 
 // memoryConflictCode maps the §8 error vocabulary onto the string the HTTP
@@ -572,3 +735,323 @@ func memoryFileCap(rel string) (int, bool) {
 }
 
 var errIllegalPath = errors.New("illegal file path")
+
+// ── The host mutation forward ────────────────────────────────────────────
+//
+// Everything below is the client half of internal/api/memory_mutation.go. It
+// exists because the guaranteed profile needs a *sql.DB and this process will
+// never have one; the host does, so the write travels rather than the database.
+
+// memoryHostMutationPath and memoryHostCanonicalPath are the two host routes.
+// The read is not a convenience next to the write: a client cannot supply
+// expected_revision without having been told the revision, and the revision
+// anchor lives in the host database. Without the read the guaranteed profile
+// would be reachable in principle and unusable in practice.
+const (
+	memoryHostMutationPath  = "/api/v1/internal/memory/mutation"
+	memoryHostCanonicalPath = "/api/v1/internal/memory/canonical"
+)
+
+// hostMutationFencing resolves I4's (run_id, generation) pair.
+//
+// It comes from the REQUEST, and only from the request. That is not a trust
+// hole: the host refuses any run that is not this acting agent's own live
+// attempt at the current generation, so naming someone else's run buys nothing,
+// and naming your own is exactly what the invariant asks for.
+//
+// It is deliberately not read from the container environment either. A run id
+// is per-attempt and a container outlives many attempts, so an environment
+// variable set at container start would carry a stale run for every attempt
+// after the first — the precise failure I5's fencing term exists to catch, in
+// the one place nothing would catch it.
+//
+// Nothing in this tree supplies it yet: the durable work ledger's dispatch path
+// is still being built and no run id reaches an agent (IPCConfig carries agent,
+// crew, workspace and chat, and no run). Until a caller passes one, every write
+// through this handler degrades with a reason that says exactly that.
+func hostMutationFencing(req MemoryWriteRequest) (runID string, generation int64) {
+	return strings.TrimSpace(req.RunID), req.Generation
+}
+
+// hostMutationBlocker returns why the guaranteed path cannot be attempted for
+// this request, or "" when it can. Every branch is a fact known without any
+// network I/O, so a request that cannot possibly qualify never pays a round
+// trip to find out.
+func (s *Server) hostMutationBlocker(r *http.Request, req MemoryWriteRequest, op memory.MutateOp) string {
+	if s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.Token == "" {
+		return "this sidecar has no host IPC channel, so the mutation ledger is unreachable"
+	}
+	if _, ok := s.hybridActingSlug(r); !ok {
+		return "the acting agent identity could not be resolved, and the host will not accept a write it cannot attribute"
+	}
+	if runID, _ := hostMutationFencing(req); runID == "" {
+		return "the request carries no work-ledger run id, so invariant I4's run and generation cannot be verified"
+	}
+	if op == memory.OpReplace {
+		if req.Removals == nil {
+			return "a guaranteed replace must declare its removals; a missing array means undeclared, an empty one means it deletes nothing"
+		}
+		if req.ExpectedRevision <= 0 && strings.TrimSpace(req.ExpectedSHA256) == "" {
+			return "a guaranteed replace must carry expected_revision, or expected_sha256 for this handler to derive it from the host"
+		}
+	}
+	return ""
+}
+
+// screenBeforeHostMutation runs this sidecar's scrubber over the content the
+// host is about to be handed. The host runs its own default scrubber inside
+// Mutate, but only this process has the crew's credential literals registered
+// (registerCredentialLiterals), so without this the guaranteed path would be
+// weaker than the legacy one on the one check that is per-crew. Returns nil
+// when the content passes.
+func (s *Server) screenBeforeHostMutation(content string) *MemoryWriteRejection {
+	sc := s.memoryScrubber()
+	if sc == nil {
+		return nil
+	}
+	res := sc.Validate(content, scrubber.ModeBlock)
+	if res.Decision != scrubber.DecisionReject {
+		return nil
+	}
+	return &MemoryWriteRejection{
+		Rejected: true,
+		Kind:     "scrubber",
+		Hits:     res.Hits,
+		Message:  "scrubber policy rejected this write",
+	}
+}
+
+// hostMutationRelay is a host answer this handler forwards verbatim.
+type hostMutationRelay struct {
+	status int
+	body   []byte
+}
+
+// hostMutationSuccess is the decoded 200 from the host mutation route. Field
+// names track internal/api.MemoryMutationResponse; the two packages cannot
+// share the type (internal/api's own tests import internal/sidecar-adjacent
+// code and the edge would be a cycle), so the JSON tags are the contract.
+type hostMutationSuccess struct {
+	Profile        string `json:"profile"`
+	Revision       int64  `json:"revision"`
+	ContentSHA256  string `json:"content_sha256"`
+	LedgerRecorded bool   `json:"ledger_recorded"`
+	BytesWritten   int    `json:"bytes_written"`
+	MutationID     string `json:"mutation_id"`
+	BaseRevision   int64  `json:"base_revision"`
+	Idempotent     bool   `json:"idempotent"`
+}
+
+// hostMutationOutcome is exactly one of: performed (ok), refused by the host
+// (relay), or not performed at all (degradeReason).
+type hostMutationOutcome struct {
+	ok            bool
+	res           hostMutationSuccess
+	relay         *hostMutationRelay
+	degradeReason string
+}
+
+// hostCanonicalRead is the §8 read, host-side: the revision anchor plus the
+// hash of the exact bytes on disk.
+type hostCanonicalRead struct {
+	Exists         bool   `json:"exists"`
+	ContentSHA256  string `json:"content_sha256"`
+	Revision       int64  `json:"revision"`
+	LedgerRecorded bool   `json:"ledger_recorded"`
+	Drift          bool   `json:"drift"`
+}
+
+// mutateOnHost performs the forward. It never falls back on its own: it
+// reports which of the three outcomes happened and the caller applies the
+// declared contract.
+func (s *Server) mutateOnHost(r *http.Request, req MemoryWriteRequest, op memory.MutateOp, operationID string) hostMutationOutcome {
+	expectedRevision := req.ExpectedRevision
+	if op == memory.OpReplace && expectedRevision <= 0 {
+		// The loop-closing read. The caller told us the hash it diffed
+		// against; ask the host which revision that hash IS. If the file has
+		// moved on since the caller read it the hashes disagree and this is a
+		// conflict here, before any write — the same answer the ledger CAS
+		// would give, one round trip earlier.
+		canon, out, ok := s.readCanonicalOnHost(r, req)
+		if !ok {
+			return out
+		}
+		if canon.ContentSHA256 != strings.TrimSpace(req.ExpectedSHA256) {
+			body, _ := json.Marshal(MemoryMutationConflictEnvelope{
+				Error:           "memory_conflict",
+				Code:            "memory_conflict",
+				CurrentRevision: canon.Revision,
+				CurrentSHA256:   canon.ContentSHA256,
+				Message: "expected_sha256 does not match the canonical content; re-read and propose again " +
+					"under a NEW operation id",
+			})
+			return hostMutationOutcome{relay: &hostMutationRelay{status: http.StatusConflict, body: body}}
+		}
+		if canon.Revision <= 0 {
+			// internal/memory's guaranteed profile requires a NON-ZERO
+			// ExpectedRevision on a replace, and revision 0 means no contract
+			// write has ever anchored this key. The first write to a key must
+			// therefore be an append (which is guaranteed-eligible with
+			// revision 0) — this is a property of the committed §8 contract in
+			// internal/memory/mutate.go, not something this handler can paper
+			// over, so it is reported rather than worked around.
+			return hostMutationOutcome{degradeReason: "no revision anchor exists for this key yet; " +
+				"the guaranteed profile cannot CAS a first replace — append once to establish revision 1"}
+		}
+		expectedRevision = canon.Revision
+	}
+
+	runID, generation := hostMutationFencing(req)
+	body, err := json.Marshal(map[string]any{
+		"operation_id":      operationID,
+		"scope":             req.Scope,
+		"file":              req.File,
+		"op":                string(op),
+		"content":           req.Content,
+		"expected_revision": expectedRevision,
+		"expected_sha256":   req.ExpectedSHA256,
+		"removals":          req.Removals,
+		"run_id":            runID,
+		"generation":        generation,
+		"source":            "sidecar:/memory/write",
+	})
+	if err != nil {
+		return hostMutationOutcome{degradeReason: "the mutation request could not be encoded: " + err.Error()}
+	}
+
+	resp, err := s.memoryHostRequest(r, http.MethodPost, memoryHostMutationPath, body)
+	if err != nil {
+		return hostMutationOutcome{degradeReason: "the host mutation endpoint is unreachable: " + err.Error()}
+	}
+	switch {
+	case resp.status == http.StatusOK:
+		var ok hostMutationSuccess
+		if err := json.Unmarshal(resp.body, &ok); err != nil {
+			// The host says it wrote; we cannot read what it says. Degrading
+			// here would write the same content a second time.
+			return hostMutationOutcome{relay: &hostMutationRelay{
+				status: http.StatusBadGateway,
+				body:   []byte(`{"error":"the host performed the mutation but its response could not be decoded"}`),
+			}}
+		}
+		return hostMutationOutcome{ok: true, res: ok}
+	case resp.status == http.StatusNotFound:
+		// An older host without the route. Unambiguous, and the only status
+		// that means "nothing happened over there".
+		return hostMutationOutcome{degradeReason: "this host does not serve " + memoryHostMutationPath +
+			" (older crewshipd), so the mutation ledger is out of reach"}
+	default:
+		// Everything else — 400, 403, 409, 422, 5xx — is relayed. A conflict
+		// the host detected is the contract WORKING, and re-running it here
+		// under the legacy profile would perform exactly the lost update the
+		// CAS just prevented. A 5xx is relayed for the same reason in the
+		// other direction: the host may have written, and a legacy retry could
+		// append the same content twice.
+		return hostMutationOutcome{relay: &hostMutationRelay{status: resp.status, body: resp.body}}
+	}
+}
+
+// MemoryMutationConflictEnvelope is the §8 conflict shape, matching the host's
+// own so a client branches on one vocabulary regardless of which side detected
+// the conflict.
+type MemoryMutationConflictEnvelope struct {
+	Error           string `json:"error"`
+	Code            string `json:"code"`
+	CurrentRevision int64  `json:"current_revision"`
+	CurrentSHA256   string `json:"current_sha256,omitempty"`
+	Message         string `json:"message,omitempty"`
+}
+
+// readCanonicalOnHost fetches the revision anchor for (scope, file). A failure
+// is returned as a degrade outcome rather than an error so the caller's three
+// outcomes stay the only three.
+func (s *Server) readCanonicalOnHost(r *http.Request, req MemoryWriteRequest) (hostCanonicalRead, hostMutationOutcome, bool) {
+	q := url.Values{}
+	q.Set("scope", req.Scope)
+	q.Set("file", req.File)
+	resp, err := s.memoryHostRequest(r, http.MethodGet, memoryHostCanonicalPath+"?"+q.Encode(), nil)
+	if err != nil {
+		return hostCanonicalRead{}, hostMutationOutcome{
+			degradeReason: "the host canonical read is unreachable, so expected_revision cannot be derived: " + err.Error(),
+		}, false
+	}
+	if resp.status == http.StatusNotFound {
+		return hostCanonicalRead{}, hostMutationOutcome{
+			degradeReason: "this host does not serve " + memoryHostCanonicalPath + " (older crewshipd)",
+		}, false
+	}
+	if resp.status != http.StatusOK {
+		return hostCanonicalRead{}, hostMutationOutcome{
+			relay: &hostMutationRelay{status: resp.status, body: resp.body},
+		}, false
+	}
+	var canon hostCanonicalRead
+	if err := json.Unmarshal(resp.body, &canon); err != nil {
+		return hostCanonicalRead{}, hostMutationOutcome{
+			degradeReason: "the host canonical read could not be decoded: " + err.Error(),
+		}, false
+	}
+	return canon, hostMutationOutcome{}, true
+}
+
+// memoryHostIPCTimeout bounds one host round trip. Shorter than the 15 s the
+// other IPC forwards use: this one sits directly in front of an agent's memory
+// write, and a slow host should degrade to the legacy path (which the response
+// declares) rather than stall the turn.
+const memoryHostIPCTimeout = 10 * time.Second
+
+// memoryHostResponse is a raw host answer.
+type memoryHostResponse struct {
+	status int
+	body   []byte
+}
+
+// memoryHostRequest is the IPC call, carrying BOTH credentials the host route
+// needs: X-Internal-Token (which authenticates this sidecar) and
+// X-Acting-Agent-Slug (which narrows it to one agent). The slug is derived
+// exclusively from the token-resolved acting identity — never from the URL or
+// the payload — and the host re-proves it inside the token's own binding, so
+// the header can only narrow this sidecar's authority, never widen it.
+//
+// It does not reuse ipcRequestJSON (pipelines.go) because that helper sends
+// only the internal token, and a mutation the host cannot attribute to an
+// agent is one it must refuse.
+func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []byte) (*memoryHostResponse, error) {
+	if s.ipc == nil {
+		return nil, errors.New("IPC not configured")
+	}
+	slug, ok := s.hybridActingSlug(r)
+	if !ok {
+		return nil, errors.New("acting agent identity could not be resolved")
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), memoryHostIPCTimeout)
+	defer cancel()
+
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, s.ipc.BaseURL+path, reader)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+	httpReq.Header.Set(actingAgentSlugHeader, slug)
+
+	resp, err := ipcClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("call: %w", err)
+	}
+	defer resp.Body.Close()
+	// Bounded like every other IPC read here: these payloads are small
+	// structured JSON, and the cap stops a runaway peer.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	return &memoryHostResponse{status: resp.StatusCode, body: raw}, nil
+}

@@ -52,6 +52,32 @@ type IPCConfig struct {
 	// crew member's AuthToken to resolve the ACTING agent's true identity,
 	// so a shared-container sibling can't impersonate the boot agent.
 	AgentToken string `json:"agent_token,omitempty"`
+
+	// RunID / RunChatID are the run that STARTED this sidecar. Seeded into the
+	// run registry at construction so the boot run has per-run context from
+	// the outset — every other run's context arrives with its first
+	// authenticated call. E0.
+	RunID     string `json:"run_id,omitempty"`
+	RunChatID string `json:"run_chat_id,omitempty"`
+
+	// AgentRunKey is the crew-scoped key this sidecar VALIDATES per-run agent
+	// tokens with (internaltoken.DeriveAgentRunKey / ValidateAgentRunToken).
+	// E0.
+	//
+	// It is what makes per-run identity possible at all here. Everything above
+	// is frozen at boot — AgentToken and the crew roster are minted once by the
+	// run that started the sidecar and never refreshed, because
+	// sidecarNeedsRestart considers only the credential set, the network mode
+	// and the egress domains. So a token for a run that began AFTER this
+	// sidecar booted can never appear in the roster, and a lookup-based scheme
+	// has exactly two ways to admit it: restart the sidecar, which ends every
+	// other run sharing the container, or accept it unverified. With this key
+	// it needs neither — it verifies the MAC.
+	//
+	// Deliberately NOT the master internal token: the sidecar has never held
+	// that (its own IPC bearer is crew-derived for the same reason), and this
+	// key grants exactly one capability, over one crew.
+	AgentRunKey string `json:"agent_run_key,omitempty"`
 }
 
 // CrewMember describes a crew member accessible for lead assignment routing.
@@ -178,9 +204,13 @@ type Server struct {
 	ipc         *IPCConfig
 	routeAuth   *RouteAuth
 	crewMembers []CrewMember
-	mcpGateway  *MCPGateway
-	logger      *slog.Logger
-	readyCh     chan struct{} // closed when the TCP listener is bound
+	// runs is per-RUN identity state (E0). The roster above is frozen at
+	// boot; this is not, because runs start and end constantly and a frozen
+	// roster of them is a contradiction. See run_registry.go.
+	runs       *runRegistry
+	mcpGateway *MCPGateway
+	logger     *slog.Logger
+	readyCh    chan struct{} // closed when the TCP listener is bound
 	// memoryExec runs post-write side effects (FTS reindex + the
 	// memory.updated journal emit) off the request hot path so a slow
 	// reindex can't delay the 201 the agent is blocked on. Strict FIFO,
@@ -329,6 +359,7 @@ func NewServer(cfg ServerConfig) *Server {
 		ipc:         cfg.IPC,
 		routeAuth:   cfg.RouteAuth,
 		crewMembers: cfg.CrewMembers,
+		runs:        newRunRegistry(),
 		logger:      cfg.Logger,
 		readyCh:     make(chan struct{}),
 		// Shared scrubber instance reused by every /memory/write
@@ -357,6 +388,18 @@ func NewServer(cfg ServerConfig) *Server {
 		billingMode = "metered"
 	}
 	subscriptionPlan := os.Getenv("CREWSHIP_SUBSCRIPTION_PLAN")
+
+	// E0: seed the boot run so its per-run context (the chat it was dispatched
+	// for) is known immediately, rather than only once it makes its first
+	// authenticated call. Every later run of this crew registers itself on
+	// first use — see registerRunFromToken.
+	if cfg.IPC != nil && cfg.IPC.RunID != "" {
+		s.runs.start(cfg.IPC.RunID, runState{
+			AgentID:   cfg.IPC.AgentID,
+			AgentSlug: cfg.IPC.AgentSlug,
+			ChatID:    cfg.IPC.RunChatID,
+		})
+	}
 
 	// #1385: fingerprint the crew-bound IPC token so /health can advertise
 	// which master minted it. Empty when no IPC token is configured (crew-less
@@ -516,6 +559,17 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			// E0 run lifecycle. Registered FIRST so it cannot be shadowed by a
+			// future prefix route, and handled entirely inside the sidecar —
+			// see handleRunEnd for why this is a route at all rather than a
+			// push from crewshipd.
+			// The path literal is spelled out rather than referenced through
+			// runEndPath because routeKeysFromSource (the coverage guard in
+			// memory_routes_coverage_test.go) reads the router's SOURCE for
+			// string literals — a constant here would make the route invisible
+			// to the very test that exists to stop routes going unclassified.
+			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/end":
+				s.handleRunEnd(w, r)
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
 				s.handleMemorySearch(w, r)
 				return

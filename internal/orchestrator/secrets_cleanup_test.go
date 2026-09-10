@@ -35,23 +35,61 @@ func secretsTestReader() io.ReadCloser {
 
 func TestBuildSecretsCleanupScript(t *testing.T) {
 	cases := []struct {
-		name string
-		slug string
-		want string
+		name      string
+		slug, run string
+		want      string
 	}{
-		{"simple slug", "writer", "rm -rf '/secrets/writer'"},
-		{"slug with digits and dashes", "agent-2", "rm -rf '/secrets/agent-2'"},
-		{"empty slug refused", "", ""},
-		{"path traversal refused", "../shared", ""},
-		{"absolute path refused", "/etc", ""},
-		{"uppercase refused", "Writer", ""},
-		{"quote injection refused", "a'b", ""},
-		{"whitespace refused", "a b", ""},
+		// E0: the target is the RUN's directory, never the agent's. Removing
+		// /secrets/<slug> would delete a concurrently-live sibling run's
+		// credentials — a cleanup doing the exact cross-run damage this
+		// package exists to prevent.
+		{"simple slug", "writer", "run-a", "rm -rf '/secrets/writer/run-a'"},
+		{"slug with digits and dashes", "agent-2", "c0k3xj9q0001", "rm -rf '/secrets/agent-2/c0k3xj9q0001'"},
+		{"empty slug refused", "", "run-a", ""},
+		{"path traversal refused", "../shared", "run-a", ""},
+		{"absolute path refused", "/etc", "run-a", ""},
+		{"uppercase refused", "Writer", "run-a", ""},
+		{"quote injection refused", "a'b", "run-a", ""},
+		{"whitespace refused", "a b", "run-a", ""},
+		// The run id lands in the same rm and gets the same scrutiny.
+		{"empty run id refused", "writer", "", ""},
+		{"run id traversal refused", "writer", "../..", ""},
+		{"run id quote injection refused", "writer", "a'b", ""},
+		{"run id separator refused", "writer", "a/b", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := buildSecretsCleanupScript(c.slug); got != c.want {
-				t.Errorf("buildSecretsCleanupScript(%q) = %q, want %q", c.slug, got, c.want)
+			if got := buildSecretsCleanupScript(c.slug, c.run); got != c.want {
+				t.Errorf("buildSecretsCleanupScript(%q, %q) = %q, want %q", c.slug, c.run, got, c.want)
+			}
+		})
+	}
+}
+
+func TestBuildRunHomeCleanupScript(t *testing.T) {
+	cases := []struct {
+		name      string
+		slug, run string
+		want      string
+	}{
+		{"simple", "writer", "run-a", "rm -rf '/crew/runs/writer/run-a'"},
+		// The onboarding setup crew's slugs lead with an underscore. The
+		// secrets cleanup's stricter charset refuses those, which would have
+		// meant the one crew every new install runs never cleaned up a run
+		// home — so this one uses validSlugRe instead.
+		{"leading underscore accepted", "_crewship-setup-guide", "run-a",
+			"rm -rf '/crew/runs/_crewship-setup-guide/run-a'"},
+		{"empty slug refused", "", "run-a", ""},
+		{"traversal refused", "../agents", "run-a", ""},
+		{"quote injection refused", "a'b", "run-a", ""},
+		{"empty run id refused", "writer", "", ""},
+		{"run id traversal refused", "writer", "../..", ""},
+		{"run id quote injection refused", "writer", "a'b", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := buildRunHomeCleanupScript(c.slug, c.run); got != c.want {
+				t.Errorf("buildRunHomeCleanupScript(%q, %q) = %q, want %q", c.slug, c.run, got, c.want)
 			}
 		})
 	}
@@ -117,33 +155,76 @@ func TestHasFileMountedCreds(t *testing.T) {
 	}
 }
 
-// Two concurrent runs of the same agent share /secrets/<slug>; only the LAST
-// finisher may remove the directory or it vanishes under the other run.
+// The refcount mechanism itself: only the LAST release of a key may clean up.
+// E0 gave the key a third component (the run), so a hold is now per-run — but
+// the arithmetic it is asked to do is unchanged and still has to hold.
 func TestSecretsHoldRefcount(t *testing.T) {
 	o := &Orchestrator{}
 
-	o.retainAgentSecrets("ctr-1", "writer")
-	o.retainAgentSecrets("ctr-1", "writer")
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
 
-	if o.releaseAgentSecrets("ctr-1", "writer") {
-		t.Fatal("first release of two holds must NOT allow cleanup (concurrent run still live)")
+	if o.releaseAgentSecrets("ctr-1", "writer", "run-a") {
+		t.Fatal("first release of two holds must NOT allow cleanup (something still live)")
 	}
-	if !o.releaseAgentSecrets("ctr-1", "writer") {
+	if !o.releaseAgentSecrets("ctr-1", "writer", "run-a") {
 		t.Fatal("last release must allow cleanup")
 	}
 
-	// Independent keys: a different agent (or container) doesn't interfere.
-	o.retainAgentSecrets("ctr-1", "writer")
-	o.retainAgentSecrets("ctr-1", "editor")
-	o.retainAgentSecrets("ctr-2", "writer")
-	if o.releaseAgentSecrets("ctr-1", "writer") != true {
-		t.Fatal("sole hold for ctr-1/writer must allow cleanup regardless of other keys")
+	// Independent keys: a different agent, container, OR RUN doesn't interfere.
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
+	o.retainAgentSecrets("ctr-1", "editor", "run-a")
+	o.retainAgentSecrets("ctr-2", "writer", "run-a")
+	if o.releaseAgentSecrets("ctr-1", "writer", "run-a") != true {
+		t.Fatal("sole hold for ctr-1/writer/run-a must allow cleanup regardless of other keys")
 	}
-	if o.releaseAgentSecrets("ctr-1", "editor") != true {
-		t.Fatal("sole hold for ctr-1/editor must allow cleanup")
+	if o.releaseAgentSecrets("ctr-1", "editor", "run-a") != true {
+		t.Fatal("sole hold for ctr-1/editor/run-a must allow cleanup")
 	}
-	if o.releaseAgentSecrets("ctr-2", "writer") != true {
-		t.Fatal("sole hold for ctr-2/writer must allow cleanup")
+	if o.releaseAgentSecrets("ctr-2", "writer", "run-a") != true {
+		t.Fatal("sole hold for ctr-2/writer/run-a must allow cleanup")
+	}
+}
+
+// The overlap case, which is what the refcount was built for and what E0
+// changes the shape of. TWO RUNS of ONE agent in ONE container: each is the
+// sole holder of its own directory, so each finisher cleans up its own and
+// neither can reach the other's.
+//
+// Before E0 both runs shared /secrets/<slug>, and the refcount's job was to
+// stop the first finisher deleting files the second was still using. It did
+// that correctly — and could do nothing about the real damage, which was that
+// the second run's credential write had already OVERWRITTEN the first's files
+// in place. Per-run directories are what fix that; this test pins that the
+// bookkeeping followed them.
+func TestSecretsHoldRefcount_TwoRunsOfOneAgentAreIndependent(t *testing.T) {
+	o := &Orchestrator{}
+
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
+	o.retainAgentSecrets("ctr-1", "writer", "run-b")
+
+	// A finishing while B is still live: A is nonetheless the last holder of
+	// its OWN directory and must be allowed to remove it.
+	if !o.releaseAgentSecrets("ctr-1", "writer", "run-a") {
+		t.Error("run A must be allowed to clean up its own /secrets dir while run B is live")
+	}
+	// And B's hold is untouched by that.
+	if n := o.secretsHoldCount("ctr-1", "writer", "run-b"); n != 1 {
+		t.Errorf("run B's hold count = %d after run A finished, want 1", n)
+	}
+	if !o.releaseAgentSecrets("ctr-1", "writer", "run-b") {
+		t.Error("run B must be allowed to clean up its own dir once it finishes")
+	}
+
+	// The scripts they would run name different directories — the property
+	// the whole change rests on.
+	a := buildSecretsCleanupScript("writer", "run-a")
+	b := buildSecretsCleanupScript("writer", "run-b")
+	if a == b || a == "" || b == "" {
+		t.Errorf("two runs of one agent must clean up different directories; got %q and %q", a, b)
+	}
+	if strings.Contains(b, "run-a") {
+		t.Errorf("run B's cleanup names run A's directory: %q", b)
 	}
 }
 
@@ -155,7 +236,7 @@ func TestCleanupAgentSecrets_ExecsAsAgentUID(t *testing.T) {
 	}}
 	o := &Orchestrator{container: ctr, logger: secretsTestLogger()}
 
-	o.cleanupAgentSecrets("ctr-9", "writer")
+	o.cleanupAgentSecrets("ctr-9", "writer", "run-a")
 
 	if got == nil {
 		t.Fatal("cleanup did not exec")
@@ -167,8 +248,8 @@ func TestCleanupAgentSecrets_ExecsAsAgentUID(t *testing.T) {
 		t.Errorf("User = %q, want 1001:1001 (dir is 0700 agent-owned; root has no CAP_DAC_OVERRIDE)", got.User)
 	}
 	if len(got.Cmd) != 3 || got.Cmd[0] != "sh" || got.Cmd[1] != "-c" ||
-		!strings.Contains(got.Cmd[2], "rm -rf '/secrets/writer'") {
-		t.Errorf("Cmd = %v, want sh -c rm -rf '/secrets/writer'", got.Cmd)
+		!strings.Contains(got.Cmd[2], "rm -rf '/secrets/writer/run-a'") {
+		t.Errorf("Cmd = %v, want sh -c rm -rf '/secrets/writer/run-a'", got.Cmd)
 	}
 }
 
@@ -184,22 +265,22 @@ func TestCleanupAgentSecrets_SkipsWhenRetainedAgain(t *testing.T) {
 	o := &Orchestrator{container: ctr, logger: secretsTestLogger()}
 
 	// Run A finishes: retain → release says "last holder".
-	o.retainAgentSecrets("ctr-1", "writer")
-	if !o.releaseAgentSecrets("ctr-1", "writer") {
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
+	if !o.releaseAgentSecrets("ctr-1", "writer", "run-a") {
 		t.Fatal("sole hold release must report last holder")
 	}
 	// Run B starts before A's cleanup exec fires.
-	o.retainAgentSecrets("ctr-1", "writer")
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
 
-	o.cleanupAgentSecrets("ctr-1", "writer")
+	o.cleanupAgentSecrets("ctr-1", "writer", "run-a")
 	if execd {
 		t.Fatal("cleanup must re-check holds and skip the rm when a new run retained meanwhile")
 	}
 	// B finishing later still cleans up normally.
-	if !o.releaseAgentSecrets("ctr-1", "writer") {
+	if !o.releaseAgentSecrets("ctr-1", "writer", "run-a") {
 		t.Fatal("B is now the sole holder")
 	}
-	o.cleanupAgentSecrets("ctr-1", "writer")
+	o.cleanupAgentSecrets("ctr-1", "writer", "run-a")
 	if !execd {
 		t.Fatal("cleanup with zero holds must exec the rm")
 	}
@@ -220,17 +301,17 @@ func TestCleanupAgentSecrets_SerializesWithCredentialWrite(t *testing.T) {
 
 	cleanupDone := make(chan struct{})
 	go func() {
-		o.cleanupAgentSecrets("ctr-1", "writer")
+		o.cleanupAgentSecrets("ctr-1", "writer", "run-a")
 		close(cleanupDone)
 	}()
 	<-execStarted // rm is now in flight, holding the key lock
 
 	// A starting run retains and then takes the write lock (the order
 	// orchestrator_run.go uses). It must block until the rm finishes.
-	o.retainAgentSecrets("ctr-1", "writer")
+	o.retainAgentSecrets("ctr-1", "writer", "run-a")
 	writerLocked := make(chan struct{})
 	go func() {
-		lk := o.agentSecretsLock("ctr-1", "writer")
+		lk := o.agentSecretsLock("ctr-1", "writer", "run-a")
 		lk.Lock()
 		close(writerLocked)
 		lk.Unlock()
@@ -250,7 +331,7 @@ func TestCleanupAgentSecrets_SerializesWithCredentialWrite(t *testing.T) {
 		t.Fatal("writer never acquired the lock after cleanup finished")
 	}
 	<-cleanupDone
-	o.releaseAgentSecrets("ctr-1", "writer")
+	o.releaseAgentSecrets("ctr-1", "writer", "run-a")
 }
 
 func TestCleanupAgentSecrets_InvalidSlugOrNilContainer_NoExecNoPanic(t *testing.T) {
@@ -260,14 +341,14 @@ func TestCleanupAgentSecrets_InvalidSlugOrNilContainer_NoExecNoPanic(t *testing.
 		return &provider.ExecResult{ExecID: "e1", Reader: secretsTestReader()}, nil
 	}}
 	o := &Orchestrator{container: ctr, logger: secretsTestLogger()}
-	o.cleanupAgentSecrets("ctr-9", "../etc")
+	o.cleanupAgentSecrets("ctr-9", "../etc", "run-a")
 	if execd {
 		t.Fatal("invalid slug must never reach an exec (shell command surface)")
 	}
 
 	// nil container (tests / --no-docker) must be a no-op, not a panic.
 	o2 := &Orchestrator{logger: secretsTestLogger()}
-	o2.cleanupAgentSecrets("ctr-9", "writer")
+	o2.cleanupAgentSecrets("ctr-9", "writer", "run-a")
 }
 
 // End-to-end through RunAgent: the hold must already exist when the
@@ -289,9 +370,9 @@ func TestRunAgent_SecretsRetainBeforeWriteThenCleanup(t *testing.T) {
 			switch {
 			case strings.Contains(joined, "base64 -d"):
 				mu.Lock()
-				holdAtWrite = o.secretsHoldCount("c1", "test-agent")
+				holdAtWrite = o.secretsHoldCount("c1", "test-agent", "run-a")
 				mu.Unlock()
-			case strings.Contains(joined, "rm -rf '/secrets/test-agent'"):
+			case strings.Contains(joined, "rm -rf '/secrets/test-agent/run-a'"):
 				mu.Lock()
 				cleanupSeen = true
 				cleanupAfterAgent = agentSeen
@@ -314,6 +395,7 @@ func TestRunAgent_SecretsRetainBeforeWriteThenCleanup(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
+		RunID:       "run-a",
 		ChatID:      "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -336,7 +418,7 @@ func TestRunAgent_SecretsRetainBeforeWriteThenCleanup(t *testing.T) {
 	if !cleanupAfterAgent {
 		t.Error("cleanup fired before the agent exec")
 	}
-	if n := o.secretsHoldCount("c1", "test-agent"); n != 0 {
+	if n := o.secretsHoldCount("c1", "test-agent", "run-a"); n != 0 {
 		t.Errorf("hold count after run = %d, want 0", n)
 	}
 }

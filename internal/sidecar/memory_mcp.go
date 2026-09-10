@@ -305,7 +305,28 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dispatcher := memory.NewDispatcher(ac, memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)))
+	// The dispatcher's profile is LEGACY, declared here rather than inherited
+	// from NewDispatcher's default so that it is a statement instead of an
+	// omission — and so the reason sits next to the construction rather than
+	// in the option's doc comment.
+	//
+	// memory.WithMutationLedger is what would turn this up, and it takes a
+	// *sql.DB. This process runs inside the agent container and cannot have
+	// one. Unlike POST /memory/write, which forwards its whole mutation to the
+	// host (memoryHostMutationPath, memory_write.go), the MCP tool path cannot
+	// be forwarded the same way without moving the dispatcher's own work —
+	// path resolution inside the memory root, the prompt-injection screen, the
+	// quarantine, the soft-cap guidance — to the other side of the IPC
+	// boundary, and internal/memory is the package that owns all of it.
+	//
+	// So this path stays legacy and says so: the lock, the normalisation, the
+	// declared-removal check, the cap, the scrubber and the durable write all
+	// apply; the revision, the operation-id idempotency, crash recovery and
+	// I4's run/generation verification do not. An agent that needs the
+	// guaranteed profile uses POST /memory/write, which does.
+	dispatcher := memory.NewDispatcher(ac,
+		memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)),
+		memory.WithMutationProfile(memory.ProfileLegacy))
 	toolRes, err := dispatcher.Dispatch(r.Context(), memory.ToolCall{
 		Name: params.Name,
 		Args: params.Arguments,
