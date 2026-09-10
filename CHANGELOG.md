@@ -10,6 +10,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
+
+### Fixed
+
+- Routines: comparison starts survive closing the page and recognize interrupted runs. One-time starts pin their accepted version and new start times no longer reuse an earlier run. Optional nested inputs remain optional; failed artifact capture no longer fails successful work or overwrites another attempt's evidence. Execution pagination remains available during polling, and schedule cancellation works while presets load.
+
+### Changed
+
+- Routine authoring saves durable drafts, reviews publication changes, tests steps with explicit samples and compares archived versions with recorded run evidence. Run details group attempts and outputs by step. Proxy errors and obsolete draft loads preserve the user's work.
+
 - Add typed human decision forms to routine waits, Inbox and CLI; preserve rejection and approved-answer recovery (N5, N10, N15; #2473).
 
 - Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).

@@ -111,7 +111,7 @@ func (e *Executor) runStep(
 		if err != nil {
 			state = "draft"
 		}
-		err = errors.Join(err, e.executionStore.publisher.PublishRunArtifacts(ctx, in.WorkspaceID, in.AuthorCrewID, executionIn(ctx).runID, id, scrubStepOutput(out), state))
+		e.publishExecutionArtifacts(ctx, in.WorkspaceID, in.AuthorCrewID, id, out, state)
 	}
 	return
 }
@@ -136,9 +136,20 @@ func (e *Executor) runRecordedAgent(ctx context.Context, req AgentStepRequest) (
 	}()
 	res, err = e.runner.RunStep(ctx, req)
 	if e.executionStore.publisher != nil && res.Output != "" {
-		err = errors.Join(err, e.executionStore.publisher.PublishRunArtifacts(ctx, req.WorkspaceID, req.AuthorCrewID, executionIn(ctx).runID, id, scrubStepOutput(res.Output), "draft"))
+		e.publishExecutionArtifacts(ctx, req.WorkspaceID, req.AuthorCrewID, id, res.Output, "draft")
 	}
 	return
+}
+
+func (e *Executor) publishExecutionArtifacts(ctx context.Context, workspaceID, crewID, executionID, output, state string) {
+	runID := executionIn(ctx).runID
+	if err := e.executionStore.publisher.PublishRunArtifacts(ctx, workspaceID, crewID, runID, executionID, scrubStepOutput(output), state); err != nil {
+		// Capturing evidence must not change the outcome of the actual work.
+		warning := errors.New(scrubStepOutput(err.Error()))
+		stage := "artifacts:" + executionID
+		e.persistWarn(stage, runID, warning)
+		e.recordRunWarning(context.WithoutCancel(ctx), runID, stage, warning)
+	}
 }
 
 var errExecutionSkipped = errors.New("Condition was false")

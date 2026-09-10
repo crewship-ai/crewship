@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"net/http/httptest"
 	"testing"
 )
@@ -53,5 +54,28 @@ func TestRoutineCalendar_PendingLimitAppliesInsideRequestedWindow(t *testing.T) 
 	}
 	if n, truncated := read(); n != 1000 || !truncated {
 		t.Fatalf("dense month not reported: count=%d truncated=%v", n, truncated)
+	}
+}
+
+func TestRoutineCalendarImpossibleCronDoesNotClaimTruncation(t *testing.T) {
+	h, db, user, ws := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, ws, "calendar_impossible", "impossible")
+	if _, err := pipeline.NewScheduleStore(db).Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Impossible", TargetPipelineID: "calendar_impossible", CronExpr: "0 0 31 2 *", Timezone: "UTC", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/calendar?from=2027-02-01T00:00:00Z&to=2027-03-01T00:00:00Z", nil), user, ws, "OWNER")
+	rr := httptest.NewRecorder()
+	h.RoutineCalendar(rr, req)
+	var data struct {
+		Truncated bool `json:"truncated"`
+	}
+	if rr.Code != 200 {
+		t.Fatal(rr.Code, rr.Body)
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Truncated {
+		t.Fatal("impossible cron reported hidden occurrences")
 	}
 }

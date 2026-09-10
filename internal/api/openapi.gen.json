@@ -11241,6 +11241,9 @@
           "outcome": {
             "type": "string"
           },
+          "pinned_version": {
+            "type": "integer"
+          },
           "schedule_id": {
             "type": "string"
           },
