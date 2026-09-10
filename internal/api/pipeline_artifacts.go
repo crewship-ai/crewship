@@ -108,14 +108,16 @@ func NewRoutineArtifactPublisher(db *sql.DB, storageRoot string) pipeline.Artifa
 			// deliverable, so the enclosing step promotes the row its own
 			// subtree already owns instead of adding a second one. Two
 			// UNRELATED steps naming the same file still keep separate rows.
+			// A failed parent records its own draft. A later shared-file
+			// write must not replace the child's earlier snapshot.
 			promoted, err := db.ExecContext(persistCtx, `UPDATE pipeline_run_artifacts SET state=?,content_type=?,sha256=?,content=?,error=?
-              WHERE run_id=? AND kind=? AND label=? AND source=? AND state='draft' AND step_execution_id IN (
+              WHERE ?='available' AND run_id=? AND kind=? AND label=? AND source=? AND state='draft' AND step_execution_id IN (
                 SELECT child.id FROM pipeline_step_executions child JOIN pipeline_step_executions parent ON parent.id=?
                 WHERE child.run_id=parent.run_id
                   AND child.parent_execution_id=parent.id
                   AND child.kind='agent_attempt' AND child.status='completed'
                 ORDER BY child.attempt DESC,child.started_at DESC LIMIT 1)`,
-				artifactState, contentType, sha, content, reason, runID, kind, label, source, executionID)
+				artifactState, contentType, sha, content, reason, state, runID, kind, label, source, executionID)
 			if err != nil {
 				unlock()
 				return err

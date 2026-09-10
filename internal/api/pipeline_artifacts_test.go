@@ -171,3 +171,52 @@ func TestRoutineArtifacts_PaginationAndLazyContent(t *testing.T) {
 		t.Fatal("invalid cursor accepted")
 	}
 }
+
+func TestArtifactDraftParentPreservesChildSnapshot(t *testing.T) {
+	_, db, _, ws := runsHandlerRig(t)
+	crew := seedTestCrew(t, db, ws)
+	seedRunsPipeline(t, db, ws, "draft-artifacts", "draft-artifacts")
+	seedRunRow(t, db, ws, "draft-artifacts", "draft-artifacts", "draft-artifact-run", "failed")
+	if _, err := db.Exec(`INSERT INTO pipeline_step_executions(id,run_id,parent_execution_id,step_id,execution_path,attempt,kind,status,started_at) VALUES
+ ('draft-parent','draft-artifact-run',NULL,'work','/work',1,'agent_run','failed','2026-09-09T00:00:00Z'),
+ ('draft-child','draft-artifact-run','draft-parent','agent','/work/agent',1,'agent_attempt','completed','2026-09-09T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	shared := filepath.Join(root, "crews", crew, "shared")
+	if err := os.MkdirAll(shared, 0700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(shared, "report.txt")
+	if err := os.WriteFile(file, []byte("child snapshot"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	publisher := NewRoutineArtifactPublisher(db, root)
+	output := `{"artifacts":[{"kind":"file","path":"/crew/shared/report.txt"}]}`
+	if err := publisher.PublishRunArtifacts(t.Context(), ws, crew, "draft-artifact-run", "draft-child", output, "draft"); err != nil {
+		t.Fatal(err)
+	}
+	// A required outcome check can fail after a completed agent invocation.
+	// A later shared-file write must not replace that invocation's evidence.
+	if err := os.WriteFile(file, []byte("later shared file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := publisher.PublishRunArtifacts(t.Context(), ws, crew, "draft-artifact-run", "draft-parent", output, "draft"); err != nil {
+		t.Fatal(err)
+	}
+	var sha, state string
+	if err := db.QueryRow(`SELECT sha256,state FROM pipeline_run_artifacts WHERE step_execution_id='draft-child'`).Scan(&sha, &state); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readAttachmentBlob(root, ws, sha)
+	if err != nil || string(data) != "child snapshot" || state != "draft" {
+		t.Fatalf("child evidence overwritten: %q state=%s err=%v", data, state, err)
+	}
+	if err := db.QueryRow(`SELECT sha256,state FROM pipeline_run_artifacts WHERE step_execution_id='draft-parent'`).Scan(&sha, &state); err != nil {
+		t.Fatal(err)
+	}
+	data, err = readAttachmentBlob(root, ws, sha)
+	if err != nil || string(data) != "later shared file" || state != "draft" {
+		t.Fatalf("parent draft was lost: %q state=%s err=%v", data, state, err)
+	}
+}
