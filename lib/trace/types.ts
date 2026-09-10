@@ -112,6 +112,7 @@ export interface TraceStep {
 }
 
 export interface PipelineDSL {
+  parallelism?: string
   steps?: TraceStep[]
 }
 
