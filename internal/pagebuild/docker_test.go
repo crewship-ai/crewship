@@ -147,3 +147,18 @@ fi
 		t.Fatalf("stale compiler not rejected: %v", err)
 	}
 }
+
+func TestWorkerOutputOverflowAfterSuccessfulExit(t *testing.T) {
+	for _, stderr := range []bool{false, true} {
+		out := &boundedOutput{limit: 1, cancel: func() {}}
+		logs := &boundedOutput{limit: 1, cancel: func() {}}
+		target := out
+		if stderr {
+			target = logs
+		}
+		_, _ = target.Write([]byte("{}"))
+		if _, err := decodeWorkerArtifact(out, logs); err == nil || err.Error() != "Page build exceeded its output limit" {
+			t.Fatalf("overflow diagnosis: %v", err)
+		}
+	}
+}

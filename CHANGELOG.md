@@ -16,6 +16,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.
 - Crews and agents share the Routines dashboard visual language, with avatar-based team browsing, server-side purpose search and name sorting, compact crew lists, real run outcome charts, and scoped work/access previews. Create/Edit forms and Memory now expose clearer icon-based navigation and actionable empty states.
 ### Fixed
+- **Pages compiler review** (#2472) — normalize bootstrap default ports, atomically repair corrupt content-addressed snapshots without masking I/O errors, and report output overflow even after a successful worker exit.
 - Agent inbox cost summaries query the actual ledger timestamp, including the beginning of the current month. Memory refresh also reloads personal data; exports identify their scope and report empty scopes and download outcomes. Crew navigation updates the selected canvas reliably. The placeholder agent container restart is replaced by a working, confirmed crew-level action with accurate next-run recreation feedback.
 - Invalidated cache requests cannot overwrite newer results, and failed relation refreshes preserve known cached data. Historical collaboration no longer implies an automatic delegation trigger.
 ### Changed

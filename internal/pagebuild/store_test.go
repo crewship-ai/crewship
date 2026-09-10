@@ -35,6 +35,12 @@ func TestArtifactStoreIsolationIntegrityAndBounds(t *testing.T) {
 	if _, err := s.Get(ctx, "a", digest); err == nil {
 		t.Fatal("corrupt artifact accepted")
 	}
+	if repaired, err := s.Put(ctx, "a", a); err != nil || repaired != digest {
+		t.Fatalf("repair: %s %v", repaired, err)
+	}
+	if _, err := s.Get(ctx, "a", digest); err != nil {
+		t.Fatal(err)
+	}
 	a.JavaScript = strings.Repeat("x", MaxArtifactBytes+1)
 	if _, _, err := a.Encode(); err == nil {
 		t.Fatal("oversized artifact accepted")
@@ -70,5 +76,48 @@ func TestArtifactStoreQuotaAdmission(t *testing.T) {
 				t.Fatalf("quota admission: %v", err)
 			}
 		})
+	}
+}
+
+func TestArtifactRepairAtQuotaPreservesIOErrors(t *testing.T) {
+	ctx := context.Background()
+	s := &Store{Directory: t.TempDir()}
+	a := &Artifact{Format: ArtifactFormat, JavaScript: "export {};", Toolchain: "test"}
+	digest, err := s.Put(ctx, "ws", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.root("ws", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for i := 0; i < 255; i++ {
+		f, err := r.Create(fmt.Sprintf("fixture-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	f, err := r.OpenFile(digest+".json", os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("corrupt")
+	f.Close()
+	if _, err := s.Put(ctx, "ws", a); err != nil {
+		t.Fatalf("repair at quota: %v", err)
+	}
+	if _, err := s.Get(ctx, "ws", digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Remove(digest + ".json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Mkdir(digest+".json", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Put(ctx, "ws", a); err == nil {
+		t.Fatal("directory read error ignored")
 	}
 }
