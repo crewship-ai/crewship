@@ -54,6 +54,28 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	if err = json.Unmarshal(payload["memory"], &memory); err != nil || memory.Value != 50 || len(memory.Samples) != 8 {
 		t.Fatalf("invalid measurement: %+v %v", memory, err)
 	}
+	for _, tc := range []struct{ name, file, value, valid string }{
+		{"invalid-memory-limit", "memory.max", "bad", "4294967296"},
+		{"zero-memory-limit", "memory.max", "0", "4294967296"},
+		{"invalid-cpu-limit", "cpu.max", "bad 100000", "200000 100000"},
+		{"zero-cpu-period", "cpu.max", "200000 0", "200000 100000"},
+		{"missing-cpu-period", "cpu.max", "max", "200000 100000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.file)
+			if err := os.WriteFile(path, []byte(tc.value), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.WriteFile(path, []byte(tc.valid), 0600); err != nil {
+					t.Error(err)
+				}
+			})
+			if out, err := run(); err == nil || len(out) != 0 {
+				t.Fatalf("invalid accounting published a snapshot: %s %v", out, err)
+			}
+		})
+	}
 	if err = os.Remove(filepath.Join(dir, "cpu.stat")); err != nil {
 		t.Fatal(err)
 	}
