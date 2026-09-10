@@ -99,6 +99,7 @@ export function CustomNumberChip({ active, value, onChange, min, max, step = 1, 
             }}
             className={cn(
               "w-12 bg-transparent text-right font-medium outline-none",
+              "coarse:h-12 coarse:text-base",
               error ? "text-destructive" : "text-primary",
             )}
           />

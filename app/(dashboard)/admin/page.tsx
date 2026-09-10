@@ -373,7 +373,10 @@ export default function AdminPage() {
      `setMobileNavOpen(false)` is a no-op. */
   const adminNav = (
     <>
-      <SidebarToolbar>
+      {/* pr-10 on the phone: SheetContent draws its close button at
+          top-4 right-4 over this row, and it would otherwise take taps
+          meant for the search field. */}
+      <SidebarToolbar className={isMobile ? "pr-10" : undefined}>
         <SidebarSearch
           value={navQuery}
           onValueChange={setNavQuery}
@@ -430,7 +433,7 @@ export default function AdminPage() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2 coarse:after:content-['']"
+              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2.5 coarse:after:content-['']"
               aria-label="Open admin navigation"
               onClick={() => setMobileNavOpen(true)}
             >

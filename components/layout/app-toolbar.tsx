@@ -383,23 +383,38 @@ export function AppToolbar() {
                       // FUTURE is announced, not built — the row reads as a
                       // destination but must not navigate anywhere.
                       const disabled = item.badge === "FUTURE"
-                      return (
-                        <Link
-                          key={item.href}
-                          href={disabled ? "#" : item.href}
-                          onClick={() => !disabled && setMobileNavOpen(false)}
-                          className={`w-full flex items-center gap-3 px-4 min-h-11 py-2.5 text-sm transition-colors ${
-                            disabled
-                              ? "text-muted-foreground-soft pointer-events-none"
-                              : isActive
-                                ? "bg-accent text-foreground font-medium"
-                                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-                          }`}
-                        >
+                      const rowClass = `w-full flex items-center gap-3 px-4 min-h-12 py-2.5 text-sm transition-colors ${
+                        disabled
+                          ? "text-muted-foreground-soft"
+                          : isActive
+                            ? "bg-accent text-foreground font-medium"
+                            : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                      }`
+                      const body = (
+                        <>
                           <item.icon className="h-4 w-4 shrink-0" />
                           <span className="truncate">{item.title}</span>
                           {item.href === "/inbox" && <InboxUnreadBadge workspaceId={workspaceId} />}
                           {disabled && <span className="text-micro bg-muted px-1.5 rounded ml-auto">FUTURE</span>}
+                        </>
+                      )
+                      // A FUTURE row announces something that does not exist
+                      // yet, so it must not be a link. `pointer-events-none`
+                      // only stops a mouse: the row stayed in the tab order,
+                      // Enter still followed href="#", and a screen reader
+                      // still called it a link to somewhere.
+                      return disabled ? (
+                        <div key={item.href} aria-disabled="true" className={rowClass}>
+                          {body}
+                        </div>
+                      ) : (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setMobileNavOpen(false)}
+                          className={rowClass}
+                        >
+                          {body}
                         </Link>
                       )
                     })}

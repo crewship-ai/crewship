@@ -332,7 +332,7 @@ export function SettingsLayout() {
             <Button
               variant="ghost"
               size="icon-sm"
-              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2 coarse:after:content-['']"
+              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2.5 coarse:after:content-['']"
               aria-label="Open settings navigation"
               onClick={() => setMobileNavOpen(true)}
             >

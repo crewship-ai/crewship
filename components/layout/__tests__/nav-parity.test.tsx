@@ -100,6 +100,25 @@ describe("the phone navigation sheet offers the whole product", () => {
     expect(inbox!.textContent).toContain("3")
   })
 
+  it("does not offer a FUTURE row to the keyboard or a screen reader", () => {
+    // `pointer-events-none` blocks a mouse and nothing else: the row stayed
+    // focusable, Enter followed href="#", and assistive technology announced
+    // a link to a destination that does not exist.
+    openMobileNav()
+    const future = flatten().filter((i) => i.badge === "FUTURE")
+    expect(future.length, "no FUTURE row to check").toBeGreaterThan(0)
+    for (const item of future) {
+      const row = screen.getByText(item.title).closest("[aria-disabled], a")
+      expect(row, `no row for ${item.title}`).toBeTruthy()
+      expect(row!.tagName, `${item.title} is still a link`).not.toBe("A")
+      expect(row!.getAttribute("aria-disabled")).toBe("true")
+    }
+    expect(
+      screen.getAllByRole("link").map((a) => a.getAttribute("href")),
+      "a FUTURE row is still reachable as a link",
+    ).not.toContain("#")
+  })
+
   it("does not link at the per-agent chat route, which needs a slug nobody has yet", () => {
     openMobileNav()
     for (const a of screen.getAllByRole("link")) {

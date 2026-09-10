@@ -867,7 +867,7 @@ export function OrchestrationLayout({
             </div>
           )}
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
-            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-12")}>
+            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-[52px]")}>
               <IssuesToolbarStrip
                 loaded={issues.length}
                 total={issuesTotal}

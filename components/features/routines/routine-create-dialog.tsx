@@ -1458,7 +1458,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
               aria-pressed={section === "Code"}
               onClick={() => setSection(section === "Code" ? lastRecipeSection.current : "Code")}
               className={cn(
-                "absolute right-4 top-2 inline-flex h-7 max-sm:top-1 coarse:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted",
+                "absolute right-4 top-2 inline-flex h-7 max-sm:top-1 coarse:top-1 coarse:h-10 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-muted",
                 section === "Code" ? "bg-primary/15 text-primary" : "text-muted-foreground",
               )}
             >
