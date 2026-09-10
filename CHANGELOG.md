@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
+
 - Routines: comparison starts survive closing the page and recognize interrupted runs. One-time starts pin their accepted version and new start times no longer reuse an earlier run. Optional nested inputs remain optional; failed artifact capture no longer fails successful work or overwrites another attempt's evidence. Execution pagination remains available during polling, and schedule cancellation works while presets load.
 
 ### Changed

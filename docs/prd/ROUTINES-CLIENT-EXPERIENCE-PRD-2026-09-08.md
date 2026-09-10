@@ -365,17 +365,19 @@ Původní vzorek obsahuje 27 rutin, 25 popisů a nula vlastních názvů kroků.
 Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavků,
 158 433 přenesených API bajtů. Není to uživatelská studie ani benchmark.
 
-- [ ] Nasazení čitelnosti na dev1 a nové měření stejným postupem.
-- [ ] Pět přihlášených úloh z §9, run IDs a snímky výsledků.
+- [x] Nasazení čitelnosti na dev1 a nové měření stejným postupem (§14).
+- [x] Pět přihlášených úloh z §9 interním browser walkthrough (§14); nejde o uživatelskou studii.
 - [ ] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
       běžný reload nedokazuje recovery po náhlém ukončení ani exactly-once účinky.
-- [ ] Souběh startů, editorů a rozhodnutí nad skutečným serverem.
+- [x] Souběh startů, editorů a rozhodnutí nad skutečným serverem (§14).
 - [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
 
-## 13. Závěr pro nezávislou AI oponenturu — 10. září 2026
+## 13. Historický podklad pro oponenturu — před živou přejímkou
+
+Tento oddíl zachovává stav před nasazením; aktuální výsledky jsou v §14.
 
 **Stav: opravy jsou integrované, čitelnost je připravená v PR, produktová
 přejímka není hotová.** Předmětem oponentury je
@@ -479,3 +481,137 @@ závislostí či automatického paralelismu odstraňuje pořadová čísla a vys
 rozdíl mezi pořadím receptu a spuštění. Vlastní názvy se zkracují stejně jako
 odvozené; uložený název a ID se nemění. Počet celé testové sady zůstává
 regresní kontrolou, nikoli důkazem použitelnosti nebo pokrytí všech změn.
+
+
+## 14. Odpověď na oponenturu a živý protokol — 10. září 2026
+
+**Oponent měl pravdu: původní podklad nedokládal nasazení ani přejímku.**
+Následující výsledky jsou nové pozorování přihlášeného Chromium na
+[dev1](https://crewship-dev1.unifylab.cz/routines), nikoli dodatečné přejmenování
+unit testů na uživatelský důkaz. Interní průchod nenahrazuje potvrzení člověka.
+
+### Nasazení a ochrana rozpracované práce
+
+Dev1 dostal úplný integrovaný zdroj, včetně upstream main `410563eca`.
+Původní checkout `cd2074d0b` a jeho rozpracované soubory jsou zachované v
+archivu a stash `a1420f0b69c03cb67e8efa192462f8e5d8174e3e`.
+Šestnáct nesouvisejících souborů bylo obnoveno a jejich obsah ověřen SHA-256;
+tři další změny již byly v upstream. Žádná jiná instance nebyla nasazena.
+Sestavení i restart proběhly standardním `systemctl reload crewship-ws@1`.
+Browser úlohy začaly na `bf83d6d21`, následná oprava obnovy běhu byla ověřena
+na `353e0a588`. Revision binárky byla ověřena pomocí `go version -m`, nejen
+podle Git checkoutu. Dev1 obsahuje zachované nesouvisející WIP.
+
+### Pět úloh a autorův Edit/Test
+
+Všechny běhy používají vlastní kontrolované recepty bez agentů a externích
+HTTP akcí. Neproběhlo přihlášené srovnávání s konkurencí ani uživatelská studie.
+
+| Úloha | Pozorování a důkaz |
+| --- | --- |
+| Přečíst účel a kroky | Popisy jsou viditelné v hlavním seznamu. Browser postupně otevřel všech 27 původních rutin včetně skrytých a všech 81 kroků; primární titulky odpovídají odvozeným názvům, žádný není jen technické ID. To dokládá render, nikoli porozumění člověka. |
+| Změnit vstup a dohledat výsledek | `run_cmtvp6yn4001555f2552a`: vstup `message="Message changed in the browser"`; dokončený výstup odpovídá přesně odeslané hodnotě. |
+| Najít neúspěch | `run_cmtvp710k0016dcaa8189`: `failed`, krok `intentional_failure` otevřený. Verdikt i chyba jsou v prvním viewportu 1440×1000. Skutečná chyba je ne-JSON vstup transformace vyžadující JSON, nikoli selhání výstupní kontroly. |
+| Vyřídit rozhodnutí | `run_cmtvp8yvi001dd218715d`: z Routines otevřeno stejné rozhodnutí v Inbox; odpověď `count: 0, enabled: false` přijata HTTP 200, běh dokončen, rozhodnutí odstraněno z čekajících. |
+| Naplánovat a zrušit | Jednorázový start `pnd_cmtvp94qf0012632eb36d` na `2026-09-12T10:30:00Z`, připnutá verze 2; vytvořen a zrušen přes browser, nepřítomnost plánu ověřena API. |
+| Edit/Test/Publish | Vlastní název `Return the entered message`, stabilní ID `echo`, publikovaná verze 2. Test transformace vypočetl `Sample from browser`; UI správně uvádí, že výstupní kontroly nejsou deklarované. Statická kontrola receptu neslibuje spuštění agentů, skriptů ani HTTP. |
+
+Snímky skutečného průchodu: [hlavní seznam](../ux/assets/routines-acceptance-2026-09-10/main-list.png),
+[změněný vstup](../ux/assets/routines-acceptance-2026-09-10/changed-input.png),
+[chyba nahoře](../ux/assets/routines-acceptance-2026-09-10/failure-desktop.png),
+[rozhodnutí v Inbox](../ux/assets/routines-acceptance-2026-09-10/decision-in-inbox.png),
+[jednorázový plán před zrušením](../ux/assets/routines-acceptance-2026-09-10/one-time-schedule.png).
+Doplňující kontrola na `6d681bd85`: [úzký displej 390×844](../ux/assets/routines-acceptance-2026-09-10/failure-mobile.png)
+a [Edit/Test](../ux/assets/routines-acceptance-2026-09-10/edit-test.png).
+Na 1440×1000 i 390×844 není vodorovný overflow dokumentu a chyba je v prvním
+viewportu (na mobilu y=547,94, výška 64 px). Kontrola běžela s reduced motion.
+Escape nyní vrací fokus na původní Edit; před opravou tato browser aserce
+selhala, po opravě prošla na obou šířkách. Cílených 59 testů prošlo.
+Nejde o úplný audit přístupnosti ani zkoušku všech kombinací délky textu.
+
+Snímky obsahují pouze demo data; autentizační stav a surové odpovědi s tokeny
+nejsou součástí repozitáře.
+
+### Publikační důkaz: původní chyba a pozitivní opakování
+
+Původní serverový log je korelován přes slug `work-order-proof-mtvcinau` a čas
+`2026-09-10T09:49:34.749446989Z`: `save_token: HMAC mismatch`.
+Samotné 422 by chybu podpisu nedokazovalo. Po nasazení tentýž postup nad
+jednou definicí s doslovnými `&`, `<`, `>` prošel: uložení 200, kontrola 200,
+publikace 201, následné čtení 200 a zachování doslovných bajtů.
+Pozitivní sonda `work-order-proof-mtvp2jq1` proběhla v 15:40 UTC a byla odstraněna.
+
+### Souběh a restart odhalily další skutečnou chybu
+
+Dva současné starty se stejným idempotency key vrátily 202/200 a stejné
+`run_cmtvp9dkr001eaf494dda`. Dva zápisy draftu nad stejnou revizí vrátily
+200/409; vítězná hodnota byla přečtena zpět.
+
+**První restart čekajícího rozhodnutí neprošel.** Běh
+`run_cmtvparzs002020412b2c` měl zachycenou původní definici, ale po publikaci
+nové verze obnovovací cesta použila aktuální head a odmítla jej jako
+`definition changed since run started (content hash mismatch)`.
+To je nový runtime nález, nikoli chyba testovacího skriptu. Dva regresní testy
+nejprve selhaly: restart i odpověď na čekání po změně publikované definice.
+
+Commit `353e0a588` opravuje obnovu: používá uložený execution snapshot,
+nepřepíše jej novějšími step overrides a při nečitelném zachyceném receptu
+odmítne pokračovat. Starší běhy bez snapshotu zachovávají dosavadní kontrolu
+verze/hash. Jde o 29 přidaných a 10 odebraných řádků runtime, bez migrace
+nebo nového endpointu; **dřívější tvrzení o nulové změně exekuce již pro celý
+PR neplatí**. Engine se nepřepisuje.
+
+Opakování na opravené binárce prošlo: `run_cmtvpv3y000039bf2ed9a` po běžném
+reloadu zachoval přijatou verzi 1 proti head 2, hash, token, formulář a Inbox
+`ibx_waitpoint_c248743b52fa97fd289338b43291c54a`.
+Ze dvou současných odpovědí přijal jednu (200/409), dokončil se s
+`{count: 0, enabled: false}` podle původního receptu a Inbox přešel na `resolved`.
+Anonymní veřejný callback na toto typované rozhodnutí byl odmítnut 403.
+
+Rozpracovaný běh `run_cmtvpv41j000681bfa329` běžný reload ukončil jako
+`failed: context canceled`, ale zachoval mezivýsledek `saved`.
+**To nedokládá obnovení rozpracované akce po tvrdém pádu ani exactly-once
+vedlejší účinky.** Tyto závěry si nelze odškrtnout z úspěchu čekajícího rozhodnutí.
+
+### Regresní kontroly a dostupnost důkazů
+
+Na aplikačním head `6d681bd85` prošel celý frontend: **8 451 testů / 710 souborů**,
+173,13 s. TypeScript a lint změněných souborů prošly. Vet prošel pro runtime
+`353e0a588`; celý Go běh tohoto runtime je při zápisu protokolu ještě spuštěný.
+Celý pipeline balík po opravě snapshotu prošel (11,083 s). Strict docs inventory
+ověřil 636 API operací a 878 CLI příkazů; agent invariants i migrační lint prošly.
+Výsledek dokončeného Go běhu a CI bude doložen v PR na konkrétním head.
+
+Čtyři kontrolované recepty `work-order-*-mtvp2jz6` zůstávají na dev1 pro
+reprodukci a ruční přejímku. Závěrečné čtení API nepotvrdilo žádný jejich
+aktivní běh; jednorázový plán byl zrušen. Nejde o původní vzorek 27 rutin.
+Surové autentizační/tokenové reporty zůstávají mimo repo. Run IDs, scénáře,
+pozorované výsledky a snímky jsou uvedeny výše; účelové sondy publikace byly
+po pozitivním ověření odstraněny.
+
+### Co se změnilo po připomínkách a co zůstává otevřené
+
+DAG řádky ukazují závislosti a nepředstírají pořadí exekuce čísly.
+`step_count` je výslovně počet definic vrchní úrovně, nikoli vnořených kroků.
+Vlastní názvy se zkracují na první řádek a nejvýše 100 znaků bez změny uložené
+hodnoty. Prázdné uložené vstupy mají jediný řádek; statická kontrola již
+nevypisuje technický výstup `<dry-run>`.
+
+Stejná jednorázová metrika otevření detailu: před 470 ms / 32 API požadavků /
+158 433 bajtů, po 387 ms / 33 požadavků / 161 857 bajtů. Podmínky cache a
+zatížení nejsou kontrolované; nejde o statistický důkaz zrychlení.
+
+CodeRabbit provedl skutečné review původního head `25bfebfab`.
+Osm věcných nálezů a dvě drobnosti bylo opraveno. Ze čtyř požadavků odstranit
+jména konkurentů z evidenční rešerše bot tři stáhl; čtvrtý autor vypořádal
+ručně, protože zadání výslovně vyžaduje zachovat dohledatelnou rešerši.
+Všechna původní vlákna jsou uzavřená; to samo neznamená strojové review
+pozdější opravy obnovy. Aktuální CI a pokrytí další revizí musí být ověřeno
+na konečném head před merge.
+
+**Závěr pro oponenta:** nyní existuje skutečné nasazení, render 81 kroků,
+interní průchod pěti úloh, pozitivní publikace a serverový souběh. Živý test
+navíc našel a následně prokázal opravu obnovy čekajícího běhu. Přetrvává
+neověřená použitelnost člověkem a neprokázané zotavení rozpracované akce po
+náhlém pádu. Před vydáním je nutné dokončit brány CI/review/merge a získat
+uživatelovo potvrzení podle §9–§10. Počty regresních testů tyto brány nenahrazují.
