@@ -1,5 +1,8 @@
 # Pages Apps — current handoff, 2026-09-09 16:43 UTC
 
+> September 10 CI results, test fixes and current acceptance status:
+> [follow-up validation](pages-apps-validation-2026-09-10.md).
+
 Task: independent counter-review, then user “vše oprav a pokračuj”.
 Issue/claim: #2472. Integration: `.claude/worktrees/pages-apps-project`, branch
 `feat/pages-apps-project`. Root clone is a different branch with other WIP;

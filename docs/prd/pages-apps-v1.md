@@ -6,7 +6,8 @@ same-origin exception and is not evidence of production process isolation.
 
 This document defines the current product and acceptance criteria. Historical
 P0–P5 implementation notes are in [the archived chronology](pages-apps-v1-history-2026-09-09.md).
-Current delivery evidence and remaining work are in [the hardening handoff](pages-apps-hardening-handoff-2026-09-09.md).
+Current delivery evidence and remaining work are in [the hardening handoff](pages-apps-hardening-handoff-2026-09-09.md)
+and [the September 10 validation](pages-apps-validation-2026-09-10.md).
 The earlier [audit](pages-apps-review-audit-2026-09-09.md) and
 [independent review](pages-apps-independent-review-2026-09-09.md) remain dated evidence,
 not a list of defects necessarily still present in the current implementation.
