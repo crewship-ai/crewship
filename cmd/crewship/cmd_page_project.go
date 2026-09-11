@@ -248,7 +248,7 @@ func newPageProjectCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return projectCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/project/publish", map[string]any{"build_id": buildID, "expected_revision": revision, "expected_publication": expected, "reviewed_code": true, "expected_definition_digest": fence.Definition, "expected_routine_digests": fence.Routines})
+		return projectCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/project/publish", map[string]any{"build_id": buildID, "expected_revision": revision, "expected_publication": expected, "reviewed_code": true, "expected_definition_digest": fence.Definition, "expected_routine_digests": fence.Routines, "acknowledged_unavailable_baseline": fence.Acknowledged})
 	}}
 	publish.Flags().String("build", "", "Reviewed build ID")
 	publish.Flags().Int64("revision", 0, "Reviewed source revision")
@@ -266,7 +266,7 @@ func newPageProjectCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return projectCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/project/publish", map[string]any{"rollback_version": version, "expected_publication": expected, "reviewed_code": true, "expected_definition_digest": fence.Definition, "expected_routine_digests": fence.Routines})
+		return projectCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/project/publish", map[string]any{"rollback_version": version, "expected_publication": expected, "reviewed_code": true, "expected_definition_digest": fence.Definition, "expected_routine_digests": fence.Routines, "acknowledged_unavailable_baseline": fence.Acknowledged})
 	}}
 	rollback.Flags().Int64("publication", 0, "Earlier publication version to restore")
 	rollback.Flags().Int64("expected-publication", 0, "Current publication version")
@@ -381,11 +381,15 @@ func projectCLIRequest(cmd *cobra.Command, method, endpoint string, body any) er
 type pageFence struct {
 	Definition string
 	Routines   map[string]string
+	// Acknowledged is whatever the operator typed, never anything this
+	// command worked out for them. See pageResolveFence.
+	Acknowledged bool
 }
 
 func pageAddFenceFlags(cmd *cobra.Command) {
 	cmd.Flags().String("expected-definition-digest", "", "sha256 of the reviewed Page definition; read from the review snapshot when omitted")
 	cmd.Flags().StringArray("expected-routine-digest", nil, "routine=sha256 the reviewed candidate calls; repeatable, read from the review snapshot when omitted")
+	cmd.Flags().Bool("acknowledge-unavailable-baseline", false, "Publish even though the live publication's retained source cannot be read back, so nobody compared this candidate with what is running")
 }
 
 // pageResolveFence builds the publish fence.
@@ -402,6 +406,9 @@ func pageAddFenceFlags(cmd *cobra.Command) {
 // the wrong one produces a 409 that names routines nobody moved.
 func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (pageFence, error) {
 	fence := pageFence{Routines: map[string]string{}}
+	// Never inferred, never filled in from the snapshot: the digests are facts
+	// the server can restate, and this is a statement only a person can make.
+	fence.Acknowledged, _ = cmd.Flags().GetBool("acknowledge-unavailable-baseline")
 	definition, _ := cmd.Flags().GetString("expected-definition-digest")
 	pairs, _ := cmd.Flags().GetStringArray("expected-routine-digest")
 	explicitRoutines := cmd.Flags().Changed("expected-routine-digest")
@@ -422,9 +429,12 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 
 	var snapshot struct {
 		Baseline struct {
-			DefinitionDigest string `json:"definition_digest"`
+			DefinitionDigest        string  `json:"definition_digest"`
+			SourceAvailable         bool    `json:"source_available"`
+			SourceUnavailableReason *string `json:"source_unavailable_reason"`
 		} `json:"baseline"`
-		Routines []struct {
+		InitialPublication bool `json:"initial_publication"`
+		Routines           []struct {
 			Routine       string  `json:"routine"`
 			CurrentDigest *string `json:"current_digest"`
 			InCandidate   bool    `json:"in_candidate"`
@@ -459,6 +469,21 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 		}
 	}
 	out := cmd.ErrOrStderr()
+	// Say what is missing and what acknowledging it would and would not mean.
+	// The flag is not set here; a sentence the operator reads after the fact
+	// is not a decision they made.
+	if !snapshot.InitialPublication && !snapshot.Baseline.SourceAvailable {
+		reason := "the retained source could not be read back"
+		if snapshot.Baseline.SourceUnavailableReason != nil {
+			reason = *snapshot.Baseline.SourceUnavailableReason
+		}
+		fmt.Fprintf(out, "The live publication's retained source is unavailable: %s\n", strings.Join(strings.Fields(reason), " "))
+		if fence.Acknowledged {
+			fmt.Fprintln(out, "Nothing can be compared with what is running. Publishing anyway, as --acknowledge-unavailable-baseline was given: the publication records that nobody made that comparison, which says nothing about the candidate itself.")
+		} else {
+			fmt.Fprintln(out, "Nothing can be compared with what is running. The server refuses this publication unless you pass --acknowledge-unavailable-baseline, which records that nobody made that comparison and proves nothing about the candidate itself.")
+		}
+	}
 	if rollbackVersion > 0 {
 		fmt.Fprintf(out, "Fencing on the retained source of publication %d.\n", rollbackVersion)
 	}

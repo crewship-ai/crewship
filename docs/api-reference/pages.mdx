@@ -1267,6 +1267,21 @@ publication. For rollback, send `{rollback_version, expected_publication,
 reviewed_code:true}` with both fence fields, and omit `build_id` and
 `expected_revision`.
 
+`acknowledged_unavailable_baseline` is optional and defaults to false. When
+the live publication's retained source cannot be read back — the same
+condition the review reports as `baseline_unavailable` — the publication is
+refused with `409` and `conflict: "baseline"` unless it is `true`. It states
+that nobody compared this candidate with what is running. It proves nothing
+about the candidate itself, whose source, checkpoint, artifact and bindings
+are verified either way, and the answer is recorded in the publication's
+`checks` as `baseline_source` (`verified`, `unavailable_acknowledged`, or
+`initial_publication`) so a receipt says which publications shipped without a
+diff basis. An initial publication has no prior source and is never refused
+for this reason. The server refuses by default rather than blocking outright
+because retention and compaction legitimately discard old checkpoints, and a
+workspace whose history was reclaimed must still be able to publish a sound
+candidate — by saying so, not by having it assumed.
+
 `expected_definition_digest` and `expected_routine_digests` are required on
 both paths and are the values the reviewer was shown — read them from the
 review snapshot above. The digest is 64 lowercase hex characters; the map is
@@ -1286,7 +1301,7 @@ does not undo completed routine effects.
 or a malformed fence, `409` changed draft, publication or declaration, `413`
 oversized body, `422` invalid bindings, `507` publication quota, plus common
 errors. A `409` body carries `conflict` — `definition`, `routines`,
-`publication` or `draft` — naming which base moved, and a `routines` conflict
+`publication`, `draft` or `baseline` — naming which base moved or is missing, and a `routines` conflict
 also lists the routines that moved.
 
 ### Read the live application

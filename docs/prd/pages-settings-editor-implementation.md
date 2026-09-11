@@ -50,8 +50,8 @@ Everything below was run; nothing is inferred from a passing neighbour.
 
 | Check | Result |
 |---|---|
-| Vitest, Pages + `lib/pages` + the review hook | **816 passed / 53 files**, 0 failed, 0 skipped |
-| `go test ./internal/api/ -run 'PageProject…'` | 14 top-level + 16 subtests pass |
+| Vitest, Pages + `lib/pages` + the review hook | **821 passed / 53 files**, 0 failed, 0 skipped |
+| `go test ./internal/api/ -run 'PageProject…'` | 15 top-level + 20 subtests pass |
 | `go test ./cmd/crewship/` (whole package, real build image) | pass, 0 skipped — includes `TestSeedPageAppLifecycle/publish` and `TestAcceptance_PageProjectGitHistoryRestore/restart` |
 | `go vet`, `go build ./...`, `gofmt` | clean |
 | `golangci-lint run` on the changed packages | 0 issues |
@@ -88,14 +88,24 @@ Worth recording, because each is a class of thing a green suite does not catch.
   a withdrawn publication counted as already live. Caught by the acceptance
   suite, not by a unit test.
 - **An interrupted build rendered as "Ready"** on the review screen.
+- **Restoring a retained version could be refused the same way**, because that
+  fence filtered on having a current hash rather than on the version declaring
+  the routine. Found by a review asking why a test fixture was missing a field.
 
 ## 5. Limits, stated
 
-- **The publish fence covers the live definition and the candidate's routine
-  digests.** `baseline_unavailable` — the retained source behind the live
-  publication no longer reading back — blocks publishing in the review screen
-  but is **not** enforced by the server, so a direct API or CLI caller is not
-  stopped by it.
+- **The publish fence covers the live definition, the candidate's routine
+  digests, and the readability of the baseline.** The last one was a UI-only
+  gate until the review of this branch called it what it was (CWE-602). It is
+  enforced server-side now, but as an explicit statement rather than a block:
+  compaction legitimately reclaims old checkpoints, so refusing outright would
+  trade an integrity gain for a workspace that can no longer publish anything.
+  Publishing without a readable baseline needs
+  `acknowledged_unavailable_baseline`, and the publication's receipt records
+  `verified` / `unavailable_acknowledged` / `initial_publication` so it can be
+  found afterwards. **The review screen never sends it** — the design says the
+  alternative to a full review has to be approved by the product, not assumed,
+  so from a review the refusal stands.
 - **The CLI's ergonomic path is not a review step.** `publish` and `rollback`
   with no fence flags read the snapshot and send it in the same command, and
   print what they fenced on. The documentation says so plainly rather than
@@ -117,6 +127,14 @@ that table has been measured with anyone. An automated pass and an
 implementer's impression are not that measurement and are not offered as one.
 The proposal's technical acceptance criteria are covered by §3 above; the
 product criteria are not.
+
+**Nothing type-checks the test files.** `tsconfig.json` excludes them, so no
+`tsc --noEmit` in this repo — local or CI — has ever looked at a harness, and
+Vitest transpiles without checking. On this branch that hid two harnesses
+rendering a component without required props, and a fixture missing a required
+field whose absence was masking a real fence bug. The Pages tests here were
+checked under a scoped config and are clean; the repo-wide gap is #2493, with
+its ~3186 mostly-jest-dom errors measured rather than guessed.
 
 Also unmeasured: contrast ratios, reduced motion, and real screen-reader
 behaviour. Focus handling after entering and leaving the preview is implemented

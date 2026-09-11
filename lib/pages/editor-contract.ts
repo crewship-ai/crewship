@@ -465,13 +465,28 @@ export interface FencedPublishRequest {
   readonly rollback_version?: number
   readonly expected_definition_digest: string
   readonly expected_routine_digests: Readonly<Record<string, string>>
+  /**
+   * States that the caller is publishing although the retained source behind
+   * the live publication cannot be read, so no comparison with what is
+   * running was possible. Without it the server answers 409 with
+   * `conflict: "baseline"`, and the publication's receipt records which of
+   * the three it was.
+   *
+   * **The review screen must never send this.** The design blocks publishing
+   * from a review whose baseline is unavailable and says the alternative to
+   * a full review has to be approved by the product rather than assumed;
+   * until it is, the escape lives at the API and the CLI, where a person
+   * states it deliberately and it is written down. A checkbox next to a
+   * Publish button is the opposite of that.
+   */
+  readonly acknowledged_unavailable_baseline?: boolean
 }
 
 /**
  * 409 body when the fence trips. `conflict` names which base moved, so the UI
  * can say what to re-review rather than "something changed".
  */
-export type PublishConflictKind = "definition" | "routines" | "publication" | "draft"
+export type PublishConflictKind = "definition" | "routines" | "publication" | "draft" | "baseline"
 
 export interface PublishConflictWire {
   readonly error: string

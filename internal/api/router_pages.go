@@ -115,7 +115,7 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/fsck", authed(wsCtx(http.HandlerFunc(p.VerifyProjectStorage))))
 	r.authedMut("POST", "/api/v1/pages/maintenance", roleManage, p.CompactPageProjects)
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/history", authed(wsCtx(http.HandlerFunc(p.ProjectHistory))))
-	// openapi: responses 200,401,403,404,500,503
+	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/review", authed(wsCtx(http.HandlerFunc(p.ReviewProject))))
 	// openapi: responses 200,400,401,403,404,409,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/project/history/{revision}", authed(wsCtx(http.HandlerFunc(p.GetProjectRevision))))

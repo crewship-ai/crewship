@@ -34,6 +34,26 @@ type pageProjectPublishRequest struct {
 	// cannot supply this property.
 	ExpectedDefinitionDigest string            `json:"expected_definition_digest" yaml:"expected_definition_digest"`
 	ExpectedRoutineDigests   map[string]string `json:"expected_routine_digests" yaml:"expected_routine_digests"`
+	// AcknowledgedUnavailableBaseline says the publisher knows the live
+	// publication's retained source cannot be read back, and is publishing
+	// without comparing the candidate against what is running.
+	//
+	// The review screen refuses this case (`baseline_unavailable`), and a gate
+	// only the browser enforces is not a gate: a scripted caller published
+	// straight past it. An unconditional server-side block would be worse —
+	// retention and compaction legitimately drop old checkpoints, so a
+	// workspace whose history was reclaimed could not publish a sound
+	// candidate at all. So the server refuses by default and takes an explicit
+	// statement instead of assuming one (docs/prd/pages-settings-editor-review-
+	// proposal-2026-09-10.md §3, "Chybějící historie": the alternative to full
+	// review is stated, never inferred).
+	//
+	// What it proves: somebody said, on this request, that there was no
+	// comparison. What it does NOT prove: anything about the candidate. The
+	// candidate's own integrity is checked in full either way
+	// (checkPageCandidate), and the answer is recorded in checks_json so the
+	// receipt says which publications shipped without a diff basis.
+	AcknowledgedUnavailableBaseline bool `json:"acknowledged_unavailable_baseline" yaml:"acknowledged_unavailable_baseline"`
 }
 
 // replyPublishConflict writes a 409 that names WHICH base moved.
@@ -337,7 +357,6 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	dim := panelsToDim(candidate.document, candidate.resolved, shapes)
 	now := h.evaluator().Now().UTC().Format(time.RFC3339Nano)
-	report, _ := json.Marshal(candidate.report)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin Page publish", err)
@@ -401,6 +420,23 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
 		return
 	}
+	// The baseline question is asked LAST, once everything checkable has
+	// checked out: it is not "is this candidate sound" — that is settled — but
+	// "will this publication be made without anyone having compared it with
+	// what is running". Asking it first would make a caller acknowledge a
+	// missing diff for a publication that was going to be refused anyway.
+	baseline, ok := h.publishBaselineState(w, r, tx, rec)
+	if !ok {
+		return
+	}
+	if baseline.reason != "" && !req.AcknowledgedUnavailableBaseline {
+		// The reason carries a tool's own diagnostic, which can be multi-line;
+		// collapse it so the refusal reads as one sentence.
+		replyPublishConflict(w, "The live publication's retained source cannot be read back, so this candidate cannot be compared with what is running: "+strings.Join(strings.Fields(baseline.reason), " ")+" Send acknowledged_unavailable_baseline=true to publish without that comparison", "baseline", nil)
+		return
+	}
+	candidate.report["baseline_source"] = baseline.state(req.AcknowledgedUnavailableBaseline)
+	report, _ := json.Marshal(candidate.report)
 	version := *req.ExpectedPublication + 1
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_publications(page_id,version,build_id,source_revision,source_digest,git_commit,artifact_digest,spec_json,checks_json,actor_user_id,created_at,rollback_of) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,0))`, rec.ID, version, candidate.record.BuildID, candidate.record.SourceRevision, candidate.record.SourceDigest, candidate.record.GitCommit, candidate.record.ArtifactDigest, candidate.spec, string(report), user.ID, now, req.RollbackVersion); err != nil {
 		if isUniqueViolation(err) {
@@ -472,6 +508,57 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	candidate.record.CreatedAt = now
 	w.Header().Set("Cache-Control", "no-store")
 	h.writePublicationReceipt(w, r, rec.ID, candidate.record, false)
+}
+
+// pageBaselineState is what the publishing transaction could establish about
+// the source the reviewer would have diffed against.
+type pageBaselineState struct {
+	initial bool
+	// reason is empty when the retained source read back, and a sentence
+	// otherwise. An initial publication has no prior source and is not a
+	// missing one: it leaves reason empty and is never refused.
+	reason string
+}
+
+func (b pageBaselineState) state(acknowledged bool) string {
+	switch {
+	case b.initial:
+		return "initial_publication"
+	case b.reason == "":
+		return "verified"
+	case acknowledged:
+		return "unavailable_acknowledged"
+	}
+	return "unavailable"
+}
+
+// publishBaselineState answers the same question reviewBaselineSource answers
+// for the review screen, from inside the publishing transaction, so the two
+// cannot disagree about the same Page at the same moment.
+func (h *PageHandler) publishBaselineState(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord) (pageBaselineState, bool) {
+	ctx := r.Context()
+	var publications int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_project_publications WHERE page_id=?`, rec.ID).Scan(&publications); err != nil {
+		replyInternalError(w, h.logger, "count publications for the baseline check", err)
+		return pageBaselineState{}, false
+	}
+	if publications == 0 {
+		return pageBaselineState{initial: true}, true
+	}
+	var commit, spec string
+	err := tx.QueryRowContext(ctx, `SELECT p.git_commit,p.spec_json FROM page_project_live l JOIN page_project_publications p ON p.page_id=l.page_id AND p.version=l.version WHERE l.page_id=?`, rec.ID).Scan(&commit, &spec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return pageBaselineState{reason: "This Page has publication history but no live publication pointer, so there is no retained application source to compare against."}, true
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read the live publication for the baseline check", err)
+		return pageBaselineState{}, false
+	}
+	available, reason := h.reviewBaselineSource(ctx, WorkspaceIDFromContext(ctx), rec.ID, commit, spec)
+	if available {
+		return pageBaselineState{}, true
+	}
+	return pageBaselineState{reason: *reason}, true
 }
 
 // A receipt records a completed operation, not a promise that its version is still live.

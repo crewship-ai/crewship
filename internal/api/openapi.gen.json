@@ -86711,6 +86711,10 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "acknowledged_unavailable_baseline": {
+                    "description": "Publish even though the live publication's retained source cannot be read back. Without it that case is refused with 409 and conflict:\"baseline\". It states that nobody compared the candidate with what is running; it proves nothing about the candidate, whose own integrity is verified either way, and it is recorded in the publication's checks as baseline_source. An initial publication has no prior source and never needs it.",
+                    "type": "boolean"
+                  },
                   "build_id": {
                     "type": "string"
                   },
@@ -87442,8 +87446,7 @@
                           "type": "object"
                         },
                         "created_at": {
-                          "description": "In draft mode, when the source revision was saved. In ?publication=N mode, when that publication was made.",
-                          "format": "date-time",
+                          "description": "In draft mode, when the source revision was saved. In ?publication=N mode, when that publication was made. Empty — never null, never invented — when the draft has no matching revision row and the server therefore cannot say; no format is declared because an empty string is not a date-time.",
                           "type": "string"
                         },
                         "git_commit": {

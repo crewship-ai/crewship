@@ -1254,3 +1254,127 @@ func TestPageWireHasProjectIsNotHasApplication(t *testing.T) {
 		t.Errorf("withdrawn, listed: has_project=%v has_application=%v, want true/false", project, application)
 	}
 }
+
+// TestPageProjectPublishUnavailableBaselineNeedsAnAcknowledgement — CWE-602.
+// The review screen refuses to publish when the live publication's retained
+// source cannot be read back; the server used to allow it, so the gate only
+// existed in the browser. It is now an explicit statement rather than a silent
+// allow (which enforces nothing) or a hard block (which would strand a
+// workspace whose history was legitimately compacted).
+func TestPageProjectPublishUnavailableBaselineNeedsAnAcknowledgement(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	first := reviewBuildRevision(t, h, ws, user, 1)
+	zero, one, two, three := int64(0), int64(1), int64(2), int64(3)
+
+	// An initial publication has no prior source. It must not be affected.
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: first, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+		t.Fatalf("initial publication refused for a baseline it cannot have: %d %s", w.Code, w.Body.String())
+	}
+	if checks := reviewPublicationChecks(t, h, 1); checks["baseline_source"] != "initial_publication" {
+		t.Fatalf("initial publication recorded baseline_source=%v", checks["baseline_source"])
+	}
+
+	source := projectTestSource()
+	source.Files[3].Content = "// second revision\n"
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 1, source); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	second := reviewBuildRevision(t, h, ws, user, 2)
+	reviewBreakLiveBaseline(t, h)
+
+	t.Run("refused without the acknowledgement", func(t *testing.T) {
+		// The review says so too: the two must not disagree about one Page.
+		_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+		if _, ok := reviewBlockers(snapshot)[reviewBlockerBaselineMissing]; !ok {
+			t.Fatalf("review does not report the missing baseline: %+v", snapshot.Blockers)
+		}
+		w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: second, ExpectedRevision: 2, ExpectedPublication: &one, ReviewedCode: true})
+		if w.Code != 409 {
+			t.Fatalf("published past a gate only the browser enforced: %d %s", w.Code, w.Body.String())
+		}
+		if kind, _ := publishConflict(t, w); kind != "baseline" {
+			t.Fatalf("conflict = %q, want baseline (%s)", kind, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "acknowledged_unavailable_baseline") {
+			t.Fatalf("the refusal does not say how to proceed: %s", w.Body.String())
+		}
+	})
+
+	t.Run("allowed, and recorded, with it", func(t *testing.T) {
+		w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: second, ExpectedRevision: 2, ExpectedPublication: &one, ReviewedCode: true,
+			AcknowledgedUnavailableBaseline: true})
+		if w.Code != 200 {
+			t.Fatalf("acknowledged publication refused: %d %s", w.Code, w.Body.String())
+		}
+		if checks := reviewPublicationChecks(t, h, 2); checks["baseline_source"] != "unavailable_acknowledged" {
+			t.Fatalf("the acknowledgement left no trace on the receipt: %v", checks["baseline_source"])
+		}
+	})
+
+	t.Run("a readable baseline needs neither the flag nor a note", func(t *testing.T) {
+		// Publication 2 is live now and its own checkpoint is intact.
+		source := projectTestSource()
+		source.Files[3].Content = "// third revision\n"
+		if w := projectPut(t, h, ws, user, "OWNER", "health", 2, source); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		third := reviewBuildRevision(t, h, ws, user, 3)
+		if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{BuildID: third, ExpectedRevision: 3, ExpectedPublication: &two, ReviewedCode: true}); w.Code != 200 {
+			t.Fatalf("sound baseline refused: %d %s", w.Code, w.Body.String())
+		}
+		if checks := reviewPublicationChecks(t, h, 3); checks["baseline_source"] != "verified" {
+			t.Fatalf("baseline_source = %v, want verified", checks["baseline_source"])
+		}
+	})
+
+	t.Run("the rollback path is gated the same way", func(t *testing.T) {
+		reviewBreakLiveBaseline(t, h)
+		rollback := pageProjectPublishRequest{RollbackVersion: 1, ExpectedPublication: &three, ReviewedCode: true}
+		w := publishCall(t, h, ws, user, "OWNER", "health", rollback)
+		if w.Code != 409 {
+			t.Fatalf("rollback published past the gate: %d %s", w.Code, w.Body.String())
+		}
+		if kind, _ := publishConflict(t, w); kind != "baseline" {
+			t.Fatalf("rollback conflict = %q, want baseline (%s)", kind, w.Body.String())
+		}
+		rollback.AcknowledgedUnavailableBaseline = true
+		if w := publishCall(t, h, ws, user, "OWNER", "health", rollback); w.Code != 200 {
+			t.Fatalf("acknowledged rollback refused: %d %s", w.Code, w.Body.String())
+		}
+		if checks := reviewPublicationChecks(t, h, 4); checks["baseline_source"] != "unavailable_acknowledged" {
+			t.Fatalf("rollback receipt: %v", checks["baseline_source"])
+		}
+	})
+}
+
+// reviewBreakLiveBaseline is what compaction does: the publication row keeps a
+// checkpoint the repository no longer has. Removing the whole project store
+// would also remove the CANDIDATE's source, which fails the candidate's own
+// verification long before the baseline is ever considered — a different
+// fault, and one that would hide the behaviour under test.
+func reviewBreakLiveBaseline(t *testing.T, h *PageHandler) {
+	t.Helper()
+	res, err := h.db.Exec(`UPDATE page_project_publications SET git_commit=? WHERE (page_id,version) IN (SELECT page_id,version FROM page_project_live)`, strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		t.Fatalf("expected to orphan exactly one live publication, changed %d (%v)", n, err)
+	}
+}
+
+func reviewPublicationChecks(t *testing.T, h *PageHandler, version int64) map[string]any {
+	t.Helper()
+	var raw string
+	if err := h.db.QueryRow(`SELECT checks_json FROM page_project_publications WHERE version=?`, version).Scan(&raw); err != nil {
+		t.Fatalf("read publication %d checks: %v", version, err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		t.Fatalf("checks_json is not JSON: %v", err)
+	}
+	return out
+}

@@ -1015,6 +1015,16 @@ run `crewship page project review <slug>`, read it, and pass the values back
 with the flags. If the live definition or a routine script moves between the
 snapshot and the write, the server refuses with 409 and names which one.
 
+`--acknowledge-unavailable-baseline` is separate from the digests and is never
+filled in for you. When the live publication's retained source cannot be read
+back — history compacted, a checkpoint lost — there is nothing to compare the
+candidate against, and the server refuses the publication with 409 until
+somebody says so explicitly. The CLI prints what is missing and what
+acknowledging it would mean, and then stops; passing the flag records that
+nobody made that comparison. It proves nothing about the candidate, which is
+verified in full either way, and the publication's `checks` keep the answer as
+`baseline_source`.
+
 `--expected-publication 0` creates the first publication. Exact retries return the
 original receipt. Rollback creates a new publication of an earlier artifact and
 Page definition, keeping the source draft unchanged. It does not undo work already
