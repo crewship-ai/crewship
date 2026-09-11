@@ -36,7 +36,8 @@ def main():
     # Pushes, including docs-only commits, get complete evidence for publication.
     if base:
         paths = subprocess.check_output(['git', 'diff', '--name-only', '-z', f'{base}...{head}']).decode().split('\0')
-        result = classify([p for p in paths if p])
+        paths = [p for p in paths if p]
+        result = classify(paths)
         result['release'] = release_changed(paths)
     else:
         result = {'code': True, 'go': True, 'release': name == 'workflow_dispatch'}

@@ -167,6 +167,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Assert control-plane + runtime + EXCLUDED covers test-*.sh
         # This job exists because the prose in this file already went stale once:
         # it claimed "19 suites" while 20 were on disk, because test-crew-links.sh
@@ -352,6 +354,8 @@ jobs:
           - suite: test-session-provenance.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
 
       - name: Download shared test binaries
@@ -555,6 +559,8 @@ jobs:
           - suite: test-crew-links.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
 
       - name: Download shared test binaries
@@ -675,6 +681,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Write the tier coverage table to the run summary
         env:
           KEY_PRESENT: ${{ needs.provider-key.outputs.present }}

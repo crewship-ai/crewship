@@ -10,7 +10,7 @@ API, CLI and remaining Go race shards run independently. CI Result directly requ
 
 `Security Result` and `CodeQL Result` distinguish planned exclusions from unexpected skipped/cancelled/failed jobs. CodeQL success proves analysis executed, not that all historic SARIF alerts were remediated; the existing alert tracking policy remains. The deterministic API shape checks still block; the broader Schemathesis finding exemption remains explicit and needs its separate API remediation work.
 
-Recommended required contexts are `CI Result`, `Security Result`, `CodeQL Result`, with a pull-request requirement and conversation resolution. Roll out the rules only after these checks exist on the merged workflow. Enabling them while older branches lack the jobs requires those branches to update from main. CodeRabbit review still needs to be read: a throttled green status is not a review. Do not remove the repository's claim/review process.
+Recommended required contexts are `CI Result`, `Security Result`, `CodeQL Result`, with a pull-request requirement and conversation resolution. Roll out the rules only after these checks exist on the merged workflow. Enabling them while older branches lack the jobs requires those branches to update from main. The required automated review still needs to be read: a throttled green status is not a review. Do not remove the repository's claim/review process.
 
 ## Image and publication
 

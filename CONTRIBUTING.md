@@ -202,7 +202,8 @@ and runtime credential requirements are documented in
 
 ## Verify any change
 
-Run these locally before pushing — CI will run them too:
+Run the relevant checks locally before pushing. CI routes checks by change type
+(see Pull requests below); unknown paths and main pushes run the full suite:
 
 ```bash
 go test ./... -count=1 && go vet ./...      # Go: must pass

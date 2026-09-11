@@ -13,9 +13,9 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
-version=$(docker run --rm --platform "$platform" "$image" version)
+version=$(docker run --rm --platform "$platform" "$image" version --format json)
 printf '%s\n' "$version"
-[[ "$version" == *"${expected:0:7}"* ]] || { echo 'Image commit identity mismatch' >&2; exit 1; }
+[[ "$expected" =~ ^[0-9a-f]{40}$ ]] && [ "$(jq -er .client.commit <<< "$version")" = "$expected" ] || { echo 'Image commit identity mismatch' >&2; exit 1; }
 auth=$(openssl rand -hex 32)
 encryption=$(openssl rand -hex 32)
 if [ "${GITHUB_ACTIONS:-}" = true ]; then

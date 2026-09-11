@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Boot the actual Linux release archive in isolated state before publication."""
 import argparse
+import json
+import re
 import os
 from pathlib import Path
 import secrets
@@ -23,9 +25,9 @@ with tempfile.TemporaryDirectory(prefix='crewship-archive-smoke-') as temp:
     for name in ('crewship', 'crewship-sidecar', 'entrypoint.sh'):
         if not (root / name).is_file():
             raise SystemExit(f'Archive is missing {name}')
-    version = subprocess.check_output([str(binary), 'version'], text=True)
+    version = subprocess.check_output([str(binary), 'version', '--format', 'json'], text=True)
     print(version)
-    if args.sha[:7] not in version:
+    if not re.fullmatch(r'[0-9a-f]{40}', args.sha) or json.loads(version)['client']['commit'] != args.sha:
         raise SystemExit('Archive commit identity mismatch')
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))

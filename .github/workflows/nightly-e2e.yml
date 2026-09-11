@@ -264,6 +264,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Assert GATE + DRIFT + EXCLUDED covers e2e/*.spec.ts
         # Without this, adding e2e/new-thing.spec.ts means it runs in the PR
         # suite and in neither nightly bucket — i.e. it silently loses its
@@ -300,6 +302,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
 
       - uses: ./.github/actions/setup-node-pnpm
@@ -431,6 +435,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
 
       - uses: ./.github/actions/setup-node-pnpm
