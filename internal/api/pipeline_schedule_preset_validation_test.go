@@ -528,3 +528,103 @@ func TestPresetValidation_RepinningWithoutInputsIsJudgedToo(t *testing.T) {
 		t.Errorf("a repin with a matching preset was refused: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestPresetValidation_PinToAMissingArchiveIsRefused — opponent round 2. The
+// gate loaded the pinned version and, when the load failed, "failed open":
+// no definition, nothing to judge, 200. That is the right answer for a
+// missing STORE (nothing to judge with) and the wrong one for a missing
+// ARCHIVE: a plan pinned to a version that does not exist has nothing to
+// run at 02:30, and the create/repin/retarget that names it is the moment
+// to say so. The refusal names the version and leaves the row as it was.
+// Seen and deferred in the #2498 self-review ("belongs to whatever
+// validates the pin"); the probe showed what the deferral stored.
+func TestPresetValidation_PinToAMissingArchiveIsRefused(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p, id := pinnedPlanOnV1(t, h, user, ws)
+
+	t.Run("repin", func(t *testing.T) {
+		rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":999}`)
+		if rr.Code != http.StatusBadRequest || !bytes.Contains(rr.Body.Bytes(), []byte("version 999")) {
+			t.Fatalf("repin to a missing archive: %d %s, want 400 naming version 999", rr.Code, rr.Body.String())
+		}
+		if _, pin := storedPlan(t, h, id); pin == nil || *pin != 1 {
+			t.Fatalf("refused repin changed the row: pin=%v, want 1", pin)
+		}
+	})
+	t.Run("create", func(t *testing.T) {
+		before := countSchedules(t, h, ws)
+		body, _ := json.Marshal(map[string]any{
+			"name": "Nowhere", "target_pipeline_id": p.ID, "target_pipeline_version": 999,
+			"cron_expr": "0 9 * * *", "timezone": "UTC", "enabled": true,
+			"inputs": map[string]any{"region": "eu"},
+		})
+		req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/pipeline-schedules", bytes.NewReader(body)), ws), user, "OWNER")
+		rr := httptest.NewRecorder()
+		h.CreateSchedule(rr, req)
+		if rr.Code != http.StatusBadRequest || !bytes.Contains(rr.Body.Bytes(), []byte("version 999")) {
+			t.Fatalf("create pinned to a missing archive: %d %s, want 400 naming version 999", rr.Code, rr.Body.String())
+		}
+		if got := countSchedules(t, h, ws); got != before {
+			t.Fatalf("refused create stored a plan: %d → %d", before, got)
+		}
+	})
+	t.Run("retarget", func(t *testing.T) {
+		other := seedRoutineForPreset(t, h, ws, "elsewhere", presetValidationDef)
+		rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_id":"`+other.ID+`","target_pipeline_version":999}`)
+		if rr.Code != http.StatusBadRequest || !bytes.Contains(rr.Body.Bytes(), []byte("version 999")) {
+			t.Fatalf("retarget onto a missing archive: %d %s, want 400 naming version 999", rr.Code, rr.Body.String())
+		}
+		var target string
+		if err := h.db.QueryRowContext(t.Context(), `SELECT target_pipeline_id FROM pipeline_schedules WHERE id=?`, id).Scan(&target); err != nil {
+			t.Fatal(err)
+		}
+		if target != p.ID {
+			t.Fatalf("refused retarget moved the plan to %s", target)
+		}
+	})
+}
+
+// TestPresetValidation_ABrokenPlanCanStillBeDisabled — the operator's way
+// out must survive the gate. A plan already pinned to nothing (written
+// before this gate, or by a store-level caller) is switched off by a PATCH
+// that mentions neither pin nor inputs, and that PATCH is not judged.
+func TestPresetValidation_ABrokenPlanCanStillBeDisabled(t *testing.T) {
+	h, user, ws := presetRig(t)
+	_, id := pinnedPlanOnV1(t, h, user, ws)
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET target_pipeline_version = 999 WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	rr := patchPlan(t, h, user, ws, id, `{"enabled":false}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable: %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	var enabled bool
+	if err := h.db.QueryRowContext(t.Context(), `SELECT enabled FROM pipeline_schedules WHERE id=?`, id).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled {
+		t.Fatal("plan still enabled after PATCH enabled=false")
+	}
+	// Repairing it by moving the pin onto a real archive is judged and works.
+	if rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":1}`); rr.Code != http.StatusOK {
+		t.Fatalf("repin onto v1: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPresetValidation_AStorageFailureIsNotAPass — the other half of "fail
+// open". A lookup that errors is a 500, not a silent acceptance: the gate
+// could not judge, so it must not answer as if it had.
+func TestPresetValidation_AStorageFailureIsNotAPass(t *testing.T) {
+	h, user, ws := presetRig(t)
+	_, id := pinnedPlanOnV1(t, h, user, ws)
+	if _, err := h.db.ExecContext(t.Context(), `DROP TABLE pipeline_versions`); err != nil {
+		t.Fatal(err)
+	}
+	rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":1,"inputs":{"region":"us"}}`)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("repin with the archive unreadable: %d %s, want 500", rr.Code, rr.Body.String())
+	}
+	if inputs, _ := storedPlan(t, h, id); inputs != `{"region":"eu"}` {
+		t.Fatalf("failed judgement still wrote the plan: inputs=%s", inputs)
+	}
+}

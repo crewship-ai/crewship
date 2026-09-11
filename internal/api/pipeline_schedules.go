@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -211,10 +212,18 @@ func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targ
 // and an empty list stay answers rather than absences.
 //
 // Pinned plans are validated against the version they name, unpinned ones
-// against HEAD — the recipe each would actually execute. A routine whose
-// definition no longer parses is not held against the plan: the executor
-// surfaces that, and refusing to edit a plan because its target is broken
-// would take away the screen an operator fixes it from.
+// against HEAD — the recipe each would actually execute. A pin that names
+// no archived version is refused outright: there is nothing for the plan
+// to run, and the request that wrote the pin is the moment to say so (the
+// alternative, found by the opponent review of #2503, was an enabled plan
+// pinned to nothing, with a 200). A lookup that FAILS is a 500 for the same
+// reason — the gate could not judge, so it must not answer as if it had.
+// Only a target routine whose definition no longer parses is not held
+// against the plan: the executor surfaces that, and refusing to edit a plan
+// because its target is broken would take away the screen an operator fixes
+// it from. Callers only invoke the gate for a request that writes the pin,
+// the target or the inputs, so `{"enabled": false}` on a broken plan is
+// never judged and stays the way out.
 func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Request, pipelineID string, version *int, inputs map[string]any) bool {
 	if h.store == nil || pipelineID == "" {
 		return false
@@ -222,14 +231,26 @@ func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Requ
 	definition := ""
 	if version != nil {
 		v, err := h.store.GetVersion(r.Context(), pipelineID, *version)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, fmt.Sprintf("The target routine has no archived version %d. Pin the plan to a published version, or leave the version out to run the current one.", *version))
+			return true
+		}
 		if err != nil {
-			return false
+			h.logger.Error("schedule preset gate: load pinned version", "error", err, "pipeline_id", pipelineID, "version", *version)
+			replyError(w, http.StatusInternalServerError, "Could not load the pinned version to check the plan's inputs against it.")
+			return true
 		}
 		definition = v.DefinitionJSON
 	} else {
 		p, err := h.store.GetByID(r.Context(), pipelineID)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, "The target routine does not exist.")
+			return true
+		}
 		if err != nil {
-			return false
+			h.logger.Error("schedule preset gate: load target", "error", err, "pipeline_id", pipelineID)
+			replyError(w, http.StatusInternalServerError, "Could not load the target routine to check the plan's inputs against it.")
+			return true
 		}
 		definition = p.DefinitionJSON
 	}
