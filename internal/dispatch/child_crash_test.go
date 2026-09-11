@@ -232,12 +232,17 @@ func runCrashingDispatcher(spec string) {
 	os.Exit(2)
 }
 
-// die SIGKILLs this process. Not os.Exit: an orderly exit unwinds defers,
-// flushes buffers and closes the database — precisely the cooperation a crash
-// does not offer.
+// die requires an actual SIGKILL exit status. Signal delivery can lag behind
+// Kill returning (notably on Darwin), so a successful send must not race an
+// os.Exit fallback. Neither os.Exit nor SIGKILL runs Go defers.
 func die() {
-	_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
-	os.Exit(97)
+	if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+		fmt.Fprintf(os.Stderr, "crash child: SIGKILL: %v\n", err)
+		os.Exit(97)
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 // ---------------------------------------------------------------------------

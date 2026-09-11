@@ -1155,14 +1155,12 @@ func TestVerticalServer_CancelOverHTTPSurvivesAHeldAgentsDeferral(t *testing.T) 
 	if _, err := rig.db.Exec(`UPDATE agents SET status = 'PENDING_REVIEW' WHERE id = ?`, rig.agentID); err != nil {
 		t.Fatal(err)
 	}
-	rig.startDispatcher()
-
-	// Hold the real authorizer open. The dispatcher's first claim may already
-	// have deferred the work before the hook is set; that is fine — the
-	// eligible_at reset below makes it claim again, and that claim is caught.
+	// Configure the barrier before publishing the authorizer to the dispatcher
+	// goroutine. The first claim must hit it; no timing-based requeue is needed.
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
+	rig.router.webhookAuthorizer = NewWebhookAuthorizer(rig.db)
 	rig.router.webhookAuthorizer.beforeDecide = func(ctx context.Context) {
 		once.Do(func() { close(entered) })
 		select {
@@ -1170,10 +1168,7 @@ func TestVerticalServer_CancelOverHTTPSurvivesAHeldAgentsDeferral(t *testing.T) 
 		case <-ctx.Done():
 		}
 	}
-	if _, err := rig.db.Exec(`UPDATE work_items SET eligible_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`,
-		rec.WorkID); err != nil {
-		t.Fatal(err)
-	}
+	rig.startDispatcher()
 	select {
 	case <-entered:
 	case <-time.After(15 * time.Second):
@@ -1215,7 +1210,6 @@ func TestVerticalServer_CancelOverHTTPSurvivesAHeldAgentsDeferral(t *testing.T) 
 	}
 
 	// The operator approves afterwards. Cancelled is terminal; nothing may run.
-	rig.router.webhookAuthorizer.beforeDecide = nil
 	if _, err := rig.db.Exec(`UPDATE agents SET status = 'IDLE' WHERE id = ?`, rig.agentID); err != nil {
 		t.Fatal(err)
 	}

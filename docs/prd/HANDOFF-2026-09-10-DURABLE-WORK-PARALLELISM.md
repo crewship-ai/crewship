@@ -626,12 +626,13 @@ item is live, and the attempt's generation matches both the item's and the
 request's. Replacing that closure with `return nil` turns six subtests green
 that should be red.
 
-What is missing is upstream. No dispatch path threads a run id to the agent, so
-every real write still degrades — with its reason stated, `revision_checked:
-false`, and `degraded: true`. An environment variable is the obvious shortcut
-and is wrong: a run id is per attempt and a container outlives many attempts, so
-it would carry a stale run for every attempt after the first, which is exactly
-what the fencing term exists to catch.
+The missing link is in the memory clients. The orchestrator already injects
+an authenticated per-run token into each exec and MCP configuration. The
+sidecar can resolve it through `actingRunIdentity`, but `hostMutationFencing`
+still reads run_id/generation only from the memory request body. The normal
+client does not supply those fields, so it cannot use the host ledger yet.
+Reuse the authenticated per-exec identity when closing R6; a container-boot
+identity would go stale because a container outlives many attempts.
 
 Two smaller limits, both stated where they bite: a guaranteed FIRST replace on a
 key is impossible by contract (revision 0 is what an unanchored key has, and the
@@ -695,15 +696,19 @@ required by it:
 
 - **Durable chat mailbox wired** (§7). The table exists and nothing uses it, so a
   busy agent still bounces a message before persisting it — finding P1, unfixed.
-- **Dispatch-time permission and budget re-checks** (I8). Columns exist; nothing
-  re-checks at dispatch, so a right removed while work waited still runs.
+- **Dispatch-time permission checks** (I8). The agent-webhook dispatcher rechecks
+  agent/workspace/crew existence and defers PENDING_REVIEW agents (§4a).
+  The remaining producers have not been moved onto that shared contract.
+  No agent-run spend-budget gate exists in 1.0.
 - **External operations with an unclear result** (§4, T09). The table exists and
   nothing writes to it: no intent before a call, no receipt after, no
   reconciliation path.
-- **Scheduling recovery and retention.** `RecoverExpiredLeases` and
-  `RetentionPolicy.Sweep` are implemented and nothing runs them on a timer.
-- **The remaining producers onto shared admission** (I7): the agent webhook, the
-  direct IPC start route and peer query still start runs with no shared lock.
+- **Scheduling recovery and retention.** The webhook dispatcher runs
+  `RecoverExpiredLeases` at startup and on its recovery timer. This does not
+  wire retention: `RetentionPolicy.Sweep` still needs a production lifecycle.
+- **The remaining producers onto shared admission** (I7): agent webhooks use
+  the ledger; chat, assignments, schedules, pipeline execution and direct
+  IPC/peer-query entrypoints still need the common admission contract.
 - **UI reconnect and stream separation under a real server** (T12) — built
   against mocks only.
 - **Load and soak** (§10): acceptance p95/p99 at 10 req/s for 60 minutes, the
@@ -756,3 +761,38 @@ required by it:
 - Published Standard Webhooks test vectors trip gitleaks. `.gitleaks.toml` has a
   narrow entry for that file, and the "these are public vectors" claim is enforced
   by a test that verifies each published signature against its secret.
+
+
+## Codex takeover — 2026-09-11
+
+Ownership of #2488 / PR #2490 was explicitly transferred by the user. Synced
+origin/main in a separate merge commit (44ca466e); the only conflict was in
+CHANGELOG.md and both sides' entries were retained.
+
+Independent CI of 4a31e1b9 (run 34604690097) exposed three integration failures:
+
+- `lint-tsformat`: the ledger timestamp parser was near a SQL query. Added the
+  guard's scoped exception explaining that it parses stored timestamps rather
+  than formatting a SQL parameter. The exact CI command now passes locally.
+- Go Shuffle: `TestCollectWorkMetrics_EmptyLedgerZeroFills` confused a fresh DB
+  with a fresh process. Another test's global acceptance sample survived.
+  Reproduced with seed 1789133893833417385; the zero-observation assertion now
+  runs in a child process. The entire server package passed that seed (114.873s).
+- macOS ARM64: the crash child announced its runtime but exited 97 instead of
+  dying from SIGKILL. Both dispatch and work crash helpers now check Kill errors
+  and, after a successful send, wait for signal delivery instead of racing an
+  os.Exit fallback. Linux coverage passed; a fresh macOS CI run is still needed.
+  Neither os.Exit nor SIGKILL executes Go defers.
+
+The Cancel/Defer HTTP test now installs its authorization barrier before the
+loop starts. It no longer relies on rewriting eligible_at after dispatch has
+begun. Three repeated executions with -race passed (72.298s).
+
+Validation is separated deliberately: work passed in full (7.552s); server
+passed the original failing shuffle seed; dispatch's first shuffled run failed
+while the host was under severe memory pressure (a nominal 10s wait lasted over
+146s and its lease expired). The full dispatch rerun with the same seed passed
+in 11.010s. go vet ./... passed on the merged code before the work crash-helper
+follow-up. The final full Go verification is a separate run, not inferred from
+these package results. R6, mailbox, global I7 and real T06/T07 remain unfinished;
+the parallel profile remains disabled.

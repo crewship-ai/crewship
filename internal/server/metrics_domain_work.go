@@ -144,7 +144,7 @@ func parseLedgerTimestamp(s string) (time.Time, bool) {
 	if s == "" {
 		return time.Time{}, false
 	}
-	t, err := time.Parse(time.RFC3339Nano, s)
+	t, err := time.Parse(time.RFC3339Nano, s) // tsformat:allow: parses an existing ledger timestamp; does not format a SQL parameter
 	if err != nil {
 		return time.Time{}, false
 	}

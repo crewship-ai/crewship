@@ -50,8 +50,10 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 	}
 
 	runtime := NewWebhookRuntime(r.webhookHandler)
-	authz := NewWebhookAuthorizer(r.db)
-	r.webhookAuthorizer = authz
+	if r.webhookAuthorizer == nil {
+		r.webhookAuthorizer = NewWebhookAuthorizer(r.db)
+	}
+	authz := r.webhookAuthorizer
 
 	limits := work.SerialAgentLimits()
 	d := dispatch.New(work.NewStore(r.db), runtime, authz, dispatch.Config{

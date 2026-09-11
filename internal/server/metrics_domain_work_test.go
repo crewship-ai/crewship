@@ -14,6 +14,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -557,6 +559,18 @@ func TestCollectWorkMetrics_ProcessCounters(t *testing.T) {
 // than 0 — §10 requires functionality that does not exist to be marked N/A,
 // "nikoli nulou", and an omitted series is how this format says that.
 func TestCollectWorkMetrics_EmptyLedgerZeroFills(t *testing.T) {
+	// A new database does not reset the process-wide acceptance sampler.
+	// Exercise the first-scrape contract in a fresh process so another test's
+	// observations cannot turn an empty database into an empty process.
+	const childEnv = "WORK_METRICS_EMPTY_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestCollectWorkMetrics_EmptyLedgerZeroFills$", "-test.count=1", "-test.timeout=2m")
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fresh-process metrics: %v\n%s", err, out)
+		}
+		return
+	}
 	s := workFixture(t)
 	out := renderWorkMetrics(t, s)
 

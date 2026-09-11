@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil"
@@ -84,15 +85,17 @@ func runCrashChild(spec string) {
 	die()
 }
 
-// die SIGKILLs this process. Not os.Exit: an orderly exit still unwinds defers,
-// flushes buffers and closes the database handle, which is precisely the
-// cooperation a crash does not offer. SIGKILL cannot be caught or deferred, so
-// whatever survives is what the storage layer actually committed.
+// die requires a real SIGKILL exit status. Delivery can be asynchronous on
+// Darwin, so a successful send must not race an os.Exit fallback. Neither
+// os.Exit nor SIGKILL runs Go defers.
 func die() {
-	_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
-	// Unreachable in practice; if the signal were somehow blocked, exiting with
-	// a distinctive code makes that visible instead of looking like success.
-	os.Exit(97)
+	if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+		fmt.Fprintf(os.Stderr, "crash child: SIGKILL: %v\n", err)
+		os.Exit(97)
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func crashDelivery(sourceID string) Delivery {
