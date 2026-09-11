@@ -1826,6 +1826,10 @@ crewship routine pending cancel <id>     # cancel before it fires
 
 An in-process dispatcher (5s tick) fires due rows highest-priority-first and expires rows past their `ttl`. Immediate runs (no `--delay` / `--debounce-key`) are unaffected. Full reference, including the underlying API fields: [Deferred dispatch](/manifest/routine).
 
+**A deferred run is pinned to the version it was accepted against.** The receipt carries `pinned_version`, and publishing an edit while the trigger waits does not change what fires — the run executes the recipe that passed its preflight, not whatever HEAD has become by the time the dispatcher reaches it. A debounced burst keeps the first trigger's version, because coalescing makes it one trigger. Pass `pinned_version` explicitly to choose a different one. A routine with no archived version is the one exception: it defers unpinned and the receipt reports `pinned_version: null`, rather than the run being refused.
+
+That is the opposite of a schedule, which deliberately runs current HEAD unless its `target_pipeline_version` says otherwise: a plan is a standing instruction, a deferred run is one start that a person already made.
+
 ## Dry-run preview
 
 Two execution modes, distinguished by `Mode` in the request body and surface:

@@ -81,20 +81,38 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	if body.FireAt != "" && body.PinnedVersion == nil {
+	// Pin the definition that passed preflight, not a concurrently changed
+	// HEAD. Every deferral needs this, not only the one-time start (#2500):
+	// a `delay_seconds` or debounced trigger is parked in the same table,
+	// cleared the same governance/integration/resource/credential gates, and
+	// hands the caller a receipt — so coming back minutes later running a
+	// recipe that did not exist when they pressed Run is the same defect
+	// whichever shape of deferral they used. A debounced burst keeps the
+	// first trigger's pin, because coalescing makes it one logical trigger.
+	if body.PinnedVersion == nil {
 		var version int
-		// Pin the definition that passed preflight, not a concurrently changed HEAD.
 		err := h.db.QueryRowContext(r.Context(), `SELECT version FROM pipeline_versions WHERE pipeline_id=? AND definition_hash=?`, p.ID, p.DefinitionHash).Scan(&version)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			h.logger.Error("schedule one-time start: load archive", "error", err, "slug", p.Slug)
+			h.logger.Error("deferred run: load archive", "error", err, "slug", p.Slug)
 			replyError(w, http.StatusInternalServerError, "Could not load the published recipe archive.")
 			return
 		}
-		if errors.Is(err, sql.ErrNoRows) || version < 1 {
+		switch {
+		case version >= 1:
+			body.PinnedVersion = &version
+		case body.FireAt != "":
+			// A one-time scheduled start IS the pin — refusing is right,
+			// and this is the behaviour that shipped.
 			replyError(w, http.StatusConflict, "Published recipe archive is unavailable. Publish a version before scheduling a one-time start.")
 			return
+		default:
+			// A routine old enough to have no archived version can still be
+			// deferred; it just runs unpinned, and the receipt says so
+			// rather than the caller having to assume. Refusing here would
+			// take away a run that works today to fix one that is rarer.
+			h.logger.Warn("deferred run: no archived version to pin",
+				"slug", p.Slug, "pipeline_id", p.ID)
 		}
-		body.PinnedVersion = &version
 	}
 	store := pipeline.NewPendingRunStore(h.db)
 	id, coalesced, err := store.Enqueue(r.Context(), pipeline.PendingRun{
