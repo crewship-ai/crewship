@@ -440,7 +440,7 @@ změna některého PASS.
 | 1 | Recept bez vstupů, jednoduchý úspěch | PASS | §14 (10. 9.), interní browser walkthrough pěti úloh | Není uživatelská studie; §11 lidská brána otevřená |
 | 2 | Typované vstupy, defaulty, neplatné hodnoty | PASS | Server: `ValidateFormInputs` v handleru i v exekutoru, `TestPresetValidation_RunPathAlreadyRejects`. UI: jediná sdílená `InputsForm` pro ruční start i plán. Živě: `run_cmtvp6yn4001555f2552a` (§14) | **Vstup s `type` bez `widget` se netypuje nikde** — jedno sdílené pravidlo (`hasInputForm`), většina existujících rutin má tento tvar. Viz N3 |
 | 3 | Dvojklik / opakovaný request | PASS | Živě: dva požadavky se stejným idempotency klíčem → jediný `run_cmtvp9dkr001eaf494dda` (§14) | Není to přejímka všech gest v UI |
-| 4 | Edit během běhu, publish během čekání ve frontě | PASS | Živě 11. 9.: v2 publikována uprostřed běhu `run_cmtwp7vt700033e66cfc6`, běh doběhl na v1 (`afa10a995ec7`), v1 znění účinku, krok `v2only` neproveden | Běh čekající *ve frontě* (queued, ne waiting/running) v okamžiku publikace nebyl samostatně vyzkoušen |
+| 4 | Edit během běhu, publish během čekání ve frontě | **PASS pro běžící a čekající, FAIL pro zařazený** | Živě 11. 9.: v2 publikována uprostřed běhu `run_cmtwp7vt700033e66cfc6`, běh doběhl na v1 (`afa10a995ec7`), v1 znění účinku, krok `v2only` neproveden. **Ale** `--delay` běh (`pnd_cmtwvbad3000108716b4d`, 202 SCHEDULED, `pinned_version:null`) po publikaci v2 odpálil **v2** — `run_cmtwvcb6c00052baa2423`, `pipeline_version 2`, výstup `{"ran":"v2"}` | Nález **N4**, oprava v [PR #2501](https://github.com/crewship-ai/crewship/pull/2501), **nesloučeno**. Doslovné znění §9 („publish během čekání ve frontě“) tento tvar pojmenovává, takže řádek není celý PASS, dokud oprava nepřistane |
 | 5 | Dva editoři | PASS | Server: 200/409 nad stejnou revizí. **Browser 11. 9.: dva skutečné kontexty**, B dostal „Save failed — routine draft changed…“ a **podržel si svůj text** | — |
 | 6 | Změna schématu s existujícími plány | PASS | Živě 11. 9. celý průchod Edit → Test → Publish: 409 `schedule_conflict` (`psched_cmtwt3yna0001cd0e0145`, „Input recipient is required by the draft“), draft zachován, živý recept nezměněn → oprava presetu → publish 201. Testy na obou vrstvách | Brána platí pro **povolené a nepřipnuté** plány; vypnuté a připnuté jsou vyňaté záměrně |
 | 7 | Větev neprovedena, foreach, více pokusů | PASS | Živě `run_cmtwqaand001db3acdea1`: skipped s důvodem „Condition was false“; foreach položky `/fan/items/N/each att=1`; skutečné pokusy `/flaky att=1..3` — rozlišené cestou, ne počtem | — |
@@ -458,7 +458,6 @@ změna některého PASS.
 
 | Položka | Proč |
 |---|---|
-| Běh čekající **ve frontě** (queued) v okamžiku publikace novější verze | Doložen běh `waiting` a `running`; queued zvlášť ne |
 | Issue takeover × opožděná odpověď **živým průchodem UI** | Serverová vrstva doložena testy |
 | Selhání načtení journalu na stránce Journal a archivu na záložce Versions | Run detail tyto zdroje nevolá; ověřeno, které volá |
 | `/journal/lookup` selže tiše | Pozorováno, nezměřen dopad; dekorace odkazu |
@@ -592,6 +591,41 @@ propašovat oprava validace presetů.
 Oprava je v [PR #2498](https://github.com/crewship-ai/crewship/pull/2498).
 **Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
 je tento řádek doložená oprava v review, ne uzavřená vada.
+
+### N4 — Zařazený běh není připnutý, takže publikace změní, co odpálí · OPRAVA V REVIEW
+
+`POST …/run` s `delay_seconds` zaparkuje spouštěč v `pending_runs` a odpoví
+`202 SCHEDULED` s handlem — běh je přijatý. Nebyl ale připnutý, takže
+publikace během čekání změnila, co se spustí.
+
+```
+POST …/run {"inputs":{},"delay_seconds":45}
+→ 202 {"pending_id":"pnd_cmtwvbad3000108716b4d","status":"SCHEDULED","pinned_version":null}
+
+crewship routine save --definition v2        # publikováno, zatímco běh čeká
+
+o 45 s: run_cmtwvcb6c00052baa2423  pipeline_version=2  hash=b9ad38ef6dc0  output={"ran":"v2"}
+```
+
+Připnutí v `enqueueDeferredRun` bylo podmíněné `body.FireAt != ""`, tedy
+tvarem jednorázového plánovaného startu. `delay_seconds` i debounce jdou
+toutéž cestou, projdou toutéž preflight kontrolou a dostanou účtenku;
+komentář u té větve — „pin the definition that passed preflight, not a
+concurrently changed HEAD“ — nikdy neříkal, kterým tvarem odkladu.
+
+Druhá polovina §9 řádku 4 je v pořádku a zůstává doložená: běh, který už
+`waiting` nebo `running` je, si snapshot podrží — `run_cmtwp7vt700033e66cfc6`
+přežil publikaci v2 i dva `kill -9` a doběhl na v1.
+
+Issue [#2500](https://github.com/crewship-ai/crewship/issues/2500), oprava v
+[PR #2501](https://github.com/crewship-ai/crewship/pull/2501).
+**Stav: nesloučeno.**
+
+Vědomě beze změny: volající, který `pinned_version` uvede, dostane svůj;
+jednorázový start si nechává i své 409; a rutina bez archivované verze se dá
+odložit dál — poběží nepřipnutá a účtenka to řekne, místo aby o běh přišla.
+Plány a webhooky zůstávají opačně: plán je stálý pokyn, odložený běh je jedno
+spuštění, které už člověk udělal.
 
 ## Úklid
 
