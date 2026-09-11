@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -93,11 +95,21 @@ type MemoryWriteRequest struct {
 	RunID      string `json:"run_id,omitempty"`
 	Generation int64  `json:"generation,omitempty"`
 
-	// RequireGuaranteed makes the downgrade the caller's decision rather
-	// than this handler's. With it set, a write that cannot reach the host
-	// ledger is refused (503) instead of being served under the legacy
-	// profile; without it the fallback below applies and the response says
-	// so. Either way the outcome is declared, never silent.
+	// RequireGuaranteed lets the caller ASK for the fallback to be turned
+	// off: with it set, a write that could not reach the host ledger is
+	// refused (503) instead of being served under the legacy profile.
+	//
+	// It is a floor, never a ceiling, and correctness must not depend on it.
+	// Two things hold whatever the caller passes here:
+	//
+	//   - A mutation that was already SENT is never resolved by a local
+	//     write, with or without this field. An unknown outcome is answered
+	//     with 503 memory_mutation_unknown. That is R5's rule and it is not
+	//     the caller's to waive.
+	//   - The runtime can require the guaranteed profile on its own
+	//     (memoryGuaranteedRequiredByRuntime). R5: for the parallel profile
+	//     "require guaranteed" has to come from server/runtime configuration,
+	//     not from an optional field a model may omit.
 	RequireGuaranteed bool `json:"require_guaranteed,omitempty"`
 }
 
@@ -143,6 +155,31 @@ type MemoryWriteResponse struct {
 	MutationID   string `json:"mutation_id,omitempty"`
 	BaseRevision int64  `json:"base_revision,omitempty"`
 	Idempotent   bool   `json:"idempotent,omitempty"`
+}
+
+// MemoryWriteUnknown is the 503 envelope for R5's third outcome: the host
+// mutation LEFT this process and its result is not known. It is deliberately
+// not the memory_profile_unmet envelope — that one means "the guaranteed
+// profile was out of reach and nothing was written anywhere", which is a
+// different fact and a different remedy.
+//
+// The remedy is named in the payload because there is exactly one safe one:
+// retry the SAME operation_id. The host's ledger deduplicates on it and
+// answers a repeat with the stored result of the first attempt, so a retry is
+// either the original outcome or the first real one — never a second append.
+// Retrying under a NEW operation id is the bug this envelope exists to stop.
+type MemoryWriteUnknown struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+	// Retryable is always true here, and the retry is only safe because
+	// OperationID below is the one to carry.
+	Retryable   bool   `json:"retryable"`
+	OperationID string `json:"operation_id"`
+	// Sent records that the mutation reached the wire. It is the whole
+	// distinction: a request that provably never left is a degrade, not this.
+	Sent    bool   `json:"sent"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // MemoryWriteConflict is the 409 envelope for the §8 error vocabulary:
@@ -315,18 +352,43 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	//         conflict the host detected is the contract working, and
 	//         retrying it locally under the legacy profile would perform
 	//         exactly the lost update the CAS just prevented.
-	//   host unreachable, or the request cannot meet the profile
+	//   the mutation was SENT and its outcome is not known
+	//       → 503 memory_mutation_unknown, retryable, and NOTHING is written
+	//         here. See the paragraph below; this is finding R5.
+	//   the request was provably never sent, or it cannot meet the profile
 	//       → the write is served by the in-container legacy path AND the
 	//         response says so: profile "legacy", revision_checked false,
 	//         degraded true, degraded_reason naming what stopped it.
 	//
-	// Why degrade rather than fail closed by default: the legacy path is
-	// exactly today's behaviour, and refusing an agent's memory write because
-	// crewshipd is restarting would discard content the agent cannot get back.
-	// The response is explicit enough that nothing downstream can describe
-	// such a write as revision-checked, which is the property that matters. A
-	// caller that would rather lose the write than lose the guarantee sets
-	// require_guaranteed and gets a 503 instead.
+	// R5 (review 2026-09-11): the third outcome used to be folded into the
+	// fourth. A transport error on the forward became a degradeReason and,
+	// unless the CALLER had set require_guaranteed, the handler performed the
+	// legacy write instead. That is wrong in the one case that matters: a
+	// transport error can happen AFTER the host committed and before the
+	// response arrived. The append then lands twice — once in the host ledger
+	// and once on this side of the bind mount — and the local copy bypasses
+	// the ledger, so the host's revision/hash chain no longer describes the
+	// bytes on disk. Neither a timeout nor a dropped response is evidence
+	// that the host did not accept.
+	//
+	// So the rule is the sent/not-sent boundary, not the caller's preference:
+	// once a host mutation has been SENT, an unclear outcome is answered with
+	// retryable/unknown and the caller retries carrying the SAME operation_id,
+	// which the host's idempotency answers with the ORIGINAL result. A legacy
+	// fallback needs the request to be PROVABLY not accepted, which in
+	// practice means a failure before the request ever left this process —
+	// memoryHostRequestReachedHost is where that judgement is made and its
+	// comment enumerates the cases.
+	//
+	// Why degrade at all rather than fail closed on the fourth outcome: the
+	// legacy path is exactly today's behaviour, and refusing an agent's memory
+	// write because crewshipd is not configured would discard content the
+	// agent cannot get back. The response is explicit enough that nothing
+	// downstream can describe such a write as revision-checked. A deployment
+	// that would rather lose the write than lose the guarantee turns the
+	// fallback off — and per R5 that decision belongs to the runtime
+	// (memoryGuaranteedRequiredByRuntime) rather than to an optional field
+	// the model may simply omit.
 	degradeReason := s.hostMutationBlocker(r, req, op)
 	if degradeReason == "" {
 		// Screen with THIS sidecar's scrubber before forwarding. The host runs
@@ -370,15 +432,24 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 				Idempotent:      out.res.Idempotent,
 			})
 			return
+		case out.unknown != "":
+			// R5. The mutation was SENT and we do not know whether the host
+			// took it. Writing locally now is the one thing that cannot be
+			// undone, so this answers unknown and writes nothing. The remedy
+			// is a retry carrying the same operation id, which the host's
+			// ledger answers with the original result rather than a second
+			// append.
+			s.answerUnknownHostMutation(w, req, operationID, out.unknown)
+			return
 		default:
 			degradeReason = out.degradeReason
 		}
 	}
-	if req.RequireGuaranteed {
+	if req.RequireGuaranteed || memoryGuaranteedRequiredByRuntime() {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
 			"error":  "guaranteed memory profile unavailable: " + degradeReason,
 			"code":   "memory_profile_unmet",
-			"detail": "require_guaranteed was set, so this write was refused rather than served under the legacy profile",
+			"detail": "the guaranteed profile is required here, so this write was refused rather than served under the legacy profile",
 		})
 		return
 	}
@@ -570,6 +641,59 @@ func (s *Server) finishMemoryWrite(w http.ResponseWriter, r *http.Request, engin
 	}
 
 	writeJSONResponse(w, http.StatusCreated, resp)
+}
+
+// answerUnknownHostMutation is the reply for a mutation that was sent and whose
+// outcome is unknown. It writes NOTHING: not locally (that is the duplicate
+// append R5 names), and not a second time to the host (the caller's retry does
+// that, under the same operation id, which is what makes it safe).
+//
+// No memory.updated journal entry is emitted and no reindex is triggered,
+// because neither is known to have anything behind it. The sidecar log carries
+// the reason for the operator; the agent gets a retryable answer.
+func (s *Server) answerUnknownHostMutation(w http.ResponseWriter, req MemoryWriteRequest, operationID, reason string) {
+	if s != nil && s.logger != nil {
+		s.logger.Warn("memory write: host mutation outcome unknown",
+			"scope", req.Scope,
+			"file", req.File,
+			"operation_id", operationID,
+			"reason", reason)
+	}
+	writeJSONResponse(w, http.StatusServiceUnavailable, MemoryWriteUnknown{
+		Error:       "memory mutation outcome unknown",
+		Code:        "memory_mutation_unknown",
+		Retryable:   true,
+		OperationID: operationID,
+		Sent:        true,
+		Reason:      reason,
+		Message: "the mutation was sent to the host and its outcome could not be determined; " +
+			"retry with this exact operation_id — the host's ledger answers a repeat with the " +
+			"original result. Nothing was written in-container: a transport failure after the " +
+			"request was sent is not evidence that the host did not accept it.",
+	})
+}
+
+// memoryGuaranteedRequiredByRuntime reports whether this deployment demands the
+// guaranteed profile regardless of what the caller asked for.
+//
+// R5: for the parallel profile, "require guaranteed" has to be a property of
+// the server/runtime configuration, not an optional field the model may omit —
+// a correctness rule that holds only when the caller remembers to request it is
+// not a rule. CREWSHIP_MEMORY_REQUIRE_GUARANTEED is set on the agent container
+// by whatever launches it, so nothing inside the container can clear it.
+//
+// This is the sidecar half only. The per-attempt run identity that makes the
+// guaranteed profile REACHABLE for an agent write is R6's, and lives outside
+// this file; until it lands, switching this on turns memory writes into 503s
+// rather than silently-legacy writes, which is the intended failure direction
+// for the parallel profile and the wrong one for today's default. So it stays
+// off unless an operator sets it.
+func memoryGuaranteedRequiredByRuntime() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("CREWSHIP_MEMORY_REQUIRE_GUARANTEED"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // memoryConflictCode maps the §8 error vocabulary onto the string the HTTP
@@ -842,12 +966,26 @@ type hostMutationSuccess struct {
 	Idempotent     bool   `json:"idempotent"`
 }
 
-// hostMutationOutcome is exactly one of: performed (ok), refused by the host
-// (relay), or not performed at all (degradeReason).
+// hostMutationOutcome is exactly one of four things, and the fourth is the
+// point of R5:
+//
+//	ok             the host performed it and said so.
+//	relay          the host answered and its answer is forwarded verbatim.
+//	unknown        the mutation was SENT and the outcome is not known. The
+//	               caller must not resolve this with a local write; the reason
+//	               string is non-empty exactly in this case.
+//	degradeReason  the mutation was PROVABLY never performed — it was never
+//	               sent, or the host answered that the route does not exist.
+//	               Only this one permits the declared legacy fallback.
+//
+// The two failure outcomes were one before, and collapsing them is precisely
+// how a transport error after a successful host commit turned into a second,
+// ledger-bypassing append.
 type hostMutationOutcome struct {
 	ok            bool
 	res           hostMutationSuccess
 	relay         *hostMutationRelay
+	unknown       string
 	degradeReason string
 }
 
@@ -916,28 +1054,43 @@ func (s *Server) mutateOnHost(r *http.Request, req MemoryWriteRequest, op memory
 		"source":            "sidecar:/memory/write",
 	})
 	if err != nil {
+		// Pre-send by construction: there is no request yet to have been
+		// accepted, so the legacy fallback is permitted here.
 		return hostMutationOutcome{degradeReason: "the mutation request could not be encoded: " + err.Error()}
 	}
 
 	resp, err := s.memoryHostRequest(r, http.MethodPost, memoryHostMutationPath, body)
 	if err != nil {
-		return hostMutationOutcome{degradeReason: "the host mutation endpoint is unreachable: " + err.Error()}
+		// R5's fork, and the only place in this file that decides it. A
+		// transport error says nothing about whether the host committed
+		// unless we know the request never left — a connect failure, a name
+		// that does not resolve, no IPC channel at all. Everything else (a
+		// timeout, a dropped response, a read failure) happened at or after
+		// the moment the bytes went out, and the host may well have written.
+		if memoryHostRequestReachedHost(err) {
+			return hostMutationOutcome{unknown: "the host mutation was sent and no answer came back: " + err.Error()}
+		}
+		return hostMutationOutcome{degradeReason: "the host mutation endpoint is unreachable, " +
+			"and the request was never sent: " + err.Error()}
 	}
 	switch {
 	case resp.status == http.StatusOK:
 		var ok hostMutationSuccess
 		if err := json.Unmarshal(resp.body, &ok); err != nil {
 			// The host says it wrote; we cannot read what it says. Degrading
-			// here would write the same content a second time.
-			return hostMutationOutcome{relay: &hostMutationRelay{
-				status: http.StatusBadGateway,
-				body:   []byte(`{"error":"the host performed the mutation but its response could not be decoded"}`),
-			}}
+			// here would write the same content a second time — so this is
+			// the same unknown outcome as a dropped response, and it carries
+			// the same remedy: retry the identical operation id.
+			return hostMutationOutcome{unknown: "the host performed the mutation but its response " +
+				"could not be decoded: " + err.Error()}
 		}
 		return hostMutationOutcome{ok: true, res: ok}
 	case resp.status == http.StatusNotFound:
 		// An older host without the route. Unambiguous, and the only status
-		// that means "nothing happened over there".
+		// that means "nothing happened over there": the host answered, and
+		// the answer is that there is nothing at this path to have performed
+		// the mutation. That makes it PROVABLY not accepted in R5's sense,
+		// unlike any transport failure on a route that does exist.
 		return hostMutationOutcome{degradeReason: "this host does not serve " + memoryHostMutationPath +
 			" (older crewshipd), so the mutation ledger is out of reach"}
 	default:
@@ -963,8 +1116,14 @@ type MemoryMutationConflictEnvelope struct {
 }
 
 // readCanonicalOnHost fetches the revision anchor for (scope, file). A failure
-// is returned as a degrade outcome rather than an error so the caller's three
-// outcomes stay the only three.
+// is returned as a degrade outcome rather than an error so the caller's
+// outcomes stay the only ones.
+//
+// A transport failure here is a degrade whether or not the request was sent,
+// and that is not an exception to R5: this is a GET that runs BEFORE any
+// mutation. Nothing has been offered to the ledger at this point, so "the
+// request may have arrived" carries no risk of a second write — the mutation
+// that R5 is about has not happened yet and now will not.
 func (s *Server) readCanonicalOnHost(r *http.Request, req MemoryWriteRequest) (hostCanonicalRead, hostMutationOutcome, bool) {
 	q := url.Values{}
 	q.Set("scope", req.Scope)
@@ -1017,12 +1176,14 @@ type memoryHostResponse struct {
 // only the internal token, and a mutation the host cannot attribute to an
 // agent is one it must refuse.
 func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []byte) (*memoryHostResponse, error) {
+	// The three pre-send failures. Each is tagged sent:false because each
+	// happens before anything is dialled, let alone written.
 	if s.ipc == nil {
-		return nil, errors.New("IPC not configured")
+		return nil, &memoryHostTransportError{err: errors.New("IPC not configured")}
 	}
 	slug, ok := s.hybridActingSlug(r)
 	if !ok {
-		return nil, errors.New("acting agent identity could not be resolved")
+		return nil, &memoryHostTransportError{err: errors.New("acting agent identity could not be resolved")}
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), memoryHostIPCTimeout)
@@ -1034,7 +1195,7 @@ func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, method, s.ipc.BaseURL+path, reader)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, &memoryHostTransportError{err: fmt.Errorf("create request: %w", err)}
 	}
 	if body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
@@ -1042,16 +1203,77 @@ func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
 	httpReq.Header.Set(actingAgentSlugHeader, slug)
 
+	// The sent/not-sent evidence R5 turns on. GotConn fires once this call
+	// has a connection to write the request onto; before that there is
+	// nothing on any wire, so a failure is proof the host was never offered
+	// the mutation. httptrace is used rather than error-string matching
+	// because the error text for "connection refused" is neither stable nor
+	// exhaustive (DNS, unreachable network, a refused unix socket, a dial
+	// deadline all read differently), while the presence of a connection is
+	// a fact.
+	var gotConn atomic.Bool
+	httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { gotConn.Store(true) },
+	}))
+
 	resp, err := ipcClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("call: %w", err)
+		// Deliberately conservative at the boundary. A connection that was
+		// obtained and then failed before a single byte was flushed (a stale
+		// keep-alive the peer had already closed) is reported as sent. That
+		// costs a retryable 503 on a request that did nothing; calling it
+		// "not sent" would cost a duplicate ledger-bypassing append on the
+		// day the guess is wrong, and only one of those two is recoverable.
+		return nil, &memoryHostTransportError{err: fmt.Errorf("call: %w", err), sent: gotConn.Load()}
 	}
 	defer resp.Body.Close()
 	// Bounded like every other IPC read here: these payloads are small
 	// structured JSON, and the cap stops a runaway peer.
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		// The request was certainly sent — the host was already answering.
+		// Truncating here says nothing about what it did before the body
+		// stopped arriving.
+		return nil, &memoryHostTransportError{err: fmt.Errorf("read response: %w", err), sent: true}
 	}
 	return &memoryHostResponse{status: resp.StatusCode, body: raw}, nil
+}
+
+// memoryHostTransportError carries the one fact a caller cannot recover from
+// the error text: whether the request reached the wire.
+type memoryHostTransportError struct {
+	err  error
+	sent bool
+}
+
+func (e *memoryHostTransportError) Error() string { return e.err.Error() }
+func (e *memoryHostTransportError) Unwrap() error { return e.err }
+
+// memoryHostRequestReachedHost reports whether err leaves open the possibility
+// that the host received — and therefore may have performed — the request.
+//
+// The default is YES, and the default is load-bearing: only a failure this
+// package positively KNOWS to be pre-send answers no. "Provably not accepted"
+// is, exhaustively:
+//
+//   - no host IPC channel configured, so no request was ever built;
+//   - the acting agent identity could not be resolved, likewise;
+//   - the request object itself could not be constructed (a malformed base
+//     URL, say) — no connection was ever opened;
+//   - no connection was obtained: connection refused, DNS failure, no route,
+//     a dial that timed out. Nothing was written to any socket.
+//
+// Everything else is unknown. A read timeout, a response the peer never sent,
+// a connection reset after the body went out, a context deadline that expired
+// while waiting — every one of those can follow a host commit, and R5 is the
+// rule that none of them may be treated as evidence of non-acceptance.
+func memoryHostRequestReachedHost(err error) bool {
+	if err == nil {
+		return false
+	}
+	var te *memoryHostTransportError
+	if errors.As(err, &te) {
+		return te.sent
+	}
+	return true
 }
