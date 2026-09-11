@@ -769,7 +769,7 @@ Ownership of #2488 / PR #2490 was explicitly transferred by the user. Synced
 origin/main in a separate merge commit (44ca466e); the only conflict was in
 CHANGELOG.md and both sides' entries were retained.
 
-Independent CI of 4a31e1b9 (run 34604690097) exposed three integration failures:
+Independent CI of 4a31e1b9 (run 34604690097) initially exposed three integration failures:
 
 - `lint-tsformat`: the ledger timestamp parser was near a SQL query. Added the
   guard's scoped exception explaining that it parses stored timestamps rather
@@ -813,3 +813,21 @@ fail deterministically before creation (2.174s). The first full post-merge run
 was stopped after this follow-up changed the test tree; the final full run was
 restarted with -count=1, -p 4, GOMAXPROCS=4 and a 60m package timeout. No completion
 result is inferred from the earlier run. Frontend lint and static build passed.
+
+
+The last job of that same original CI run also failed. Go Race reported real
+races in memory_write_host_test.go: asynchronous audit requests appended to the
+stub's request slice while assertions read it. The recorder and readers now
+share a mutex, and assertions select the last mutation by route rather than
+assuming the last HTTP request was the mutation. The dispatcher harness now
+registers idempotent cleanup even for tests that explicitly stop later, so an
+early fatal assertion cannot leave its loop polling a closed database. The
+outcome-classification test freezes store time to inspect retry_wait before
+eligibility advances; its assertion no longer races the backoff. State polling
+has a 30s failure bound for instrumented CI, not a claimed runtime SLA.
+
+After those changes, both COMPLETE packages passed with -race -count=1:
+internal/sidecar 144.536s and internal/dispatch 82.193s, local log
+/tmp/crewship-2-takeover-race-fixes.log. This covers the extra test fixes in the
+isolated worktree; the full Go run on 9b3ee52b is still pending and is not
+retroactively described as covering these later changes.

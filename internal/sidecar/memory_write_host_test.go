@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ type hostStubCall struct {
 
 type hostStub struct {
 	srv   *httptest.Server
+	mu    sync.Mutex // audit requests can arrive after the write response
 	calls []hostStubCall
 	// mutation and canonical are the canned answers; either may be nil, in
 	// which case the stub 404s that route (an older host).
@@ -61,7 +63,9 @@ func newHostStub(t *testing.T) *hostStub {
 			raw, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(raw, &call.body)
 		}
+		h.mu.Lock()
 		h.calls = append(h.calls, call)
+		h.mu.Unlock()
 
 		var fn func() (int, string)
 		switch r.URL.Path {
@@ -85,6 +89,8 @@ func newHostStub(t *testing.T) *hostStub {
 }
 
 func (h *hostStub) called(path string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	n := 0
 	for _, c := range h.calls {
 		if c.path == path {
@@ -92,6 +98,22 @@ func (h *hostStub) called(path string) int {
 		}
 	}
 	return n
+}
+
+// lastCall selects the route under the same lock as the recorder. An
+// asynchronous audit request may follow a mutation, so the last HTTP request
+// overall is not necessarily the mutation whose identity we want to assert.
+func (h *hostStub) lastCall(t *testing.T, path string) hostStubCall {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := len(h.calls) - 1; i >= 0; i-- {
+		if h.calls[i].path == path {
+			return h.calls[i]
+		}
+	}
+	t.Fatalf("no host request for %s", path)
+	return hostStubCall{}
 }
 
 // newHostWriteServer is newWriteTestServer plus an IPC config pointed at the
@@ -188,7 +210,7 @@ func TestHandleMemoryWrite_ForwardsToHostUnderTheGuaranteedProfile(t *testing.T)
 	if got := stub.called(memoryHostMutationPath); got != 1 {
 		t.Fatalf("host mutation calls = %d, want 1", got)
 	}
-	call := stub.calls[len(stub.calls)-1]
+	call := stub.lastCall(t, memoryHostMutationPath)
 	if call.token != "internal-token-for-test" {
 		t.Errorf("X-Internal-Token = %q", call.token)
 	}
@@ -336,7 +358,7 @@ func TestHandleMemoryWrite_DerivesExpectedRevisionFromTheHostRead(t *testing.T) 
 	if got := stub.called(memoryHostCanonicalPath); got != 1 {
 		t.Fatalf("canonical reads = %d, want 1", got)
 	}
-	mut := stub.calls[len(stub.calls)-1]
+	mut := stub.lastCall(t, memoryHostMutationPath)
 	if mut.path != memoryHostMutationPath {
 		t.Fatalf("last call = %s, want the mutation", mut.path)
 	}

@@ -242,14 +242,22 @@ func (h *harness) runDispatcher(authz Authorizer) (*Dispatcher, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = d.Run(ctx) }()
-	return d, func() { cancel(); <-done }
+	stop := sync.OnceFunc(func() { cancel(); <-done })
+	// Tests that stop explicitly must still clean up if an earlier assertion
+	// fails; otherwise a dispatcher outlives its database and contaminates
+	// every subsequent test with retries against a closed connection.
+	h.t.Cleanup(stop)
+	return d, stop
 }
 
 // waitForState polls the ledger. Real timers, no sleeps standing in for
 // synchronisation: the condition is what is waited on.
 func (h *harness) waitForState(workID string, want work.State) *work.Item {
 	h.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	// This bounds test failure, not a production latency promise. Race CI
+	// runs this SQLite path alongside other instrumented packages.
+	const timeout = 30 * time.Second
+	deadline := time.Now().Add(timeout)
 	var last work.State
 	for time.Now().Before(deadline) {
 		it, err := h.store.Get(context.Background(), workID)
@@ -262,7 +270,7 @@ func (h *harness) waitForState(workID string, want work.State) *work.Item {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	h.t.Fatalf("work %s is %q after 10s, want %q", workID, last, want)
+	h.t.Fatalf("work %s is %q after %s, want %q", workID, last, timeout, want)
 	return nil
 }
 
@@ -738,6 +746,10 @@ func TestVertical_OnlyAProvablySafeFailureIsRetried(t *testing.T) {
 			h := newHarness(t)
 			h.rt.failWith = errors.New("the run failed")
 			h.rt.classifyAs = tc.classify
+			// Inspect the first outcome without racing the retry backoff. Other
+			// tests exercise advancing eligibility and subsequent claims.
+			now := time.Now()
+			h.store.WithClock(func() time.Time { return now })
 
 			r := h.accept("dlv-classify")
 			_, stop := h.runDispatcher(nil)
