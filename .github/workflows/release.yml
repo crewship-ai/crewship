@@ -35,7 +35,7 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
   release:
-    name: Build & Release
+    name: Build and verify signed release assets
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -98,7 +98,6 @@ jobs:
           args: release --parallelism 2 --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -125,21 +124,6 @@ jobs:
           [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
           (cd dist && sha256sum -c checksums.txt)
           python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
-      - name: Publish the verified signed assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          DIGEST: ${{ needs.docker.outputs.digest }}
-        run: |
-          set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
-          jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
-          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
-          [ "${#assets[@]}" -gt 0 ]
-          flags=()
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi
-          gh release create "$TAG" --repo "$REPO" --verify-tag --draft --title "Crewship $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
-          gh release edit "$TAG" --repo "$REPO" --draft=false
       - name: Retain generated Homebrew formulas
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -147,11 +131,27 @@ jobs:
           path: dist/homebrew/
           if-no-files-found: error
           retention-days: 7
+      - name: Share verified release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-assets-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.spdx.json
+            dist/*.cdx.json
+            dist/*.sig
+            dist/*.pem
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
     needs:
       - verified
-      - docker
     permissions:
-      contents: write
+      contents: read
       id-token: write
   docker:
     name: Build & push Docker image
@@ -267,7 +267,7 @@ jobs:
     name: Promote verified release image
     needs:
       - docker
-      - release
+      - publish
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -295,7 +295,7 @@ jobs:
   homebrew:
     name: Publish stable Homebrew formulas
     needs:
-      - release
+      - publish
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -312,3 +312,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: python3 scripts/ci/publish-homebrew.py "$GITHUB_REF_NAME"
+  publish:
+    name: Publish verified release
+    needs:
+      - verified
+      - docker
+      - release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-assets-${{ github.sha }}
+          path: dist
+      - name: Publish the verified signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
+          [ "${#assets[@]}" -gt 0 ]
+          flags=()
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --draft --title "Crewship $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
+          gh release edit "$TAG" --repo "$REPO" --draft=false

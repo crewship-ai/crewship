@@ -32,6 +32,8 @@ class WorkflowContracts(unittest.TestCase):
             self.assertIn('ci-server-${{ github.sha }}', job)
             self.assertNotIn('pnpm build', job)
             self.assertIn('Generate ephemeral', job)
+        self.assertIn('nextjs-static-export', self.job(ci, 'playwright-pr'))
+        self.assertIn('path: out', self.job(ci, 'playwright-pr'))
         self.assertIn('needs_bootstrap', self.job(ci, 'onboarding-journey'))
 
     def test_every_browser_spec_is_classified_once(self):

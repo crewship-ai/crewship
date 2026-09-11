@@ -723,6 +723,11 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ci-server-${{ github.sha }}
+      - name: Download the shared export for isolated credential UI fixtures
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nextjs-static-export
+          path: out
       - run: chmod +x crewship
 
       - name: Generate ephemeral instance secrets
