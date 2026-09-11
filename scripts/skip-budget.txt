@@ -145,4 +145,14 @@
 # 139 2026-09-09: #2472 compiler image and browser-server harness guards; mandatory pages-apps CI exercises both.
 # 141 2026-09-09: #2472 API and MCP integration guards; mandatory Pages CI supplies their compiler image.
 # 143 2026-09-09: #2472 adds seed and Node collector dependency guards; mandatory Pages CI exercises both.
-143
+# 144 2026-09-11: #2491 turns a silent log-and-return in
+#                    TestAcceptance_PageProjectGitHistoryRestore into a t.Skip.
+#                    The publish-and-restart half needs a pinned pages-build
+#                    image that only the mandatory pages-apps lane supplies,
+#                    and that lane refuses a skipped subtest — so the guard is
+#                    honest where it fires and enforced where it matters. Not
+#                    debt; carries a SKIP-WAIVER, no tracking issue on the
+#                    #2472 precedent. The previous shape reported PASS with
+#                    half the test unexecuted and zero skips, which the
+#                    branch's own handover had quoted as evidence.
+144
