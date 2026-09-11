@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // seedPinnable saves a routine and returns it, ready to be re-saved to mint
@@ -370,12 +371,22 @@ func TestDeferredReceiptReportsDebounceCap(t *testing.T) {
 	h, user, ws := newPipelineHandlerForCRUDTest(t)
 	_, p := seedPinnable(t, h, user, ws, "receipt-cap")
 	first := enqueueDelayed(t, h, user, ws, p, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 10, DebounceMaxSeconds: 60})
+	// Force trailing-zero precision on every platform: SQL stores a fixed
+	// width, while the public receipt omits fractional zeros.
+	capTime := time.Now().Add(time.Minute).Truncate(time.Second)
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pending_runs SET debounce_max_at=? WHERE id=?`, tsformat.Format(capTime), first["pending_id"]); err != nil {
+		t.Fatal(err)
+	}
 	second := enqueueDelayed(t, h, user, ws, p, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
 	var fireAt, maxAt string
 	if err := h.db.QueryRowContext(t.Context(), `SELECT fire_at,debounce_max_at FROM pending_runs WHERE id=?`, first["pending_id"]).Scan(&fireAt, &maxAt); err != nil {
 		t.Fatal(err)
 	}
-	if fireAt != maxAt || second["fire_at"] != fireAt {
+	receiptAt, err := time.Parse(time.RFC3339Nano, second["fire_at"].(string)) // tsformat:allow: parsing the public receipt, not writing a SQL timestamp
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fireAt != maxAt || !receiptAt.Equal(capTime) {
 		t.Fatalf("receipt=%v stored=%s cap=%s", second["fire_at"], fireAt, maxAt)
 	}
 }
