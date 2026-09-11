@@ -19,6 +19,10 @@ import (
 	"context"
 	"testing"
 	"time"
+	// The zone IS the fixture. Embedding tzdata means a runner without a
+	// system zoneinfo database fails these tests rather than skipping them
+	// — a DST test that quietly does not run is worse than no DST test.
+	_ "time/tzdata"
 )
 
 // prague is the zone under test. The two transitions the fixtures below
@@ -33,7 +37,7 @@ func pragueLoc(t *testing.T) *time.Location {
 	t.Helper()
 	loc, err := time.LoadLocation("Europe/Prague")
 	if err != nil {
-		t.Skipf("Europe/Prague unavailable in this environment: %v", err)
+		t.Fatalf("Europe/Prague must load — tzdata is embedded above: %v", err)
 	}
 	return loc
 }
