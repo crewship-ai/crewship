@@ -18,7 +18,7 @@
 # So this script never asks the check what happened. It reads the comment and
 # review bodies CodeRabbit actually posted, and reports one of:
 #
-#   reviewed   a review was submitted (with its actionable-comment count).
+#   reviewed   the current head was reviewed (with its actionable-comment count).
 #              An APPROVED review with an empty body counts only when a
 #              walkthrough names the same commit as reviewed — a clean CHILL
 #              review and the #1729 non-event are the same empty approval,
@@ -271,7 +271,7 @@ CLASSIFY_JQ="$WAIT_JQ"'
   # exception every refused `@coderabbitai review` would demote a
   # fully-reviewed head, and `--retrigger` would then re-request it, collect
   # another refusal, and loop.
-  | (if   ($rev != null) and (($thr == null) or ($rev.t >= $thr.t) or $revCoversHead)
+  | (if   $revCoversHead and (($thr == null) or ($rev.t >= $thr.t) or $revCoversHead)
           and (($fail == null) or ($rev.t >= $fail.t))              then "reviewed"
      elif ($thr != null) and (($fail == null) or ($thr.t >= $fail.t)) then "throttled"
      elif ($fail != null)                                            then "failed"
@@ -298,8 +298,8 @@ CLASSIFY_JQ="$WAIT_JQ"'
   | ( []
       # The head SHA is what merges. A review of an earlier commit is a real
       # review of code that is no longer the code landing.
-      + (if $state == "reviewed" and (($rev.commitId // "") != "")
-              and ((($in.headSha) // "") != "") and ($rev.commitId != $in.headSha)
+      + (if (($rev.commitId // "") != "")
+              and ((($in.headSha) // "") != "") and ($revCoversHead | not)
          then ["reviewed " + ($rev.commitId | short) + ", head is "
                + ($in.headSha | short) + " — the newest push is unreviewed"]
          else [] end)

@@ -45,3 +45,14 @@ Run `bash scripts/verify.sh quick` before pushing: gate regression tests, workfl
 A new persistent self-hosted runner has not been installed. This public repository shares its current development machine with stage and live developer sessions; a pilot must use isolated ephemeral workers and its own capacity limits. During this implementation the default parallel multi-platform release rehearsal approached the host's disk limit; it was stopped and only its identified temporary build directories were removed. Existing caches/data of other sessions were preserved. The standard Go suite, vet, frontend build, lint, 33 nightly browser checks (one intentional skip), CI helper regression tests and real image boot were verified locally; full signed publication is a separate hosted acceptance step.
 
 Nightly retains the existing `nightly-YYYYMMDD-rN` grammar required by installed self-update clients. The numeric suffix is `workflow_run_number * 100 + attempt` (attempts 1–99), bounded for 32-bit clients. The same version is stamped into the server, CLI, frontend and image; snapshot archive/package versions remain digit-leading for dpkg.
+
+
+## Completion follow-up: report integrity and review identity
+
+The full hosted CI for `efdccf88` passed, including all three race groups, image boot and release packaging rehearsal. The next follow-up strengthens two evidence boundaries discovered during acceptance:
+
+- `review-status.sh` requires a real review covering the current head. A genuine review of an older commit remains visible as evidence, but cannot produce the `reviewed` verdict or suppress a scoped retrigger.
+- Nightly drift reports validate complete file/test inventory and distinguish intentional skips from unexecuted serial tests. Global errors, empty reports and unknown outcomes fail closed. Recovery cannot close #1592 on an incomplete report.
+- `scripts/ci/e2e-drift-baseline.json` records individual outcomes from hosted run 34620139212 at source 81984158: 50 passed, 70 failed, 6 deliberate skips, 47 not run. New failures, flakes, skips, unexecuted tests and missing tests fail the regression gate. Existing failures remain reported; the baseline is not a claim of full E2E health. Test fixes pass without expanding allowances. Promote repaired specs into the gate and remove their baseline entries together in review; never regenerate a baseline merely to make a failing run green.
+
+The stage implementation being developed independently now freezes source SHA and checks trusted main-push runs of the same three GitHub workflows. Its isolated source-build artifact remains distinct from a registry image digest. No stage files or live services were changed by this CI/CD work.

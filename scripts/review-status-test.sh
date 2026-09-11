@@ -382,6 +382,10 @@ expect_eq "a review after a throttle clears it" "reviewed" \
 
 echo "== reviewed, but not of what is merging =="
 
+expect_eq "an older review without a later throttle is not current-head coverage" "absent" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" "$NONE" \
+      "$(rev 2026-07-30T21:20:00Z APPROVED "$REVIEW_BODY" cccccccccccccccccccccccccccccccccccccccc)")")"
+
 expect_contains "a review of an older commit is flagged against head" \
   "$(notes_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" "$NONE" \
       "$(rev 2026-07-30T21:20:00Z APPROVED "$REVIEW_BODY" cccccccccccccccccccccccccccccccccccccccc)")")" \
