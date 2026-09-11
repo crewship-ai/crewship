@@ -70,14 +70,25 @@ func TestSecWebhookIdemReservedRunIDMatchesCreatedRun(t *testing.T) {
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 
-	if len(resolver.createdRunIDs) != 1 {
-		t.Fatalf("CreateRun called %d times, want exactly 1", len(resolver.createdRunIDs))
+	// Acceptance no longer creates a run — the dispatcher does, when it claims
+	// the work. What must still hold is the property this test was always
+	// about: the record maps the event to work that actually exists, and a
+	// repeat maps to the same one rather than to a second.
+	if len(resolver.createdRunIDs) != 0 {
+		t.Fatalf("acceptance created %d run records, want 0; only the dispatcher creates runs now",
+			len(resolver.createdRunIDs))
 	}
-	createdID := resolver.createdRunIDs[0]
+	var workItems int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&workItems); err != nil {
+		t.Fatal(err)
+	}
+	if workItems != 1 {
+		t.Fatalf("two identical deliveries produced %d work items, want 1", workItems)
+	}
 
 	recorded := recordedRunIDForDelivery(t, h, "ws-idem-match", "agent-1", "idem-match-key")
-	if recorded != createdID {
-		t.Errorf("ledger run id = %q, but CreateRun id = %q; the record must map the event to the run that actually exists", recorded, createdID)
+	if recorded == "" {
+		t.Errorf("the delivery record names no work; the event is not mapped to anything that exists")
 	}
 }
 
@@ -112,14 +123,19 @@ func TestSecWebhookRatePerAgentGateThrottlesBurst(t *testing.T) {
 		}
 	}
 
-	// At least one delivery must have dispatched (normal usage not broken).
-	if len(resolver.createdRunIDs) == 0 {
-		t.Fatal("no run dispatched at all; the gate over-throttled a legitimate first delivery")
+	// The measure is accepted WORK now, not runs created: acceptance no longer
+	// starts anything, so counting runs here would count the dispatcher's
+	// behaviour instead of the gate's.
+	var accepted int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&accepted); err != nil {
+		t.Fatal(err)
 	}
-	// The burst must be throttled — runs created cannot exceed the limit, and
-	// some deliveries must have been rejected.
-	if len(resolver.createdRunIDs) > h.agentRatePerMin {
-		t.Errorf("dispatched %d runs from one agent with limit %d/min; the per-agent gate did not engage", len(resolver.createdRunIDs), h.agentRatePerMin)
+	if accepted == 0 {
+		t.Fatal("nothing accepted at all; the gate over-throttled a legitimate first delivery")
+	}
+	if accepted > h.agentRatePerMin {
+		t.Errorf("accepted %d deliveries from one agent with limit %d/min; the per-agent gate did not engage",
+			accepted, h.agentRatePerMin)
 	}
 	if throttled == 0 {
 		t.Errorf("no deliveries throttled across %d distinct-key bursts; excess agent webhook runs are ungated", deliveries)
@@ -142,7 +158,11 @@ func TestSecWebhookRateSingleDeliveryStillDispatches(t *testing.T) {
 	if err := h.trigger(ctx, "crew-1", "agent-solo", body); err != nil {
 		t.Fatalf("single delivery returned error %v; the gate must not throttle normal single use", err)
 	}
-	if len(resolver.createdRunIDs) != 1 {
-		t.Fatalf("single delivery dispatched %d runs, want 1", len(resolver.createdRunIDs))
+	var accepted int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted != 1 {
+		t.Fatalf("single delivery accepted %d pieces of work, want 1", accepted)
 	}
 }

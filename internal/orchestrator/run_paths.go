@@ -1,9 +1,13 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/provider"
+	"io"
 	"path"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -228,4 +232,85 @@ func liveRunIDsForAgent(containerID, agentSlug string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// runHomeLocation finds which container and agent a live run belongs to.
+//
+// Present only for runs THIS process started: the registry is process-global,
+// not durable. That limitation is the point of the (found bool) return — see
+// RunIsAlive, where "this process has no record" has to stay distinguishable
+// from "there is no such process".
+func runHomeLocation(runID string) (containerID, agentSlug string, found bool) {
+	if runID == "" {
+		return "", "", false
+	}
+	liveRunHomes.mu.Lock()
+	defer liveRunHomes.mu.Unlock()
+	for key, set := range liveRunHomes.m {
+		if _, ok := set[runID]; !ok {
+			continue
+		}
+		i := strings.LastIndex(key, "|")
+		if i < 0 {
+			continue
+		}
+		return key[:i], key[i+1:], true
+	}
+	return "", "", false
+}
+
+// RunIsAlive reports whether a runtime for runID still exists.
+//
+// An unknown run returns an ERROR rather than false, and the distinction is the
+// whole value of this method. The registry only knows runs this process
+// started, so after a restart it knows nothing — and answering "not alive"
+// there would let a dispatcher conclude that a process it cannot see is a
+// process that does not exist. That is the inference the start protocol was
+// built to prevent; a caller that gets an error parks the work for
+// reconciliation instead, which is the truthful outcome.
+func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, error) {
+	containerID, agentSlug, found := runHomeLocation(runID)
+	if !found {
+		return false, fmt.Errorf("this process has no record of run %s; whether a runtime exists for it "+
+			"cannot be answered from here", runID)
+	}
+	session := TmuxSessionName(agentSlug, runID)
+	res, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", "tmux has-session -t '" + session + "' 2>/dev/null && echo yes || echo no"},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return false, fmt.Errorf("probe run %s: %w", runID, err)
+	}
+	out, _ := io.ReadAll(res.Reader)
+	res.Reader.Close()
+	return strings.Contains(string(out), "yes"), nil
+}
+
+// StopRun signals the runtime for runID and reports whether it is now gone.
+//
+// It targets that run's own tmux session, never the agent: before E0 the
+// session name carried only the slug, so stopping one run of an agent stopped
+// every run of it. Returning (false, nil) means "asked, still there" — not a
+// failure, and not something a caller may report as a stop.
+func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) {
+	containerID, agentSlug, found := runHomeLocation(runID)
+	if !found {
+		return false, fmt.Errorf("this process has no record of run %s; it cannot signal a runtime "+
+			"it does not know the location of", runID)
+	}
+	session := TmuxSessionName(agentSlug, runID)
+	res, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd: []string{"sh", "-c", "tmux kill-session -t '" + session + "' 2>/dev/null; " +
+			"tmux has-session -t '" + session + "' 2>/dev/null && echo alive || echo gone"},
+		User: "1001:1001",
+	})
+	if err != nil {
+		return false, fmt.Errorf("stop run %s: %w", runID, err)
+	}
+	out, _ := io.ReadAll(res.Reader)
+	res.Reader.Close()
+	return strings.Contains(string(out), "gone"), nil
 }

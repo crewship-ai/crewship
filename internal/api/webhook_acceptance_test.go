@@ -230,10 +230,18 @@ func TestAgentWebhookAcceptance_NothingRunsBeforeTheResponse(t *testing.T) {
 	if n := rig.resolver.runsCreated(); n != 0 {
 		t.Errorf("%d run record(s) written before the response, want 0", n)
 	}
-	// And the dispatch really did run afterwards — otherwise this test would
-	// pass against a handler that simply never dispatches.
-	if got := rig.container.starts.Load(); got != 1 {
-		t.Errorf("container starts after the response = %d, want 1", got)
+	// And nothing runs AFTERWARDS either, which is the stronger claim this
+	// path can now make. Acceptance commits the delivery and the work and then
+	// hints; the dispatcher is the only thing that starts a runtime, and there
+	// is none running in this test. Before R3 this assertion read "want 1",
+	// because the handler dispatched directly — which is exactly the second
+	// owner that made `queued` and "an agent is running" the same state.
+	if got := rig.container.starts.Load(); got != 0 {
+		t.Errorf("container starts after the response = %d, want 0 — acceptance started a runtime "+
+			"without claiming the work", got)
+	}
+	if n := rig.resolver.runsCreated(); n != 0 {
+		t.Errorf("%d run record(s) written by acceptance, want 0", n)
 	}
 }
 
@@ -393,8 +401,9 @@ func TestAgentWebhookAcceptance_Duplicate(t *testing.T) {
 	if n := countWebhookRows(t, rig.db, `SELECT COUNT(*) FROM work_items`); n != 1 {
 		t.Errorf("work items = %d, want 1 — a re-delivery must not create a second piece of work", n)
 	}
-	if got := rig.container.starts.Load(); got != 1 {
-		t.Errorf("container starts = %d, want 1 — the duplicate dispatched again", got)
+	if got := rig.container.starts.Load(); got != 0 {
+		t.Errorf("container starts = %d, want 0 — acceptance must not start a runtime at all, "+
+			"for the first delivery or its duplicate", got)
 	}
 }
 
@@ -483,8 +492,9 @@ func TestAgentWebhookAcceptance_ConcurrentDuplicatesProduceOneWork(t *testing.T)
 				i, a.deliveryID, a.workID, wantDelivery, wantWork)
 		}
 	}
-	if got := rig.container.starts.Load(); got != 1 {
-		t.Errorf("container starts = %d, want 1 — concurrent duplicates dispatched more than once", got)
+	if got := rig.container.starts.Load(); got != 0 {
+		t.Errorf("container starts = %d, want 0 — acceptance starts nothing; the one stable receipt above "+
+			"is what concurrency has to produce", got)
 	}
 }
 

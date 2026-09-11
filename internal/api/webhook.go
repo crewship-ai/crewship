@@ -83,6 +83,16 @@ type WebhookHandler struct {
 	// ingress so ops can see injection attempts at the chokepoint.
 	fence *untrusted.Fence
 
+	// dispatchHint nudges the dispatcher that there may be work now.
+	//
+	// It is deliberately a plain func and deliberately allowed to be nil. This
+	// handler must not be able to make execution depend on it: a hint that
+	// could fail, block, or be forgotten would turn an optimisation into a
+	// precondition, and the durable ledger is what actually guarantees the work
+	// runs. Nil means "nobody is listening", which is a slower system and not a
+	// broken one.
+	dispatchHint func(workID string)
+
 	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
 	// (R4#3). agentRatePerMin is 0 by default, meaning "follow the runtime
 	// ratelimitcfg value" (admin-tunable, default 60/min) — see
@@ -721,7 +731,25 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 		return acc, nil, nil
 	}
 
-	return acc, h.dispatchAccepted(ctx, info, agentID, runID, payload, releaseOnce), nil
+	// Acceptance is finished. It commits the delivery and the work, and then
+	// says so — nothing more.
+	//
+	// The hint is an optimisation: it tells the dispatcher there may be work
+	// now, so the common case does not wait for a poll. Losing it costs
+	// latency and nothing else, which is the only reason it is allowed to be
+	// best-effort. If the execution depended on it, a crash between this commit
+	// and the nudge would strand work — precisely the window the durable ledger
+	// exists to survive, and one the tests cover by never sending a hint at all.
+	//
+	// It used to return a closure that started an agent. That closure was the
+	// second owner of this work: the ledger said `queued` while a runtime ran,
+	// a finished agent need never finish its work item, and a restart resumed
+	// nothing. Review finding R3.
+	if h.dispatchHint != nil {
+		h.dispatchHint(acc.WorkID)
+	}
+	releaseOnce()
+	return acc, nil, nil
 }
 
 // receiptOrRefusal answers a gate rejection.
@@ -748,36 +776,25 @@ func (h *WebhookHandler) receiptOrRefusal(
 	return webhook.Acceptance{}, nil, refusal
 }
 
-// dispatchAccepted builds the work that runs AFTER the receipt is written.
+// runWebhookAgent executes ONE webhook-triggered agent run, synchronously.
 //
-// Everything in here used to run before the sender heard anything: the chat
-// creation, the container start (an image pull, on a cold crew), the run record
-// and then the ten-minute agent run. The delivery is durably recorded by the
-// time this is called, so a failure in here loses no evidence — the work item
-// stays queued and is recoverable, which is what the old code could not say.
-func (h *WebhookHandler) dispatchAccepted(
+// It used to be fire-and-forget, launched by the handler the moment a delivery
+// was accepted — which is exactly what review finding R3 was about: the work
+// item said `queued` while an agent ran, and nothing tied the two together.
+// The dispatcher owns the goroutine now, so this returns when the run does.
+//
+// started() is called once, from the first stream event. That is the honest
+// moment to say the runtime exists: the process is producing output. Calling it
+// before RunAgent would claim a confirmation for something that had not yet
+// happened, which is the inference the start protocol exists to avoid.
+func (h *WebhookHandler) runWebhookAgent(
 	ctx context.Context,
 	info *chatbridge.ChatInfo,
 	agentID, runID string,
 	payload webhook.WebhookPayload,
 	releaseSlot func(),
-) func() {
-	// The request context is cancelled once the response flushes, and this runs
-	// after that by construction. WithoutCancel keeps the trace span and the
-	// auth values without the cancellation.
-	ctx = context.WithoutCancel(ctx)
-	return func() {
-		h.runAccepted(ctx, info, agentID, runID, payload, releaseSlot)
-	}
-}
-
-func (h *WebhookHandler) runAccepted(
-	ctx context.Context,
-	info *chatbridge.ChatInfo,
-	agentID, runID string,
-	payload webhook.WebhookPayload,
-	releaseSlot func(),
-) {
+	started func(),
+) error {
 	// 2. Create a chat session for THIS DELIVERY.
 	//
 	// It used to be fmt.Sprintf("webhook-%s", agentID) — one constant chat id
@@ -823,12 +840,12 @@ func (h *WebhookHandler) runAccepted(
 		// whoever owns dispatch.
 		//
 		// It is worth being precise about what "recoverable" means today: the
-		// work item is durable and correct, but no dispatcher is claiming
-		// queued work yet, so in this release the run does not restart on its
-		// own. That is a gap in the dispatcher, not in the record.
-		h.logger.Error("webhook dispatch: crew runtime did not start; work stays queued",
+		// work item is durable and correct, and the dispatcher owns retrying
+		// it — this failure is reported upward rather than swallowed, so the
+		// attempt lands in retry_wait instead of vanishing.
+		h.logger.Error("webhook dispatch: crew runtime did not start",
 			"agent_id", agentID, "run_id", runID, "error", err)
-		return
+		return fmt.Errorf("crew runtime did not start: %w", err)
 	}
 
 	// 4. Create run record. Reuses the runID minted (and idempotency-
@@ -851,7 +868,7 @@ func (h *WebhookHandler) runAccepted(
 		}
 		h.logger.Error("webhook dispatch: run record not created; not starting the agent",
 			"agent_id", agentID, "run_id", runID, "error", err)
-		return
+		return fmt.Errorf("run record not created: %w", err)
 	}
 
 	// 5. Build user message from payload. The payload fields (event/source/
@@ -871,11 +888,8 @@ func (h *WebhookHandler) runAccepted(
 	// once the response flushes. The `ctx` parameter is the request ctx
 	// threaded in from the webhook handler.
 	// ctx already carries WithoutCancel from dispatchAccepted.
-	parentCtx := ctx
-	finish := beginBackgroundWork()
-	go func() {
-		defer finish()
-		runCtx, cancel := context.WithTimeout(parentCtx, 10*time.Minute)
+	{
+		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 		// Put the run on the context so every journal entry the orchestrator
 		// emits beneath it inherits trace_id = runID. Its JournalEntry has no
@@ -937,7 +951,13 @@ func (h *WebhookHandler) runAccepted(
 			AgentSlug:         info.AgentSlug,
 			CaptureResultMeta: true,
 		})
+		// The first event means the CLI is alive and emitting. That is what
+		// the dispatcher records as a confirmed runtime.
+		var confirmOnce sync.Once
 		handler := func(event orchestrator.AgentEvent) {
+			if started != nil {
+				confirmOnce.Do(started)
+			}
 			base(event)
 
 			broadcastWorkspaceEvent(h.hub, info.WorkspaceID, "agent.log",
@@ -992,5 +1012,6 @@ func (h *WebhookHandler) runAccepted(
 		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}
-	}()
+		return err
+	}
 }
