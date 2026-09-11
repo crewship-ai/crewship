@@ -186,6 +186,16 @@ expect_not_contains "throttled and reviewed do not collapse" \
 expect_contains "throttled carries the wait the notice quoted" \
   "$(classify "$THROTTLED_IN")" "37m"
 
+UPDATED_THROTTLE="$(printf '%s' "$THROTTLED_IN" | jq '.comments[0].updatedAt = "2026-07-30T21:59:00Z"')"
+expect_eq "edited throttle starts the cooldown at its update" "2026-07-30T21:59:00Z" \
+  "$(classify "$UPDATED_THROTTLE" | cut -f4)"
+UPDATED_THROTTLE_WITH_REPLY="$(printf '%s' "$UPDATED_THROTTLE" | jq '.comments += [{createdAt:"2026-07-30T21:30:00Z", body:"Review rate limited."}]')"
+expect_eq "an old reply cannot hide the edited cooldown" "2026-07-30T21:59:00Z" \
+  "$(classify "$UPDATED_THROTTLE_WITH_REPLY" | cut -f4)"
+expect_contains "edited notice keeps its wait despite the later-listed reply" \
+  "$(classify "$UPDATED_THROTTLE_WITH_REPLY")" "37m"
+
+
 # Three phrasings each match a rate-limit notice, and the real fixture above
 # happens to carry all three — so a test built only on it cannot tell whether
 # two of the three were deleted. Pin each shape on its own, or the redundancy

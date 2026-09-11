@@ -106,7 +106,7 @@ WAIT_JQ='
 #
 # Input shape (see fetch_pr):
 #   { now, createdAt, windowMin, headSha, statusState, statusDesc,
-#     comments: [{createdAt, body, url}],
+#     comments: [{createdAt, updatedAt, body, url}],
 #     reviews:  [{submittedAt, state, body, commitId}] }
 # Both arrays are already filtered to the CodeRabbit bot.
 #
@@ -181,9 +181,13 @@ CLASSIFY_JQ="$WAIT_JQ"'
   | ($in.now | secs) as $now
   | ( [ $in.comments[]?
         | (.body // "") as $b
+        # The bot edits its existing walkthrough when a new push is throttled.
+        # Start that cooldown at the edit, not the original PR comment date.
+        | (if ($b | isThrottle) then (.updatedAt // .createdAt // "")
+           else (.createdAt // "") end) as $at
         | {
-          at: (.createdAt // ""),
-          t:  ((.createdAt // "") | secs),
+          at: $at,
+          t:  ($at | secs),
           kind: ( $b
                   | if isThrottle then "throttle"
                     elif isFailure then "failure"
@@ -252,7 +256,7 @@ CLASSIFY_JQ="$WAIT_JQ"'
 
   | ($ev | map(select(.kind == "review"))      | last) as $rev
   | ($ev | map(select(.kind == "empty-review")) | last) as $emptyRev
-  | ($ev | map(select(.kind == "throttle"))    | last) as $thr
+  | ($ev | map(select(.kind == "throttle"))    | sort_by(.t) | last) as $thr
   | ($ev | map(select(.kind == "failure"))     | last) as $fail
   | ($ev | map(select(.kind == "walkthrough" or .kind == "completed-walkthrough")) | last) as $walk
   | ($ev | map(select(.kind == "ack"))         | last) as $ack
@@ -422,7 +426,7 @@ assemble_input() {
         ciRunForHead: $ciRun,
         statusState: (($s.state) // ""), statusDesc: (($s.description) // ""),
         comments: [ $comments[] | select(.user.login == $bot)
-                    | {createdAt: .created_at, body: (.body // "")} ],
+                    | {createdAt: .created_at, updatedAt: .updated_at, body: (.body // "")} ],
         # inReplyTo carries the GitHub in_reply_to_id field: set when the
         # comment replies inside an existing review thread rather than
         # opening a new one. #2145 — a reply is not evidence CodeRabbit read
