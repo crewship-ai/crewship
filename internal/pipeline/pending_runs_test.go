@@ -237,3 +237,18 @@ func TestPendingRuns_DuePreservesOccurrenceAfterRearm(t *testing.T) {
 		}
 	}
 }
+
+func TestPendingClaimRespectsSubsecondDueBoundary(t *testing.T) {
+	s := NewPendingRunStore(newPendingDB(t))
+	now := time.Date(2026, 9, 11, 14, 0, 0, 500000000, time.UTC)
+	fireAt := now.Add(123456 * time.Nanosecond)
+	if _, _, err := s.Enqueue(t.Context(), PendingRun{ID: "boundary", WorkspaceID: "w", PipelineID: "p", PipelineSlug: "p", FireAt: fireAt}); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := s.ClaimDue(t.Context(), "boundary", now); err != nil || row != nil {
+		t.Fatalf("claimed before due: row=%+v err=%v", row, err)
+	}
+	if row, err := s.ClaimDue(t.Context(), "boundary", fireAt); err != nil || row == nil {
+		t.Fatalf("not claimed at due boundary: row=%+v err=%v", row, err)
+	}
+}
