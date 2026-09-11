@@ -359,6 +359,65 @@ verdikt na kartě beze změny, a žádný komentář ani obnovené přiřazení 
 odmítnuté akci. Opakovaná opožděná odpověď dostane stejné odmítnutí a
 payload karty nenaroste.
 
+### P7 — Živé ověření obou oprav proti skutečnému serveru
+
+Izolovaná instance na binárce sestavené z **kombinace** obou větví
+(`sha256:5ed54d20…`), skutečné HTTP, skutečně serializovaná těla, žádné mocky.
+
+**#2496 — plán se nedá uložit s presetem, který jeho rutina odmítá.** Rutina
+`acc-live-gate` s povinným `select` a volitelným `boolean`, oba s widgetem:
+
+```
+POST /pipeline-schedules  inputs {}                                → 400 input "region" is required
+                          inputs {"region":"antarctica"}           → 400 input "region": choose one of the available answers
+                          inputs {"region":"eu","dry_run":"yes"}   → 400 input "dry_run": expected true or false
+                          inputs {"region":"eu","dry_run":false}   → 201
+```
+
+Uloženy **jedna** z těch čtyř — `false` je odpověď, ne nepřítomnost.
+
+**#2495 — přímé uložení už plán tiše nerozbije.** Táž rutina, v2 přejmenuje
+povinný vstup:
+
+```
+crewship routine save --definition v2   → API error (409): publication blocked by
+                                          schedule p-ok: Input zone is required by the new recipe
+POST /pipelines/save (totéž tělo)       → 409 {"error": …,
+                                            "schedule_conflict":{"schedule_id":"psched_cmtwtyo0n0001a88675d1",
+                                                                 "name":"p-ok","reason":"Input zone is required by the new recipe"},
+                                            "hint": "Update this plan's inputs in the same save …"}
+```
+
+Po odmítnutí: živý recept dál `['region','dry_run']`, preset plánu dál
+`{"dry_run":false,"region":"eu"}`. Nic částečně zapsaného.
+
+**Deadlock, který to živé ověření odhalilo, a cesta ven.** První pokus o
+nápravu skončil takto:
+
+```
+PATCH plán {"inputs":{"zone":"eu"}}  → 400  (nesplňuje recept, který je stále publikovaný)
+POST  /pipelines/save v2             → 409  (uložený preset nesplňuje nový recept)
+```
+
+Přejmenování povinného vstupu vyžaduje, aby se recept a plán pohnuly
+**společně**, a ani jeden nemohl jít první. Produkt ten atomický krok už měl —
+uložení rutiny může nést `trigger` a `upsertTriggerSchedule` vlastní nejvýš
+jeden plán na (workspace, rutina) — jen brána běžela dřív, než ho viděla.
+Posunuta za `createTriggerTx`:
+
+```
+POST /pipelines/save  {definition: v2, trigger:{cron, inputs:{"zone":"eu"}}}  → 201
+   živé vstupy: ['zone']     plán: enabled, {"zone":"eu"}
+```
+
+Recept sám dál 409. Trigger nesoucí preset, který **nový** recept odmítá,
+také 409 a recept se nepohne — posunutí brány není cesta okolo ní.
+
+Pozn.: formulace důvodu se opravou mění z „is required by the draft“ na
+„is required by the new recipe“, protože brána už nefiří jen při publikaci
+draftu. Citace „by the draft“ v oddílu P6 pochází z průchodu na binárce před
+touto opravou.
+
 ## Závěrečná tabulka §9 — všech 16 řádků
 
 Rozsah Release 1.0 podle §11. **PASS znamená „doložené v pojmenovaném
