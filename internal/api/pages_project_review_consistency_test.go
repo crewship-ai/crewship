@@ -78,8 +78,8 @@ type reviewQueryHook struct {
 }
 
 // before runs the interleaved write just before the Nth statement whose SQL
-// contains `match` is prepared. The callback writes through a DIFFERENT
-// *sql.DB, so it cannot re-enter this hook.
+// contains `match` is prepared. The callback may re-enter the hooked handle;
+// fired is set and the mutex released before run, so re-entry is ignored.
 func (k *reviewQueryHook) before(query string) {
 	k.mu.Lock()
 	if k.run == nil || k.fired || !strings.Contains(query, k.match) {

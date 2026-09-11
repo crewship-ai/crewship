@@ -457,15 +457,6 @@ function PageBody({
   if (!page) return null
 
   const panels = page.panels ?? []
-  if (panels.length === 0) {
-    return (
-      <EmptyState
-        icon={CONCEPT_ICON.pages}
-        title="This page declares no panels"
-        description={`A page with no panel has nothing to render and nothing to push to. Add a panel to the spec and save it with crewship page update ${slug} --file page.yaml.`}
-      />
-    )
-  }
 
   // The freshness summary is computed over the whole PAGE — every panel the
   // server sent, on every tab — and never over the tab in view. That is the
@@ -513,7 +504,13 @@ function PageBody({
         )}
       </div>
 
-      <PanelGrid
+      {panels.length === 0 ? (
+        <EmptyState
+          icon={CONCEPT_ICON.pages}
+          title="This page declares no panels"
+          description={`A page with no panel has nothing to render and nothing to push to. Add a panel to the spec and save it with crewship page update ${slug} --file page.yaml.`}
+        />
+      ) : <PanelGrid
         panels={panels}
         slug={slug}
         now={now}
@@ -521,7 +518,7 @@ function PageBody({
         tabs={tabs}
         activeTab={activeTab}
         tabIdScope={tabIdScope}
-      />
+      />}
     </>
   )
 }
