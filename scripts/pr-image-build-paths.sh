@@ -55,6 +55,24 @@ WORKFLOW="$ROOT/.github/workflows/pr-image-build.yml"
   "That is the PR-triggered image build itself (#2064) — without it this" \
   "guard has nothing to check its paths against."
 
+# Reusable mode: the image is part of CI Result for every code change, so
+# there is no independent path allow-list left to drift. Keep the old parser
+# below for its regression fixtures and repositories migrating this contract.
+if grep -qE '^[[:space:]]*workflow_call:' "$WORKFLOW"; then
+  ci="$ROOT/.github/workflows/ci.yml"
+  [ -f "$ci" ] || fatal "reusable image build has no CI caller"
+  grep -qF 'uses: ./.github/workflows/pr-image-build.yml' "$ci" || fatal "CI does not call the image build"
+  grep -qE 'needs: \[(release-rehearsal, )?image, changes,' "$ci" || fatal "CI Result does not require the image job"
+  if grep -qE '^[[:space:]]*paths(-ignore)?:' "$ci" "$WORKFLOW"; then
+    fatal "image gate must not have a workflow-level path filter"
+  fi
+  if grep -qE 'push:[[:space:]]*true' "$WORKFLOW"; then
+    fatal "CI image candidates must not be pushed"
+  fi
+  echo "Reusable image build is required by CI Result for all code changes."
+  exit 0
+fi
+
 # ---------------------------------------------------------------------------
 # Required triggers
 # ---------------------------------------------------------------------------
@@ -143,6 +161,10 @@ fi
 NEEDED["Dockerfile"]=1
 NEEDED[".dockerignore"]=1
 NEEDED["prisma/**"]=1
+# The frontend stage's COPY . . also consumes these build inputs.
+for frontend_path in 'app/**' 'components/**' 'hooks/**' 'lib/**' 'stores/**' 'public/**' 'next.config.*' 'tsconfig*.json' 'postcss.config.*'; do
+  NEEDED["$frontend_path"]=1
+done
 
 # ---------------------------------------------------------------------------
 # Every needed source must be covered by the paths: list

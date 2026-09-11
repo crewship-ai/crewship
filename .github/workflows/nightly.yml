@@ -1,230 +1,200 @@
 name: Nightly
-
-# Continuous-delivery channel for beta testers: every push to main produces
-# a Docker image tagged `:nightly` and `:main-<short-sha>`, plus a rolling
-# `nightly` GitHub Release with prebuilt binaries.
-#
-# Two consumer profiles:
-#   - `docker pull ghcr.io/crewship-ai/crewship:nightly` for self-hosters
-#     who want every merged commit
-#   - GitHub Release `nightly` for testers who don't run Docker
-#
-# This workflow intentionally does NOT cut a semver tag. Tags drive the
-# main release pipeline; nightly is "trunk binary, dated, no promises."
-
-on:
-  push:
-    branches: [main]
-    # Skip nightly rebuild for changes that can't affect the binary or
-    # static export. Saves ~10 minutes per docs-only commit.
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
-      - 'THIRD-PARTY-NOTICES.md'
-      - '.github/ISSUE_TEMPLATE/**'
-  # Manual trigger for backfill or recovery from a bad nightly.
+'on':
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  schedule:
+    - cron: 17 2 * * *
   workflow_dispatch: {}
-
 permissions:
-  contents: write       # to update the rolling `nightly` release
-  packages: write       # GHCR push
-  id-token: write       # cosign keyless
-
+  contents: read
 concurrency:
-  group: nightly
-  cancel-in-progress: true
-
+  group: nightly-publish
+  cancel-in-progress: false
 env:
-  NODE_VERSION: "22"
-  PNPM_VERSION: "10"
-  GO_VERSION: "1.27.1"
-
+  NODE_VERSION: '22'
+  PNPM_VERSION: '10'
+  GO_VERSION: 1.27.1
 jobs:
+  verified:
+    name: Verify publication commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve trusted source commit
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SOURCE_EVENT: ${{ github.event.workflow_run.event }}
+          SOURCE_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_run ]; then
+            [ "$SOURCE_EVENT" = push ] && [ "$SOURCE_BRANCH" = main ] && [ "$SOURCE_REPO" = "$REPO" ] && [ "$SOURCE_RESULT" = success ]
+          else
+            [ "$GITHUB_REF" = refs/heads/main ]
+          fi
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Require successful CI, Security and CodeQL for this SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: python3 scripts/ci/verified_commit.py "$REPO" "$SHA"
+      - name: Resolve compatible immutable nightly version
+        id: version
+        run: python3 scripts/ci/nightly-version.py
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion
+      == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
   docker:
     name: Nightly Docker image
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 1
-
-      # Same rationale as release.yml: prefer the commit's own timestamp
-      # over repo-update-time so two pushes within the same workflow window
-      # don't get conflated.
+          ref: ${{ needs.verified.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Resolve commit timestamp
         id: meta
         run: echo "date=$(git log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
         with:
           cosign-release: v2.6.3
-
-      - name: Build & push nightly image
+      - name: Build immutable image candidate
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6.18.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/crewship:nightly
-            ghcr.io/${{ github.repository_owner }}/crewship:main-${{ github.sha }}
+          tags: ghcr.io/${{ github.repository_owner }}/crewship:candidate-${{ needs.verified.outputs.sha }}-${{ github.run_id
+            }}
           build-args: |
-            VERSION=nightly-${{ github.sha }}
-            COMMIT=${{ github.sha }}
+            VERSION=${{ needs.verified.outputs.version }}
+            COMMIT=${{ needs.verified.outputs.sha }}
             DATE=${{ steps.meta.outputs.date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Sign nightly image
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
+          cache-from: type=gha,scope=server-image
+          cache-to: type=gha,mode=max,scope=server-image
+          provenance: mode=max
+          sbom: true
+      - name: Scan the built image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Smoke both image platforms before promotion
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          SHA: ${{ needs.verified.outputs.sha }}
         run: |
-          cosign sign --yes \
-            "ghcr.io/${{ github.repository_owner }}/crewship:nightly@${DIGEST}"
-          cosign sign --yes \
-            "ghcr.io/${{ github.repository_owner }}/crewship:main-${{ github.sha }}@${DIGEST}"
-
-  # Rolling pre-release with prebuilt binaries for non-Docker testers.
-  # goreleaser handles all cross-arch build + signing; we run it in snapshot
-  # mode so it doesn't try to push a tag, then upload the dist/ output to
-  # the `nightly` release (recreated each run so it always reflects HEAD).
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+      - name: Sign verified image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+    needs:
+      - verified
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
   binaries:
     name: Nightly binaries
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ needs.verified.outputs.sha }}
           fetch-depth: 0
-
-      # Version-less: pnpm/action-setup reads `packageManager` from
-      # package.json. See release.yml for the rationale.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: "file:./dev.db"
-
+          DATABASE_URL: file:./dev.db
       - name: Build Next.js static export
         run: pnpm build
         env:
-          NEXTAUTH_SECRET: "build-time-placeholder"
-          # Same NEXT_PUBLIC_* baking pattern as release.yml. The
-          # nightly channel uses "nightly-<sha>" as its version string;
-          # sentry.client.config's classifyEnv() maps that prefix into
-          # the "beta" environment, keeping nightly noise out of the
-          # production Sentry view while still surfacing it alongside
-          # the beta-channel events maintainers actually watch.
-          #
-          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes to the
-          # `crewship-frontend` Sentry project; see release.yml for
-          # the per-platform rationale and scripts/sentry-bootstrap.sh
-          # for the secret mapping.
+          NEXTAUTH_SECRET: build-time-placeholder
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
-          NEXT_PUBLIC_CREWSHIP_VERSION: nightly-${{ github.sha }}
-
-      # Verifies a real export landed, not the tracked placeholder (#1567).
+          NEXT_PUBLIC_CREWSHIP_VERSION: ${{ needs.verified.outputs.version }}
       - name: Copy static export for embedding
         run: ./scripts/embed-web-out.sh sync
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
         with:
           cosign-release: v2.6.3
-
-      # Goreleaser's `sboms:` block shells out to syft (CRE-122); the runner
-      # image doesn't ship it. Same SHA-pinned install as release.yml.
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
         with:
           syft-version: v1.38.0
-
-      # Materialize the deb/rpm signing key from the GPG_SIGNING_KEY secret,
-      # if configured (#932) — same conditional pattern as release.yml: when
-      # the secret is absent GPG_KEY_PATH stays unset, nfpm skips signing, and
-      # the nightly ships unsigned packages (secret-less forks keep working).
-      # Signing the nightly channel means the GPG path (key decode, nfpm
-      # template, passphrase env) is exercised on every push to main instead
-      # of failing for the first time inside a tagged release.
-      - name: Prepare package signing key (if configured)
+      - name: Require package signing key
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
         run: |
-          if [ -n "$GPG_SIGNING_KEY" ]; then
-            printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
-            echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
-            echo "deb/rpm signing enabled"
-          else
-            echo "::notice::GPG_SIGNING_KEY not set — nightly deb/rpm packages will be UNSIGNED (see #932)"
-          fi
-
+          set -euo pipefail
+          [ -n "$GPG_SIGNING_KEY" ] || { echo '::error::GPG_SIGNING_KEY is required for published packages'; exit 1; }
+          printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
+          chmod 600 "$RUNNER_TEMP/crewship-signing.asc"
+          echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
       - name: Build snapshot binaries
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
         with:
-          # Match release.yml pin; `~> v2` allows v3 once released.
-          version: "v2.6.1"
-          # --snapshot: skip tag validation; --skip=publish,homebrew: do NOT
-          # skip sign — nightly artifacts get the same cosign keyless
-          # provenance as tagged releases so testers can `cosign verify-blob`
-          # before installing. We still skip publish (we upload via gh
-          # release ourselves) and homebrew (no formula bump on nightly).
-          args: release --snapshot --clean --skip=publish,homebrew
+          version: v2.6.1
+          args: release --parallelism 2 --snapshot --clean --skip=publish,homebrew
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          # Pin the version goreleaser builds against instead of deriving it
-          # from git. The "Replace rolling nightly release" step below creates a
-          # rolling `nightly` git tag; `fetch-depth: 0` above pulls it back into
-          # every subsequent checkout, and goreleaser — even with --snapshot —
-          # parses the latest tag as semver up front and dies with
-          # "failed to parse tag 'nightly' as semver" (#886). GORELEASER_CURRENT_TAG
-          # overrides that lookup with a valid, deterministic semver so the
-          # nightly build no longer depends on the rolling tag's (non-semver)
-          # name. It only affects the {{.Version}} string baked into snapshot
-          # artifacts (already "nightly-<sha>" via the ldflags path), not what
-          # gets published — we upload via `gh release` ourselves.
           GORELEASER_CURRENT_TAG: v0.0.0-nightly
-          # nfpm reads the signing-key passphrase from NFPM_<ID>_PASSPHRASE
-          # (nfpms id = "packages"); empty when the key has no passphrase.
-          # See release.yml and packaging/SIGNING.md (#932).
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
-          # goreleaser's `signs:` block uses the GitHub Actions OIDC token to
-          # request a Fulcio short-lived cert (keyless cosign). The token is
-          # injected automatically because the workflow has `id-token: write`.
-
-      # Sign the checksums file out-of-band so testers can verify the
-      # archives transitively (cosign verify-blob → checksums.txt → sha256
-      # of each tarball). goreleaser's per-archive signing is already on via
-      # the `signs:` block, but we sign checksums.txt explicitly here so a
-      # single-shot `curl + cosign verify-blob` is enough to validate.
+          CREWSHIP_NIGHTLY_VERSION: ${{ needs.verified.outputs.version }}
       - name: Sign checksums.txt
         if: hashFiles('dist/checksums.txt') != ''
         run: |
@@ -232,78 +202,158 @@ jobs:
             --output-signature dist/checksums.txt.sig \
             --output-certificate dist/checksums.txt.pem \
             dist/checksums.txt
-
-      # Publish an immutable, unique per-run pre-release.
-      #
-      # The repo has immutable releases enabled (it protects the cosign/SBOM/
-      # checksums provenance of tagged stable releases). Immutable releases
-      # forbid reusing a tag name — so the old rolling `nightly` tag (delete +
-      # recreate every run) is dead: `gh release create nightly` 422s with
-      # "tag_name was used by an immutable release". Instead each run cuts a
-      # unique, sortable tag:
-      #
-      #   nightly-<UTC-date>-r<run_number>
-      #
-      # run_number is unique per workflow run, so two pushes on the same day
-      # (Nightly runs on every push to main) get distinct tags — a per-DAY tag
-      # would hit the same immutable wall on the second run. A re-run of the
-      # SAME run reuses the tag; we detect the existing release and skip rather
-      # than double-publishing onto an immutable tag. The rolling
-      # `ghcr.io/…:nightly` Docker image is unaffected — that is a GHCR tag,
-      # not a git tag.
-      - name: Publish nightly pre-release (immutable, per-run)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+      - name: Require complete release assets
         run: |
           set -euo pipefail
-          TAG="nightly-$(date -u +%Y%m%d)-r${{ github.run_number }}"
-          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          # *.deb / *.rpm: the GPG-signed packages (#932). goreleaser built
-          # and cosign-signed them all along, but the old glob dropped them
-          # from the upload — publishing dangling .deb.sig/.rpm.pem
-          # signatures for assets that didn't exist. Same story for the syft
-          # SBOMs (*.cdx.json / *.spdx.json), whose .sig/.pem uploaded
-          # without their subject. Keep this list in sync with what
-          # .goreleaser.yml produces per artifact family.
-          ASSETS=$(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.cdx.json' -o -name '*.spdx.json' -o -name 'checksums.txt' -o -name '*.sig' -o -name '*.pem' \) | tr '\n' ' ')
-          NOTES="Nightly pre-release built from main @ ${GITHUB_SHA:0:7} (${TS}).
-
-          **Not for production.** Use a tagged release for stable workloads.
-          Docker: \`docker pull ghcr.io/${{ github.repository_owner }}/crewship:nightly\`
-          Latest nightly binaries: \`gh release list --repo ${REPO} | grep -m1 nightly-\` (or query the API's latest prerelease)."
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "::notice::Release $TAG already exists (workflow re-run); skipping create to avoid recreating an immutable tag."
+          test -s dist/checksums.txt
+          test -s dist/checksums.txt.sig
+          test -s dist/checksums.txt.pem
+          (cd dist && sha256sum -c checksums.txt)
+      - name: Scan final nightly artifacts
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          path: dist
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Boot the packaged Linux archive before publication
+        env:
+          SHA: ${{ needs.verified.outputs.sha }}
+        run: |
+          set -euo pipefail
+          archives=(dist/crewship_*_linux_amd64.tar.gz)
+          [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
+          python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
+      - name: Share immutable binary candidates
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nightly-binaries-${{ needs.verified.outputs.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.json
+            dist/checksums.txt
+            dist/*.sig
+            dist/*.pem
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+    needs:
+      - verified
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+  publish:
+    name: Publish verified nightly
+    needs:
+      - verified
+      - docker
+      - binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.verified.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nightly-binaries-${{ needs.verified.outputs.sha }}
+          path: dist
+      - name: Prevent superseded binaries from advancing self-update
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.verified.outputs.sha }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$current" = "$SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           else
-            gh release create "$TAG" \
-              --prerelease \
-              --title "Nightly $TAG (main @ ${GITHUB_SHA:0:7})" \
-              --notes "$NOTES" \
-              --target "$GITHUB_SHA" \
-              $ASSETS
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo '::notice::Main advanced; retaining verified candidates without publishing a superseded nightly.'
           fi
-
-      # Prune old nightly pre-releases so unique-per-run tags don't accumulate
-      # forever. Deleting an immutable release IS allowed (only reusing a tag
-      # name is forbidden, which unique tags never do). Keep ~7 days of
-      # nightlies; drop the rest along with their tags.
-      - name: Prune old nightly pre-releases
-        if: success()
+      - name: Write publication identity
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ needs.verified.outputs.sha }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
+          VERSION: ${{ needs.verified.outputs.version }}
+          PUBLISH: ${{ steps.current.outputs.publish }}
+        run: |
+          jq -n --arg sha "$SHA" --arg digest "$DIGEST" --arg image "$IMAGE" --arg release "$VERSION" --argjson published "$PUBLISH" '{sha:$sha,digest:$digest,image:$image,release:$release,published:$published}' > dist/image-manifest.json
+      - name: Publish immutable nightly release
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          SHA: ${{ needs.verified.outputs.sha }}
+          VERSION: ${{ needs.verified.outputs.version }}
         run: |
           set -euo pipefail
-          CUTOFF=$(date -u -d '7 days ago' +%s)
-          OLD=$(gh release list --repo "$REPO" --limit 200 --json tagName,isPrerelease,createdAt \
-            | jq -r --argjson cutoff "$CUTOFF" \
-                '[.[] | select(.isPrerelease and (.tagName | startswith("nightly-")) and ((.createdAt | fromdateiso8601) < $cutoff))] | .[].tagName')
-          if [ -z "$OLD" ]; then
-            echo "No nightly pre-releases older than 7 days to prune."
+          TAG="$VERSION"
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f -print0)
+          [ "${#assets[@]}" -gt 0 ]
+          printf 'Verified main commit: `%s`
+
+          Image digest and source identity: image-manifest.json.
+          ' "$SHA" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$REPO" --draft --prerelease --target "$SHA" --title "Nightly ${SHA:0:12}" --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
+          # Uploads can take minutes. Recheck after uploading, before visibility.
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$current" != "$SHA" ]; then
+            gh release delete "$TAG" --repo "$REPO" --yes
+            jq '.published = false' dist/image-manifest.json > "$RUNNER_TEMP/unpublished.json"
+            mv "$RUNNER_TEMP/unpublished.json" dist/image-manifest.json
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo '::notice::Main advanced during upload; discarded the unpublished draft.'
             exit 0
           fi
-          echo "$OLD" | while read -r tag; do
-            [ -z "$tag" ] && continue
-            echo "Pruning old nightly release $tag"
-            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag || true
-          done
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "published=true" >> "$GITHUB_OUTPUT"
+        if: steps.current.outputs.publish == 'true'
+      - name: Promote only the verified image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.verified.outputs.sha }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "$IMAGE:main-$SHA" "$IMAGE@$DIGEST"
+          # Never let a slow older build replace the current main's rolling image.
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$current" = "$SHA" ]; then
+            docker buildx imagetools create --tag "$IMAGE:nightly" "$IMAGE@$DIGEST"
+          else
+            echo "Main advanced; published immutable artifacts without moving :nightly."
+          fi
+        if: steps.publication.outputs.published == 'true'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nightly-image-manifest
+          path: dist/image-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Prune expired nightlies (keep at least 20 and 14 days)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/ci/prune-nightlies.py "$REPO"
+        if: steps.publication.outputs.published == 'true'

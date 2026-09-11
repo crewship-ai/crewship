@@ -22,6 +22,7 @@ function probeDefinition() {
     name: SLUG,
     description: "E2E probe for the B9 reliability editor — never actually fires.",
     agentless: true,
+    inputs: [{ name: "x", type: "string", default: "probe" }],
     steps: [
       { id: "noop", type: "transform", transform: { input: "{{ inputs.x }}", expression: "." } },
     ],
@@ -135,7 +136,7 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
   test("editing a schedule's cron shows a live preview and the saved cron sticks", async ({ page }) => {
     await page.goto(`/routines?slug=${SLUG}`)
 
-    await page.getByRole("button", { name: "Manage" }).click()
+    await page.getByRole("button", { name: "Schedule", exact: true }).click()
 
     const editButton = page.getByRole("button", { name: /Edit schedule e2e reliability schedule/i })
     await expect(editButton).toBeVisible({ timeout: TIMEOUT })
@@ -151,6 +152,7 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
 
     // Editing the cron re-fetches the preview for the NEW value — the whole
     // point of a server-computed preview over a client-side cron guess.
+    await dialog.getByText(/Advanced.*cron expression/).click()
     const cronInput = dialog.getByLabel(/cron expression/i)
     await cronInput.fill("")
     await cronInput.fill("15 3 * * *")
@@ -166,7 +168,7 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
 
     // The read-only row (a6) reflects the edit — this is the whole loop:
     // edit -> preview -> save -> the display everyone else reads.
-    await expect(page.getByText("15 3 * * *")).toBeVisible({ timeout: TIMEOUT })
-    await expect(page.getByText("Europe/Prague")).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByText("Every day at 03:15")).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByText(/Europe\/Prague/)).toBeVisible({ timeout: TIMEOUT })
   })
 })

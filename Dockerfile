@@ -16,22 +16,27 @@
 # build, so `pnpm prisma generate` dies with a wall of P1012 "This line is
 # invalid" errors even though the schema is valid. Bump only in lockstep
 # with CI + a Prisma release that declares Node 26 support.
-FROM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 # Newer node-alpine images stopped bundling corepack by default, so
 # `corepack enable` alone can fail with "corepack: not found". Install it
 # explicitly first; `pnpm install` below then picks up the exact version
 # pinned in package.json's `packageManager` field, same as CI's
 # pnpm/action-setup (see .github/actions/setup-node-pnpm/action.yml).
-RUN npm install -g corepack@latest && corepack enable pnpm
+RUN npm install -g corepack@0.34.1 && corepack enable pnpm
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm prisma generate
+ARG VERSION=dev
+ARG NEXT_PUBLIC_SENTRY_DSN=""
+ENV NEXT_PUBLIC_CREWSHIP_VERSION=$VERSION
 RUN pnpm build
 
-FROM golang:1.27.1-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS backend
+ARG TARGETOS
+ARG TARGETARCH
 # This tag is the compiler for the shipped binary, and it is the one Go version
 # no pull-request check ever exercises: the image is built by release.yml and
 # nightly.yml only (#2064). Dependabot's `docker-images` group bumps it alone.
@@ -92,7 +97,6 @@ COPY schemas/ ./schemas/
 # The PR image build (#2064) now catches this class before merge, and
 # scripts/pr-image-build-paths.sh keeps its path filter in step with the
 # COPY lines here.
-COPY config/ ./config/
 COPY web/ ./web/
 COPY --from=frontend /app/out ./web/out
 # Release gate (#1567). web/out/ now always compiles — a tracked placeholder
@@ -113,17 +117,30 @@ ARG DATE=unknown
 # crashreport package treats empty DSN as "stay disabled regardless of
 # opt-in" so dev images never phone home).
 ARG SENTRY_DSN=""
+# The daemon validates the bundled sidecar even in --no-docker mode.
+# Build it for the same target architecture as the server.
+RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
+    --mount=type=cache,id=go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+    -ldflags="-s -w" -o /crewship-sidecar ./cmd/crewship-sidecar
 # -trimpath strips workspace paths from binary debug info — same
 # rationale as the Makefile / goreleaser changes: reproducible builds
 # so cosign-verified hashes match across builders.
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=go-build,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN}" \
     -o /crewship ./cmd/crewship
 
 # -- Runner --
 FROM alpine:3.24
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+LABEL org.opencontainers.image.source="https://github.com/crewship-ai/crewship" \
+      org.opencontainers.image.version=$VERSION \
+      org.opencontainers.image.revision=$COMMIT \
+      org.opencontainers.image.created=$DATE
 
 RUN apk --no-cache add ca-certificates git docker-cli && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
@@ -132,9 +149,16 @@ RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
     chown -R crewship:crewship /var/lib/crewship /var/log/crewship /data
 
 COPY --from=backend /crewship /usr/local/bin/crewship
+COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/server-entrypoint.sh /usr/local/bin/crewship-entrypoint
 RUN chmod +x /usr/local/bin/crewship-entrypoint
 
+ENV DATABASE_URL=file:/data/crewship.db \
+    CREWSHIP_STORAGE_BASE_PATH=/var/lib/crewship \
+    CREWSHIP_LOG_PATH=/var/log/crewship \
+    CREWSHIP_BOLT_PATH=/data/state.db
+WORKDIR /data
 USER crewship
 
 EXPOSE 8080

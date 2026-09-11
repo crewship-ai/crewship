@@ -20,7 +20,7 @@ import { baseURL, skipWebServer, webServerConfig } from "./playwright.shared"
  *
  *   - the GATE bucket, verified green, hard-fails the nightly;
  *   - the DRIFT bucket, known-stale, reported into one tracking issue
- *     and never allowed to fail the workflow.
+ *     with new regressions blocked against measured test outcomes.
  *
  * The workflow also asserts that GATE + DRIFT + a small explicitly
  * excluded list covers every e2e/*.spec.ts file, so a newly added spec

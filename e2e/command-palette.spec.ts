@@ -13,9 +13,9 @@ import { test, expect, type Page } from "@playwright/test"
 // THING. Landing on the index of what you just searched for is the same
 // failure as landing nowhere — you are made to search twice.
 //
-// Nothing here names a seeded fixture. Each test takes whatever the palette
-// itself offers for that kind, so the file is worth running against any
-// instance rather than only the one it was written on.
+// Run against a fully seeded instance. Rows must exist: missing seed data
+// is a failed prerequisite, never a silent skip. The project test owns and
+// removes its own fixture so another spec cannot erase its prerequisites.
 
 const TIMEOUT = 20_000
 
@@ -26,8 +26,10 @@ const TIMEOUT = 20_000
 test.beforeEach(async ({ page }) => {
   await page.goto("/")
   const wsId = await page.evaluate(async () => {
+    // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
     const list = await (await fetch("/api/v1/workspaces")).json()
     for (const w of Array.isArray(list) ? list : []) {
+      // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
       const agents = await (await fetch(`/api/v1/agents?workspace_id=${w.id}`)).json()
       if (Array.isArray(agents) && agents.length > 0) return w.id as string
     }
@@ -46,8 +48,19 @@ async function openPalette(page: Page) {
   // ControlOrMeta, not Meta: on Linux and Windows runners Meta is the Super
   // key, so a hardcoded Meta+k opens nothing and every test here fails for a
   // reason that has nothing to do with the palette.
-  await page.keyboard.press("ControlOrMeta+k")
   const input = page.locator("[cmdk-input]")
+  // The static export can paint the toolbar before React installs the global
+  // shortcut listener. Open through the idempotent Search button first to
+  // establish interactivity, then verify a single keyboard shortcut works.
+  await expect(async () => {
+    if (!await input.isVisible()) {
+      await page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click()
+    }
+    await expect(input).toBeVisible({ timeout: 1_000 })
+  }).toPass({ timeout: TIMEOUT })
+  await page.keyboard.press("Escape")
+  await expect(input).toBeHidden({ timeout: TIMEOUT })
+  await page.keyboard.press("ControlOrMeta+k")
   await expect(input).toBeVisible({ timeout: TIMEOUT })
   // Rows arrive from several parallel fetches; wait for the first one rather
   // than racing them.
@@ -85,7 +98,7 @@ test.describe("⌘K — every row opens the thing it names", () => {
   test("an agent opens that agent on the canvas", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/crews\?agent=/)
-    test.skip(!hit, "no agents in this workspace")
+    expect(hit, "seeded palette is missing agents").not.toBeNull()
     await hit!.row.click()
 
     const slug = decodeURIComponent(/agent=([^&]+)/.exec(hit!.href)![1])
@@ -94,13 +107,14 @@ test.describe("⌘K — every row opens the thing it names", () => {
     // rendered only the sidebar, so "the URL changed" proves nothing. The
     // agent has to be ON it.
     await expect(page.locator("main")).toContainText(slug, { timeout: TIMEOUT })
-    await expect(page.getByText(/WHAT IT HOLDS/i)).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByText("Current work", { exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.getByText("Recent outcomes", { exact: true })).toBeVisible({ timeout: TIMEOUT })
   })
 
   test("a crew selects that crew, rather than a route that does not exist", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/crews\?crew=/)
-    test.skip(!hit, "no crews in this workspace")
+    expect(hit, "seeded palette is missing crews").not.toBeNull()
     await hit!.row.click()
 
     await expect(page).toHaveURL(/\/crews\?crew=/, { timeout: TIMEOUT })
@@ -112,7 +126,7 @@ test.describe("⌘K — every row opens the thing it names", () => {
   test("a routine opens that routine", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/routines\?slug=/)
-    test.skip(!hit, "no routines in this workspace")
+    expect(hit, "seeded palette is missing routines").not.toBeNull()
     const slug = decodeURIComponent(/slug=([^&]+)/.exec(hit!.href)![1])
     await hit!.row.click()
 
@@ -121,23 +135,41 @@ test.describe("⌘K — every row opens the thing it names", () => {
   })
 
   test("a project filters the board to that project", async ({ page }) => {
-    await openPalette(page)
-    const hit = await firstRow(page, /\/issues\?project=/)
-    test.skip(!hit, "no projects in this workspace")
-    // The row shows "<name> <n> issues"; the name is the first line.
-    const name = hit!.text.split("\n")[0].trim()
-    await hit!.row.click()
-
-    await expect(page).toHaveURL(/\/issues\?project=/, { timeout: TIMEOUT })
-    // The param used to be ignored outright: the caller arrived at an
-    // unfiltered board with the project rail unhighlighted.
-    await expect(page.locator("main")).toContainText(name, { timeout: TIMEOUT })
+    // Own this fixture: selecting a workspace with agents does not guarantee
+    // that it has projects, and a missing row must not turn coverage into skip.
+    const fixture = await page.evaluate(async () => {
+      const workspace = window.localStorage.getItem("crewship.workspaceId")
+      // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
+      const response = await fetch(`/api/v1/projects?workspace_id=${workspace}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `Palette project ${crypto.randomUUID()}` }),
+      })
+      if (!response.ok) throw new Error(`project fixture failed: ${response.status}`)
+      const project = await response.json() as { id: string; name: string }
+      return { ...project, workspace }
+    })
+    try {
+      await openPalette(page)
+      const row = page.locator(`[cmdk-item][data-href="/issues?project=${fixture.id}"]`)
+      await expect(row).toBeVisible({ timeout: TIMEOUT })
+      await row.click()
+      await expect(page).toHaveURL(new RegExp(`/issues\\?project=${fixture.id}`), { timeout: TIMEOUT })
+      await expect(page.locator("main")).toContainText(fixture.name, { timeout: TIMEOUT })
+    } finally {
+      const cleaned = await page.evaluate(async ({ id, workspace }) => {
+        // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
+        const response = await fetch(`/api/v1/projects/${id}?workspace_id=${workspace}`, { method: "DELETE" })
+        return response.ok
+      }, fixture)
+      expect(cleaned, "delete the project created by this test").toBeTruthy()
+    }
   })
 
   test("a person opens that person's row on the roster", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/settings\?tab=members&member=/)
-    test.skip(!hit, "no members in this workspace")
+    expect(hit, "seeded palette is missing members").not.toBeNull()
     await hit!.row.click()
 
     // Two bugs in one step: the settings tab deep link worked on a full page
@@ -152,7 +184,7 @@ test.describe("⌘K — every row opens the thing it names", () => {
   test("a credential opens that credential, not the vault", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/credentials\?id=/)
-    test.skip(!hit, "no credentials in this workspace")
+    expect(hit, "seeded palette is missing credentials").not.toBeNull()
     await hit!.row.click()
 
     await expect(page).toHaveURL(/\/credentials\?id=/, { timeout: TIMEOUT })

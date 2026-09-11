@@ -20,6 +20,8 @@ name: Security
 # All checks run in parallel.
 
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     branches: [main]
   push:
@@ -72,10 +74,14 @@ jobs:
             # vulnerable function even with unchanged deps — so Go sources
             # count, not just the module files.
             gocode:
+              - ".github/workflows/security.yml"
+              - ".github/actions/**"
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
             deps:
+              - ".github/workflows/security.yml"
+              - ".github/actions/**"
               - 'go.mod'
               - 'go.sum'
               - 'package.json'
@@ -677,3 +683,31 @@ jobs:
               --body "$body"
             echo "Filed new tracking issue (${count} open)."
           fi
+
+  result:
+    name: Security Result
+    if: always()
+    needs: [changes, gitleaks, govulncheck, grype, license-check, osv-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require planned security checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          n = json.loads(os.environ['RESULTS'])
+          is_pr = os.environ['IS_PR'] == 'true'
+          plan = n['changes']['outputs']
+          expected = {key: 'success' for key in n}
+          if is_pr:
+              expected['grype'] = 'skipped'
+              for key, flag in [('govulncheck','gocode'), ('license-check','deps'), ('osv-scan','deps')]:
+                  assert plan.get(flag) in ('true', 'false'), 'missing security change plan'
+                  if plan[flag] == 'false': expected[key] = 'skipped'
+          errors = [f"{key}: expected {value}, got {n[key]['result']}" for key,value in expected.items() if n[key]['result'] != value]
+          for error in errors: print('::error::' + error)
+          raise SystemExit(bool(errors))
+          PY
