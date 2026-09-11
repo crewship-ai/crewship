@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
@@ -59,7 +60,7 @@ func (s *Server) actingRunIdentity(r *http.Request) (agentID, slug, runID string
 	if tok == "" {
 		return "", "", "", false, false
 	}
-	return s.identityForRunToken(tok)
+	return s.identityForRunTokenCtx(r.Context(), tok)
 }
 
 // identityForRunToken resolves a bearer token to an identity by TWO different
@@ -80,12 +81,26 @@ func (s *Server) actingRunIdentity(r *http.Request) (agentID, slug, runID string
 // Order matters only for clarity; the two token formats are domain-separated in
 // the MAC, so a v1 token can never satisfy the v2 check or vice versa.
 func (s *Server) identityForRunToken(tok string) (agentID, slug, runID string, present, ok bool) {
+	return s.identityForRunTokenCtx(context.Background(), tok)
+}
+
+// identityForRunTokenCtx is identityForRunToken with the request's context, so
+// the run registry's authority probe (run_registry.go) is bounded by the call
+// it is deciding about rather than outliving it. identityForRunToken keeps the
+// context-free signature for the callers — and the tests — that have none.
+func (s *Server) identityForRunTokenCtx(ctx context.Context, tok string) (agentID, slug, runID string, present, ok bool) {
 	if tok == "" {
 		return "", "", "", false, false
 	}
 
 	// (1) Verified per-run token.
 	if s.ipc != nil && s.ipc.AgentRunKey != "" {
+		// Restore the durable registry — live runs AND revocations — before
+		// this function answers its first admission question for this process.
+		// R7: a revocation that lives only in the ended process's heap is not a
+		// revocation, and "unknown" must not silently mean "current" for a run
+		// this sidecar ended before it restarted.
+		s.runs.ensureDurable(s.ipc, s.logger)
 		if ws, ag, run, valid := internaltoken.ValidateAgentRunToken(s.ipc.AgentRunKey, tok); valid {
 			// The run key is already crew-scoped, so a token verifying under it
 			// belongs to this crew. The workspace check is belt and braces
@@ -93,7 +108,7 @@ func (s *Server) identityForRunToken(tok string) (agentID, slug, runID string, p
 			if s.ipc.WorkspaceID != "" && ws != s.ipc.WorkspaceID {
 				return "", "", "", true, false
 			}
-			if !s.runs.current(run) {
+			if !s.runs.current(ctx, run) {
 				return "", "", run, true, false
 			}
 			// First sight of a run this sidecar did not boot with: record it,
@@ -135,6 +150,7 @@ func (s *Server) registerRunFromToken(runID, agentID string) {
 	}
 	s.runs.start(runID, runState{AgentID: agentID, AgentSlug: s.slugForAgentID(agentID, "")})
 	s.runs.sweep()
+	s.runs.compact()
 }
 
 // slugForAgentID resolves a verified agent id to its slug. A v2 token binds the

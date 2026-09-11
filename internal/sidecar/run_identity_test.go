@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -255,32 +256,32 @@ func TestSidecarIdentity_ChatContextIsPerRun(t *testing.T) {
 func TestRunRegistry_Lifecycle(t *testing.T) {
 	r := newRunRegistry()
 
-	if !r.current("never-seen") {
+	if !r.current(context.Background(), "never-seen") {
 		t.Error("an unknown run must be current — see the type comment for why the default is accept")
 	}
-	if r.current("") {
+	if r.current(context.Background(), "") {
 		t.Error("an empty run id is not a run and must not be current")
 	}
 
 	r.start("run-a", runState{AgentID: "a1", ChatID: "chat-a"})
-	if !r.current("run-a") {
+	if !r.current(context.Background(), "run-a") {
 		t.Error("a started run must be current")
 	}
 	r.end("run-a")
-	if r.current("run-a") {
+	if r.current(context.Background(), "run-a") {
 		t.Error("an ended run must not be current")
 	}
 	// A retried start must not resurrect it: a replayed notification would
 	// otherwise revive a finished run's credentials.
 	r.start("run-a", runState{AgentID: "a1"})
-	if r.current("run-a") {
+	if r.current(context.Background(), "run-a") {
 		t.Error("re-starting an ended run resurrected it")
 	}
 
 	// end() for a run never seen starting is still recorded — a run older than
 	// this sidecar must still become un-current when it finishes.
 	r.end("run-unseen")
-	if r.current("run-unseen") {
+	if r.current(context.Background(), "run-unseen") {
 		t.Error("ending a run this sidecar never saw start had no effect")
 	}
 }
