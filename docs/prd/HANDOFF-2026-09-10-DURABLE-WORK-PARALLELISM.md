@@ -859,7 +859,68 @@ suite and a final full Go-tree run cover the assembled code; their completion
 results must be recorded before claiming either passed.
 
 The earlier disk-backed full run on 9b3ee52b completed internal/api successfully
-in 1321.309s. That predates the shutdown and MCP production fixes. Final-code
-verification uses a dedicated TMPDIR under /dev/shm and disk-backed GOTMPDIR;
-this reduces shared-disk fsync contention. It proves the test contracts under
+in 1321.309s. That predates the shutdown and MCP production fixes. The first final-code run used a dedicated TMPDIR under /dev/shm and a
+disk-backed GOTMPDIR, but local Go 1.27 testing.TempDir prefers GOTMPDIR, so
+that did not move its database fixtures. The subsequent complete run sets BOTH
+to a dedicated /dev/shm directory to reduce shared-disk fsync contention. It proves the test contracts under
 process failure, not OS/power-failure durability (T14 remains unproven).
+
+
+### Next bounded implementation: finish R6 before mailbox
+
+- Reuse the existing per-exec authenticated run capability. Sidecar must derive
+  the run from it, reject same-agent run substitution from the body, and have
+  the host resolve and validate the current attempt generation. Do not enable
+  global run-authority enforcement while non-ledger producers remain.
+- Construct the memory dispatcher on the host with trusted actor roots, the
+  ledger, run authorization under the file lock, and the existing injection
+  screen/quarantine/cap policy. Preserve the sidecar's credential-literal check.
+- Unify the canonical namespace: HTTP currently anchors agent:<slug>/<file>,
+  while the generic dispatcher uses agent:<agent ID>/<file>. Alternating HTTP
+  and MCP writes must share one revision history, not two counters for one file.
+- Return revision, hash, operation identity and provenance to the MCP client;
+  currently ToolResult.Metadata is dropped. A successful internal ledger write
+  is insufficient if the model cannot read the revision needed for its CAS.
+- Require stable caller operation IDs and stable effective date/content for
+  append_daily retries. Distinguish missing expected_revision from a deliberate
+  first-write precondition at revision zero; do not require a model to invent
+  an empty append bootstrap. Concurrent first writes must have one winner.
+- Acceptance must cross a real host + sidecar + filesystem/SQLite boundary:
+  HTTP/MCP read/append/replace share revisions; lost response retries once with
+  the same identity; stale and substituted run tokens fail; two attempts reuse
+  one long-lived sidecar without inheriting the previous run identity.
+
+This scope does not complete mailbox, global I7, real-adapter T06/T07 or T14.
+
+
+### Completed takeover verification — code commit 205fe4fc
+
+The final COMPLETE Go-tree run returned COMPLETE_FULL_EXIT=0: 145 packages
+passed and 10 had no test files. Command: go test -p 4 ./... -count=1 -timeout
+60m, GOMAXPROCS=4, GOGC=50, with both TMPDIR and GOTMPDIR set to the dedicated
+/dev/shm/crewship-2-takeover-complete directory. Raw output including the shell's
+exit marker is /tmp/crewship-2-takeover-complete-full.log, copied to
+/srv/crewship/backups/crewship_2/oponentura-4a31e1b9/.
+
+| Verification | Observed result |
+|---|---|
+| Complete Go tree | exit 0; CLI 172.561s, API 199.211s, database 413.751s, dispatch 9.095s, sidecar 5.032s |
+| Complete dispatch, final shutdown fixes, -race | exit 0, 87.045s |
+| Complete sidecar, final required-MCP guard, -race | exit 0, 132.901s |
+| Real HTTP TestVerticalServer_ family, final shutdown fixes, -race | exit 0, 126.083s; FILTERED, not the full API race suite |
+| go vet -p 2 ./... on final code | exit 0 |
+| golangci-lint on final code | exit 0, 0 issues |
+| Strict docs inventory, migration lint, timestamp lint, invariant guard | exit 0 |
+| Skip budget | 143 calls, baseline 143 |
+| Frontend lint and static build | exit 0 on the merged frontend; takeover follow-ups change only Go/tests/docs |
+
+Only AFTER the final full run passed were the two older redundant runs stopped:
+the disk-backed 9b3ee52b run (API passed 1321.309s) and the partial-RAM final-code
+run (API passed 242.297s). They have no successful whole-tree result and are not
+counted as passes. The successful full run above covers the final production
+code; the subsequent handoff-only commit records these observed results.
+
+A fresh remote CI run must still verify macOS and the other platform lanes.
+CodeRabbit's old rate-limit status is not a review of this code. No merge or
+release-readiness claim is made. R6, mailbox, non-webhook I7, real T06/T07 and
+power-loss T14 remain outstanding.
