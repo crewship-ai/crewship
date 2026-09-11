@@ -119,6 +119,13 @@ class WorkflowContracts(unittest.TestCase):
         job = self.job(self.text('ci.yml'), 'release-rehearsal')
         self.assertIn('GORELEASER_CURRENT_TAG: v0.0.0-ci', job)
 
+    def test_required_go_lint_preserves_shipped_migrations(self):
+        job = self.job(self.text('ci.yml'), 'go-lint')
+        self.assertIn('go run ./scripts/lint-migrations "$BASE_SHA"', job)
+        self.assertIn('github.event.merge_group.base_sha', job)
+        self.assertIn('github.event.before', job)
+        self.assertIn('fetch-depth: 0', job)
+
     def test_both_publishers_scan_final_binary_artifacts(self):
         for workflow, job in [('nightly.yml', 'binaries'), ('release.yml', 'release')]:
             block = self.job(self.text(workflow), job)

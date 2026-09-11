@@ -2008,6 +2008,11 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Preserve already shipped migrations
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+        run: go run ./scripts/lint-migrations "$BASE_SHA"
+
       # Cache the golangci-lint binary itself — `go install` from source
       # adds ~30s per run and the resulting binary is fully determined by
       # (runner OS, Go version, golangci-lint version). Cache miss falls
