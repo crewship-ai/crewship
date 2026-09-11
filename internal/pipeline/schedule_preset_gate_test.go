@@ -19,7 +19,6 @@ package pipeline
 // nothing a preset could trip over.
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -44,12 +43,12 @@ func newPresetGateRig(t *testing.T, scheduleCols, scheduleVals string, args ...a
 	s := draftStore(t)
 	in := validSaveInput("planned")
 	in.DefinitionJSON = presetGateV1
-	p, err := s.Save(context.Background(), in)
+	p, err := s.Save(t.Context(), in)
 	if err != nil {
 		t.Fatalf("save v1: %v", err)
 	}
 	all := append([]any{p.ID}, args...)
-	if _, err := s.db.Exec(
+	if _, err := s.db.ExecContext(t.Context(),
 		`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json`+scheduleCols+`)`+
 			` VALUES('plan','ws_test','Daily',?,'0 9 * * *','{"who":"alice"}'`+scheduleVals+`)`, all...); err != nil {
 		t.Fatalf("seed schedule: %v", err)
@@ -64,13 +63,13 @@ func (r *presetGateRig) saveV2(t *testing.T) error {
 	t.Helper()
 	in := validSaveInput("planned")
 	in.DefinitionJSON = presetGateV2
-	_, err := r.store.Save(context.Background(), in)
+	_, err := r.store.Save(t.Context(), in)
 	return err
 }
 
 func (r *presetGateRig) liveDefinition(t *testing.T) string {
 	t.Helper()
-	got, err := r.store.GetByID(context.Background(), r.p.ID)
+	got, err := r.store.GetByID(t.Context(), r.p.ID)
 	if err != nil {
 		t.Fatalf("reload pipeline: %v", err)
 	}
@@ -80,7 +79,7 @@ func (r *presetGateRig) liveDefinition(t *testing.T) string {
 func (r *presetGateRig) planPreset(t *testing.T) string {
 	t.Helper()
 	var raw string
-	if err := r.store.db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE id='plan'`).Scan(&raw); err != nil {
+	if err := r.store.db.QueryRowContext(t.Context(), `SELECT inputs_json FROM pipeline_schedules WHERE id='plan'`).Scan(&raw); err != nil {
 		t.Fatalf("read preset: %v", err)
 	}
 	return raw
@@ -89,7 +88,7 @@ func (r *presetGateRig) planPreset(t *testing.T) string {
 func (r *presetGateRig) versionCount(t *testing.T) int {
 	t.Helper()
 	var n int
-	if err := r.store.db.QueryRow(`SELECT COUNT(*) FROM pipeline_versions WHERE pipeline_id=?`, r.p.ID).Scan(&n); err != nil {
+	if err := r.store.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_versions WHERE pipeline_id=?`, r.p.ID).Scan(&n); err != nil {
 		t.Fatalf("count versions: %v", err)
 	}
 	return n
@@ -134,7 +133,7 @@ func TestPresetGate_RepairThePresetThenTheSaveSucceeds(t *testing.T) {
 	if err := r.saveV2(t); err == nil {
 		t.Fatal("expected the first attempt to be refused")
 	}
-	if _, err := r.store.db.Exec(`UPDATE pipeline_schedules SET inputs_json='{"recipient":"alice"}' WHERE id='plan'`); err != nil {
+	if _, err := r.store.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET inputs_json='{"recipient":"alice"}' WHERE id='plan'`); err != nil {
 		t.Fatalf("repair preset: %v", err)
 	}
 	if err := r.saveV2(t); err != nil {
@@ -177,16 +176,16 @@ func TestPresetGate_ExclusionsStillSaveCleanly(t *testing.T) {
 		s := draftStore(t)
 		in := validSaveInput("legacy")
 		in.DefinitionJSON = `{"dsl_version":"1.0","name":"legacy","inputs":[{"name":"topic"}],"steps":[]}`
-		p, err := s.Save(context.Background(), in)
+		p, err := s.Save(t.Context(), in)
 		if err != nil {
 			t.Fatalf("save v1: %v", err)
 		}
-		if _, err := s.db.Exec(`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
+		if _, err := s.db.ExecContext(t.Context(), `INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
 			` VALUES('plan','ws_test','Daily',?,'0 9 * * *','{"topic":"news"}',1)`, p.ID); err != nil {
 			t.Fatalf("seed schedule: %v", err)
 		}
 		in.DefinitionJSON = `{"dsl_version":"1.0","name":"legacy","inputs":[{"name":"topic"},{"name":"extra"}],"steps":[]}`
-		if _, err := s.Save(context.Background(), in); err != nil {
+		if _, err := s.Save(t.Context(), in); err != nil {
 			t.Fatalf("legacy untyped input must not be gated: %v", err)
 		}
 	})
@@ -199,17 +198,17 @@ func TestPresetGate_ExclusionsStillSaveCleanly(t *testing.T) {
 		in := validSaveInput("stable")
 		in.DefinitionJSON = `{"dsl_version":"1.0","name":"stable","inputs":[` +
 			`{"name":"who","type":"string","widget":"text","required":true}],"steps":[]}`
-		p, err := s.Save(context.Background(), in)
+		p, err := s.Save(t.Context(), in)
 		if err != nil {
 			t.Fatalf("save v1: %v", err)
 		}
 		// A preset that never satisfied the schema in the first place.
-		if _, err := s.db.Exec(`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
+		if _, err := s.db.ExecContext(t.Context(), `INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
 			` VALUES('plan','ws_test','Daily',?,'0 9 * * *','{}',1)`, p.ID); err != nil {
 			t.Fatalf("seed schedule: %v", err)
 		}
 		in.Description = "a new description, the same recipe"
-		if _, err := s.Save(context.Background(), in); err != nil {
+		if _, err := s.Save(t.Context(), in); err != nil {
 			t.Fatalf("a save that does not touch the definition must not be gated: %v", err)
 		}
 	})
@@ -220,7 +219,7 @@ func TestPresetGate_ExclusionsStillSaveCleanly(t *testing.T) {
 		s := draftStore(t)
 		in := validSaveInput("brand-new")
 		in.DefinitionJSON = presetGateV2
-		if _, err := s.Save(context.Background(), in); err != nil {
+		if _, err := s.Save(t.Context(), in); err != nil {
 			t.Fatalf("inserting a new routine must not be gated: %v", err)
 		}
 	})
@@ -231,14 +230,14 @@ func TestPresetGate_ExclusionsStillSaveCleanly(t *testing.T) {
 // refuse, still keep the draft, and still leave the live recipe alone.
 func TestPresetGate_PublishPathKeepsItsOwnBehaviour(t *testing.T) {
 	s := draftStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	in := validSaveInput("planned")
 	in.DefinitionJSON = presetGateV1
 	p, err := s.Save(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Exec(`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
+	if _, err := s.db.ExecContext(t.Context(), `INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)`+
 		` VALUES('plan','ws_test','Daily',?,'0 9 * * *','{"who":"alice"}',1)`, p.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +275,7 @@ func TestPresetGate_PublishPathKeepsItsOwnBehaviour(t *testing.T) {
 // save has landed.
 func TestPresetGate_SchemaAndPlanChangeTogether(t *testing.T) {
 	s := draftStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	in := validSaveInput("planned")
 	in.DefinitionJSON = presetGateV1
 	p, err := s.Save(ctx, in)
@@ -316,7 +315,7 @@ func TestPresetGate_SchemaAndPlanChangeTogether(t *testing.T) {
 		t.Errorf("recipe did not advance: %s", got.DefinitionJSON)
 	}
 	var preset string
-	if err := s.db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND deleted_at IS NULL`, p.ID).Scan(&preset); err != nil {
+	if err := s.db.QueryRowContext(t.Context(), `SELECT inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND deleted_at IS NULL`, p.ID).Scan(&preset); err != nil {
 		t.Fatalf("read preset: %v", err)
 	}
 	if preset != `{"recipient":"alice"}` {
@@ -329,7 +328,7 @@ func TestPresetGate_SchemaAndPlanChangeTogether(t *testing.T) {
 // not let a save attach a plan the recipe rejects.
 func TestPresetGate_TriggerCannotSmuggleABrokenPlanPast(t *testing.T) {
 	s := draftStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	in := validSaveInput("planned")
 	in.DefinitionJSON = presetGateV1
 	if _, err := s.Save(ctx, in); err != nil {
@@ -349,7 +348,7 @@ func TestPresetGate_TriggerCannotSmuggleABrokenPlanPast(t *testing.T) {
 		t.Errorf("error %v is not an actionable schedule conflict", err)
 	}
 	var def string
-	if err := s.db.QueryRow(`SELECT definition_json FROM pipelines WHERE workspace_id='ws_test' AND slug='planned'`).Scan(&def); err != nil {
+	if err := s.db.QueryRowContext(t.Context(), `SELECT definition_json FROM pipelines WHERE workspace_id='ws_test' AND slug='planned'`).Scan(&def); err != nil {
 		t.Fatalf("read recipe: %v", err)
 	}
 	if def != presetGateV1 {

@@ -41,7 +41,7 @@ func seedPlannedRoutine(t *testing.T, h *PipelineHandler, wsID string) *pipeline
 	if err != nil {
 		t.Fatalf("seed routine: %v", err)
 	}
-	if _, err := h.db.Exec(
+	if _, err := h.db.ExecContext(t.Context(),
 		`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,inputs_json,enabled)
 		 VALUES('nightly',?,'Nightly report',?,'0 9 * * *','{"who":"alice"}',1)`, wsID, p.ID); err != nil {
 		t.Fatalf("seed schedule: %v", err)
@@ -77,13 +77,13 @@ func assertActionableConflict(t *testing.T, rr *httptest.ResponseRecorder, door 
 func assertRecipeUnchanged(t *testing.T, h *PipelineHandler, wsID, door string) {
 	t.Helper()
 	var def, preset string
-	if err := h.db.QueryRow(`SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug='planned'`, wsID).Scan(&def); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug='planned'`, wsID).Scan(&def); err != nil {
 		t.Fatalf("%s: read recipe: %v", door, err)
 	}
 	if def != presetGateV1Def {
 		t.Errorf("%s: the live recipe changed despite the refusal: %s", door, def)
 	}
-	if err := h.db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE id='nightly'`).Scan(&preset); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT inputs_json FROM pipeline_schedules WHERE id='nightly'`).Scan(&preset); err != nil {
 		t.Fatalf("%s: read preset: %v", door, err)
 	}
 	if preset != `{"who":"alice"}` {
@@ -149,7 +149,7 @@ func TestSchedulePresetGate_RepairThenSave(t *testing.T) {
 	if rr := save(); rr.Code != http.StatusConflict {
 		t.Fatalf("first attempt: status = %d, want 409", rr.Code)
 	}
-	if _, err := h.db.Exec(`UPDATE pipeline_schedules SET inputs_json='{"recipient":"alice"}' WHERE id='nightly'`); err != nil {
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET inputs_json='{"recipient":"alice"}' WHERE id='nightly'`); err != nil {
 		t.Fatalf("repair preset: %v", err)
 	}
 	rr := save()
@@ -157,7 +157,7 @@ func TestSchedulePresetGate_RepairThenSave(t *testing.T) {
 		t.Fatalf("after repairing the preset: status = %d, want 2xx; body = %s", rr.Code, rr.Body.String())
 	}
 	var def string
-	if err := h.db.QueryRow(`SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug='planned'`, ws).Scan(&def); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug='planned'`, ws).Scan(&def); err != nil {
 		t.Fatalf("read recipe: %v", err)
 	}
 	if def != presetGateV2Def {
@@ -171,7 +171,7 @@ func TestSchedulePresetGate_RepairThenSave(t *testing.T) {
 func TestSchedulePresetGate_DisabledPlanDoesNotBlock(t *testing.T) {
 	h, user, ws := newPipelineHandlerForCRUDTest(t)
 	seedPlannedRoutine(t, h, ws)
-	if _, err := h.db.Exec(`UPDATE pipeline_schedules SET enabled=0 WHERE id='nightly'`); err != nil {
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET enabled=0 WHERE id='nightly'`); err != nil {
 		t.Fatalf("disable plan: %v", err)
 	}
 	body, _ := json.Marshal(map[string]any{
