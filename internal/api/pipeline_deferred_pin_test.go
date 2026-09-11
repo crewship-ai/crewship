@@ -111,12 +111,26 @@ func TestDebouncedRunPinsTheFirstAcceptedRecipe(t *testing.T) {
 	if _, err := h.store.Save(t.Context(), in); err != nil {
 		t.Fatalf("publish v2: %v", err)
 	}
-	// A second trigger inside the window coalesces into the first row.
-	enqueueDelayed(t, h, user, ws, p, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
+	// The second trigger arrives the way a real one does: the handler loads
+	// the routine fresh, so it sees v2. The first version of this test
+	// re-passed the stale v1 object here, which made the pin lookup find v1
+	// again and hid that the coalesce UPDATE overwrites pinned_version — a
+	// probe that cannot fail is not a probe.
+	current, err := h.store.GetByID(t.Context(), p.ID)
+	if err != nil {
+		t.Fatalf("reload routine: %v", err)
+	}
+	if current.DefinitionHash == p.DefinitionHash {
+		t.Fatal("fixture: v2 did not change the definition hash")
+	}
+	enqueueDelayed(t, h, user, ws, current, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
 
 	pin := pendingPin(t, h, time.Now().Add(2*time.Hour))
-	if pin == nil || *pin != 1 {
-		t.Errorf("pinned_version = %v, want 1 — a coalesced burst is one trigger, accepted against v1", pin)
+	if pin == nil {
+		t.Fatal("pinned_version = nil, want 1")
+	}
+	if *pin != 1 {
+		t.Errorf("pinned_version = %d, want 1 — a coalesced burst is one trigger, accepted against v1; the coalesce must not take the later trigger's pin", *pin)
 	}
 }
 

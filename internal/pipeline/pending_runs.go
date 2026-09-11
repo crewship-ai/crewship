@@ -178,11 +178,22 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 	// chain_origin travels with the depth that won, so a chain that keeps its
 	// budget also keeps its root. Found by the runtime harness, which produced
 	// ten status changes against a cap of nine and two distinct origins.
+	//
+	// pinned_version stays with the FIRST trigger (#2500). A debounce window
+	// turns a burst into one logical trigger, and that trigger was accepted
+	// against whatever was published when the window opened; a later trigger
+	// in the same window must not silently move it onto a recipe that was
+	// published in between. COALESCE keeps an existing pin and only fills an
+	// empty one, so a legacy unpinned row can still acquire a pin from the
+	// first pinned trigger that coalesces into it. Found by the opponent
+	// review of PR #2501 — the first probe re-used a stale routine object and
+	// could not have failed.
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
-    triggered_via = ?, triggered_by_id = ?, pinned_version = ?,
+    triggered_via = ?, triggered_by_id = ?,
+    pinned_version = COALESCE(pinned_version, ?),
     chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
     chain_depth  = MAX(COALESCE(chain_depth,0), ?),
     updated_at = datetime('now','subsec')
