@@ -430,11 +430,13 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 	// they land. ErrInvalidTrigger keeps the existing 422 mapping on both
 	// save doors. A definition that no longer parses is left to the
 	// executor to surface rather than blamed on the trigger.
-	if len(trigger.Inputs) > 0 {
-		if dsl, perr := Parse([]byte(in.DefinitionJSON)); perr == nil {
-			if verr := ValidateFormInputs(dsl, trigger.Inputs); verr != nil {
-				return nil, fmt.Errorf("%w: %s", ErrInvalidTrigger, verr.Error())
-			}
+	if dsl, perr := Parse([]byte(in.DefinitionJSON)); perr == nil {
+		// Deliberately not gated on a non-empty preset: a trigger that
+		// supplies NOTHING to a recipe with a required input is the
+		// unsatisfiable plan this check exists for, and skipping the empty
+		// case would let exactly that one through.
+		if verr := ValidateFormInputs(dsl, trigger.Inputs); verr != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidTrigger, verr.Error())
 		}
 	}
 	if trigger.Kind == TriggerKindOnce {

@@ -359,3 +359,44 @@ func TestPresetValidation_PinnedPlanIsCheckedAgainstItsPinnedVersion(t *testing.
 		t.Fatalf("a preset correct for the pinned version was refused: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestPresetValidation_TriggerWithNoInputsIsStillJudged — the empty preset is
+// the unsatisfiable one when the recipe has a required input, so skipping
+// validation for "no inputs supplied" would let exactly the worst case
+// through.
+func TestPresetValidation_TriggerWithNoInputsIsStillJudged(t *testing.T) {
+	h, user, ws := presetRig(t)
+
+	body, _ := json.Marshal(map[string]any{
+		"slug": "planned", "name": "Planned",
+		"definition":     json.RawMessage(presetValidationDef),
+		"skip_test_gate": true,
+		"trigger":        map[string]any{"kind": "schedule", "cron": "0 9 * * *", "timezone": "UTC"},
+	})
+	req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/save", bytes.NewReader(body)), ws), user, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Save(rr, req)
+
+	if rr.Code != http.StatusUnprocessableEntity && rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 422/400 — a plan supplying nothing for a required input cannot run; body = %s",
+			rr.Code, rr.Body.String())
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("region")) {
+		t.Errorf("refusal does not name the unanswered input: %s", rr.Body.String())
+	}
+
+	// A recipe with no declared inputs still takes a bare trigger.
+	const noInputs = `{"name":"plain","steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`
+	body2, _ := json.Marshal(map[string]any{
+		"slug": "plain", "name": "Plain",
+		"definition":     json.RawMessage(noInputs),
+		"skip_test_gate": true,
+		"trigger":        map[string]any{"kind": "schedule", "cron": "0 9 * * *", "timezone": "UTC"},
+	})
+	req2 := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/save", bytes.NewReader(body2)), ws), user, "OWNER")
+	rr2 := httptest.NewRecorder()
+	h.Save(rr2, req2)
+	if rr2.Code != http.StatusOK && rr2.Code != http.StatusCreated {
+		t.Errorf("a bare trigger on a recipe with no inputs was refused: %d %s", rr2.Code, rr2.Body.String())
+	}
+}

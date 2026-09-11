@@ -197,6 +197,7 @@ func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targ
 // the natural caller — UI fills target_pipeline_slug from the row
 // the user clicks on. ID path is for the CLI (which already has the
 // id from `crewship pipeline get`).
+
 // gateSchedulePreset refuses a plan whose stored inputs its target routine
 // would refuse at dispatch (#2496). Answers true when it has written the
 // response and the caller must return.
@@ -243,6 +244,8 @@ func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Requ
 	return false
 }
 
+// CreateSchedule attaches a cron plan to a routine. See the slug/id
+// resolution note above resolveSchedulePipelineID's callers.
 func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
 		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
