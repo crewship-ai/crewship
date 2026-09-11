@@ -115,7 +115,7 @@ func TestN4RearmedPendingStartHasNewIdempotencyKey(t *testing.T) {
 	ctx := t.Context()
 	first := PendingRun{ID: "pa"}
 	d.fireOne(ctx, first)
-	secondAt := time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
+	secondAt := formatRFC3339(time.Now().Add(-time.Second))
 	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending',fire_at=? WHERE id='pa'`, secondAt); err != nil {
 		t.Fatal(err)
 	}

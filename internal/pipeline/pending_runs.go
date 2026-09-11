@@ -163,7 +163,7 @@ INSERT INTO pending_runs (
 			pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
 			orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 			nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
-			pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
+			formatRFC3339(pr.FireAt), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
 			nullableStr(pr.InvokingUserID),
 			nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
 			nullableStr(pr.ChainOrigin), pr.PinnedVersion)
@@ -266,7 +266,7 @@ SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     updated_at = datetime('now','subsec')
 WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
-		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
+		nullableStr(pr.TierOverride), pr.Priority, formatRFC3339(fireAt),
 		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
 		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), effectivePin,
 		pr.ChainDepth, nullableStr(pr.ChainOrigin), pr.ChainDepth,
@@ -287,7 +287,7 @@ WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
 func (s *PendingRunStore) ClaimDue(ctx context.Context, id string, now time.Time) (*PendingRun, error) {
 	var pr PendingRun
 	var fireAt string
-	at := now.UTC().Format(time.RFC3339Nano)
+	at := formatRFC3339(now)
 	err := s.db.QueryRowContext(ctx, `
 UPDATE pending_runs
 SET status='fired', fired_run_id='', updated_at=datetime('now','subsec')
@@ -320,7 +320,7 @@ func (s *PendingRunStore) ExpireDue(ctx context.Context, now time.Time) (int, er
 	res, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs SET status = 'expired', updated_at = datetime('now','subsec')
 WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`,
-		now.UTC().Format(time.RFC3339Nano))
+		formatRFC3339(now))
 	if err != nil {
 		return 0, err
 	}
@@ -343,7 +343,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, met
 FROM pending_runs
 WHERE status = 'pending' AND fire_at <= ?
 ORDER BY priority DESC, created_at ASC
-LIMIT ?`, now.UTC().Format(time.RFC3339Nano), limit)
+LIMIT ?`, formatRFC3339(now), limit)
 	if err != nil {
 		return nil, err
 	}
