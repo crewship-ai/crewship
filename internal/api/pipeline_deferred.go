@@ -140,12 +140,24 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusInternalServerError, "enqueue deferred run")
 		return
 	}
+	// The receipt must report the pin the ROW carries, not the one this
+	// request computed. They differ exactly when the request coalesced into
+	// an earlier trigger's window: the row keeps the first trigger's pin
+	// (#2500), so a caller told "pinned_version: 2" here would be told the
+	// wrong recipe for a run that will fire v1. Read it back.
+	pinned := body.PinnedVersion
+	if coalesced {
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT pinned_version FROM pending_runs WHERE id = ?`, id).Scan(&pinned); err != nil {
+			h.logger.Warn("deferred run: read coalesced pin", "error", err, "pending_id", id)
+		}
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":         "SCHEDULED",
 		"pending_id":     id,
 		"fire_at":        fireAt.Format(time.RFC3339Nano),
 		"coalesced":      coalesced,
-		"pinned_version": body.PinnedVersion,
+		"pinned_version": pinned,
 		"priority":       body.Priority,
 	})
 }

@@ -123,7 +123,16 @@ func TestDebouncedRunPinsTheFirstAcceptedRecipe(t *testing.T) {
 	if current.DefinitionHash == p.DefinitionHash {
 		t.Fatal("fixture: v2 did not change the definition hash")
 	}
-	enqueueDelayed(t, h, user, ws, current, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
+	second := enqueueDelayed(t, h, user, ws, current, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
+	// The receipt for the coalescing trigger must say what the ROW carries.
+	// Found live: the row kept 1 while the receipt said 2 — the caller
+	// would have been told the wrong recipe for the run that fires.
+	if second["coalesced"] != true {
+		t.Fatalf("second trigger did not coalesce: %v", second)
+	}
+	if got, _ := second["pinned_version"].(float64); got != 1 {
+		t.Errorf("coalesced receipt reports pinned_version %v, want 1 — the row's pin, not this request's", second["pinned_version"])
+	}
 
 	pin := pendingPin(t, h, time.Now().Add(2*time.Hour))
 	if pin == nil {
