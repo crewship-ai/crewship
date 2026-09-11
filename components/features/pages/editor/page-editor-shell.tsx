@@ -64,22 +64,25 @@ export interface PageEditorShellProps {
   loading: boolean
   capabilities: PageCapabilities
   navigation: EditorNavigation
+  /** Called after the editor closes, so the caller can place focus. */
+  onLeft?: () => void
 }
 
-export function PageEditorShell({ workspaceId, slug, page, loading, capabilities, navigation }: PageEditorShellProps) {
+export function PageEditorShell({ workspaceId, slug, page, loading, capabilities, navigation, onLeft }: PageEditorShellProps) {
   const { section, pane, setSection, setPane, setMode, setDirty, pending, openPage } = navigation
   const Section = SECTION_COMPONENT[section]
 
-  // Focus lands on the editor's heading when a section changes, so a keyboard
-  // or screen-reader user is told where they now are instead of being left on
-  // a control that has just been replaced.
+  // Focus lands on the editor's heading when a section changes, and when the
+  // editor opens.
+  //
+  // The open case used to be skipped deliberately — and that was the wrong
+  // call. Pressing Edit unmounts the button focus was on, so a keyboard user
+  // arrived at the editor with focus on `<body>`: the single most common way
+  // into this surface dropped them at the top of the document. A measured
+  // pass found the same at every other seam, which is why `focusHeading` is
+  // exported and the dialog and `View page` use it too.
   const heading = React.useRef<HTMLHeadingElement>(null)
-  const first = React.useRef(true)
   React.useEffect(() => {
-    if (first.current) {
-      first.current = false
-      return
-    }
     heading.current?.focus()
   }, [section])
 
@@ -91,7 +94,10 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
     onNavigate: setSection,
     pane,
     onPaneChange: setPane,
-    onLeaveEditor: () => setMode("view"),
+    onLeaveEditor: () => {
+      setMode("view")
+      onLeft?.()
+    },
     // A deleted Page has no view to go back to, so this is the overview and
     // not `setMode("view")`.
     onPageDeleted: () => openPage(null),
@@ -105,7 +111,16 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
           variant="outline"
           size="sm"
           className="coarse:min-h-11"
-          onClick={() => setMode("view")}
+          // Leaving unmounts this button, so something has to catch the
+          // focus it drops. The view's own heading is the honest target and
+          // the shell cannot reach it, so the caller — which renders both —
+          // is handed the moment instead. An id would have been simpler and
+          // was wrong: two page views can share a document, and a fixed id
+          // collides.
+          onClick={() => {
+            setMode("view")
+            onLeft?.()
+          }}
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
           View page
@@ -113,7 +128,17 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
         <div className="min-w-0 flex-1">
           {/* The identity of the page being edited never leaves the screen,
               on any width — losing it is how someone edits the wrong Page. */}
-          <h2 ref={heading} tabIndex={-1} className="truncate text-body font-medium outline-none">
+          {/* `outline-none` here meant the focus this shell moves on every
+              section change, on returning from the preview and after a
+              discard was invisible to a sighted keyboard user — the move was
+              correct and silent, which is the same as not making it. A
+              programmatic focus does not fire `:focus-visible` reliably, so
+              the ring is on `:focus`. */}
+          <h2
+            ref={heading}
+            tabIndex={-1}
+            className="truncate rounded-sm text-body font-medium outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          >
             {page?.name ?? slug}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
@@ -185,7 +210,7 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
         </div>
       </div>
 
-      <UnsavedWorkDialog pending={pending} />
+      <UnsavedWorkDialog pending={pending} onReturnFocus={() => heading.current?.focus()} />
     </div>
   )
 }
@@ -198,7 +223,22 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
  * autosave and no global Save — each control writes its own thing at its own
  * moment — so the honest offer is "discard" or "stay", not "save everything".
  */
-function UnsavedWorkDialog({ pending }: { pending: EditorNavigation["pending"] }) {
+function UnsavedWorkDialog({
+  pending,
+  onReturnFocus,
+}: {
+  pending: EditorNavigation["pending"]
+  /**
+   * Where focus goes when the answer leaves you where you were.
+   *
+   * Radix restores focus to the trigger, and this dialog is `open`-controlled
+   * with no trigger to restore to — so Escape and Stay here, the two answers
+   * that keep you on this screen, both dropped focus onto `<body>`. Discard
+   * was already fine, because the navigation that follows it moves focus
+   * itself.
+   */
+  onReturnFocus: () => void
+}) {
   // Radix closes the dialog after a Cancel or Action handler runs, and the
   // close calls `onOpenChange(false)` with the same captured `pending`. Left
   // ungated, Stay pushes the restored Back entry twice and Discard performs
@@ -210,8 +250,14 @@ function UnsavedWorkDialog({ pending }: { pending: EditorNavigation["pending"] }
   const answer = (choice: "keep" | "discard") => {
     if (answered.current) return
     answered.current = true
-    if (choice === "keep") pending?.keep()
-    else pending?.discard()
+    if (choice === "keep") {
+      pending?.keep()
+      // Staying means the screen did not change, so focus belongs back on it
+      // rather than at the top of the document.
+      window.requestAnimationFrame(onReturnFocus)
+    } else {
+      pending?.discard()
+    }
   }
   return (
     <AlertDialog open={pending != null} onOpenChange={(open) => { if (!open) answer("keep") }}>

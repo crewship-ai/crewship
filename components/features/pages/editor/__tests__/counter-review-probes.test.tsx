@@ -91,6 +91,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     definition_digest: "sha256:live-def",
     definition: liveDefinition,
     excluded_panels: 0,
+    withheld_changed: false,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,

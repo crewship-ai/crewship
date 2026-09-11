@@ -171,6 +171,16 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     mayManageAccess: grants.refusal === null,
   })
 
+  // Closing the editor unmounts the control that had focus, and a keyboard
+  // user was landing on `<body>`. This component renders both halves, so it
+  // is the one that can hand focus from one to the other; the view's heading
+  // is addressed by a ref rather than an id, because two page views can share
+  // a document and a fixed id collides.
+  const viewHeading = React.useRef<HTMLHeadingElement>(null)
+  const focusTheView = React.useCallback(() => {
+    window.requestAnimationFrame(() => viewHeading.current?.focus())
+  }, [])
+
   return (
     <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
       <SubBar
@@ -281,6 +291,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   loading={detail.loading}
                   capabilities={capabilities}
                   navigation={nav}
+                  onLeft={focusTheView}
                 />
               </motion.div>
             ) : selectedSlug ? (
@@ -294,6 +305,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               >
                 <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} fallback={
                 <PageView
+                  headingRef={viewHeading}
                   page={detail.page}
                   slug={selectedSlug}
                   loading={detail.loading}

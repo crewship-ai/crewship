@@ -47,16 +47,27 @@ import type { WirePageDetail } from "@/hooks/use-page-grants"
 
 const PAGE = { slug: "operations-lab", name: "Operations Lab", panels: [], has_application: false } as unknown as WirePageDetail
 
+const onLeft = vi.fn()
+
 function Harness() {
   const nav = useEditorRoute("operations-lab")
+  // Opened once. Re-opening on every render would put the editor straight
+  // back after `View page` and hide what leaving actually does.
+  const opened = React.useRef(false)
   React.useEffect(() => {
-    if (nav.mode !== "edit") nav.openEditor()
+    if (opened.current) return
+    opened.current = true
+    nav.openEditor()
   }, [nav])
   return (
     <>
       {/* Stands in for the global sidebar: an ordinary in-app link, outside
           the editor's own chrome and knowing nothing about it. */}
       <a href="/routines">Routines</a>
+      {/* The real layout swaps the editor for the page view; the harness
+          mirrors that, otherwise leaving the editor would leave it mounted
+          and the test would be measuring nothing. */}
+      {nav.mode === "edit" && (
       <PageEditorShell
         workspaceId="ws-1"
         slug="operations-lab"
@@ -64,7 +75,9 @@ function Harness() {
         loading={false}
         capabilities={derivePageCapabilities(PAGE)}
         navigation={nav}
+        onLeft={onLeft}
       />
+      )}
     </>
   )
 }
@@ -77,6 +90,7 @@ function clickRoutines() {
 
 beforeEach(() => {
   push.mockReset()
+  onLeft.mockReset()
   window.history.replaceState(null, "", "/pages/operations-lab")
 })
 afterEach(cleanup)
@@ -106,6 +120,40 @@ describe("leaving the editor by the global navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }))
 
     expect(push).toHaveBeenCalledWith("/routines")
+  })
+
+  it("hands focus to something real on the way in and on the way out", () => {
+    // Both directions unmount the control that had focus, and a keyboard user
+    // was landing on `<body>` — the most common way into this surface and the
+    // most common way out of it, both silent. The way out is placed by the
+    // component that renders both halves, because the shell cannot reach the
+    // view's heading and a fixed id collides when two views share a document.
+    render(<Harness />)
+    // On the way in: the editor's own heading, not `<body>`.
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Operations Lab" }))
+
+    // On the way out: the shell asks whoever renders both halves to place it,
+    // rather than reaching across the tree for an element it does not own.
+    act(() => raiseDirty(false))
+    fireEvent.click(screen.getByRole("button", { name: /view page/i }))
+    expect(onLeft).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId("section-content")).toBeNull()
+  })
+
+  it("puts focus back on the editor when the person chooses to stay", () => {
+    // Radix restores focus to the trigger, and this dialog is open-controlled
+    // with no trigger, so Stay here and Escape both dropped focus on `<body>`
+    // — the two answers that leave you exactly where you were.
+    render(<Harness />)
+    act(() => raiseDirty(true))
+    clickRoutines()
+    fireEvent.click(screen.getByRole("button", { name: "Stay here" }))
+    return new Promise<void>(resolve => {
+      requestAnimationFrame(() => {
+        expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Operations Lab" }))
+        resolve()
+      })
+    })
   })
 
   it("does not ask when nothing is unsaved", () => {

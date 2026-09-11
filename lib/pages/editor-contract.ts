@@ -356,13 +356,22 @@ export interface ReviewCandidateWire {
   /**
    * The document this candidate would make live, authorized for this viewer.
    *
-   * It comes from the same handler and the same read as `baseline.definition`
-   * and is filtered by the same rule, which is the whole point: the screen
-   * compares two documents that came out of one authorized read at one
-   * instant, so what it renders and what the fence checks cannot drift.
-   * Reading the candidate from its own query — as this screen used to — is
-   * the same cross-endpoint gap that let a person approve a comparison the
-   * screen never showed them.
+   * It comes from the same handler as `baseline.definition` and is filtered
+   * by the same rule, which is the whole point: the screen never compares a
+   * document from one endpoint against a digest from another. Reading the
+   * candidate from its own query — as this screen used to — is the
+   * cross-endpoint gap that let a person approve a comparison the screen
+   * never showed them.
+   *
+   * It is **not** a database snapshot, and this file used to say it was.
+   * `ReviewProject` issues about ten separate autocommit statements and a
+   * concurrent write can land between any two of them — an interleaving test
+   * produces a snapshot reporting one publication number beside the live
+   * declaration that preceded it, a pair that existed at no instant. Each
+   * document is consistent with the statement that read it; the two are not a
+   * joint view. What keeps consent honest is that the digests the screen
+   * sends back are re-checked inside the publishing transaction, so a stale
+   * comparison produces a 409 rather than a publication.
    *
    * Null only when the stored bytes do not parse as a Page document. That is
    * no basis for a comparison: say so, and do not offer consent.
@@ -421,6 +430,25 @@ export interface ReviewBaselineWire {
    * but only if it admits which one it is.
    */
   readonly excluded_panels: number
+  /**
+   * At least one panel withheld from this comparison **differs** between the
+   * live definition and the candidate.
+   *
+   * The count alone was not a policy. A reviewer who cannot see a panel can
+   * still be the person who may publish — a Page owner who is not a workspace
+   * admin sees only the panels of crews they belong to, and
+   * `mayAdministerGrants` does not ask about panels at all. Withholding the
+   * panel keeps the comparison from leaking it and from inventing a phantom
+   * addition, but the consent underneath still said the whole change had been
+   * reviewed, which was not true of the part that was hidden.
+   *
+   * So the server answers the only question that settles it, using both full
+   * documents, which it has and the client does not: did anything the reader
+   * cannot see actually change? False means their comparison covers
+   * everything that moves, and consent can be honest about that scope. True
+   * means it cannot, and this review may not complete the publication.
+   */
+  readonly withheld_changed: boolean
   readonly source_revision: number | null
   readonly git_commit: string | null
   /**
@@ -471,6 +499,13 @@ export type ReviewBlockerCode =
    * publishing was available when it was not.
    */
   | "routine_unresolved"
+  /**
+   * Part of what this publication changes is not visible to this reviewer, so
+   * they cannot attest to it. Neutral by construction: it says that such a
+   * part exists, never what or whose it is, and it does not hand anybody a
+   * new permission or a delegation button the product does not have.
+   */
+  | "withheld_change"
   | "definition_moved"
   | "not_permitted"
   | "storage_unavailable"

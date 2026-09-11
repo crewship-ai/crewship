@@ -186,3 +186,17 @@ it("leaves Build dead only when no revision is known from either source", () => 
   render(<ReviewPreview {...props} candidateRevision={null} />)
   expect((screen.getByRole("button", { name: "Build preview" }) as HTMLButtonElement).disabled).toBe(true)
 })
+
+it("shows the keyboard user where focus went when this pane takes it", () => {
+  // Entering the preview parks focus on this heading. A browser pass found
+  // the move invisible: `outline-none` with nothing in its place, and
+  // `focus-visible:` would not have fired for a programmatic focus on a
+  // tabIndex={-1} element. happy-dom computes no Tailwind, so what is held
+  // here is the rule that gets emitted, next to the move it accompanies.
+  render(<ReviewPreview {...props} />)
+  const heading = screen.getByRole("heading", { name: "Candidate preview" })
+  expect(document.activeElement).toBe(heading)
+  expect(heading.getAttribute("tabindex")).toBe("-1")
+  expect(heading.className).toMatch(/focus:ring-2/)
+  expect(heading.className).not.toMatch(/focus-visible:ring/)
+})

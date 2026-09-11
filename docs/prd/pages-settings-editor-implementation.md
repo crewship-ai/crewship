@@ -187,10 +187,21 @@ they were confirmed to fail on the pristine `93246b89`.
   disagreed for as long as the detail lagged, consent reset, and the reader
   ticked it again while still looking at the old comparison. Resetting was
   never going to be enough. The review endpoint now carries **both**
-  documents — live and candidate — authorized for the viewer and read in one
-  handler from one read, and the screen derives its comparison from them.
-  Correspondence holds by construction; there is no second query to disagree
-  with. The wire-to-document mapping that existed only to bridge the two is
+  documents — live and candidate — authorized for the viewer in one handler
+  by one rule, and the screen derives its comparison from them. The
+  cross-endpoint gap is closed: there is no second endpoint whose cache can
+  disagree.
+
+  It is **not** a point-in-time view of the database, and an earlier draft of
+  this file said it was. `ReviewProject` issues about ten separate autocommit
+  statements; an interleaving test drives a write between two of them and
+  gets back a publication number beside the live declaration that preceded
+  it — a pair that existed at no instant. What makes consent sound is not the
+  read but the fence: publish re-reads the live definition, the draft row and
+  every called routine **inside the writing transaction** and refuses with a
+  409 naming the base that moved. No interleaving was found in which a stale
+  or mixed snapshot publishes successfully, and eleven tests
+  (`internal/api/pages_project_review_consistency_test.go`) hold that down. The wire-to-document mapping that existed only to bridge the two is
   deleted, and the fractional-SLA false alarm went with it.
 - **R2 — consent worked before the sources arrived and after they failed.**
   One predicate now says whether every piece of evidence the decision rests on

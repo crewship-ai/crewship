@@ -19,6 +19,7 @@ import {
   type ReviewRoutineWire,
   type ReviewSnapshotWire,
   type SourceDiff,
+  type SourceDiffLineKind,
   type SourceFileChange,
   type SourceFileStatus,
 } from "@/lib/pages/editor-contract"
@@ -71,6 +72,29 @@ const TONE_MARK: Readonly<Record<DefinitionChangeTone, string>> = { add: "+", re
 const TONE_WORD: Readonly<Record<DefinitionChangeTone, string>> = { add: "Added", remove: "Removed", change: "Changed" }
 const STATUS_MARK: Readonly<Record<SourceFileStatus, string>> = { added: "A", modified: "M", removed: "D" }
 const STATUS_WORD: Readonly<Record<SourceFileStatus, string>> = { added: "Added", modified: "Modified", removed: "Removed" }
+
+/**
+ * What each diff line IS, in three registers at once.
+ *
+ * A diff line used to say it in one: a `+` or `−` inside `aria-hidden`, on a
+ * row that computed to the same white-on-near-black as every other row. So to
+ * a screen reader the distinction did not exist at all, and to everyone else
+ * it hung on one glyph. On the evidence surface of a review screen that is
+ * the failure this whole feature exists to avoid — "not by colour alone" is
+ * not satisfied by carrying it in nothing.
+ *
+ * `LINE_WORD` is read out (`sr-only`), `LINE_MARK` is seen, and `LINE_TONE`
+ * adds a tint and a left rule so the two kinds differ in shape as well as in
+ * hue. The file rows above already worked this way; the lines now match them.
+ */
+const LINE_MARK: Readonly<Record<SourceDiffLineKind, string>> = { add: "+", del: "−", hunk: "@", context: " " }
+const LINE_WORD: Readonly<Record<SourceDiffLineKind, string>> = { add: "Added", del: "Removed", hunk: "Section", context: "Unchanged" }
+const LINE_TONE: Readonly<Record<SourceDiffLineKind, string>> = {
+  add: "border-success bg-success/10",
+  del: "border-destructive bg-destructive/10",
+  hunk: "border-transparent bg-muted-foreground/10 text-muted-foreground",
+  context: "border-transparent",
+}
 
 /**
  * The identity the server can actually prove. `page_project_revisions` stores
@@ -130,6 +154,26 @@ function excludedPanelsOf(snapshot: ReviewSnapshotWire | undefined): number {
   const count = snapshot?.baseline.excluded_panels
   return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
 }
+
+/**
+ * The whole of what this screen may say about a change it cannot see.
+ *
+ * Withholding the panel is right for authorization, but the consent
+ * underneath used to claim the whole change had been reviewed, which was not
+ * true of the hidden part. The server compares both FULL documents and
+ * answers the only question that settles it — did anything this reader
+ * cannot see actually change — and when it did, this review cannot complete
+ * the publication.
+ *
+ * Every word here is load-bearing by omission. It names no panel, no title,
+ * no crew and no content: the reader is not entitled to those, and a message
+ * that leaks them defeats the withholding it is explaining. It also offers
+ * no way out, because the product has none — there is no delegation, no
+ * request-for-access and no escalation behind any of this, and a control
+ * that does nothing is worse than a sentence that is true.
+ */
+const WITHHELD_CHANGE_MESSAGE =
+  "Part of what this candidate changes is not visible to you, so this review cannot cover all of it. Completing this publication needs someone who can review the whole change."
 
 /** One read this decision depends on, as the screen sees it. */
 export interface EvidenceRead {
@@ -319,6 +363,13 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     if (conflict && !has("definition_moved")) {
       out.push({ code: "definition_moved", message: conflictSentence(conflict) })
     }
+    // The server sends this blocker; the flag is what the screen refuses on.
+    // Same belt-and-braces as `baseline_unavailable` above: a snapshot that
+    // reports the fact but omits the row must still block, because the whole
+    // point of the fact is that this reader may not complete the publication.
+    if (snapshot.baseline.withheld_changed && !has("withheld_change")) {
+      out.push({ code: "withheld_change", message: WITHHELD_CHANGE_MESSAGE })
+    }
     return out
   }, [snapshot, review.baselineUnavailable, review.candidateMoved, conflict])
 
@@ -329,6 +380,9 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   // be a second source for a fact about the very documents on screen — and
   // the two are free to disagree.
   const excludedPanels = excludedPanelsOf(snapshot)
+  // Decided by the server over both FULL documents — the client holds neither,
+  // so it cannot answer this and must not guess at it from what it was shown.
+  const withheldChanged = snapshot?.baseline.withheld_changed === true
   // Both operands off the one snapshot. `definitionDiff === null` therefore
   // means exactly one thing — a document that could not be read — which is
   // why the render below can name which, with no "still loading" state to
@@ -422,32 +476,18 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     )
   }
 
-  if (review.snapshot.isError) {
-    return (
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Review application changes</h2>
-        <p role="alert" className="text-sm text-destructive">
-          {review.snapshot.error.message}
-        </p>
-        <div>
-          <Button variant="outline" className="min-h-11" onClick={review.refresh}>
-            Try again
-          </Button>
-        </div>
-      </section>
-    )
-  }
-
-  if (!snapshot) {
-    return (
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Review application changes</h2>
-        <p role="status" className="text-sm text-muted-foreground">
-          Loading this application&apos;s review…
-        </p>
-      </section>
-    )
-  }
+  // An unreadable review is the PARENT's state, and it is the only one that
+  // can be seen: `ApplicationPageContent` reads this same query key, holds
+  // `kind: "unreadable"` for both a failed read and an absent snapshot, and
+  // never mounts this component in either (`section-content.tsx:150-176`).
+  // Its message carries the server's reason and its own retry refetches the
+  // query the gate read. A second copy here could only ever drift from that
+  // one — so this component does not answer for those two states at all.
+  //
+  // What remains is a type guard, not a screen: `snapshot` is optional on the
+  // query result, and if the gate above it ever stops holding, rendering
+  // nothing is the honest outcome. The parent is already saying what happened.
+  if (!snapshot) return null
 
   // Independent review §5 rule 6: with no draft, or a draft identical to the
   // live publication, this screen must not present itself as a pending review.
@@ -456,7 +496,19 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   if (!snapshot.candidate) {
     return (
       <section className="flex flex-col gap-3" aria-labelledby="application-review-heading">
-        <h2 id="application-review-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+        <h2
+          id="application-review-heading"
+          ref={heading}
+          tabIndex={-1}
+          // Focus lands here programmatically — on return from the preview,
+          // and after a discard — and a programmatic focus on a tabIndex={-1}
+          // element does not reliably match `:focus-visible`, so a
+          // `focus-visible:` ring is silent in exactly the case it exists
+          // for. Plain `:focus` always matches. Same utilities as the shell's
+          // heading (`page-editor-shell.tsx:136`), so the two moves look
+          // identical to the person following them.
+          className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+        >
           {published ? "Application published" : "Nothing to review"}
         </h2>
         {published && review.publish.data ? (
@@ -492,7 +544,19 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     <section className="flex w-full min-w-0 flex-col gap-6" aria-labelledby="application-review-heading">
       {/* 1 — Header: the Page, the candidate, the provable author, the time. */}
       <header className="flex flex-col gap-1">
-        <h2 id="application-review-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+        <h2
+          id="application-review-heading"
+          ref={heading}
+          tabIndex={-1}
+          // Focus lands here programmatically — on return from the preview,
+          // and after a discard — and a programmatic focus on a tabIndex={-1}
+          // element does not reliably match `:focus-visible`, so a
+          // `focus-visible:` ring is silent in exactly the case it exists
+          // for. Plain `:focus` always matches. Same utilities as the shell's
+          // heading (`page-editor-shell.tsx:136`), so the two moves look
+          // identical to the person following them.
+          className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+        >
           Review application changes
         </h2>
         <p className="text-sm">
@@ -598,9 +662,14 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             </strong>
             <p className="mt-1">
               {excludedPanels === 1 ? "It was" : "They were"} withheld from both documents compared above, so nothing about {excludedPanels === 1 ? "it" : "them"} is
-              reported here: a change confined to a withheld panel does not appear in the list, and neither does a panel re-pointed between a crew you may read and one you
-              may not — such a panel leaves both sides at once and its new owner is invisible from here. This review does not cover{" "}
-              {excludedPanels === 1 ? "that panel" : "those panels"}.
+              reported here.{" "}
+              {/* Which of the two this is was decided by the server, over both
+                  full documents. Saying "nothing you cannot see changed" when
+                  something did was the untruth this whole note exists to end;
+                  saying it when nothing did is the useful half of the news. */}
+              {withheldChanged
+                ? WITHHELD_CHANGE_MESSAGE
+                : `Nothing this candidate changes is among ${excludedPanels === 1 ? "it" : "them"}, so the comparison above covers the whole of this change.`}
             </p>
           </div>
         )}
@@ -611,7 +680,14 @@ export function EditorApplicationReview(props: EditorSectionProps) {
               {definitionDiff.unmodelled.length > UNMODELLED_SHOWN ? ` and ${definitionDiff.unmodelled.length - UNMODELLED_SHOWN} more` : ""}
             </strong>
             <p className="mt-1">A field that is not modelled has not been checked. It must not be read as unchanged — read the raw definition diff below.</p>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">{definitionDiff.raw}</pre>
+            <pre
+              tabIndex={0}
+              role="region"
+              aria-label="Raw definition diff"
+              className="mt-2 max-h-64 overflow-auto rounded bg-muted p-2 text-xs break-words whitespace-pre-wrap focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {definitionDiff.raw}
+            </pre>
           </div>
         )}
       </div>
@@ -701,8 +777,15 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             </Button>
           </div>
         </div>
+        {/* Keeps `role="alert"`: a build failure must announce itself. The
+            tab stop is added for the same reason as the diff's — it scrolls,
+            so it has to be reachable without a pointer. */}
         {build?.state === "failed" && build.error && (
-          <pre role="alert" className="mt-3 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs">
+          <pre
+            tabIndex={0}
+            role="alert"
+            className="mt-3 max-h-48 overflow-auto rounded bg-muted p-3 text-xs break-words whitespace-pre-wrap focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
             {build.error}
           </pre>
         )}
@@ -772,6 +855,14 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           <span>
             I reviewed this candidate&apos;s code, definition changes and behaviour.
             {candidate ? ` This applies to draft ${candidate.revision}${build ? ` and build ${build.id}` : ""}, compared with publication ${baseline.publication_version}.` : ""}
+            {/* Not a disclaimer: a narrower claim that happens to be true. The
+                reader is attesting to everything this candidate changes, and
+                what they cannot see is not among it — the server established
+                that over both full documents. When it is among it, this line
+                is not reached: the blocker has taken the checkbox away. */}
+            {excludedPanels > 0 && !withheldChanged
+              ? ` ${excludedPanels} panel${excludedPanels === 1 ? "" : "s"} on this Page ${excludedPanels === 1 ? "is" : "are"} not visible to you and ${excludedPanels === 1 ? "is" : "are"} not changed by this candidate, so this consent covers everything it does change.`
+              : ""}
           </span>
         </label>
 
@@ -982,10 +1073,25 @@ function FileDiff({ file }: { file: SourceFileChange }) {
         </p>
       ) : (
         <>
-          <pre className="mt-2 max-h-[28rem] overflow-auto rounded bg-muted p-2 text-xs leading-5">
+          {/* A focus stop by declaration, not by the browser's grace.
+              Chromium makes an overflowing container tabbable on its own
+              (keyboard-focusable scrollers); Safari does not, and there this
+              diff — the evidence the whole screen is about — was simply
+              unreachable from the keyboard. `tabIndex` guarantees the stop,
+              `role`+`aria-label` say which file it lands in, and the ring
+              makes the landing visible. `focus-visible` is right HERE, where
+              the focus is a real Tab: a click into the scroller should not
+              ring. The headings use plain `focus:` for the opposite reason. */}
+          <pre
+            tabIndex={0}
+            role="region"
+            aria-label={`Diff of ${file.path}`}
+            className="mt-2 max-h-[28rem] overflow-auto rounded bg-muted p-2 text-xs leading-5 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
             {shown.map((line, index) => (
-              <span key={index} className="block whitespace-pre">
-                <span aria-hidden="true">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : line.kind === "hunk" ? "@" : " "}</span>
+              <span key={index} className={`block border-l-2 pl-1 whitespace-pre ${LINE_TONE[line.kind]}`} data-line-kind={line.kind}>
+                <span className="sr-only">{LINE_WORD[line.kind]}: </span>
+                <span aria-hidden="true">{LINE_MARK[line.kind]}</span>
                 {line.text}
               </span>
             ))}

@@ -48,6 +48,7 @@ const snapshot: ReviewSnapshotWire = {
     definition_digest: "sha256:live-def",
     definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [{ id: "services", sla: "5m" }] } },
     excluded_panels: 0,
+    withheld_changed: false,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,

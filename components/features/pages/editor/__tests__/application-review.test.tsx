@@ -84,6 +84,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     definition_digest: "sha256:live-def",
     definition: liveDefinition,
     excluded_panels: 0,
+    withheld_changed: false,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,
@@ -417,27 +418,125 @@ describe("EditorApplicationReview", () => {
   })
 
 
-  it("says how many panels the server withheld from the compared definition, on the server's count", () => {
-    // The count comes with the definition it describes. Counting sealed panels
-    // in the Page detail instead would be a second source for a fact about the
-    // very document on screen, and the two are free to disagree.
+  it("says how many panels the server withheld, and that this candidate changes none of them", () => {
+    // The count comes with the documents it describes, and so does the verdict
+    // on whether anything inside the withheld part moved — the server holds
+    // both FULL documents and the client holds neither.
     const snapshot = clone(baseSnapshot)
     snapshot.baseline.excluded_panels = 2
     setReview(snapshot)
     render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/This comparison is partial: 2 panels on this Page are not visible to you\./)).toBeTruthy()
-    // Withheld from BOTH documents, so nothing about them can be reported —
-    // including the case that is invisible rather than merely absent.
     expect(screen.getByText(/withheld from both documents compared above/)).toBeTruthy()
-    expect(screen.getByText(/a change confined to a withheld panel does not appear in the list/)).toBeTruthy()
-    expect(screen.getByText(/re-pointed between a crew you may read and one you may not/)).toBeTruthy()
-    expect(screen.getByText(/This review does not cover those panels/)).toBeTruthy()
+    expect(screen.getByText(/Nothing this candidate changes is among them, so the comparison above covers the whole of this change/)).toBeTruthy()
+    // The old copy claimed a re-pointed panel could slip through invisibly.
+    // That case now sets `withheld_changed` and blocks, so the sentence would
+    // be false — and a false reassurance is the failure mode of this screen.
+    expect(screen.queryByText(/re-pointed between a crew you may read/)).toBeNull()
   })
 
-  it("says nothing about withheld panels when the server withheld none", () => {
+  it("scopes the consent to what it actually covers when panels are withheld but unchanged", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline.excluded_panels = 2
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    // Available, because the comparison does cover the whole change.
+    expect(consentBox().disabled).toBe(false)
+    expect(consentBox().closest("label")!.textContent).toMatch(
+      /2 panels on this Page are not visible to you and are not changed by this candidate, so this consent covers everything it does change\./,
+    )
+    fireEvent.click(consentBox())
+    expect(publishButton().disabled).toBe(false)
+  })
+
+  it("says nothing about withheld panels, and makes no narrower claim, when none were withheld", () => {
     render(<EditorApplicationReview {...props} />)
     expect(screen.queryByText(/not visible to you/)).toBeNull()
+    expect(screen.queryByText(/This comparison is partial/)).toBeNull()
+    expect(consentBox().closest("label")!.textContent).not.toMatch(/covers everything it does change/)
+    // The blanket sentence is the whole claim here, and it is true here.
+    expect(consentBox().closest("label")!.textContent).toMatch(/I reviewed this candidate.s code, definition changes and behaviour\./)
   })
+
+  /**
+   * What a reader may not see, they may not attest to.
+   *
+   * These strings stand for the identity of the withheld panel. None of them
+   * is anywhere in the snapshot the screen is given — that is the point of
+   * withholding — so an assertion that they are absent is really an assertion
+   * that the screen invents nothing and echoes nothing back from a place it
+   * should not be reading. They are checked against the WHOLE rendered
+   * document, not just the blocker.
+   */
+  const PROTECTED = ["billing-secrets", "Q3 Billing Secrets", "crew/finance", "Finance"]
+
+  it("blocks the publication when something the reader cannot see changed, and says so without saying what", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline.excluded_panels = 1
+    snapshot.baseline.withheld_changed = true
+    snapshot.blockers = [
+      { code: "withheld_change", message: "Part of what this candidate changes is not visible to you, so this review cannot cover all of it. Completing this publication needs someone who can review the whole change." },
+    ]
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    const blocker = document.querySelector('[data-blocker="withheld_change"]')!
+    expect(blocker.textContent).toMatch(/Part of what this candidate changes is not visible to you/)
+    expect(blocker.textContent).toMatch(/needs someone who can review the whole change/)
+
+    // Through the one path, not a second mechanism beside it.
+    expect(consentBox().disabled).toBe(true)
+    fireEvent.click(consentBox())
+    expect(consentBox().checked).toBe(false)
+    expect(publishButton().disabled).toBe(true)
+
+    // Neutral by construction: no panel id, no title, no crew, anywhere.
+    for (const secret of PROTECTED) {
+      expect(document.body.textContent).not.toContain(secret)
+    }
+  })
+
+  it("blocks on the flag even when the server omitted the blocker row", () => {
+    // The flag is the fact; the row is the server's sentence about it. A
+    // snapshot carrying one without the other must not publish.
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline.excluded_panels = 1
+    snapshot.baseline.withheld_changed = true
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    expect(document.querySelector('[data-blocker="withheld_change"]')!.textContent).toMatch(/this review cannot cover all of it/)
+    expect(consentBox().disabled).toBe(true)
+    expect(publishButton().disabled).toBe(true)
+    // And the note above says the same thing rather than the reassurance.
+    expect(screen.queryByText(/Nothing this candidate changes is among/)).toBeNull()
+    expect(screen.getAllByText(/Completing this publication needs someone who can review the whole change/).length).toBe(2)
+  })
+
+  it("offers no way out it does not have: no delegation, no request for access, no escalation", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline.excluded_panels = 1
+    snapshot.baseline.withheld_changed = true
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    // By role: every control on the screen — the source-diff file pickers
+    // aside — is one of the ones that exist.
+    const names = Array.from(document.querySelectorAll("button"))
+      .filter(button => button.closest('[aria-label="Changed files"]') === null)
+      .map(button => button.textContent?.trim())
+    expect(names.sort()).toEqual(["Build preview", "Close without publishing", "Open preview", "Publish application"])
+    expect(screen.queryByRole("link")).toBeNull()
+
+    // And by name, for the controls a reader might expect to be offered.
+    for (const pattern of [/delegate/i, /request/i, /access/i, /permission/i, /escalate/i, /ask/i, /admin/i, /grant/i, /invite/i]) {
+      expect(screen.queryByRole("button", { name: pattern })).toBeNull()
+    }
+    // Not as prose either: the message must not send anybody anywhere.
+    expect(document.body.textContent).not.toMatch(/ask (an|your) admin|request access|contact (an|your)/i)
+  })
+
 
   it("says when there was no live definition to compare against, rather than listing additions alone", () => {
     state.definitionDiff = { ...state.definitionDiff, baselineMissing: true }
@@ -570,6 +669,20 @@ describe("EditorApplicationReview", () => {
     expect(screen.getByText("Comparison unavailable")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Try again" }))
     expect(state.review.refresh).toHaveBeenCalled()
+  })
+
+  it("leaves an unreadable review to the gate above it, and gives no second account of it", () => {
+    // `ApplicationPageContent` reads the same query key, holds
+    // `kind: "unreadable"` for a failed read AND for an absent snapshot, and
+    // carries the retry that refetches what the gate itself read. This
+    // component is never mounted in either state; answering them here again
+    // would put two surfaces on one condition, free to drift.
+    setReview(clone(baseSnapshot), { snapshot: { data: undefined, isError: true, error: new Error("Project storage is busy.") } })
+    const { container } = render(<EditorApplicationReview {...props} />)
+    expect(container.innerHTML).toBe("")
+    expect(screen.queryByText(/Project storage is busy/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
+    expect(screen.queryByRole("status")).toBeNull()
   })
 
   it("refuses to review a candidate when the live Page could not be loaded", () => {
@@ -768,6 +881,103 @@ describe("EditorApplicationReview", () => {
     render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/binary or undecodable file/)).toBeTruthy()
     expect(screen.getByText(/Reviewing what is shown is not the same as reviewing the whole change/)).toBeTruthy()
+  })
+
+  /**
+   * The evidence surface, read by someone who cannot see it.
+   *
+   * A browser pass found every diff line computing to the same colour with
+   * the only distinction inside `aria-hidden`, so for assistive tech added
+   * and removed were indistinguishable — and for everyone else they hung on
+   * one glyph. These hold the three registers the fix put back.
+   */
+  it("says what each diff line is in words, not only in a glyph", () => {
+    state.sourceDiff = {
+      files: [
+        {
+          path: "src/App.tsx",
+          status: "modified",
+          added: 1,
+          removed: 1,
+          binary: false,
+          truncated: false,
+          lines: [
+            { kind: "hunk", text: "@@ -1,3 +1,3 @@", oldLine: null, newLine: null },
+            { kind: "context", text: "const a = 1", oldLine: 1, newLine: 1 },
+            { kind: "del", text: "const b = 2", oldLine: 2, newLine: null },
+            { kind: "add", text: "const b = 3", oldLine: null, newLine: 2 },
+          ],
+        },
+      ],
+      filesAdded: 0,
+      filesModified: 1,
+      filesRemoved: 0,
+      truncated: false,
+    }
+    const { container } = render(<EditorApplicationReview {...props} />)
+
+    const words = Array.from(container.querySelectorAll("[data-line-kind]")).map(line => ({
+      kind: line.getAttribute("data-line-kind"),
+      spoken: line.querySelector(".sr-only")!.textContent,
+      marker: line.querySelector('[aria-hidden="true"]')!.textContent,
+    }))
+    expect(words).toEqual([
+      { kind: "hunk", spoken: "Section: ", marker: "@" },
+      { kind: "context", spoken: "Unchanged: ", marker: " " },
+      { kind: "del", spoken: "Removed: ", marker: "−" },
+      { kind: "add", spoken: "Added: ", marker: "+" },
+    ])
+
+    // The glyph stays decorative — it is a duplicate of the word above it,
+    // and announcing "plus" before every added line is noise.
+    for (const line of container.querySelectorAll("[data-line-kind]")) {
+      expect(line.querySelector('[aria-hidden="true"]')!.getAttribute("aria-hidden")).toBe("true")
+    }
+
+    // And added/removed differ visibly by more than that glyph: a tint and a
+    // left rule, so the two are told apart without reading the marker and
+    // without relying on hue alone.
+    const byKind = (kind: string) => container.querySelector(`[data-line-kind="${kind}"]`)!.className
+    expect(byKind("add")).toMatch(/border-l-2/)
+    expect(byKind("add")).toMatch(/border-success/)
+    expect(byKind("add")).toMatch(/bg-success\/10/)
+    expect(byKind("del")).toMatch(/border-destructive/)
+    expect(byKind("del")).toMatch(/bg-destructive\/10/)
+    expect(byKind("add")).not.toBe(byKind("del"))
+    expect(byKind("context")).toMatch(/border-transparent/)
+  })
+
+  it("makes the diff a named, guaranteed focus stop rather than a browser accident", () => {
+    const { container } = render(<EditorApplicationReview {...props} />)
+    const region = container.querySelector('pre[role="region"][aria-label="Diff of src/App.tsx"]') as HTMLElement
+    expect(region).toBeTruthy()
+    expect(region.getAttribute("tabindex")).toBe("0")
+    // Chromium tabs to an overflowing container on its own; Safari does not,
+    // which left this unreachable there. The attribute is the guarantee.
+    expect(region.className).toMatch(/overflow-auto/)
+    expect(region.className).toMatch(/focus-visible:ring-2/)
+
+    // Selecting another file renames the region, so the stop always says
+    // which file it lands in.
+    fireEvent.click(screen.getByRole("button", { name: /src\/Restart\.tsx/ }))
+    expect(container.querySelector('pre[role="region"][aria-label="Diff of src/Restart.tsx"]')).toBeTruthy()
+  })
+
+  it("gives the heading focus is moved to a focus indicator that fires for a programmatic move", () => {
+    // `:focus-visible` does not reliably match an element focused by script
+    // with tabIndex={-1}, so a `focus-visible:` ring would be silent in the
+    // one case this heading is ever focused. happy-dom computes no Tailwind,
+    // so what is asserted is the rule that will be emitted — plus that the
+    // move itself lands, which is the behaviour the ring has to accompany.
+    const { rerender } = render(<EditorApplicationReview {...props} pane="preview" />)
+    rerender(<EditorApplicationReview {...props} pane="section" />)
+    const headings = document.querySelectorAll("#application-review-heading")
+    expect(headings).toHaveLength(1)
+    const heading = headings[0] as HTMLElement
+    expect(document.activeElement).toBe(heading)
+    expect(heading.className).toMatch(/focus:ring-2/)
+    expect(heading.className).toMatch(/focus:ring-ring/)
+    expect(heading.className).not.toMatch(/focus-visible:ring/)
   })
 
   it("renders source diffs as text and never as markup", () => {

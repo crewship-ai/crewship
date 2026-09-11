@@ -52,7 +52,14 @@ export function ReviewPreview({
     <section className="flex min-h-0 w-full min-w-0 flex-col gap-4" aria-labelledby="review-preview-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="review-preview-heading" ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+          <h2
+            id="review-preview-heading"
+            ref={heading}
+            tabIndex={-1}
+            // Focused on mount, programmatically. `:focus` rather than
+            // `:focus-visible` for the reason given on the review heading.
+            className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          >
             Candidate preview
           </h2>
           {/* The label names the revision that is actually RUNNING, not the one

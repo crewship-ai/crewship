@@ -217,10 +217,39 @@ function ApplicationPageContent(props: EditorSectionProps) {
       )}
 
       {gate.kind === "unreadable" && (
-        <p role="alert" data-slot="review-unreadable" className="type-page-value text-warn">
-          This Page has a custom application, but its review could not be read, so this screen cannot say
-          whether a change is waiting: {gate.reason} The Page&apos;s own content is below and unaffected.
-        </p>
+        <div
+          data-slot="review-unreadable"
+          className="flex flex-col gap-2 rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2.5"
+        >
+          {/* `role="alert"` on the sentence, not on the box: a live region that
+              also contains the control is announced as one blob, and the
+              control is the part that has to be found. */}
+          <p role="alert" className="type-page-value">
+            This Page has a custom application, but its review could not be read, so this screen cannot
+            say whether a change is waiting: {gate.reason} The Page&apos;s own content is below and
+            unaffected.
+          </p>
+          <div>
+            {/* A 503 is the transient case — project storage busy, the build
+                worker restarting — and the only recovery this screen used to
+                offer was a browser reload. It refetches the QUERY THE GATE
+                READ, so a successful retry moves the gate itself; anything
+                else would clear the message without clearing the state. */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="coarse:min-h-11"
+              disabled={review.snapshot.isFetching}
+              onClick={() => {
+                void review.snapshot.refetch()
+              }}
+            >
+              {review.snapshot.isFetching && <Spinner className="h-3.5 w-3.5" />}
+              Try reading the review again
+            </Button>
+          </div>
+        </div>
       )}
 
       {gate.kind === "nothing" && (

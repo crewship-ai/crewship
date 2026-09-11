@@ -136,6 +136,7 @@ const SNAPSHOT: ReviewSnapshotWire = {
     definition_digest: "sha256:definition",
     definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
     excluded_panels: 0,
+    withheld_changed: false,
     source_revision: 5,
     git_commit: "old1234",
     source_available: true,
@@ -156,6 +157,7 @@ const FIRST_PUBLICATION: ReviewSnapshotWire = {
     definition_digest: "sha256:definition",
     definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
     excluded_panels: 0,
+    withheld_changed: false,
     source_revision: null,
     git_commit: null,
     source_available: false,
@@ -203,6 +205,8 @@ interface Harness {
   probe?: Response
   /** Answer for `GET …/project/review` — the authorized review snapshot. */
   review?: Response
+  /** Successive answers for the same read, for retry cases. The last repeats. */
+  reviewQueue?: Response[]
 }
 
 function mount(harness: Harness = {}) {
@@ -213,6 +217,11 @@ function mount(harness: Harness = {}) {
     const method = (init?.method ?? "GET").toUpperCase()
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null })
     if (url.includes("/project/review")) {
+      if (harness.reviewQueue && harness.reviewQueue.length > 0) {
+        return harness.reviewQueue.length > 1
+          ? harness.reviewQueue.shift()!
+          : harness.reviewQueue[0]
+      }
       return harness.review ?? jsonResponse(200, SNAPSHOT)
     }
     if (url.includes("/project/preview")) {
@@ -451,6 +460,44 @@ describe("an application Page shows the review AND the Page itself", () => {
     // Never "nothing to review": an unreadable snapshot is not an empty one.
     expect(warning.textContent).toContain("you may not read this application's review")
     expect(warning.textContent).not.toMatch(/nothing to review/)
+    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("offers a working, keyboard-reachable retry when the snapshot read fails", async () => {
+    const reason = "Page project storage is not configured"
+    const { calls } = mount({
+      page: APP_PAGE,
+      reviewQueue: [jsonResponse(503, { error: reason }), jsonResponse(200, SNAPSHOT)],
+    })
+
+    const box = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-slot='review-unreadable']")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(box.textContent).toContain(reason)
+
+    // An accessibility pass walked all 60 tab stops on this screen and found
+    // no way out but a browser reload. A real focusable <button> is the fix,
+    // not a clickable div and not a control parked behind `tabindex="-1"`.
+    const retry = screen.getByRole("button", { name: /try reading the review again/i })
+    expect(retry.tagName).toBe("BUTTON")
+    expect(retry).not.toBeDisabled()
+    expect(retry.getAttribute("tabindex")).not.toBe("-1")
+    retry.focus()
+    expect(document.activeElement).toBe(retry)
+
+    fireEvent.click(retry)
+
+    // Pressing it refetches the query the GATE read, so a server that has
+    // recovered moves the gate rather than merely clearing the message.
+    expect(await screen.findByText("review of fleet-overview")).toBeTruthy()
+    expect(document.querySelector("[data-slot='review-unreadable']")).toBeNull()
+    expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(2)
+
+    // …and the Page's own content was reachable throughout, which is the part
+    // of this gate that was already verified and must stay true.
     expect(screen.getByLabelText("Page name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
