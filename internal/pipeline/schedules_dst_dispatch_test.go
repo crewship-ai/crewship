@@ -88,7 +88,7 @@ func (d *dstRig) fireAt(t *testing.T, ctx context.Context, dueAt, now time.Time)
 	if after.NextRunAt == nil {
 		t.Fatalf("dispatcher left next_run_at unset — the schedule would stall")
 	}
-	if err := d.rig.db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE pipeline_id = 'pipe_dst'`).Scan(&totalRuns); err != nil {
+	if err := d.rig.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pipeline_runs WHERE pipeline_id = 'pipe_dst'`).Scan(&totalRuns); err != nil {
 		t.Fatalf("count runs: %v", err)
 	}
 	return after.NextRunAt.UTC(), totalRuns

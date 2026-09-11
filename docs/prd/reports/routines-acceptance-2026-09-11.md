@@ -103,7 +103,7 @@ Produkční **není** crew network policy gate ani credential resolver — ty
 co se stane *poté*, co byl požadavek povolen ven. Vrstvy rozhodující, zda smí
 odejít, pokrývají `runner_http_test.go` a `http_egress_credentials_test.go`.
 (Dřívější znění tohoto odstavce tvrdilo „skutečné egress brány“; to byla moje
-chyba, na kterou upozornilo CodeRabbit review PR #2494.)
+chyba, na kterou upozornilo review PR #2494.)
 
 | Test | Co měří |
 |---|---|
@@ -509,7 +509,7 @@ odváže a je nyní zdokumentován v průvodci. Živě ověřeno:
 `run_cmtwprucs0010063ab752` s `Prefer: respond-async` přežil odchod klienta
 a doběhl. `crewship routine run` async cestu nepoužívá.
 
-### N2 — Kontrola presetů se obchází přes `routine save` · OPRAVENO v samostatném PR
+### N2 — Kontrola presetů se obchází přes `routine save` · OPRAVA V REVIEW
 
 Brána kompatibility plánů žije v `consumeDraftTx`, tedy výhradně na cestě
 draft → publish, a jen pro **povolené** a **nepřipnuté** plány. Přímé
@@ -531,9 +531,13 @@ import i manifest apply. Vyloučení zůstávají a jsou připnutá testy: vypnu
 plán, připnutý plán, legacy netypovaný vstup a uložení, které definici nemění.
 Konflikt se nově mapuje na 409 se strukturovaným `schedule_conflict` i na
 importní a agentní dveře — tam by dosud i plně akční odmítnutí skončilo jako
-500. Issue [#2495](https://github.com/crewship-ai/crewship/issues/2495).
+500. Issue [#2495](https://github.com/crewship-ai/crewship/issues/2495),
+oprava v [PR #2497](https://github.com/crewship-ai/crewship/pull/2497).
 
-### N3 — Plán lze uložit s presetem, který jeho rutina odmítá · OPRAVENO v samostatném PR
+**Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
+je tento řádek doložená oprava v review, ne uzavřená vada.
+
+### N3 — Plán lze uložit s presetem, který jeho rutina odmítá · OPRAVA V REVIEW
 
 **Oprava původní formulace.** Toto zjištění jsem nejdřív zapsal jako „server
 nevaliduje typované vstupy běhu“. To je nesprávné. `pipeline.ValidateFormInputs`
@@ -579,6 +583,10 @@ sdílené pravidlo napříč branou běhu, rozhodovacími formuláři, vazbou vn
 vstupů i presetovou branou z N2, a takový tvar má většina existujících rutin.
 Zpřísnění je samostatné rozhodnutí o legacy kontraktu, ne něco, co by měla
 propašovat oprava validace presetů.
+
+Oprava je v [PR #2498](https://github.com/crewship-ai/crewship/pull/2498).
+**Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
+je tento řádek doložená oprava v review, ne uzavřená vada.
 
 ## Úklid
 

@@ -32,6 +32,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // cancelClassifyRig saves a two-step routine whose first step blocks until
@@ -204,6 +206,11 @@ type classifyOutcome struct {
 	notified int32
 	hookRuns int32
 	journal  []string
+	// runLevelStatus is the `status` the run-level journal entry carried.
+	// emitRunFailed classifies off ctx.Err() and has done so since before
+	// this change; asserting the row alone would leave the two free to
+	// disagree again, which is the defect this file exists for.
+	runLevelStatus string
 }
 
 // runToTerminal saves `definitionJSON`, runs it with the supplied runner on a
@@ -244,14 +251,21 @@ func runToTerminal(t *testing.T, slug, definitionJSON string, runner AgentRunner
 		t.Fatalf("reload run: %v", err)
 	}
 	var types []string
+	runLevelStatus := ""
 	for _, e := range em.entries {
 		types = append(types, string(e.Type))
+		if e.Type == journal.EntryPipelineRunFailed {
+			if v, ok := e.Payload["status"].(string); ok {
+				runLevelStatus = v
+			}
+		}
 	}
 	return classifyOutcome{
-		rec:      rec,
-		notified: atomic.LoadInt32(&notified),
-		hookRuns: atomic.LoadInt32(&hookRuns.calls),
-		journal:  types,
+		rec:            rec,
+		notified:       atomic.LoadInt32(&notified),
+		hookRuns:       atomic.LoadInt32(&hookRuns.calls),
+		journal:        types,
+		runLevelStatus: runLevelStatus,
 	}
 }
 
@@ -373,8 +387,13 @@ func TestClassify_CancelledRunSuppressesFailureMachinery(t *testing.T) {
 	}
 	// The journal's own classification predates this change and reads
 	// ctx.Err(); the row now agrees with it instead of contradicting it.
+	// Both halves are asserted, because the defect was the two disagreeing
+	// and "the entry exists" would still hold if they did.
 	if !slices.Contains(got.journal, "pipeline.run.failed") {
 		t.Errorf("journal entries %v — the run-level entry is missing entirely", got.journal)
+	}
+	if got.runLevelStatus != "CANCELLED" {
+		t.Errorf("journal run-level status = %q, want CANCELLED to match the row", got.runLevelStatus)
 	}
 }
 

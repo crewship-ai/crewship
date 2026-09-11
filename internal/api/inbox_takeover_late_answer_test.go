@@ -14,6 +14,7 @@ package api
 // effect is the handler refusing it on its own. That is what these pin.
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -21,13 +22,15 @@ import (
 // answeredCount reports how many times the answer's side effects landed: the
 // comment on the issue and the resumed assignment. Both must stay at zero
 // when the answer is late.
-func answeredCount(t *testing.T, r *needsHumanRig) (comments, resumed int) {
+func answeredCount(t *testing.T, ctx context.Context, r *needsHumanRig) (comments, resumed int) {
 	t.Helper()
-	if err := r.f.db.QueryRow(`SELECT COUNT(*) FROM mission_comments WHERE mission_id=? AND body='Use staging'`,
+	if err := r.f.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM mission_comments WHERE mission_id=? AND body='Use staging'`,
 		r.f.missionID).Scan(&comments); err != nil {
 		t.Fatalf("count comments: %v", err)
 	}
-	if err := r.f.db.QueryRow(`SELECT COUNT(*) FROM assignments WHERE session_id=? AND id!=?`,
+	if err := r.f.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM assignments WHERE session_id=? AND id!=?`,
 		r.sessionID, r.assignmentID).Scan(&resumed); err != nil {
 		t.Fatalf("count resumed assignments: %v", err)
 	}
@@ -37,6 +40,7 @@ func answeredCount(t *testing.T, r *needsHumanRig) (comments, resumed int) {
 // TestInboxTakeover_ThenLateAnswerIsRefused is the sequential order the race
 // tests cannot reach.
 func TestInboxTakeover_ThenLateAnswerIsRefused(t *testing.T) {
+	ctx := t.Context()
 	r := setupNeedsHumanRig(t)
 
 	if rr := r.act(t, r.cardID, `{"action":"take_over"}`); rr.Code != 200 {
@@ -63,7 +67,7 @@ func TestInboxTakeover_ThenLateAnswerIsRefused(t *testing.T) {
 	if stateAfter != state || actionAfter != action {
 		t.Errorf("the late answer moved the card: (%q,%q) → (%q,%q)", state, action, stateAfter, actionAfter)
 	}
-	if comments, resumed := answeredCount(t, r); comments != 0 || resumed != 0 {
+	if comments, resumed := answeredCount(t, ctx, r); comments != 0 || resumed != 0 {
 		t.Errorf("the refused answer still left effects: comments=%d resumed=%d", comments, resumed)
 	}
 }
@@ -73,12 +77,13 @@ func TestInboxTakeover_ThenLateAnswerIsRefused(t *testing.T) {
 // must not pull the work back after an answer has already been committed and
 // the agent resumed on it.
 func TestInboxAnswer_ThenLateTakeoverIsRefused(t *testing.T) {
+	ctx := t.Context()
 	r := setupNeedsHumanRig(t)
 
 	if rr := r.act(t, r.cardID, `{"action":"answer","input":"Use staging"}`); rr.Code != 200 {
 		t.Fatalf("answer: %d %s", rr.Code, rr.Body.String())
 	}
-	comments, resumed := answeredCount(t, r)
+	comments, resumed := answeredCount(t, ctx, r)
 	if comments != 1 || resumed != 1 {
 		t.Fatalf("the accepted answer did not take effect: comments=%d resumed=%d", comments, resumed)
 	}
@@ -94,7 +99,7 @@ func TestInboxAnswer_ThenLateTakeoverIsRefused(t *testing.T) {
 	if action != "answer" {
 		t.Errorf("the accepted verdict changed to %q", action)
 	}
-	if c, s := answeredCount(t, r); c != comments || s != resumed {
+	if c, s := answeredCount(t, ctx, r); c != comments || s != resumed {
 		t.Errorf("the refused takeover changed the answer's effects: comments %d→%d resumed %d→%d",
 			comments, c, resumed, s)
 	}
@@ -104,25 +109,30 @@ func TestInboxAnswer_ThenLateTakeoverIsRefused(t *testing.T) {
 // late answer (a stuck spinner, an impatient double-click) must keep getting
 // the same refusal rather than eventually slipping one through.
 func TestInboxLateAnswer_RepeatedDoesNotAccumulate(t *testing.T) {
+	ctx := t.Context()
 	r := setupNeedsHumanRig(t)
 	if rr := r.act(t, r.cardID, `{"action":"take_over"}`); rr.Code != 200 {
 		t.Fatalf("take_over: %d %s", rr.Code, rr.Body.String())
 	}
+	_, _, _, settled := r.card(t)
+	before, _ := json.Marshal(settled)
 	for i := 0; i < 3; i++ {
 		if rr := r.act(t, r.cardID, `{"action":"answer","input":"Use staging"}`); rr.Code != 409 {
 			t.Fatalf("late answer %d: status = %d, want 409", i+1, rr.Code)
 		}
 	}
-	if comments, resumed := answeredCount(t, r); comments != 0 || resumed != 0 {
+	if comments, resumed := answeredCount(t, ctx, r); comments != 0 || resumed != 0 {
 		t.Errorf("three refused answers left effects: comments=%d resumed=%d", comments, resumed)
 	}
 	_, action, _, payload := r.card(t)
 	if action != "take_over" {
 		t.Errorf("resolved_action = %q after three refusals", action)
 	}
-	// The card's payload must not have collected the refused attempts.
-	raw, _ := json.Marshal(payload)
-	if len(raw) > 4096 {
-		t.Errorf("card payload grew to %d bytes across refused attempts", len(raw))
+	// Byte-exact against the snapshot taken the instant the takeover
+	// committed. A size bound would let a refused attempt overwrite a field
+	// without growing the payload, which is the shape this is guarding.
+	after, _ := json.Marshal(payload)
+	if string(after) != string(before) {
+		t.Errorf("the card payload changed across three refused answers:\n before %s\n after  %s", before, after)
 	}
 }
