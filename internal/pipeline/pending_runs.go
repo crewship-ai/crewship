@@ -106,6 +106,7 @@ type EnqueueResult struct {
 	ID            string
 	Coalesced     bool
 	PinnedVersion *int // the pin the row carries after this call
+	FireAt        time.Time
 }
 
 // errPendingRowMoved: the row found by the lookup was claimed, cancelled or
@@ -176,7 +177,7 @@ INSERT INTO pending_runs (
 			}
 			return EnqueueResult{}, fmt.Errorf("pending_runs: insert: %w", err)
 		}
-		return EnqueueResult{ID: pr.ID, PinnedVersion: pr.PinnedVersion}, nil
+		return EnqueueResult{ID: pr.ID, PinnedVersion: pr.PinnedVersion, FireAt: pr.FireAt}, nil
 	}
 	return EnqueueResult{}, fmt.Errorf("pending_runs: debounce row for %s/%s kept moving after %d attempts", pr.PipelineID, pr.DebounceKey, attempts)
 }
@@ -276,7 +277,41 @@ WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
 	if n, _ := res.RowsAffected(); n == 0 {
 		return EnqueueResult{}, errPendingRowMoved
 	}
-	return EnqueueResult{ID: existingID, Coalesced: true, PinnedVersion: effectivePin}, nil
+	return EnqueueResult{ID: existingID, Coalesced: true, PinnedVersion: effectivePin, FireAt: fireAt}, nil
+}
+
+// ClaimDue atomically takes the current row, not a stale DueRuns snapshot.
+// Coalescing may replace its payload or postpone it after it was listed.
+// RETURNING binds the executed inputs, pin, attribution and occurrence to
+// the winning claim; later coalesces must create a new pending row.
+func (s *PendingRunStore) ClaimDue(ctx context.Context, id string, now time.Time) (*PendingRun, error) {
+	var pr PendingRun
+	var fireAt string
+	at := now.UTC().Format(time.RFC3339Nano)
+	err := s.db.QueryRowContext(ctx, `
+UPDATE pending_runs
+SET status='fired', fired_run_id='', updated_at=datetime('now','subsec')
+WHERE id=? AND status='pending' AND fire_at<=?
+  AND (expires_at IS NULL OR expires_at>?)
+RETURNING id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
+    COALESCE(tier_override,''), priority, COALESCE(invoking_user_id,''),
+    COALESCE(triggered_via,''), COALESCE(triggered_by_id,''), COALESCE(chain_depth,0),
+    COALESCE(chain_origin,''), pinned_version, fire_at`, id, at, at).Scan(
+		&pr.ID, &pr.WorkspaceID, &pr.PipelineID, &pr.PipelineSlug,
+		&pr.InputsJSON, &pr.TagsJSON, &pr.MetadataJSON, &pr.TierOverride, &pr.Priority,
+		&pr.InvokingUserID, &pr.TriggeredVia, &pr.TriggeredByID, &pr.ChainDepth,
+		&pr.ChainOrigin, &pr.PinnedVersion, &fireAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("pending_runs: claim current row: %w", err)
+	}
+	pr.FireAt, err = time.Parse(time.RFC3339Nano, fireAt) // tsformat:allow: parsing a persisted timestamp
+	if err != nil {
+		return nil, fmt.Errorf("pending_runs: parse claimed fire_at: %w", err)
+	}
+	return &pr, nil
 }
 
 // ExpireDue marks pending rows past their ttl as expired. Returns the

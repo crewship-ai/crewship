@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,32 +184,34 @@ func TestEnqueueHelperHonoursACallerPin(t *testing.T) {
 	}
 }
 
-// TestDeferredRunWithoutAnArchiveStillEnqueues is the compatibility line. A
-// routine old enough to have no pipeline_versions row can still be deferred;
-// it runs unpinned and the receipt says so, rather than the caller losing a
-// run that works today. The one-time start keeps its refusal, because for
-// that form the pin IS the feature.
-func TestDeferredRunWithoutAnArchiveStillEnqueues(t *testing.T) {
-	h, user, ws := newPipelineHandlerForCRUDTest(t)
-	_, p := seedPinnable(t, h, user, ws, "pin-noarchive")
-	if _, err := h.db.ExecContext(t.Context(), `DELETE FROM pipeline_versions WHERE pipeline_id=?`, p.ID); err != nil {
-		t.Fatalf("drop archive: %v", err)
-	}
-
-	receipt := enqueueDelayed(t, h, user, ws, p, runRequestBody{DelaySeconds: 3600})
-	if receipt["pinned_version"] != nil {
-		t.Errorf("pinned_version = %v, want null when there is nothing to pin", receipt["pinned_version"])
-	}
-	if pin := pendingPin(t, h, time.Now().Add(2*time.Hour)); pin != nil {
-		t.Errorf("pinned_version = %v, want nil", *pin)
-	}
-
-	// The one-time start still refuses, unchanged.
-	r := withWorkspaceUser(httptest.NewRequest("POST", "/run", nil), user, ws, "OWNER")
-	rr := httptest.NewRecorder()
-	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: time.Now().Add(time.Hour).Format(time.RFC3339)})
-	if rr.Code != http.StatusConflict {
-		t.Errorf("one-time start without an archive: %d %s, want 409", rr.Code, rr.Body.String())
+// No manual deferred start may be acknowledged without an immutable recipe.
+func TestDeferredRunRequiresArchive(t *testing.T) {
+	for _, body := range []string{
+		`{"delay_seconds":3600}`, `{"debounce_key":"k","debounce_window_seconds":3600}`,
+		`{"fire_at":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			h, user, ws := newPipelineHandlerForCRUDTest(t)
+			h.SetRunner(newBlockingRunner())
+			_, p := seedPinnable(t, h, user, ws, "pin-noarchive")
+			if _, err := h.db.ExecContext(t.Context(), `DELETE FROM pipeline_versions WHERE pipeline_id=?`, p.ID); err != nil {
+				t.Fatal(err)
+			}
+			req := withWorkspaceUser(httptest.NewRequest("POST", "/run", strings.NewReader(body)), user, ws, "OWNER")
+			req.SetPathValue("slug", p.Slug)
+			rr := httptest.NewRecorder()
+			h.Run(rr, req)
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("without an archive: %d %s, want 409", rr.Code, rr.Body.String())
+			}
+			var count int
+			if err := h.db.QueryRowContext(t.Context(), `SELECT count(*) FROM pending_runs`).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("refused start stored %d pending rows", count)
+			}
+		})
 	}
 }
 
@@ -360,5 +363,19 @@ func TestPublicRunDoorRefusesAnExplicitPinOnADeferral(t *testing.T) {
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("%s → %d %s, want 400", body, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+func TestDeferredReceiptReportsDebounceCap(t *testing.T) {
+	h, user, ws := newPipelineHandlerForCRUDTest(t)
+	_, p := seedPinnable(t, h, user, ws, "receipt-cap")
+	first := enqueueDelayed(t, h, user, ws, p, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 10, DebounceMaxSeconds: 60})
+	second := enqueueDelayed(t, h, user, ws, p, runRequestBody{DebounceKey: "k", DebounceWindowSecond: 3600})
+	var fireAt, maxAt string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT fire_at,debounce_max_at FROM pending_runs WHERE id=?`, first["pending_id"]).Scan(&fireAt, &maxAt); err != nil {
+		t.Fatal(err)
+	}
+	if fireAt != maxAt || second["fire_at"] != fireAt {
+		t.Fatalf("receipt=%v stored=%s cap=%s", second["fire_at"], fireAt, maxAt)
 	}
 }

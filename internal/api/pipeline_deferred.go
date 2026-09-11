@@ -99,22 +99,11 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 			replyError(w, http.StatusInternalServerError, "Could not load the published recipe archive.")
 			return
 		}
-		switch {
-		case version >= 1:
-			body.PinnedVersion = &version
-		case body.FireAt != "":
-			// A one-time scheduled start IS the pin — refusing is right,
-			// and this is the behaviour that shipped.
-			replyError(w, http.StatusConflict, "Published recipe archive is unavailable. Publish a version before scheduling a one-time start.")
+		if version < 1 {
+			replyError(w, http.StatusConflict, "Published recipe archive is unavailable. Publish a version before scheduling a deferred start.")
 			return
-		default:
-			// A routine old enough to have no archived version can still be
-			// deferred; it just runs unpinned, and the receipt says so
-			// rather than the caller having to assume. Refusing here would
-			// take away a run that works today to fix one that is rarer.
-			h.logger.Warn("deferred run: no archived version to pin",
-				"slug", p.Slug, "pipeline_id", p.ID)
 		}
+		body.PinnedVersion = &version
 	}
 	// A debounced trigger may coalesce into a row that keeps an EARLIER pin
 	// than the one this request was preflighted against. The inputs this
@@ -164,7 +153,7 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":         "SCHEDULED",
 		"pending_id":     stored.ID,
-		"fire_at":        fireAt.Format(time.RFC3339Nano),
+		"fire_at":        stored.FireAt.Format(time.RFC3339Nano),
 		"coalesced":      stored.Coalesced,
 		"pinned_version": stored.PinnedVersion,
 		"priority":       body.Priority,
