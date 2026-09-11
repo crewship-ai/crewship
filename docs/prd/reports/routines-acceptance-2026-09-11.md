@@ -430,6 +430,11 @@ handleru; *živě* = běžící crewshipd a skutečné run/decision identity;
 vynucená chyba v prohlížeči, která dokazuje reakci UI a nikdy ne serverovou
 autorizaci; *lidské porozumění* = §11, neodškrtnuto.
 
+Verdikty v tabulce **nestojí na nesloučených opravách N2 a N3**. Řádek 6 je
+doložen publikační cestou, která bránu měla už před nimi; řádek 2 vrstvami,
+které existovaly předtím. Co ty dvě opravy přidávají, je uzavření nálezů, ne
+změna některého PASS.
+
 | # | Scénář §9 | Stav | Rozsah důkazu | Zbývající omezení |
 |---|---|---|---|---|
 | 1 | Recept bez vstupů, jednoduchý úspěch | PASS | §14 (10. 9.), interní browser walkthrough pěti úloh | Není uživatelská studie; §11 lidská brána otevřená |
