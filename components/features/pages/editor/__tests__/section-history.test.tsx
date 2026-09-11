@@ -133,6 +133,7 @@ function reviewSnapshot(overrides: Partial<ReviewSnapshotWire> = {}): ReviewSnap
       definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
       excluded_panels: 0,
       withheld_changed: false,
+      definition_diverged: false,
       source_revision: 6,
       git_commit: "def1234567",
       source_available: true,

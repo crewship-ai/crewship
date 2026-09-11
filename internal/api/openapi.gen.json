@@ -87318,13 +87318,17 @@
                     "baseline": {
                       "properties": {
                         "definition": {
-                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison.",
+                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison. This is about what the review surface renders and compares, not confidentiality: GET .../project and GET .../project/history/{revision} serve the complete unfiltered document to the same callers behind the same edit permission.",
                           "nullable": true,
                           "type": "object"
                         },
                         "definition_digest": {
                           "pattern": "^[0-9a-f]{64}$",
                           "type": "string"
+                        },
+                        "definition_diverged": {
+                          "description": "The live Page definition and the definition the live publication shipped with have drifted apart — somebody changed panels outside the application flow. Advisory: show it, do not refuse on it. The comparison on this snapshot is derived from the CURRENT live definition and the candidate, so it is complete regardless, and publishing the candidate is what ends the divergence. Not the definition_moved blocker, which is reserved for the publish fence tripping — a base that moved between the render and the click, where refreshing is the cure. False when there is no live publication to have diverged from, and true in the withdrawn state too, where published is false and nothing is running.",
+                          "type": "boolean"
                         },
                         "excluded_panels": {
                           "description": "How many panels were withheld from this comparison, counting a panel withheld from both documents once, so the screen can say its comparison is partial. Zero when neither document rendered. definition_digest is unaffected: it is always the digest of the full stored document.",
@@ -87367,6 +87371,7 @@
                         "definition",
                         "excluded_panels",
                         "withheld_changed",
+                        "definition_diverged",
                         "source_revision",
                         "git_commit",
                         "source_available",
@@ -87378,6 +87383,7 @@
                       "items": {
                         "properties": {
                           "code": {
+                            "description": "definition_moved is reserved for the publish fence tripping; a standing divergence between the live definition and the published one is baseline.definition_diverged and is advisory.",
                             "enum": [
                               "no_candidate",
                               "candidate_matches_live",
@@ -87527,7 +87533,7 @@
                             "type": "string"
                           },
                           "in_candidate": {
-                            "description": "This routine is declared by the candidate, so it belongs in expected_routine_digests. The list is a union and also carries routines only the live publication called; fencing on one of those is refused as a routines conflict naming a routine nobody moved.",
+                            "description": "This routine is declared by the candidate, so it belongs in expected_routine_digests. Routines are listed only when a panel that survived withholding declares one, so this flag is exactly the fence the publication rebuilds for this caller; a routine only a withheld panel calls is neither listed nor fenced, because its reviewer never read it. A workspace administrator sees and fences every routine. The list is a union and also carries routines only the live publication called; fencing on one of those is refused as a routines conflict naming a routine nobody moved.",
                             "type": "boolean"
                           },
                           "published_digest": {

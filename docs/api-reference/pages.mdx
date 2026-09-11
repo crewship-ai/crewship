@@ -1213,7 +1213,8 @@ common errors.
 blockers, initial_publication}`, where `baseline` is
 `{publication_version, published, definition_digest, definition,
 excluded_panels, source_revision, git_commit, source_available,
-source_unavailable_reason, withheld_changed}` and `candidate` is
+source_unavailable_reason, withheld_changed, definition_diverged}` and
+`candidate` is
 `{revision, git_commit, source_digest, created_at, actor, build, definition}`.
 `candidate` is the current draft revision with
 its actor and the build of exactly that revision, and is `null` when there is
@@ -1253,6 +1254,13 @@ about a panel that is merely not this reader's to see.
 `baseline.excluded_panels` is how many panels were withheld from the
 comparison, counting a panel withheld from both documents once, so a partial
 comparison can say so.
+Withholding here is about what this screen renders and compares, not about
+confidentiality: `GET /api/v1/pages/{slug}/project` and
+`GET /api/v1/pages/{slug}/project/history/{revision}` serve the complete
+unfiltered Page document to the same callers behind the same edit permission,
+and the review screen reads the first of them on every render. Read
+`excluded_panels` as "this comparison is partial", never as "this caller
+cannot obtain that panel".
 `baseline.withheld_changed` is whether any of those withheld panels actually
 differs between the live definition and the candidate — added, removed,
 modified, or re-pointed between a crew this caller may see and one they may
@@ -1261,11 +1269,30 @@ underneath the review can honestly cover. False means the comparison on screen
 covers everything that moves and publishing stays available. True adds the
 `withheld_change` blocker and the publication is refused, and nothing about
 what changed is disclosed either way: the flag, and the count beside it, are
-the whole of it.
+the whole of it. `routines` follows the same rule — a routine is listed only
+when a panel that survived withholding declares it, so the response does not
+name what it has just withheld — and `routines[].in_candidate` is therefore
+exactly the fence the publication rebuilds for this caller. A routine only a
+withheld panel calls is not fenced by a publisher who cannot read that panel:
+the fence asks a human to attest that a value has not moved since they
+reviewed it, and they never reviewed that one. A workspace administrator
+reads every panel, so their list and their fence are unchanged.
 `definition_digest` is unaffected by any of this, because the fence compares
 the full stored document. Either document is `null` only when the stored bytes
 cannot be read as a Page document, and there is then no basis for a comparison
 at all; when there is no candidate, `candidate` itself is `null`.
+`baseline.definition_diverged` says the live Page definition and the
+definition the live publication shipped with have drifted apart — somebody
+changed panels outside the application flow. It is a statement, not a refusal.
+The comparison on this snapshot is derived from the current live definition
+and the candidate, so it is complete regardless of what the publication once
+shipped, and publishing the candidate is what ends the divergence; refusing on
+it would block the only action that does. It is true in the withdrawn state
+too, where `published` is `false` and nothing is running, so a note about it
+must say "the live publication", never "the running application". Do not
+confuse it with the `definition_moved` blocker code, which is reserved for the
+publish fence tripping — a base that moved between the render and the click,
+where refreshing genuinely is the cure.
 `baseline.source_available:false` means the retained source for the live
 publication cannot be read back — a missing comparison, never "no changes" —
 and `source_unavailable_reason` says why in a sentence.
@@ -1282,7 +1309,8 @@ agreement. `blockers[].code` is one of
 `no_candidate`, `candidate_matches_live`, `build_missing`, `build_failed`,
 `build_stale`, `baseline_unavailable`, `routine_unresolved`,
 `definition_moved`, `withheld_change`, `not_permitted` and
-`storage_unavailable`.
+`storage_unavailable`. `definition_moved` is reserved for the publish fence;
+the review does not emit it.
 `routine_unresolved` is emitted for every `in_candidate` routine with no
 current digest: publishing such a candidate is refused, so the review says so
 rather than reporting the routine as merely `unknown` beside a ready build. Missing build storage or a missing runtime origin is a

@@ -92,6 +92,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     definition: liveDefinition,
     excluded_panels: 0,
     withheld_changed: false,
+    definition_diverged: false,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,

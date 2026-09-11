@@ -168,6 +168,29 @@ type reviewBaselineWire struct {
 	// Nothing about WHAT changed is on the wire. The flag, and the count
 	// already beside it, are the whole disclosure.
 	WithheldChanged bool `json:"withheld_changed"`
+
+	// DefinitionDiverged says the live Page definition and the definition the
+	// LIVE PUBLICATION shipped with have drifted apart — somebody changed
+	// panels outside the application flow.
+	//
+	// A statement, not a refusal, and it used to be a blocker. That was worse
+	// than useless: the comparison on screen is derived from the CURRENT live
+	// definition and the candidate, so it is complete and correct whatever
+	// the publication once shipped; the thing that drifted is a third
+	// document nobody is being asked to approve. Refusing on it blocked the
+	// one action that ends the divergence — publishing the candidate is what
+	// puts the two back in agreement — and the screen's advice, "refresh the
+	// review", could never help, because a refetch says exactly the same
+	// thing. The only way out of the editor was `crewship page rollback`.
+	//
+	// It is NOT the `definition_moved` blocker, which is reserved for the
+	// publish fence tripping: a base moved between the render and the click,
+	// the snapshot is stale, and refreshing IS the cure. Standing divergence
+	// and a stale snapshot are different facts with opposite remedies, and
+	// giving them one name is how one got the other's behaviour.
+	//
+	// False whenever there is no live publication to have diverged from.
+	DefinitionDiverged bool `json:"definition_diverged"`
 }
 
 type reviewRoutineWire struct {
@@ -211,13 +234,17 @@ type reviewSnapshotWire struct {
 
 // Blocker codes, spelled once. The UI shows the message; tests assert the code.
 const (
-	reviewBlockerNoCandidate        = "no_candidate"
-	reviewBlockerMatchesLive        = "candidate_matches_live"
-	reviewBlockerBuildMissing       = "build_missing"
-	reviewBlockerBuildFailed        = "build_failed"
-	reviewBlockerBuildStale         = "build_stale"
-	reviewBlockerBaselineMissing    = "baseline_unavailable"
-	reviewBlockerRoutineUnresolved  = "routine_unresolved"
+	reviewBlockerNoCandidate       = "no_candidate"
+	reviewBlockerMatchesLive       = "candidate_matches_live"
+	reviewBlockerBuildMissing      = "build_missing"
+	reviewBlockerBuildFailed       = "build_failed"
+	reviewBlockerBuildStale        = "build_stale"
+	reviewBlockerBaselineMissing   = "baseline_unavailable"
+	reviewBlockerRoutineUnresolved = "routine_unresolved"
+	// reviewBlockerDefinitionMoved is reserved for the publish fence
+	// tripping. ReviewProject does not emit it: a standing divergence between
+	// the live definition and the published one is Baseline.DefinitionDiverged
+	// and is advisory. The two facts have opposite remedies.
 	reviewBlockerDefinitionMoved    = "definition_moved"
 	reviewBlockerWithheldChange     = "withheld_change"
 	reviewBlockerNotPermitted       = "not_permitted"
@@ -277,10 +304,28 @@ func (a pageDefinitionAuthorizer) visible(ownerRef string) bool {
 // directory once per request, for both documents on the snapshot.
 //
 // `mayEditSpec` — which is all projectPage proved — does not imply the caller
-// may see every panel, and handing back raw `spec_json` because the route
-// already proved it would disclose the schema, producer, SLA, actions and
-// gates of panels belonging to crews this caller is not in. That is a worse
-// bug than the correspondence failure these fields exist to close.
+// may see every panel: panel visibility is its owning crew's (§7.1 rule 2),
+// and mayEditSpec admits a `write` grantee with no crew standing at all.
+//
+// Be exact about what this withholding is, because it is easy to read as more
+// than it is. It keeps the REVIEW SURFACE from rendering and comparing what
+// this reader cannot read — so the change list is not built out of another
+// crew's panels, so `excluded_panels` can say the comparison is partial, and
+// so `withheld_changed` can refuse an attestation nobody could honestly make.
+//
+// It is NOT a confidentiality boundary, and nothing here should be cited as
+// one. `GET .../project` (pages_project.go, loadProject) and
+// `GET .../project/history/{revision}` (pages_project_history.go,
+// projectRevision) serve the COMPLETE unfiltered Page document to the same
+// callers behind the identical projectPage → mayEditSpec gate, and the review
+// screen calls the first of them on every render. A caller withheld from here
+// is one request away from the whole document.
+//
+// Those two are not filtered here on purpose: PutProject writes the whole
+// document back, so serving a filtered draft to a caller who then saves it
+// would DELETE the withheld panels — the failure that closed the document
+// editor on sealed pages in the first place. Fixing them needs a round-trip
+// story, and that is a separate change with its own issue.
 func (h *PageHandler) reviewDefinitionAuthorizer(ctx context.Context, ws string) (pageDefinitionAuthorizer, error) {
 	auth := pageDefinitionAuthorizer{h: h, viewer: h.reviewViewer(ctx, ws), crews: map[string]string{}}
 	rows, err := h.db.QueryContext(ctx, `SELECT slug,id FROM crews WHERE workspace_id=? AND deleted_at IS NULL`, ws)
@@ -386,6 +431,21 @@ func pageWithheldPanelIDs(spec string, visible func(ownerRef string) bool) (ids 
 		ids = append(ids, declared.ID)
 	}
 	return ids, unnamed
+}
+
+// pageAuthorizedDocument is pageAuthorizedDefinition parsed back into the
+// typed document the routine helpers walk. False means the bytes could not be
+// authorized or re-read, which is a server fault rather than a verdict.
+func pageAuthorizedDocument(spec string, visible func(ownerRef string) bool, drop map[string]bool) (*pages.Document, bool) {
+	authorized := pageAuthorizedDefinition(spec, visible, drop)
+	if authorized == nil {
+		return nil, false
+	}
+	var doc pages.Document
+	if err := json.Unmarshal(authorized, &doc); err != nil {
+		return nil, false
+	}
+	return &doc, true
 }
 
 // pageWithheldPanels is what one viewer cannot read across the two documents
@@ -689,11 +749,18 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 			}
 			// The live declaration drifting away from the one this publication
 			// shipped is a real, detectable condition (a panel rollback, an
-			// import): the reviewer is comparing against something the running
-			// application never declared.
-			if publishedSpec != liveSpec {
-				blocked(reviewBlockerDefinitionMoved, "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's.")
-			}
+			// import) and worth showing. It is not a reason to refuse: see
+			// Baseline.DefinitionDiverged.
+			//
+			// It is reported as a flag rather than a sentence deliberately.
+			// The sentence this used to send said "the definition the RUNNING
+			// application shipped with", which is false in the one state this
+			// branch also reaches after a withdrawal — the same snapshot says
+			// `published: false`, so nothing is running — and left the client
+			// composing a truthful replacement for that case. The true
+			// statement in both states is about the LIVE PUBLICATION, not a
+			// running application; whoever writes the note must say that.
+			snapshot.Baseline.DefinitionDiverged = publishedSpec != liveSpec
 		} else {
 			// Publications exist but no live pointer: nothing is running, so
 			// there is no retained baseline to compare against either.
@@ -750,7 +817,15 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	if withheld.Changed {
 		blocked(reviewBlockerWithheldChange, pageWithheldChangeMessage(withheld.Count()))
 	}
-	routines, err := h.reviewRoutines(ctx, ws, candidateSpec, contextSpec, comparisonChecks)
+	// The routine rows come from the SAME authorized documents as the two
+	// definitions above, not from the stored ones. Filtering the panels and
+	// then listing the routines they call would be withholding and disclosing
+	// in one response.
+	routines, err := h.reviewRoutines(ctx, ws,
+		string(pageAuthorizedDefinition(candidateSpec, authorizer.visible, withheld.IDs)),
+		string(pageAuthorizedDefinition(contextSpec, authorizer.visible, withheld.IDs)),
+		comparisonChecks,
+		string(pageAuthorizedDefinition(publishedSpec, authorizer.visible, withheld.IDs)))
 	if err != nil {
 		replyInternalError(w, h.logger, "read routine definitions", err)
 		return
@@ -956,23 +1031,45 @@ func (h *PageHandler) reviewHasReadyBuildElsewhere(ctx context.Context, page str
 // evidence of agreement, and rendering either as `unchanged` is the defect
 // this state exists to prevent.
 //
-// candidateSpec is the document being published — empty when there is no
-// candidate — and its routines are the ones flagged `in_candidate`.
+// Every spec argument is the AUTHORIZED document, never the stored one, and
+// that is load-bearing rather than tidy. A routine is named by a panel's
+// `call` action and a panel's visibility is its owning crew's, so a row for a
+// routine only a withheld panel declares would hand this reader the
+// association — that a panel they may not read calls it — plus a change
+// oracle on another crew's routine, in the same body that just withheld the
+// panel. The rule is: a routine is served only when a panel that SURVIVED
+// withholding declares it.
+//
+// candidateSpec is the authorized document being published — empty when there
+// is no candidate — and its routines are the ones flagged `in_candidate`,
+// which is also exactly the key set the publish fence rebuilds from the same
+// authorized document. The two must stay identical: offering a key the fence
+// does not want is a 409 naming a routine nobody moved, and wanting a key the
+// review never offered is a publication that can never be made.
 // contextSpec adds rows worth showing that are not part of the fence; it is
 // the live definition when there is no candidate at all, so a Page without a
 // draft still shows routine drift.
-func (h *PageHandler) reviewRoutines(ctx context.Context, ws, candidateSpec, contextSpec, checksJSON string) ([]reviewRoutineWire, error) {
+// publishedSpec is the authorized document the recorded `checks_json` came
+// from. It is what filters that map: `checks_json` is a bare name→digest map
+// with no panel attribution, so without it a routine that only a withheld
+// panel ever declared would come back through the published side.
+func (h *PageHandler) reviewRoutines(ctx context.Context, ws, candidateSpec, contextSpec, checksJSON, publishedSpec string) ([]reviewRoutineWire, error) {
+	candidate := pageDeclaredRoutines(candidateSpec)
+	context := pageDeclaredRoutines(contextSpec)
+	declared := pageDeclaredRoutines(publishedSpec)
 	published := map[string]string{}
 	if checksJSON != "" {
 		var checks pageRoutineChecks
 		if err := json.Unmarshal([]byte(checksJSON), &checks); err == nil {
 			for name, digest := range checks.Definitions {
-				published[name] = digest
+				// Provenance for a routine no authorized panel declares is
+				// provenance about somebody else's panel.
+				if declared[name] || candidate[name] || context[name] {
+					published[name] = digest
+				}
 			}
 		}
 	}
-	candidate := pageDeclaredRoutines(candidateSpec)
-	context := pageDeclaredRoutines(contextSpec)
 	names := make([]string, 0, len(published)+len(candidate)+len(context))
 	seen := map[string]bool{}
 	for _, set := range []map[string]bool{published2set(published), candidate, context} {

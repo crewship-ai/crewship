@@ -669,10 +669,17 @@ func TestPageProjectPublishFence(t *testing.T) {
 		if reviewLiveDigest(t, h, "health") == reviewed {
 			t.Fatal("the panel rollback did not change the live definition")
 		}
-		// The review snapshot now says so too.
+		// The review snapshot now says so too — as a statement, not a
+		// refusal. A divergence between the live definition and the one the
+		// live publication shipped with does not make the comparison on
+		// screen wrong, and refusing on it blocked the only action that ends
+		// it.
 		_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
-		if _, ok := reviewBlockers(snapshot)[reviewBlockerDefinitionMoved]; !ok {
-			t.Fatalf("review did not report the drifted definition: %+v", snapshot.Blockers)
+		if !snapshot.Baseline.DefinitionDiverged {
+			t.Fatalf("review did not report the drifted definition: %+v", snapshot.Baseline)
+		}
+		if message, ok := reviewBlockers(snapshot)[reviewBlockerDefinitionMoved]; ok {
+			t.Fatalf("a standing divergence is still a blocker: %q", message)
 		}
 		rollback := pageProjectPublishRequest{RollbackVersion: 1, ExpectedPublication: &one, ReviewedCode: true,
 			ExpectedDefinitionDigest: reviewed, ExpectedRoutineDigests: map[string]string{"ops-restart": routineDigest}}

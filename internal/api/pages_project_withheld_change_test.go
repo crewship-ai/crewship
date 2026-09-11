@@ -41,7 +41,8 @@ const withheldCreateBody = `{
 	"name": "Flotila .201",
 	"panels": [
 		{"id": "sluzby", "schema": "status.v1", "title": "Jede to?",
-		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla_seconds": 30, "span": 8},
+		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla_seconds": 30, "span": 8,
+		 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
 		{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
 		 "owner": "crew/engine", "producer": "script/load.sh", "sla_seconds": 60, "span": 4}
 	]
@@ -57,7 +58,8 @@ func withheldDefinition(withheldTitle, visibleOwner string) string {
 		"metadata": {"name": "Flotila .201", "slug": "health"},
 		"spec": {"panels": [
 			{"id": "sluzby", "schema": "status.v1", "title": "` + withheldTitle + `",
-			 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla": "30s", "span": 8},
+			 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla": "30s", "span": 8,
+			 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
 			{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
 			 "owner": "` + visibleOwner + `", "producer": "script/load.sh", "sla": "60s", "span": 4}
 		]}
@@ -75,6 +77,11 @@ func withheldFixture(t *testing.T) (*PageHandler, string, string, string) {
 	h, _, _, ws, admin := newPagesFixture(t)
 	if _, err := h.db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew-engine', ?, 'Engine', 'engine')`, ws); err != nil {
 		t.Fatalf("insert crew: %v", err)
+	}
+	// The withheld panel calls a routine of its own crew. Publishing must
+	// neither ask this publisher to attest to it nor tell them about it.
+	if _, err := h.db.Exec(`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-secret', ?, 'ops-secret', 'Secret', '{"steps":[]}', 'h1')`, ws); err != nil {
+		t.Fatal(err)
 	}
 	pagesSeedUser(t, h, ws, "publisher", "publisher@example.com", "MEMBER")
 	if _, err := h.db.Exec(`INSERT INTO crew_members (id, crew_id, user_id, role) VALUES ('cm-publisher', 'crew-engine', 'publisher', 'MEMBER')`); err != nil {
@@ -101,7 +108,8 @@ func withheldFixture(t *testing.T) (*PageHandler, string, string, string) {
 	h.pageStudioOrigin = "https://studio.example.com"
 
 	// The reachability this file depends on, checked rather than assumed.
-	_, snapshot := reviewCall(t, h, ws, "publisher", "MEMBER", "health")
+	w, snapshot := reviewCall(t, h, ws, "publisher", "MEMBER", "health")
+	withheldAssertBodyNeutral(t, "the publisher's review snapshot", w.Body.String())
 	if !snapshot.Capabilities.MayPublish {
 		t.Fatalf("the page owner cannot publish, so the case under test is unreachable: %+v", snapshot.Capabilities)
 	}
@@ -110,6 +118,15 @@ func withheldFixture(t *testing.T) (*PageHandler, string, string, string) {
 			"or there is no attestation gap to test: %+v", snapshot.Baseline.ExcludedPanels, snapshot.Baseline)
 	}
 	return h, ws, admin, "publisher"
+}
+
+// withheldAdminRoutineFence is the fence an ADMINISTRATOR's client builds:
+// every routine the candidate declares, because an administrator can read
+// every panel that declares one. The publisher's client builds a smaller one,
+// and that difference is the subject of
+// TestPagePublishRoutineFenceFollowsTheWithheldSet.
+func withheldAdminRoutineFence() map[string]string {
+	return map[string]string{"ops-secret": pageRoutineDigest(`{"steps":[]}`)}
 }
 
 // withheldPublishableDraft saves a draft carrying `definition` and builds it,
@@ -124,16 +141,33 @@ func withheldPublishableDraft(t *testing.T, h *PageHandler, ws, admin, definitio
 	return reviewBuildRevision(t, h, ws, admin, revision), revision
 }
 
+// withheldProtected is everything about the panel this publisher may not read
+// — the routine it calls included, since a routine is named by a panel and a
+// panel has an owning crew.
+var withheldProtected = []string{"sluzby", "lookout", "Jede to?", "Bezi to?", "watch-services", "status.v1", "ops-secret"}
+
 // withheldAssertNeutral holds the refusal to what it is allowed to say.
 func withheldAssertNeutral(t *testing.T, where, message string) {
 	t.Helper()
 	if message == "" {
 		t.Fatalf("%s: the refusal carries no sentence", where)
 	}
-	for _, secret := range []string{"sluzby", "lookout", "Jede to?", "Bezi to?", "watch-services", "status.v1"} {
+	for _, secret := range withheldProtected {
 		if strings.Contains(message, secret) {
 			t.Errorf("%s names %q; the refusal may say that a withheld part changed and how many panels are "+
 				"withheld, never what it is, whose crew it belongs to, or its name: %s", where, secret, message)
+		}
+	}
+}
+
+// withheldAssertBodyNeutral is the same standard applied to a WHOLE response
+// body rather than to one sentence. A refusal that says nothing while the
+// envelope around it names the panel has withheld nothing.
+func withheldAssertBodyNeutral(t *testing.T, where, body string) {
+	t.Helper()
+	for _, secret := range withheldProtected {
+		if strings.Contains(body, secret) {
+			t.Errorf("%s: the response discloses %q to a caller it is withholding that panel from: %s", where, secret, body)
 		}
 	}
 }
@@ -198,6 +232,7 @@ func TestPagePublishRefusesAnAttestationTheCallerCannotMake(t *testing.T) {
 				"reviewed_code:true is an attestation this caller cannot honestly make: %s", w.Code, w.Body.String())
 		}
 		withheldAssertNeutral(t, "the publish refusal", withheldPublishError(t, w))
+		withheldAssertBodyNeutral(t, "the publish refusal body", w.Body.String())
 		var published int
 		if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_project_publications`).Scan(&published); err != nil {
 			t.Fatal(err)
@@ -223,7 +258,8 @@ func TestPagePublishRefusesAnAttestationTheCallerCannotMake(t *testing.T) {
 		}
 		zero := int64(0)
 		if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
-			BuildID: build, ExpectedRevision: revision, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+			BuildID: build, ExpectedRevision: revision, ExpectedPublication: &zero, ReviewedCode: true,
+			ExpectedRoutineDigests: withheldAdminRoutineFence()}); w.Code != 200 {
 			t.Fatalf("an administrator, who can read every panel, was refused: %d %s", w.Code, w.Body.String())
 		}
 	})
@@ -238,7 +274,8 @@ func TestPagePublishWithheldChangeCoversTheRollbackPath(t *testing.T) {
 	first, firstRevision := withheldPublishableDraft(t, h, ws, admin, withheldDefinition("Jede to?", "crew/engine"), 0, "first")
 	zero, one := int64(0), int64(1)
 	if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
-		BuildID: first, ExpectedRevision: firstRevision, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+		BuildID: first, ExpectedRevision: firstRevision, ExpectedPublication: &zero, ReviewedCode: true,
+		ExpectedRoutineDigests: withheldAdminRoutineFence()}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 
@@ -247,7 +284,8 @@ func TestPagePublishWithheldChangeCoversTheRollbackPath(t *testing.T) {
 		// restoring publication 1 restores nothing they cannot see.
 		second, secondRevision := withheldPublishableDraft(t, h, ws, admin, strings.Replace(withheldDefinition("Jede to?", "crew/engine"), "Zatizeni", "Zatizeni II", 1), 1, "second")
 		if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
-			BuildID: second, ExpectedRevision: secondRevision, ExpectedPublication: &one, ReviewedCode: true}); w.Code != 200 {
+			BuildID: second, ExpectedRevision: secondRevision, ExpectedPublication: &one, ReviewedCode: true,
+			ExpectedRoutineDigests: withheldAdminRoutineFence()}); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
 		_, snapshot := reviewCallTarget(t, h, ws, publisher, "MEMBER", "health", "/?publication=1")
@@ -272,7 +310,8 @@ func TestPagePublishWithheldChangeCoversTheRollbackPath(t *testing.T) {
 		fourth, fourthRevision := withheldPublishableDraft(t, h, ws, admin, withheldDefinition("Bezi to?", "crew/engine"), 2, "fourth")
 		three := int64(3)
 		if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
-			BuildID: fourth, ExpectedRevision: fourthRevision, ExpectedPublication: &three, ReviewedCode: true}); w.Code != 200 {
+			BuildID: fourth, ExpectedRevision: fourthRevision, ExpectedPublication: &three, ReviewedCode: true,
+			ExpectedRoutineDigests: withheldAdminRoutineFence()}); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
 		_, snapshot := reviewCallTarget(t, h, ws, publisher, "MEMBER", "health", "/?publication=1")
@@ -291,6 +330,7 @@ func TestPagePublishWithheldChangeCoversTheRollbackPath(t *testing.T) {
 			t.Fatalf("rollback status = %d, want 403 — a rollback replaces the live definition too: %s", w.Code, w.Body.String())
 		}
 		withheldAssertNeutral(t, "the rollback refusal", withheldPublishError(t, w))
+		withheldAssertBodyNeutral(t, "the rollback refusal body", w.Body.String())
 	})
 }
 
@@ -384,4 +424,66 @@ func TestPagePublishReplayIsNotRefusedByTheWithheldCheck(t *testing.T) {
 	if published != 1 {
 		t.Errorf("%d publications exist after a replay, want 1", published)
 	}
+}
+
+// TestPagePublishRoutineFenceFollowsTheWithheldSet — the review's offer and
+// the fence's demand are one key set.
+//
+// The leak fix removes a routine only a withheld panel calls from the review
+// snapshot. Left there, the publish fence would still rebuild it from the full
+// document and refuse every publication this caller could ever construct —
+// naming the routine in the 409 on the way out, which hands over the slug the
+// snapshot had just withheld. Both sides now rebuild from the same authorized
+// document.
+func TestPagePublishRoutineFenceFollowsTheWithheldSet(t *testing.T) {
+	h, ws, admin, publisher := withheldFixture(t)
+	build, revision := withheldPublishableDraft(t, h, ws, admin, withheldDefinition("Jede to?", "crew/engine"), 0, "first")
+	zero := int64(0)
+
+	t.Run("the publisher is not asked to fence a routine they may not read", func(t *testing.T) {
+		w, snapshot := reviewCall(t, h, ws, publisher, "MEMBER", "health")
+		withheldAssertBodyNeutral(t, "the publisher's review snapshot", w.Body.String())
+		for _, row := range snapshot.Routines {
+			if row.InCandidate {
+				t.Errorf("the snapshot offers routine %q for the fence, and every routine on this Page is "+
+					"called by a panel this publisher may not read: %+v", row.Routine, row)
+			}
+		}
+		// Exactly what the editor and the CLI build from that snapshot.
+		fence := map[string]string{}
+		for _, row := range snapshot.Routines {
+			if row.InCandidate && row.CurrentDigest != nil {
+				fence[row.Routine] = *row.CurrentDigest
+			}
+		}
+		if w := publishCall(t, h, ws, publisher, "MEMBER", "health", pageProjectPublishRequest{
+			BuildID: build, ExpectedRevision: revision, ExpectedPublication: &zero, ReviewedCode: true,
+			ExpectedRoutineDigests: fence}); w.Code != 200 {
+			t.Fatalf("publish status = %d, want 200 — the fence the snapshot offered must be the fence the "+
+				"server rebuilds, or this caller can never publish at all: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("an administrator still fences it", func(t *testing.T) {
+		h, ws, admin, _ := withheldFixture(t)
+		build, revision := withheldPublishableDraft(t, h, ws, admin, withheldDefinition("Jede to?", "crew/engine"), 0, "first")
+		_, snapshot := reviewCall(t, h, ws, admin, "OWNER", "health")
+		row := reviewRoutineRow(t, snapshot, "ops-secret")
+		if !row.InCandidate || row.CurrentDigest == nil {
+			t.Fatalf("an administrator was not offered the routine for the fence: %+v", row)
+		}
+		// Sending nothing must still be refused for them: they can read the
+		// panel, so the fence is theirs to satisfy.
+		if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
+			BuildID: build, ExpectedRevision: revision, ExpectedPublication: &zero, ReviewedCode: true,
+			ExpectedRoutineDigests: map[string]string{}}); w.Code != 409 {
+			t.Fatalf("publish status = %d, want 409 — narrowing the fence must not narrow it for a caller "+
+				"who can read every panel: %s", w.Code, w.Body.String())
+		}
+		if w := publishCall(t, h, ws, admin, "OWNER", "health", pageProjectPublishRequest{
+			BuildID: build, ExpectedRevision: revision, ExpectedPublication: &zero, ReviewedCode: true,
+			ExpectedRoutineDigests: map[string]string{"ops-secret": *row.CurrentDigest}}); w.Code != 200 {
+			t.Fatalf("an administrator sending the fence they were offered was refused: %d %s", w.Code, w.Body.String())
+		}
+	})
 }

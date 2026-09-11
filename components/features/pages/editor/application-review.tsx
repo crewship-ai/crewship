@@ -363,22 +363,6 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     if (conflict && !has("definition_moved")) {
       out.push({ code: "definition_moved", message: conflictSentence(conflict) })
     }
-    // The server's sentence for this blocker names "the running application".
-    // When the last publication was withdrawn there is no running application
-    // — the header says exactly that — so the screen would assert and deny one
-    // thing five lines apart. Composed here rather than echoed, the way
-    // `baseline_unavailable` above already composes the server's reason.
-    // (The server string wants fixing too: `pages_project_review.go:695`.)
-    if (!snapshot.baseline.published && snapshot.baseline.publication_version > 0) {
-      const moved = out.findIndex(b => b.code === "definition_moved")
-      if (moved !== -1 && !conflict) {
-        out[moved] = {
-          code: "definition_moved",
-          message:
-            "The live Page definition no longer matches the definition the last publication shipped with. That publication was withdrawn, so nothing is running it; review the current definition.",
-        }
-      }
-    }
     // The server sends this blocker; the flag is what the screen refuses on.
     // Same belt-and-braces as `baseline_unavailable` above: a snapshot that
     // reports the fact but omits the row must still block, because the whole
@@ -399,6 +383,12 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   // Decided by the server over both FULL documents — the client holds neither,
   // so it cannot answer this and must not guess at it from what it was shown.
   const withheldChanged = snapshot?.baseline.withheld_changed === true
+  // Advisory, and the contract says so in as many words: the live definition
+  // has drifted from the one the live publication shipped with. It is a bare
+  // boolean — the server sends no sentence with it — so every word below is
+  // this screen's, and has to be true both while a publication is live and
+  // after one has been withdrawn, because the flag is raised in both.
+  const definitionDiverged = snapshot?.baseline.definition_diverged === true
   // Both operands off the one snapshot. `definitionDiff === null` therefore
   // means exactly one thing — a document that could not be read — which is
   // why the render below can name which, with no "still loading" state to
@@ -587,19 +577,14 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         )}
       </header>
 
-      {/* One blocker code, two entirely different facts.
-
-          A 409 means a base moved BETWEEN this render and the click: the
-          snapshot is stale, and re-reading it is exactly the cure. A
-          `definition_moved` that arrives in the snapshot itself means
-          something else — the live definition has drifted from the one the
-          published application shipped with, because somebody edited panels
-          outside the application flow. Refreshing never clears that, and the
-          screen used to offer it as the only way out of a state the editor
-          could not leave at all. It is a divergence to name, not an accident
-          to retry, and the comparison above — live definition against the
-          candidate, since R1 — is complete and correct either way. */}
-      {conflict && blockers.some(b => b.code === "definition_moved") && (
+      {/* The fence tripped: a base moved BETWEEN this render and the click,
+          so the snapshot is stale and re-reading it is exactly the cure.
+          `definition_moved` now means only this — the standing divergence it
+          used to share a name with is `baseline.definition_diverged` below,
+          which is advisory and has the opposite remedy. Sharing one code is
+          how the divergence inherited this one's behaviour and left the
+          editor with no way out at all. */}
+      {blockers.some(b => b.code === "definition_moved") && (
         <div role="alert" className="rounded-md border border-destructive p-3 text-sm">
           <strong>A base you reviewed moved</strong>
           <p className="mt-1">{blockers.find(b => b.code === "definition_moved")!.message}</p>
@@ -609,18 +594,22 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           </Button>
         </div>
       )}
-      {!conflict && blockers.some(b => b.code === "definition_moved") && (
+      {definitionDiverged && (
         <div role="note" data-note="definition-diverged" className="rounded-md border-2 border-notice p-3 text-sm">
           <strong>Two definitions have drifted apart</strong>
-          <p className="mt-1">{blockers.find(b => b.code === "definition_moved")!.message}</p>
           <p className="mt-1">
-            The two are different things. The <strong>live Page definition</strong> is what the Page declares right now; the{" "}
-            <strong>{nothingLive ? "withdrawn publication's definition" : "published application's definition"}</strong> is what publication{" "}
-            {baseline.publication_version} shipped with. They differ because the live one was edited outside the application flow.
+            The live Page definition no longer matches the definition publication {baseline.publication_version} was published with — somebody changed this Page&apos;s panels
+            outside the application flow.
           </p>
           <p className="mt-1">
-            The comparison above is made against the live definition, so it is complete and unaffected by this. Publishing this candidate republishes against that same live
-            definition, which is what brings the two back into agreement — refreshing this review does not.
+            These are different things: the <strong>live Page definition</strong> is what the Page declares right now, and the{" "}
+            <strong>{nothingLive ? "withdrawn publication's definition" : "live publication's definition"}</strong> is the copy that publication carries.
+            {nothingLive ? " That publication was withdrawn, so nothing is running it right now." : ""}
+          </p>
+          <p className="mt-1">
+            This does not make the comparison above wrong: it is derived from the live definition and the candidate, so it is complete either way. Publishing this candidate
+            republishes against that same live definition, which is what brings the two back into agreement — refreshing this review does not, and nothing here refuses the
+            publication.
           </p>
         </div>
       )}

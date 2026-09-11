@@ -736,12 +736,16 @@ func TestPageProjectReviewSnapshotIsNotOneDatabaseSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	if liveBefore != publishedBefore {
-		t.Fatalf("the fixture already drifted, so a `definition_moved` blocker would prove nothing")
+		t.Fatalf("the fixture already drifted, so the divergence flag would prove nothing")
 	}
-	// A control run: with no interleaving, the two rows agree and no blocker
-	// is raised.
-	if _, snapshot := reviewCall(t, h, ws, user, "OWNER", "health"); reviewBlockers(snapshot)[reviewBlockerDefinitionMoved] != "" {
-		t.Fatalf("the fixture raises definition_moved before any interleaving, so the assertion below is not about the window")
+	// A control run: with no interleaving, the two rows agree and the flag
+	// stays false. Asserted on the flag rather than on a blocker — a standing
+	// divergence between the live definition and the published one is
+	// advisory now, and `definition_moved` is reserved for the publish fence
+	// tripping. The two had shared a name and one had inherited the other's
+	// behaviour.
+	if _, snapshot := reviewCall(t, h, ws, user, "OWNER", "health"); snapshot.Baseline.DefinitionDiverged {
+		t.Fatalf("the fixture reports a diverged definition before any interleaving, so the assertion below is not about the window")
 	}
 
 	moved := reviewRenamePanel(t, liveBefore, "Republished by the second publication")
@@ -781,8 +785,8 @@ func TestPageProjectReviewSnapshotIsNotOneDatabaseSnapshot(t *testing.T) {
 	if string(snapshot.Baseline.Definition) != liveBefore {
 		t.Fatalf("the live definition on the snapshot is not the pre-write one, so the window was not the one intended")
 	}
-	if reviewBlockers(snapshot)[reviewBlockerDefinitionMoved] == "" {
-		t.Fatal("expected the mixed snapshot to raise definition_moved: publication 2 archived a declaration the " +
+	if !snapshot.Baseline.DefinitionDiverged {
+		t.Fatal("expected the mixed snapshot to report definition_diverged: publication 2 archived a declaration the " +
 			"snapshot's own (older) live definition does not match. If this ever stops holding, the reads have " +
 			"become atomic and the comments in pages_project_review.go can be taken literally")
 	}

@@ -85,6 +85,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     definition: liveDefinition,
     excluded_panels: 0,
     withheld_changed: false,
+    definition_diverged: false,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,
@@ -295,9 +296,9 @@ describe("EditorApplicationReview", () => {
     // for `crewship page rollback`, because the only control offered was a
     // refresh that re-reads the same two values.
     const snapshot = clone(baseSnapshot)
-    snapshot.blockers = [
-      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
-    ]
+    snapshot.baseline.definition_diverged = true
+    // What the review now answers for a publishable candidate over a drift.
+    expect(snapshot.blockers).toEqual([])
     setReview(snapshot)
     const { container } = render(<EditorApplicationReview {...props} />)
 
@@ -305,17 +306,27 @@ describe("EditorApplicationReview", () => {
     expect(note.textContent).toMatch(/Two definitions have drifted apart/)
     // Both bases, named, and said to be different things.
     expect(note.textContent).toMatch(/live Page definition/)
-    expect(note.textContent).toMatch(/published application.s definition/)
-    expect(note.textContent).toMatch(/publication 3 shipped with/)
+    expect(note.textContent).toMatch(/live publication.s definition/)
+    expect(note.textContent).toMatch(/publication 3 was published with/)
     // And what it does NOT invalidate: the comparison on screen.
-    expect(note.textContent).toMatch(/comparison above is made against the live definition, so it is complete and unaffected/)
-    expect(note.textContent).toMatch(/refreshing this review does not/)
+    expect(note.textContent).toMatch(/does not make the comparison above wrong/)
+    expect(note.textContent).toMatch(/refreshing this review does not, and nothing here refuses the publication/)
 
     // Not the 409 alert — that is a different fact with a different cure —
     // and no refresh button, which is the control that never helped.
     expect(screen.queryByText("A base you reviewed moved")).toBeNull()
     expect(screen.queryByRole("button", { name: "Refresh review" })).toBeNull()
     expect(screen.queryByText(/Building the candidate again does not clear this/)).toBeNull()
+
+    // The point of the whole change: publishing the candidate is what brings
+    // the two back into agreement, so the screen lets it happen. A live
+    // tester had to leave for `crewship page rollback` three times.
+    expect(screen.queryByText("Publishing is blocked")).toBeNull()
+    expect(consentBox().disabled).toBe(false)
+    fireEvent.click(consentBox())
+    expect(publishButton().disabled).toBe(false)
+    fireEvent.click(publishButton())
+    expect((state.review.publish as { mutate: ReturnType<typeof vi.fn> }).mutate).toHaveBeenCalled()
   })
 
   it("still treats a publish 409 as the stale snapshot it is, with the refresh that does cure it", () => {
@@ -386,38 +397,43 @@ describe("EditorApplicationReview", () => {
     expect(screen.queryByText("Publishing replaces the live application and its definition.")).toBeNull()
   })
 
-  it("says the same about the definition drift after a withdrawal: nothing is running it", () => {
-    // The server's sentence for this blocker names "the running application",
-    // which is the thing the header has just denied. Composed here in that
-    // one state, the way the baseline reason already is.
+  it("says the drift without claiming a running application, because the flag is raised after a withdrawal too", () => {
+    // The flag is a bare boolean: no sentence comes with it, so all of this
+    // copy is the screen's and has to hold in both states. The server-side
+    // rule is the same one — no response with `published: false` says
+    // "running application" — and the rendered screen honours it.
     const snapshot = clone(baseSnapshot)
-    snapshot.baseline = { ...snapshot.baseline, published: false }
-    snapshot.blockers = [
-      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
-    ]
+    snapshot.baseline = { ...snapshot.baseline, published: false, definition_diverged: true }
     setReview(snapshot)
     const { container } = render(<EditorApplicationReview {...props} />)
 
-    expect(document.body.textContent).not.toMatch(/the running application/)
+    expect(document.body.textContent).not.toMatch(/running application/)
     const note = container.querySelector('[data-note="definition-diverged"]')!
-    expect(note.textContent).toMatch(/That publication was withdrawn, so nothing is running it/)
-    // And the note names the withdrawn publication, not a live one.
+    expect(note.textContent).toMatch(/That publication was withdrawn, so nothing is running it right now/)
+    // It names the withdrawn publication, never a live one.
     expect(note.textContent).toMatch(/withdrawn publication.s definition/)
-    expect(note.textContent).not.toMatch(/published application.s definition/)
-    // The blocker list under Publish carries the same composed sentence, so
-    // the two places cannot say different things.
-    expect(document.querySelector('[data-blocker="definition_moved"]')!.textContent).toMatch(/nothing is running it/)
+    expect(note.textContent).not.toMatch(/live publication.s definition/)
+    // Still advisory, even here: nothing about the drift refuses the publish.
+    expect(screen.queryByText("Publishing is blocked")).toBeNull()
+    expect(consentBox().disabled).toBe(false)
   })
 
-  it("keeps the server's own words when a publication IS live", () => {
+  it("names the live publication when one is live, and never the withdrawn one", () => {
     const snapshot = clone(baseSnapshot)
-    snapshot.blockers = [
-      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
-    ]
+    snapshot.baseline.definition_diverged = true
     setReview(snapshot)
-    render(<EditorApplicationReview {...props} />)
-    expect(screen.getAllByText(/no longer matches the one published with the running application/).length).toBe(2)
+    const { container } = render(<EditorApplicationReview {...props} />)
+    const note = container.querySelector('[data-note="definition-diverged"]')!
+    expect(note.textContent).toMatch(/live publication.s definition/)
+    expect(note.textContent).not.toMatch(/withdrawn/)
+    expect(note.textContent).not.toMatch(/running application/)
     expect(screen.getByText("Publishing replaces the live application and its definition.")).toBeTruthy()
+  })
+
+  it("says nothing about a drift that is not there", () => {
+    const { container } = render(<EditorApplicationReview {...props} />)
+    expect(container.querySelector('[data-note="definition-diverged"]')).toBeNull()
+    expect(screen.queryByText(/Two definitions have drifted apart/)).toBeNull()
   })
 
   it("renders an unknown routine hash as unknown and never as unchanged", () => {

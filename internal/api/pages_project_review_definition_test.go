@@ -136,12 +136,34 @@ const reviewCandidateDefinitionBody = `{
 	"metadata": {"name": "Flotila .201", "slug": "fleet-201"},
 	"spec": {"panels": [
 		{"id": "sluzby", "schema": "status.v1", "title": "Jede to?",
-		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla": "30s", "span": 8},
+		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla": "30s", "span": 8,
+		 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
 		{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
-		 "owner": "crew/engine", "producer": "script/load.sh", "sla": "60s", "span": 4},
+		 "owner": "crew/engine", "producer": "script/load.sh", "sla": "60s", "span": 4,
+		 "actions": [{"id": "a2", "kind": "call", "label": "Run", "routine": "ops-open"}]},
 		{"id": "posadka", "schema": "status.v1", "title": "Kdo ma sluzbu",
 		 "owner": "crew/lookout", "producer": "script/roster.sh", "sla": "90s", "span": 12}
 	]}
+}`
+
+// reviewWithheldRoutineCreateBody is the LIVE page: the same two panels, each
+// with the `call` action its crew authored. The create API takes the parsed
+// spec with SLA as an integer (§11b.3).
+//
+// A routine is named by a panel, and a panel has an owning crew. A viewer who
+// may not read the panel has no business being told which routine it calls,
+// nor whether that routine's definition has moved.
+const reviewWithheldRoutineCreateBody = `{
+	"slug": "fleet-201",
+	"name": "Flotila .201",
+	"panels": [
+		{"id": "sluzby", "schema": "status.v1", "title": "Jede to?",
+		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla_seconds": 30, "span": 8,
+		 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
+		{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
+		 "owner": "crew/engine", "producer": "script/load.sh", "sla_seconds": 60, "span": 4,
+		 "actions": [{"id": "a2", "kind": "call", "label": "Run", "routine": "ops-open"}]}
+	]
 }`
 
 // reviewSealedDefinitionFixture is the two-crew page from the grants suite
@@ -164,8 +186,52 @@ func reviewSealedDefinitionFixture(t *testing.T) (*PageHandler, string, string) 
 	for _, subject := range []string{"spec-editor@example.com", "engineer@example.com"} {
 		pagesGrant(t, h, ws, owner, "fleet-201", `{"subject_type":"user","subject":"`+subject+`","level":"write"}`)
 	}
+	// One routine per crew, and each panel calls its own. `ops-secret` is the
+	// one a reader outside crew/lookout must never learn about from this
+	// endpoint; `ops-open` is the control that proves the filter is not just
+	// dropping every routine.
+	for _, q := range []string{
+		`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-secret', ?, 'ops-secret', 'Secret', '{"steps":[]}', 'h1')`,
+		`INSERT INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash) VALUES ('pl-open', ?, 'ops-open', 'Open', '{"steps":[1]}', 'h2')`,
+	} {
+		if _, err := h.db.Exec(q, ws); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := pagesRequest(t, http.MethodPatch, "/api/v1/pages/fleet-201", ws, owner, "OWNER", reviewWithheldRoutineCreateBody)
+	req.SetPathValue("slug", "fleet-201")
+	rr := httptest.NewRecorder()
+	h.Update(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("attach the call actions to the live page: %d %s", rr.Code, rr.Body.String())
+	}
 	reviewSaveDefinition(t, h, ws, owner, "fleet-201", 0, projectTestSource(), reviewCandidateDefinitionBody)
 	return h, ws, owner
+}
+
+// reviewProtectedStrings is everything about crew/lookout's panel that a
+// reader outside that crew must not be handed — including the slug of the
+// routine only that panel calls, and the association between the two.
+var reviewProtectedStrings = []string{
+	"sluzby", "posadka", "crew/lookout", "Jede to?", "Kdo ma sluzbu",
+	"status.v1", "watch-services.sh", "roster.sh", "ops-secret",
+}
+
+// reviewAssertBodyWithholds scans the WHOLE response body, not the fields the
+// withholding happens to have been applied to.
+//
+// The narrower assertion is what let a leak through: `baseline.definition` and
+// `candidate.definition` were clean while `routines[]` in the same body named
+// the routine only the withheld panel calls, with its digests and its state.
+// An endpoint that withholds must not disclose elsewhere in the same envelope.
+func reviewAssertBodyWithholds(t *testing.T, where, body string, protected []string) {
+	t.Helper()
+	for _, secret := range protected {
+		if strings.Contains(body, secret) {
+			t.Errorf("%s: the response discloses %q to a reader it is withholding that panel from — "+
+				"the whole body, not just the two definition fields: %s", where, secret, body)
+		}
+	}
 }
 
 // TestPageProjectReviewDefinitionsWithholdPanelsTheViewerMayNotSee is the test
@@ -209,14 +275,12 @@ func TestPageProjectReviewDefinitionsWithholdPanelsTheViewerMayNotSee(t *testing
 				"crews this viewer is not in, and the screen has to be able to say its comparison is partial",
 				snapshot.Baseline.ExcludedPanels)
 		}
-		// The leak, named field by field rather than by shape.
-		both := string(snapshot.Baseline.Definition) + string(snapshot.Candidate.Definition)
-		for _, secret := range []string{"status.v1", "metric.v1", "watch-services.sh", "load.sh", "roster.sh", "Jede to?", "Zatizeni", "Kdo ma sluzbu", "crew/lookout", "crew/engine"} {
-			if strings.Contains(both, secret) {
-				t.Errorf("the review snapshot discloses %q to a spec editor entitled to no panel on this page:\n baseline:  %s\n candidate: %s",
-					secret, snapshot.Baseline.Definition, snapshot.Candidate.Definition)
-			}
-		}
+		// The leak, named field by field rather than by shape, and checked
+		// against the WHOLE body: this viewer may read no panel on the page,
+		// so nothing about either crew's panels may appear anywhere in it.
+		reviewAssertBodyWithholds(t, "a spec editor entitled to no panel on this page", w.Body.String(),
+			append(append([]string{}, reviewProtectedStrings...),
+				"metric.v1", "load.sh", "Zatizeni", "crew/engine", "ops-open"))
 		if snapshot.Baseline.DefinitionDigest != digest {
 			t.Errorf("definition_digest = %s, want the digest of the FULL stored document (%s) — the fence "+
 				"compares what the server stores, not what this viewer was shown",
@@ -225,7 +289,14 @@ func TestPageProjectReviewDefinitionsWithholdPanelsTheViewerMayNotSee(t *testing
 	})
 
 	t.Run("a spec editor in one crew gets that panel and only that panel", func(t *testing.T) {
-		_, snapshot := reviewCall(t, h, ws, "engineer", "MEMBER", "fleet-201")
+		w, snapshot := reviewCall(t, h, ws, "engineer", "MEMBER", "fleet-201")
+		// Everything about crew/lookout's panels is out of the body, the
+		// routine only they call included; crew/engine's own is still there.
+		reviewAssertBodyWithholds(t, "a spec editor in crew/engine only", w.Body.String(), reviewProtectedStrings)
+		if !strings.Contains(w.Body.String(), "ops-open") {
+			t.Errorf("the routine crew/engine's own panel calls is missing, so the filter is dropping "+
+				"routines rather than withholding them: %s", w.Body.String())
+		}
 		if snapshot.Candidate == nil {
 			t.Fatal("no candidate to authorize")
 		}
@@ -529,5 +600,201 @@ func TestPageProjectReviewDefinitionsCarryTheAuthoredSLA(t *testing.T) {
 	if seconds, _ := panels[0].(map[string]any)["sla_seconds"].(float64); seconds != 90 {
 		t.Logf("the detail route reports sla_seconds = %v; the point of this test is only that the "+
 			"review no longer reads it", seconds)
+	}
+}
+
+// TestPageProjectReviewRoutinesAreWithheldWithTheirPanel — F2, the leak the
+// withholding work introduced.
+//
+// `reviewRoutines` was fed the raw, unauthorized documents while only the two
+// `definition` fields went through the authorizer. So the same response that
+// said `excluded_panels: 1` and omitted the panel also carried the routine
+// that panel calls, with its published digest, its current digest and whether
+// it had changed — the association and a change oracle on another crew's
+// routine, handed over by the response built to withhold it.
+//
+// The row set is now derived from the AUTHORIZED documents: a routine is
+// served only when a panel that survived withholding declares it.
+func TestPageProjectReviewRoutinesAreWithheldWithTheirPanel(t *testing.T) {
+	h, ws, owner := reviewSealedDefinitionFixture(t)
+
+	t.Run("a reader outside the crew gets neither the routine nor its state", func(t *testing.T) {
+		w, snapshot := reviewCall(t, h, ws, "engineer", "MEMBER", "fleet-201")
+		for _, row := range snapshot.Routines {
+			if row.Routine == "ops-secret" {
+				t.Errorf("routines[] carries the routine only crew/lookout's withheld panel calls, with "+
+					"published=%v current=%v state=%q in_candidate=%v — the association and a change "+
+					"oracle on that crew's routine", row.PublishedDigest, row.CurrentDigest, row.State, row.InCandidate)
+			}
+		}
+		reviewAssertBodyWithholds(t, "the routine rows", w.Body.String(), reviewProtectedStrings)
+		// The control: crew/engine's own routine is still fenced, still
+		// carries its digests, and is still marked for the publish fence.
+		row := reviewRoutineRow(t, snapshot, "ops-open")
+		if !row.InCandidate || row.CurrentDigest == nil {
+			t.Errorf("crew/engine's own routine came back unusable for the fence: %+v", row)
+		}
+	})
+
+	t.Run("the page owner sees both routines", func(t *testing.T) {
+		_, snapshot := reviewCall(t, h, ws, owner, "OWNER", "fleet-201")
+		for _, name := range []string{"ops-secret", "ops-open"} {
+			row := reviewRoutineRow(t, snapshot, name)
+			if !row.InCandidate || row.CurrentDigest == nil {
+				t.Errorf("routine %q is missing or unusable for a viewer entitled to every panel: %+v", name, row)
+			}
+		}
+	})
+
+	// The blocker sentence names the routine, so a routine that resolves for
+	// nobody must not reach a reader who cannot see the panel calling it.
+	t.Run("the routine_unresolved blocker does not name a withheld routine", func(t *testing.T) {
+		if _, err := h.db.Exec(`UPDATE pipelines SET deleted_at='2026-09-11T00:00:00Z' WHERE id='pl-secret'`); err != nil {
+			t.Fatal(err)
+		}
+		w, snapshot := reviewCall(t, h, ws, "engineer", "MEMBER", "fleet-201")
+		if message, ok := reviewBlockers(snapshot)[reviewBlockerRoutineUnresolved]; ok {
+			t.Errorf("routine_unresolved raised for a routine only a withheld panel calls, naming it: %q", message)
+		}
+		reviewAssertBodyWithholds(t, "the unresolved-routine path", w.Body.String(), reviewProtectedStrings)
+
+		// The owner still learns about it, because it is genuinely their
+		// problem: publishing this candidate is refused.
+		_, ownerSnapshot := reviewCall(t, h, ws, owner, "OWNER", "fleet-201")
+		if message := reviewBlockers(ownerSnapshot)[reviewBlockerRoutineUnresolved]; !strings.Contains(message, "ops-secret") {
+			t.Errorf("the owner was not told which routine stopped resolving: %q", message)
+		}
+	})
+}
+
+// TestPageProjectReviewDivergedDefinitionIsAStatementNotARefusal — the dead
+// end a live browser pass walked into three times.
+//
+// When the live Page definition drifts from the one the live publication
+// shipped with, the review used to raise a `definition_moved` blocker. Any
+// blocker disables consent, so publishing was refused — and publishing the
+// candidate is exactly what brings the two documents back into agreement. The
+// screen's advice, "refresh the review", could never help: a refetch reports
+// the same drift. The only escape was the CLI.
+func TestPageProjectReviewDivergedDefinitionIsAStatementNotARefusal(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	first := reviewBuildRevision(t, h, ws, user, 1)
+	zero, one := int64(0), int64(1)
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{
+		BuildID: first, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if _, settled := reviewCall(t, h, ws, user, "OWNER", "health"); settled.Baseline.DefinitionDiverged {
+		t.Fatalf("the definition diverged the moment it was published: %+v", settled.Baseline)
+	}
+
+	// Somebody edits the live Page outside the application flow.
+	if _, err := h.db.Exec(`UPDATE pages SET spec_json=json_set(spec_json,'$.metadata.description','moved') WHERE slug='health'`); err != nil {
+		t.Fatal(err)
+	}
+	// A candidate to publish over it.
+	source := projectTestSource()
+	source.Files[3].Content = "// second revision\n"
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 1, source); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	second := reviewBuildRevision(t, h, ws, user, 2)
+
+	_, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	if !snapshot.Baseline.DefinitionDiverged {
+		t.Fatalf("the drift is not reported at all: %+v", snapshot.Baseline)
+	}
+	if message, ok := reviewBlockers(snapshot)[reviewBlockerDefinitionMoved]; ok {
+		t.Fatalf("the drift is still a blocker, which is what disabled consent: %q", message)
+	}
+	if len(snapshot.Blockers) != 0 {
+		t.Fatalf("a publishable candidate over a diverged definition still carries blockers, so consent stays "+
+			"disabled and the dead end is unchanged: %+v", snapshot.Blockers)
+	}
+
+	// And the action that ends the divergence is available. The fence still
+	// does its job: it checks the CURRENT live digest, which the snapshot
+	// carries.
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{
+		BuildID: second, ExpectedRevision: 2, ExpectedPublication: &one, ReviewedCode: true,
+		ExpectedDefinitionDigest: snapshot.Baseline.DefinitionDigest}); w.Code != 200 {
+		t.Fatalf("publishing over a diverged definition was refused: %d %s — publishing the candidate is "+
+			"what ends the divergence, and refusing it leaves no way out of the editor", w.Code, w.Body.String())
+	}
+	if _, after := reviewCall(t, h, ws, user, "OWNER", "health"); after.Baseline.DefinitionDiverged {
+		t.Errorf("the divergence survived the publication that should have ended it: %+v", after.Baseline)
+	}
+}
+
+// TestPageProjectReviewStaleDefinitionStillTripsTheFence — the other fact,
+// which keeps its name. A base that moves between the render and the click is
+// a stale snapshot, refreshing IS the cure, and the publication is refused
+// with `conflict: "definition"`.
+func TestPageProjectReviewStaleDefinitionStillTripsTheFence(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	build := reviewBuildRevision(t, h, ws, user, 1)
+	reviewed := reviewLiveDigest(t, h, "health")
+	if _, err := h.db.Exec(`UPDATE pages SET spec_json=json_set(spec_json,'$.metadata.description','moved') WHERE slug='health'`); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{
+		BuildID: build, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true,
+		ExpectedDefinitionDigest: reviewed})
+	if w.Code != 409 {
+		t.Fatalf("publish over a definition that moved since the render: %d %s", w.Code, w.Body.String())
+	}
+	if kind, _ := publishConflict(t, w); kind != "definition" {
+		t.Fatalf("conflict = %q, want definition: %s", kind, w.Body.String())
+	}
+}
+
+// TestPageProjectReviewDivergenceAfterAWithdrawalAssertsNothingRunning — the
+// sentence that was false in one state.
+//
+// The blocker used to say the live definition no longer matched "the one
+// published with the RUNNING application". This branch is also reached after a
+// withdrawal, where the same snapshot reports `published: false` — nothing is
+// running — so the client had to compose a truthful replacement for that case.
+// Nothing on the wire asserts it any more.
+func TestPageProjectReviewDivergenceAfterAWithdrawalAssertsNothingRunning(t *testing.T) {
+	h, _, ws, user := reviewFixture(t)
+	if w := projectPut(t, h, ws, user, "OWNER", "health", 0, projectTestSource()); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	build := reviewBuildRevision(t, h, ws, user, 1)
+	zero := int64(0)
+	if w := publishCall(t, h, ws, user, "OWNER", "health", pageProjectPublishRequest{
+		BuildID: build, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if _, err := h.db.Exec(`UPDATE page_project_live SET published=0 WHERE page_id=(SELECT id FROM pages WHERE slug='health')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`UPDATE pages SET spec_json=json_set(spec_json,'$.metadata.description','moved') WHERE slug='health'`); err != nil {
+		t.Fatal(err)
+	}
+
+	w, snapshot := reviewCall(t, h, ws, user, "OWNER", "health")
+	if snapshot.Baseline.Published {
+		t.Fatalf("the publication is still running, so this is not the state under test: %+v", snapshot.Baseline)
+	}
+	if !snapshot.Baseline.DefinitionDiverged {
+		t.Fatalf("the drift is not reported after a withdrawal: %+v", snapshot.Baseline)
+	}
+	for _, blocker := range snapshot.Blockers {
+		if strings.Contains(blocker.Message, "running application") {
+			t.Errorf("blocker %q asserts a running application in a snapshot that says published:false — %q",
+				blocker.Code, blocker.Message)
+		}
+	}
+	if strings.Contains(w.Body.String(), "running application") {
+		t.Errorf("the response asserts a running application while reporting published:false: %s", w.Body.String())
 	}
 }

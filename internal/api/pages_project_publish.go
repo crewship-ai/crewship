@@ -431,23 +431,6 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Rollback publishes a retained artifact over the SAME live definition, so
-	// it is fenced identically: restoring old code against a declaration the
-	// reviewer never saw binds it to panels, producers and routines nobody
-	// approved for it.
-	currentRoutines, unresolvedRoutine, err := pageRoutineDigestsIn(r.Context(), tx, ws, candidate.document)
-	if err != nil {
-		replyInternalError(w, h.logger, "recompute candidate routine definitions", err)
-		return
-	}
-	if unresolvedRoutine != "" {
-		replyError(w, 422, pageUnresolvedRoutineMessage(unresolvedRoutine))
-		return
-	}
-	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
-		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
-		return
-	}
 	// May this publisher make the claim at all.
 	//
 	// `reviewed_code:true` attests that the whole change was reviewed.
@@ -488,8 +471,60 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	// short-circuit above. A replay is re-delivery of a publication that
 	// already committed; refusing it now would turn a delivered success into
 	// a phantom failure and invite a second publication of the same code.
-	if withheld := pageWithheldPanelsBetween(before, candidate.spec, authorizer.visible); withheld.Changed {
+	//
+	// It runs BEFORE the routine fence for two reasons. It is terminal for
+	// this caller, so sending them away to re-review routines first would be
+	// advice they cannot act on. And the routine conflict names routines: a
+	// caller who is about to be refused for a withheld change must not be
+	// handed the slug of a routine only a withheld panel calls on the way
+	// out. The withheld set it computes is also what narrows that fence.
+	withheld := pageWithheldPanelsBetween(before, candidate.spec, authorizer.visible)
+	if withheld.Changed {
 		replyError(w, 403, pageWithheldChangeMessage(withheld.Count()))
+		return
+	}
+	// Rollback publishes a retained artifact over the SAME live definition, so
+	// it is fenced identically: restoring old code against a declaration the
+	// reviewer never saw binds it to panels, producers and routines nobody
+	// approved for it.
+	// The fence's key set is the reviewer's key set, and both are rebuilt from
+	// the AUTHORIZED candidate document.
+	//
+	// It has to be the same document the review offered rows for, or the two
+	// disagree in one of two ways and both are bugs: demand a key the review
+	// withheld and this caller can never publish, whatever they send (and the
+	// 409 names the routine, undoing the withholding on the way out); offer
+	// one the fence does not rebuild and the publication is refused naming a
+	// routine nobody moved.
+	//
+	// So a routine only a withheld panel calls is not fenced by a publisher
+	// who cannot read that panel. That is the same rule as the refusal above
+	// rather than a hole in it: the fence asks the human to attest that a
+	// value has not moved since they reviewed it, and they never reviewed
+	// this one. Everything the panel itself could have changed is already
+	// covered — a withheld panel that moved at all refuses the publication.
+	// An administrator reads every panel, so nothing is dropped for them and
+	// the key set is unchanged.
+	//
+	// checkPageCandidate still records `routine_definitions` for the FULL
+	// document, so the publication's `checks_json` keeps complete provenance;
+	// only what this caller is asked to swear to narrows.
+	fenceDocument, ok := pageAuthorizedDocument(candidate.spec, authorizer.visible, withheld.IDs)
+	if !ok {
+		replyInternalError(w, h.logger, "authorize candidate definition for the routine fence", errors.New("candidate definition could not be authorized"))
+		return
+	}
+	currentRoutines, unresolvedRoutine, err := pageRoutineDigestsIn(r.Context(), tx, ws, fenceDocument)
+	if err != nil {
+		replyInternalError(w, h.logger, "recompute candidate routine definitions", err)
+		return
+	}
+	if unresolvedRoutine != "" {
+		replyError(w, 422, pageUnresolvedRoutineMessage(unresolvedRoutine))
+		return
+	}
+	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
+		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
 		return
 	}
 	// The baseline question is asked LAST, once everything checkable has
