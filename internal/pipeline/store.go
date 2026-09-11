@@ -423,6 +423,20 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
 		return nil, nil
 	}
+	// A trigger carries a preset, and a preset the recipe would refuse at
+	// dispatch must not be storable (#2496). Same function the run path
+	// uses, against the definition THIS save is publishing — so a recipe and
+	// the trigger created alongside it can never disagree from the moment
+	// they land. ErrInvalidTrigger keeps the existing 422 mapping on both
+	// save doors. A definition that no longer parses is left to the
+	// executor to surface rather than blamed on the trigger.
+	if len(trigger.Inputs) > 0 {
+		if dsl, perr := Parse([]byte(in.DefinitionJSON)); perr == nil {
+			if verr := ValidateFormInputs(dsl, trigger.Inputs); verr != nil {
+				return nil, fmt.Errorf("%w: %s", ErrInvalidTrigger, verr.Error())
+			}
+		}
+	}
 	if trigger.Kind == TriggerKindOnce {
 		now := s.now().UTC()
 		if !trigger.FireAt.After(now) || trigger.FireAt.After(now.AddDate(2, 0, 0)) {

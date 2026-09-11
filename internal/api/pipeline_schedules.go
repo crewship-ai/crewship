@@ -197,6 +197,52 @@ func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targ
 // the natural caller — UI fills target_pipeline_slug from the row
 // the user clicks on. ID path is for the CLI (which already has the
 // id from `crewship pipeline get`).
+// gateSchedulePreset refuses a plan whose stored inputs its target routine
+// would refuse at dispatch (#2496). Answers true when it has written the
+// response and the caller must return.
+//
+// Same function the run path uses — pipeline.ValidateFormInputs — deliberately
+// and not a second opinion: a preset that this accepts and the executor then
+// rejects would be worse than no check, because the plan would look healthy in
+// the calendar and fail for the first time at 02:30 with no run to inspect.
+// hasInputForm still decides what carries a contract at all, so a legacy
+// untyped recipe stays exactly as permissive as it is today, and `false`, `0`
+// and an empty list stay answers rather than absences.
+//
+// Pinned plans are validated against the version they name, unpinned ones
+// against HEAD — the recipe each would actually execute. A routine whose
+// definition no longer parses is not held against the plan: the executor
+// surfaces that, and refusing to edit a plan because its target is broken
+// would take away the screen an operator fixes it from.
+func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Request, pipelineID string, version *int, inputs map[string]any) bool {
+	if h.store == nil || pipelineID == "" {
+		return false
+	}
+	definition := ""
+	if version != nil {
+		v, err := h.store.GetVersion(r.Context(), pipelineID, *version)
+		if err != nil {
+			return false
+		}
+		definition = v.DefinitionJSON
+	} else {
+		p, err := h.store.GetByID(r.Context(), pipelineID)
+		if err != nil {
+			return false
+		}
+		definition = p.DefinitionJSON
+	}
+	dsl, err := pipeline.Parse([]byte(definition))
+	if err != nil {
+		return false
+	}
+	if verr := pipeline.ValidateFormInputs(dsl, inputs); verr != nil {
+		replyError(w, http.StatusBadRequest, verr.Error())
+		return true
+	}
+	return false
+}
+
 func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
 		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
@@ -251,6 +297,15 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 			replyError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+
+	if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, body.Inputs) {
+		return
+	}
+	// The wake gate carries its own preset for its own routine, and fails
+	// the same way at the same 02:30 if that preset does not fit.
+	if wakeID != "" && h.gateSchedulePreset(w, r, wakeID, nil, body.WakeInputs) {
+		return
 	}
 
 	maxFailures := 0
@@ -483,6 +538,13 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	catchupPolicy := existing.CatchupPolicy
 	if body.CatchupPolicy != "" {
 		catchupPolicy = body.CatchupPolicy
+	}
+
+	if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
+		return
+	}
+	if wakeID != "" && h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
+		return
 	}
 
 	maxFailures := 0
