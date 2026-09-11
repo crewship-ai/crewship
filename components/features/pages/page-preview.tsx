@@ -1,16 +1,27 @@
 "use client"
 
+/**
+ * The sandboxed frame a Page application runs in, and nothing else.
+ *
+ * This file used to also export a `PagePreviewDialog` — the "App preview"
+ * toolbar button's destination, which additionally carried an unfenced
+ * publish. Both the button and that publish path are gone: the candidate's
+ * preview is a workspace inside the editor (`editor/review-preview.tsx`) and
+ * publishing happens on the review screen behind a consent bound to the
+ * digests the reviewer was shown. The frame's own security properties —
+ * opaque sandbox, no same-origin runtime without the server's development
+ * flag, no execution in an unsupported browser, and unmounting rather than
+ * leaving code running when authorization fails — are asserted against the
+ * real frame in `editor/__tests__/review-preview.test.tsx`.
+ */
+
 import { supportsPageApplications, pageBrowserRequirement } from "@/lib/pages/runtime-support"
-import { publicationReceiptMessage } from "@/lib/pages/publication-receipt"
 
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import { useWorkspacePagesTheme, refreshWorkspaceSettings } from "@/hooks/use-workspace"
 import { normalizePageTheme } from "@/lib/pages/theme"
-import { usePageApplication } from "@/hooks/use-page-application"
 import { useEffect, useRef, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { usePagePreview, type PreviewArtifact } from "@/hooks/use-page-preview"
+import type { PreviewArtifact } from "@/hooks/use-page-preview"
 import type { WirePage } from "@/hooks/use-pages"
 import { validatePreview, previewSnapshot, PreviewSnapshotChannel, type PageRequestHandler } from "@/lib/pages/preview-runtime"
 
@@ -77,48 +88,4 @@ export function PagePreviewFrame({ workspaceId, artifact, page, runtimeURL, deve
     send(latest.current)
   }} />
   </div>
-}
-
-export function PagePreviewDialog({ workspaceId, slug, page, onClose }: { workspaceId: string; slug: string; page: WirePage | null; onClose: () => void }) {
-  const { query, build } = usePagePreview(workspaceId, slug)
-  const application = usePageApplication(workspaceId, slug)
-  const [reviewed, setReviewed] = useState(false)
-  const data = query.data
-  const job = data?.build
-  useEffect(() => setReviewed(false), [job?.id, application.query.data?.publication_version, application.query.data?.publication?.version])
-  const running = build.isPending || job?.state === "running"
-  const [stopped, setStopped] = useState(false)
-  return <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-    <DialogContent className="flex h-[90vh] max-w-[96vw] flex-col sm:max-w-[1200px]">
-      <DialogHeader>
-        <DialogTitle>Application preview</DialogTitle>
-        <DialogDescription>Try the draft using the panels you can read on this Page. Opening a preview does not publish it.</DialogDescription>
-      </DialogHeader>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={!data || running || query.isError} onClick={() => { setStopped(false); build.mutate(data!.revision) }}>{running ? "Building…" : "Build preview"}</Button>
-        <Button variant="outline" onClick={() => void query.refetch()}>Check status</Button>
-        {data?.artifact && !stopped && <Button variant="outline" onClick={() => setStopped(true)}>Stop preview</Button>}
-        {data && <span className="text-sm text-muted-foreground">Draft {data.revision}{job ? ` · Build ${job.source_revision}: ${job.state}` : " · Not built yet"}</span>}
-      </div>
-      {(query.error || build.error) && <p role="alert" className="text-sm text-destructive">{query.error?.message ?? build.error?.message}</p>}
-      {(application.check.error || application.publish.error) && <p role="alert" className="text-sm text-destructive">{application.check.error?.message ?? application.publish.error?.message}</p>}
-      {application.check.isSuccess && <p role="status" className="text-sm">Source, artifact and binding checks passed. Review the application behavior before publishing.</p>}
-      {application.publish.isSuccess && <p role="status" className="text-sm">{publicationReceiptMessage(application.publish.data)}</p>}
-      {job?.state === "ready" && data && <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" disabled={application.check.isPending} onClick={() => application.check.mutate({ build: job.id, revision: job.source_revision })}>Check application</Button>
-        {application.query.data?.can_publish && <>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={reviewed} onChange={event => setReviewed(event.target.checked)} />I reviewed this code and its behavior.</label>
-          <Button disabled={!reviewed || application.publish.isPending || application.query.isError || job.source_revision !== data.revision} onClick={() => application.publish.mutate({ build_id: job.id, expected_revision: data.revision, expected_publication: application.query.data?.publication_version ?? application.query.data?.publication?.version ?? 0, reviewed_code: reviewed })}>Publish application</Button>
-        </>}
-      </div>}
-      {job?.error && <pre role="alert" className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">{job.error}</pre>}
-      {job && data && job.source_revision !== data.revision && <p className="text-sm text-muted-foreground">This preview uses an older draft. Build again to see your latest changes.</p>}
-      {data && !data.runtime_url && <p role="alert" className="text-sm text-muted-foreground">An administrator needs to configure the application preview domain.</p>}
-      <div className="min-h-0 flex-1">
-        {data?.artifact && data.runtime_url && job?.state === "ready" && page && !query.isError && !stopped
-          ? <PagePreviewFrame workspaceId={workspaceId} key={`${workspaceId}:${slug}:${job.id}`} artifact={data.artifact} page={page} runtimeURL={data.runtime_url} developmentSameOrigin={data.development_same_origin === true} />
-          : <div className="flex h-full items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">{running ? "Preparing your application…" : stopped ? "Preview stopped." : "Your application preview will appear here."}</div>}
-      </div>
-    </DialogContent>
-  </Dialog>
 }

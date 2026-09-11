@@ -246,6 +246,8 @@ export function useArrivalFlash(signature: string | null, durationMs = PANEL_ARR
 }
 
 export interface PageViewProps {
+  /** Where the editor hands focus back when it closes. */
+  headingRef?: React.Ref<HTMLHeadingElement>
   page: PageRecord | null
   slug: string
   loading: boolean
@@ -272,6 +274,7 @@ export interface PageViewProps {
 }
 
 export function PageView({
+  headingRef,
   page,
   slug,
   loading,
@@ -388,6 +391,7 @@ export function PageView({
       <div className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
           <PageBody
+            headingRef={headingRef}
             page={page}
             slug={slug}
             loading={loading}
@@ -406,6 +410,7 @@ export function PageView({
 }
 
 function PageBody({
+  headingRef,
   page,
   slug,
   loading,
@@ -452,15 +457,6 @@ function PageBody({
   if (!page) return null
 
   const panels = page.panels ?? []
-  if (panels.length === 0) {
-    return (
-      <EmptyState
-        icon={CONCEPT_ICON.pages}
-        title="This page declares no panels"
-        description={`A page with no panel has nothing to render and nothing to push to. Add a panel to the spec and save it with crewship page update ${slug} --file page.yaml.`}
-      />
-    )
-  }
 
   // The freshness summary is computed over the whole PAGE — every panel the
   // server sent, on every tab — and never over the tab in view. That is the
@@ -475,7 +471,22 @@ function PageBody({
     <>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold tracking-tight">{page.name}</h1>
+          {/* Focusable so the editor has somewhere real to hand focus back
+              to on the way out: leaving unmounts the button that had it, and
+              a keyboard user was landing on `<body>`. Addressed by a ref the
+              shell passes down rather than by an id — two page views can
+              share a document (see `page-tabs.test.tsx`) and a fixed id
+              collides. Programmatic focus only (`tabIndex={-1}`), so it adds
+              no stop to the ordinary tab order, and `:focus` rather than
+              `:focus-visible` because the latter does not reliably match a
+              programmatic focus, which is the only kind this ever gets. */}
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="truncate rounded-sm text-lg font-semibold tracking-tight outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          >
+            {page.name}
+          </h1>
           <p className="text-xs text-muted-foreground">
             {panels.length} {panels.length === 1 ? "panel" : "panels"}
             {page.description ? ` · ${page.description}` : ""}
@@ -493,7 +504,13 @@ function PageBody({
         )}
       </div>
 
-      <PanelGrid
+      {panels.length === 0 ? (
+        <EmptyState
+          icon={CONCEPT_ICON.pages}
+          title="This page declares no panels"
+          description={`A page with no panel has nothing to render and nothing to push to. Add a panel to the spec and save it with crewship page update ${slug} --file page.yaml.`}
+        />
+      ) : <PanelGrid
         panels={panels}
         slug={slug}
         now={now}
@@ -501,7 +518,7 @@ function PageBody({
         tabs={tabs}
         activeTab={activeTab}
         tabIdScope={tabIdScope}
-      />
+      />}
     </>
   )
 }

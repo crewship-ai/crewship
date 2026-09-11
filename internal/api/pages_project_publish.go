@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,7 +22,150 @@ type pageProjectPublishRequest struct {
 	ExpectedPublication *int64 `json:"expected_publication" yaml:"expected_publication"`
 	ReviewedCode        bool   `json:"reviewed_code" yaml:"reviewed_code"`
 	RollbackVersion     int64  `json:"rollback_version,omitempty" yaml:"rollback_version,omitempty"`
+	// The fence: the two bases the human actually reviewed.
+	//
+	// expected_publication already fences the publication counter and the
+	// draft CAS already fences the source revision, but neither says anything
+	// about the DECLARATION the reviewer read. Another writer restoring a
+	// panel version, or a routine definition changing under a `call` action,
+	// moves what this publication will bind to without moving either counter.
+	// Both are required: an optional fence is a fence the caller forgets, and
+	// the point of the review snapshot is that a refetch at publish time
+	// cannot supply this property.
+	ExpectedDefinitionDigest string            `json:"expected_definition_digest" yaml:"expected_definition_digest"`
+	ExpectedRoutineDigests   map[string]string `json:"expected_routine_digests" yaml:"expected_routine_digests"`
+	// AcknowledgedUnavailableBaseline says the publisher knows the live
+	// publication's retained source cannot be read back, and is publishing
+	// without comparing the candidate against what is running.
+	//
+	// The review screen refuses this case (`baseline_unavailable`), and a gate
+	// only the browser enforces is not a gate: a scripted caller published
+	// straight past it. An unconditional server-side block would be worse —
+	// retention and compaction legitimately drop old checkpoints, so a
+	// workspace whose history was reclaimed could not publish a sound
+	// candidate at all. So the server refuses by default and takes an explicit
+	// statement instead of assuming one (docs/prd/pages-settings-editor-review-
+	// proposal-2026-09-10.md §3, "Chybějící historie": the alternative to full
+	// review is stated, never inferred).
+	//
+	// What it proves: somebody said, on this request, that there was no
+	// comparison. What it does NOT prove: anything about the candidate. The
+	// candidate's own integrity is checked in full either way
+	// (checkPageCandidate), and the answer is recorded in checks_json so the
+	// receipt says which publications shipped without a diff basis.
+	AcknowledgedUnavailableBaseline bool `json:"acknowledged_unavailable_baseline" yaml:"acknowledged_unavailable_baseline"`
 }
+
+// replyPublishConflict writes a 409 that names WHICH base moved.
+//
+// "Something changed; reload" leaves the reviewer to guess whether to re-read
+// the diff, the declaration or the routine scripts. The four kinds mirror
+// PublishConflictKind in lib/pages/editor-contract.ts.
+func replyPublishConflict(w http.ResponseWriter, msg, kind string, routines []string) {
+	body := map[string]any{"error": msg, "conflict": kind}
+	if len(routines) > 0 {
+		body["routines"] = routines
+	}
+	writeJSON(w, 409, body)
+}
+
+// validHexDigest accepts exactly what sha256 hex output is: 64 lowercase hex
+// bytes. An uppercase or truncated digest is a caller bug, not a conflict, so
+// it is a 400 and never a silent pass.
+func validHexDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// pageRoutineDigestsIn records the routine definitions observed during review.
+// These hashes are provenance, not a promise to freeze routine scripts or
+// execution.
+//
+// It takes an explicit querier so the publish fence can recompute the
+// candidate's digests INSIDE its transaction rather than from a snapshot taken
+// before the transaction opened — which is the difference between fencing the
+// publication and describing it. The pre-publication check passes h.db and
+// gets the same answer through the same code, so the two can never drift.
+// A routine the candidate calls but this workspace no longer has comes back as
+// `unresolved` rather than as an error: it is a reviewable fact about the
+// candidate, not a storage failure, and the caller owes the human a sentence
+// naming it. Only a real query failure comes back as err.
+func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc *pages.Document) (map[string]string, string, error) {
+	result := map[string]string{}
+	for _, panel := range doc.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind != pages.ActionCall || result[action.Routine] != "" {
+				continue
+			}
+			var definition string
+			err := q.QueryRowContext(ctx, `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, action.Routine).Scan(&definition)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, action.Routine, nil
+			}
+			if err != nil {
+				return nil, "", fmt.Errorf("read action routine %q: %w", action.Routine, err)
+			}
+			result[action.Routine] = pageRoutineDigest(definition)
+		}
+	}
+	return result, "", nil
+}
+
+// pageUnresolvedRoutineMessage is the sentence for a routine that vanishes
+// inside the publication's own window, and only that window.
+//
+// It is NOT what a caller gets for a routine that was already gone. The
+// authoring gate runs first: checkPageCandidate → resolveReferences →
+// resolveActionRoutinesIn (pages_actions.go) issues the byte-identical SELECT
+// and answers 400 with its own sentence, so a candidate calling a deleted
+// routine is refused there — measured, on both `check` and `publish`. The
+// pre-transaction digest pass below can therefore only reach this message if
+// the routine disappears BETWEEN those two statements, and the in-transaction
+// pass if it disappears between the candidate check and the transaction. Both
+// are narrow races rather than dead code, which is why the branches stay.
+//
+// That 400 carries no `conflict` discriminator, so a genuinely concurrent
+// deletion arrives as a plain 400 that PublishConflictKind cannot route. A
+// recorded limit, not a defect of this message: giving it one is a wire
+// change to a status the authoring gate has always returned.
+//
+// `sql: no rows in result set` used to reach the wire through err.Error(); a
+// driver string is not an API contract, and it does not tell the reader which
+// routine to go and fix.
+func pageUnresolvedRoutineMessage(routine string) string {
+	return fmt.Sprintf("This candidate has an action calling routine %q, which no longer exists in this workspace; restore the routine or remove the action before publishing.", routine)
+}
+
+type pageRowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// movedRoutines names every routine whose digest the reviewer would not
+// recognise: added, removed, or changed. Sorted so the message is stable.
+func movedRoutines(expected, current map[string]string) []string {
+	moved := []string{}
+	for name, digest := range current {
+		if expected[name] != digest {
+			moved = append(moved, name)
+		}
+	}
+	for name := range expected {
+		if _, ok := current[name]; !ok {
+			moved = append(moved, name)
+		}
+	}
+	sort.Strings(moved)
+	return moved
+}
+
 type pagePublication struct {
 	Version        int64  `json:"version"`
 	BuildID        string `json:"build_id"`
@@ -38,6 +183,9 @@ type checkedPageBuild struct {
 	report   map[string]any
 	resolved map[string]resolvedPanel
 	gates    *gatePlan
+	// authorizer is the caller's standing, resolved once here and reused by
+	// the publish fence so the check and the publication ask one question.
+	authorizer pageDefinitionAuthorizer
 }
 
 func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, build string, revision int64) (*checkedPageBuild, bool) {
@@ -88,21 +236,52 @@ func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request,
 		replyError(w, 422, err.Error())
 		return nil, false
 	}
-	resolved, ok := h.resolveReferences(w, r, WorkspaceIDFromContext(r.Context()), &doc)
-	if !ok {
-		return nil, false
-	}
-	gates, ok := h.resolveGates(w, r, WorkspaceIDFromContext(r.Context()), &doc)
-	if !ok {
-		return nil, false
-	}
-	routines, err := h.pageRoutineDigests(r.Context(), WorkspaceIDFromContext(r.Context()), &doc)
+	// Full validation of the candidate runs for everyone, on the whole
+	// document. What differs per caller is only whether a refusal may NAME
+	// what failed: a reference on a panel this caller may not read is refused
+	// with the neutral 403, not with a sentence carrying the panel, the
+	// action and the routine. That decision needs the caller's standing and
+	// the live definition (to say whether the withheld part is what this
+	// candidate changes), so both are read here, ahead of any resolver.
+	ws := WorkspaceIDFromContext(r.Context())
+	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), ws)
 	if err != nil {
-		replyError(w, 422, err.Error())
+		replyInternalError(w, h.logger, "resolve page definition authorization", err)
+		return nil, false
+	}
+	var liveSpec string
+	if err := h.db.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&liveSpec); err != nil {
+		replyInternalError(w, h.logger, "read live Page definition", err)
+		return nil, false
+	}
+	resolved, err := h.resolvePanelReferences(r.Context(), ws, &doc)
+	if err != nil {
+		h.replyCandidateResolution(w, "resolve candidate references", err, authorizer, liveSpec, spec)
+		return nil, false
+	}
+	gates, err := h.resolveGatePlan(r.Context(), ws, &doc)
+	if err != nil {
+		h.replyCandidateResolution(w, "resolve candidate gates", err, authorizer, liveSpec, spec)
+		return nil, false
+	}
+	routines, unresolved, err := pageRoutineDigestsIn(r.Context(), h.db, ws, &doc)
+	if err != nil {
+		replyInternalError(w, h.logger, "read candidate routine definitions", err)
+		return nil, false
+	}
+	if unresolved != "" {
+		// Only reachable when a routine vanishes between the reference check
+		// above and this digest pass. The sentence names the routine, so the
+		// same question is asked of it: may this caller be told?
+		if !pageRoutineVisibleTo(&doc, unresolved, authorizer.visible) {
+			replyError(w, http.StatusForbidden, pageWithheldValidationMessage(pageWithheldPanelsBetween(liveSpec, spec, authorizer.visible).Count()))
+			return nil, false
+		}
+		replyError(w, 422, pageUnresolvedRoutineMessage(unresolved))
 		return nil, false
 	}
 	report := map[string]any{"routine_definitions": routines, "routine_revision_pinned": false, "source_integrity": "pass", "artifact_integrity": "pass", "typecheck": "pass", "build": "pass", "bindings": "pass", "toolchain": artifact.Toolchain, "browser_review": "required", "security_review": "required"}
-	return &checkedPageBuild{record: row, spec: spec, document: &doc, artifact: artifact, report: report, resolved: resolved, gates: gates}, true
+	return &checkedPageBuild{record: row, spec: spec, document: &doc, artifact: artifact, report: report, resolved: resolved, gates: gates, authorizer: authorizer}, true
 }
 func (h *PageHandler) CheckProject(w http.ResponseWriter, r *http.Request) {
 	rec, ok := h.projectPage(w, r)
@@ -149,7 +328,11 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "Publishing requires Page ownership or workspace administration")
 		return
 	}
-	raw, ok := readCapped(w, r, 2048, "Page publication")
+	// 32 KiB, not the previous 2 KiB: expected_routine_digests carries one
+	// 64-hex digest per distinct `call` routine, and a Page may declare
+	// MaxPanelsPerPage (24) x MaxActionsPerPanel (6) = 144 of them with
+	// 64-byte slugs — about 19 KiB of map alone, before the fixed fields.
+	raw, ok := readCapped(w, r, 32<<10, "Page publication")
 	if !ok {
 		return
 	}
@@ -157,6 +340,21 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	if err := pages.DecodeProjectJSON(raw, &req); err != nil || req.ExpectedPublication == nil || *req.ExpectedPublication < 0 || !req.ReviewedCode || req.RollbackVersion < 0 {
 		replyError(w, 400, "expected_publication and reviewed_code=true are required")
 		return
+	}
+	// Shape only. The comparison itself happens inside the transaction below.
+	if !validHexDigest(req.ExpectedDefinitionDigest) {
+		replyError(w, 400, "expected_definition_digest must be the 64-character lowercase sha256 of the reviewed Page definition")
+		return
+	}
+	if req.ExpectedRoutineDigests == nil {
+		replyError(w, 400, "expected_routine_digests is required; send {} when the reviewed candidate declares no call actions")
+		return
+	}
+	for routine, digest := range req.ExpectedRoutineDigests {
+		if !validHexDigest(digest) {
+			replyError(w, 400, "expected_routine_digests["+routine+"] must be a 64-character lowercase sha256 digest")
+			return
+		}
 	}
 	if req.RollbackVersion > 0 {
 		if req.BuildID != "" || req.ExpectedRevision != 0 {
@@ -199,25 +397,55 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var before string
-	if err := h.db.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&before); err != nil {
-		replyInternalError(w, h.logger, "read current publication definition", err)
-		return
-	}
 	shapes, err := h.livePanelShapes(r.Context(), rec.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read live panel shapes", err)
 		return
 	}
 	dim := panelsToDim(candidate.document, candidate.resolved, shapes)
+	// This caller's standing and the crew directory, resolved by
+	// checkPageCandidate before the transaction opens. Who this publisher is
+	// and which crews exist are not part of the window the transaction
+	// protects — that window is the live definition the withheld check below
+	// reads and the write is conditioned on — and reading them on another
+	// connection inside the transaction would be the only cross-connection
+	// read in it.
+	authorizer := candidate.authorizer
 	now := h.evaluator().Now().UTC().Format(time.RFC3339Nano)
-	report, _ := json.Marshal(candidate.report)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin Page publish", err)
 		return
 	}
 	defer tx.Rollback()
+	// The fence, before any write and inside the transaction that will do the
+	// writing. Reading `before` here rather than earlier in the request is the
+	// point: the pre-existing `WHERE spec_json=?` CAS only fenced the window
+	// between this read and its own write, never the window since review.
+	//
+	// It runs AFTER the idempotent-retry short-circuit above, deliberately. An
+	// exact retry is re-delivery of a request that already committed; failing
+	// it because the world moved on afterwards would turn a delivered success
+	// into a phantom 409 and invite a second publication of the same code. The
+	// receipt records what happened, and the fence guards what is about to.
+	var before string
+	if err := tx.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&before); err != nil {
+		replyInternalError(w, h.logger, "read current publication definition", err)
+		return
+	}
+	if digest := pageDefinitionDigest(before); digest != req.ExpectedDefinitionDigest {
+		replyPublishConflict(w, "The live Page definition changed since this candidate was reviewed; review the current definition before publishing", "definition", nil)
+		return
+	}
+	// The draft CAS runs BEFORE the routine fence, not after.
+	//
+	// When a caller publishes a revision the draft has since moved past, both
+	// checks fail — but for one reason, and only one of them names it. The
+	// routine map was built for whichever document the caller believed was
+	// current, so comparing it against THIS candidate's routines answers
+	// `conflict:"routines"` naming routines nobody touched. Checking the draft
+	// first lets the accurate `conflict:"draft"` win, and the caller rebuilds
+	// against the revision that actually exists.
 	if req.RollbackVersion == 0 {
 		var revision int64
 		var commit string
@@ -226,14 +454,127 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if revision != req.ExpectedRevision || commit != candidate.record.GitCommit {
-			replyError(w, 409, "Draft changed; build and review the current revision")
+			replyPublishConflict(w, "Draft changed; build and review the current revision", "draft", nil)
 			return
 		}
 	}
+	// May this publisher make the claim at all.
+	//
+	// `reviewed_code:true` attests that the whole change was reviewed.
+	// Publishing needs mayAdministerGrants — the manage role OR Page
+	// ownership — while SEEING a panel needs canSeePanel — the manage role OR
+	// membership of that panel's owning crew. A Page owner who is not a
+	// workspace admin therefore may publish a Page whose panels include some
+	// they cannot read, and until now the server accepted their attestation
+	// over a change they could not have read. Nothing leaked and nothing
+	// bypassed authorization: the operation was always theirs to perform.
+	// What was wrong was the truthfulness of the claim about what was
+	// reviewed, and those are separate things.
+	//
+	// So it is a 403 and not a 409, and it carries no `conflict` kind: there
+	// is no value to re-review and no refetch that changes the answer. For
+	// the same reason there is no acknowledgement flag beside
+	// acknowledged_unavailable_baseline — that one says "I know nobody made
+	// this comparison", this one would say "I know I am not allowed to see
+	// what I am signing for", which is not a thing a publisher may waive.
+	// A workspace admin sees every panel, so this never fires for them.
+	//
+	// It reads `before` — the live definition read by THIS transaction, and
+	// the same value the write below is conditioned on — against
+	// `candidate.spec`, the document about to replace it on BOTH paths: for a
+	// rollback, checkPageCandidate resolved it from the retained
+	// publication's own source revision and verified it against the archived
+	// checkpoint, so a restored version is compared against exactly what it
+	// would make live.
+	//
+	// `candidate.spec` was read before this transaction opened, which is
+	// sound here for a reason worth stating rather than assuming: revision
+	// and publication rows are append-only and never rewritten, so it is an
+	// immutable snapshot, and the draft CAS above has already refused a
+	// revision that moved. The only side that can move underneath is the live
+	// definition, and that one is read here and CAS-guarded on write.
+	//
+	// Like every other fence here it runs AFTER the idempotent-retry
+	// short-circuit above. A replay is re-delivery of a publication that
+	// already committed; refusing it now would turn a delivered success into
+	// a phantom failure and invite a second publication of the same code.
+	//
+	// It runs BEFORE the routine fence for two reasons. It is terminal for
+	// this caller, so sending them away to re-review routines first would be
+	// advice they cannot act on. And the routine conflict names routines: a
+	// caller who is about to be refused for a withheld change must not be
+	// handed the slug of a routine only a withheld panel calls on the way
+	// out. The withheld set it computes is also what narrows that fence.
+	withheld := pageWithheldPanelsBetween(before, candidate.spec, authorizer.visible)
+	if withheld.Changed {
+		replyError(w, 403, pageWithheldChangeMessage(withheld.Count()))
+		return
+	}
+	// Rollback publishes a retained artifact over the SAME live definition, so
+	// it is fenced identically: restoring old code against a declaration the
+	// reviewer never saw binds it to panels, producers and routines nobody
+	// approved for it.
+	// The fence's key set is the reviewer's key set, and both are rebuilt from
+	// the AUTHORIZED candidate document.
+	//
+	// It has to be the same document the review offered rows for, or the two
+	// disagree in one of two ways and both are bugs: demand a key the review
+	// withheld and this caller can never publish, whatever they send (and the
+	// 409 names the routine, undoing the withholding on the way out); offer
+	// one the fence does not rebuild and the publication is refused naming a
+	// routine nobody moved.
+	//
+	// So a routine only a withheld panel calls is not fenced by a publisher
+	// who cannot read that panel. That is the same rule as the refusal above
+	// rather than a hole in it: the fence asks the human to attest that a
+	// value has not moved since they reviewed it, and they never reviewed
+	// this one. Everything the panel itself could have changed is already
+	// covered — a withheld panel that moved at all refuses the publication.
+	// An administrator reads every panel, so nothing is dropped for them and
+	// the key set is unchanged.
+	//
+	// checkPageCandidate still records `routine_definitions` for the FULL
+	// document, so the publication's `checks_json` keeps complete provenance;
+	// only what this caller is asked to swear to narrows.
+	fenceDocument, ok := pageAuthorizedDocument(candidate.spec, authorizer.visible, withheld.IDs)
+	if !ok {
+		replyInternalError(w, h.logger, "authorize candidate definition for the routine fence", errors.New("candidate definition could not be authorized"))
+		return
+	}
+	currentRoutines, unresolvedRoutine, err := pageRoutineDigestsIn(r.Context(), tx, ws, fenceDocument)
+	if err != nil {
+		replyInternalError(w, h.logger, "recompute candidate routine definitions", err)
+		return
+	}
+	if unresolvedRoutine != "" {
+		replyError(w, 422, pageUnresolvedRoutineMessage(unresolvedRoutine))
+		return
+	}
+	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
+		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
+		return
+	}
+	// The baseline question is asked LAST, once everything checkable has
+	// checked out: it is not "is this candidate sound" — that is settled — but
+	// "will this publication be made without anyone having compared it with
+	// what is running". Asking it first would make a caller acknowledge a
+	// missing diff for a publication that was going to be refused anyway.
+	baseline, ok := h.publishBaselineState(w, r, tx, rec)
+	if !ok {
+		return
+	}
+	if baseline.reason != "" && !req.AcknowledgedUnavailableBaseline {
+		// The reason carries a tool's own diagnostic, which can be multi-line;
+		// collapse it so the refusal reads as one sentence.
+		replyPublishConflict(w, "The live publication's retained source cannot be read back, so this candidate cannot be compared with what is running: "+strings.Join(strings.Fields(baseline.reason), " ")+" Send acknowledged_unavailable_baseline=true to publish without that comparison", "baseline", nil)
+		return
+	}
+	candidate.report["baseline_source"] = baseline.state(req.AcknowledgedUnavailableBaseline)
+	report, _ := json.Marshal(candidate.report)
 	version := *req.ExpectedPublication + 1
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO page_project_publications(page_id,version,build_id,source_revision,source_digest,git_commit,artifact_digest,spec_json,checks_json,actor_user_id,created_at,rollback_of) VALUES(?,?,?,?,?,?,?,?,?,?,?,NULLIF(?,0))`, rec.ID, version, candidate.record.BuildID, candidate.record.SourceRevision, candidate.record.SourceDigest, candidate.record.GitCommit, candidate.record.ArtifactDigest, candidate.spec, string(report), user.ID, now, req.RollbackVersion); err != nil {
 		if isUniqueViolation(err) {
-			replyError(w, 409, "Publication changed; reload before publishing")
+			replyPublishConflict(w, "Publication changed; reload before publishing", "publication", nil)
 		} else {
 			replyInternalError(w, h.logger, "record Page publication", err)
 		}
@@ -246,13 +587,13 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := res.RowsAffected()
 	if err != nil || n != 1 {
-		replyError(w, 409, "Publication changed; reload before publishing")
+		replyPublishConflict(w, "Publication changed; reload before publishing", "publication", nil)
 		return
 	}
 	if *req.ExpectedPublication > 0 {
 		var prior int
 		if err := tx.QueryRowContext(r.Context(), `SELECT count(*) FROM page_project_publications WHERE page_id=? AND version=?`, rec.ID, *req.ExpectedPublication).Scan(&prior); err != nil || prior != 1 {
-			replyError(w, 409, "Expected publication does not exist")
+			replyPublishConflict(w, "Expected publication does not exist", "publication", nil)
 			return
 		}
 	}
@@ -263,7 +604,7 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err = res.RowsAffected()
 	if err != nil || n != 1 {
-		replyError(w, 409, "Page definition changed; review again")
+		replyPublishConflict(w, "Page definition changed; review again", "definition", nil)
 		return
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, candidate.document, candidate.resolved, now); err != nil {
@@ -301,6 +642,57 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	candidate.record.CreatedAt = now
 	w.Header().Set("Cache-Control", "no-store")
 	h.writePublicationReceipt(w, r, rec.ID, candidate.record, false)
+}
+
+// pageBaselineState is what the publishing transaction could establish about
+// the source the reviewer would have diffed against.
+type pageBaselineState struct {
+	initial bool
+	// reason is empty when the retained source read back, and a sentence
+	// otherwise. An initial publication has no prior source and is not a
+	// missing one: it leaves reason empty and is never refused.
+	reason string
+}
+
+func (b pageBaselineState) state(acknowledged bool) string {
+	switch {
+	case b.initial:
+		return "initial_publication"
+	case b.reason == "":
+		return "verified"
+	case acknowledged:
+		return "unavailable_acknowledged"
+	}
+	return "unavailable"
+}
+
+// publishBaselineState answers the same question reviewBaselineSource answers
+// for the review screen, from inside the publishing transaction, so the two
+// cannot disagree about the same Page at the same moment.
+func (h *PageHandler) publishBaselineState(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord) (pageBaselineState, bool) {
+	ctx := r.Context()
+	var publications int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_project_publications WHERE page_id=?`, rec.ID).Scan(&publications); err != nil {
+		replyInternalError(w, h.logger, "count publications for the baseline check", err)
+		return pageBaselineState{}, false
+	}
+	if publications == 0 {
+		return pageBaselineState{initial: true}, true
+	}
+	var commit, spec string
+	err := tx.QueryRowContext(ctx, `SELECT p.git_commit,p.spec_json FROM page_project_live l JOIN page_project_publications p ON p.page_id=l.page_id AND p.version=l.version WHERE l.page_id=?`, rec.ID).Scan(&commit, &spec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return pageBaselineState{reason: "This Page has publication history but no live publication pointer, so there is no retained application source to compare against."}, true
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read the live publication for the baseline check", err)
+		return pageBaselineState{}, false
+	}
+	available, reason := h.reviewBaselineSource(ctx, WorkspaceIDFromContext(ctx), rec.ID, commit, spec)
+	if available {
+		return pageBaselineState{}, true
+	}
+	return pageBaselineState{reason: *reason}, true
 }
 
 // A receipt records a completed operation, not a promise that its version is still live.
