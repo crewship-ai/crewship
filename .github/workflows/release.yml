@@ -2,7 +2,7 @@ name: Release
 'on':
   push:
     tags:
-    - v*
+      - v*
 permissions:
   contents: read
 concurrency:
@@ -21,134 +21,135 @@ jobs:
       contents: read
       actions: read
     steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        fetch-depth: 0
-        persist-credentials: false
-    - name: Require verified main ancestry and checks
-      env:
-        GH_TOKEN: ${{ github.token }}
-        REPO: ${{ github.repository }}
-      run: |
-        set -euo pipefail
-        [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
-        git merge-base --is-ancestor HEAD origin/main
-        python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require verified main ancestry and checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          git merge-base --is-ancestor HEAD origin/main
+          python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
   release:
     name: Build & Release
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        fetch-depth: 0
-    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: pnpm
-    - run: pnpm install --frozen-lockfile
-    - name: Generate Prisma Client
-      run: pnpm db:generate
-      env:
-        DATABASE_URL: file:./dev.db
-    - name: Resolve release tag
-      id: meta
-      run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-    - name: Build Next.js static export
-      run: pnpm build
-      env:
-        NEXTAUTH_SECRET: build-time-placeholder
-        NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
-        NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
-    - name: Copy static export for embedding
-      run: ./scripts/embed-web-out.sh sync
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        cache: true
-    - name: Install syft
-      uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
-      with:
-        syft-version: v1.38.0
-    - name: Install cosign
-      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-      with:
-        cosign-release: v2.6.3
-    - name: Prepare package signing key (if configured)
-      env:
-        GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
-      run: |
-        if [ -n "$GPG_SIGNING_KEY" ]; then
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+        env:
+          DATABASE_URL: file:./dev.db
+      - name: Resolve release tag
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+      - name: Build Next.js static export
+        run: pnpm build
+        env:
+          NEXTAUTH_SECRET: build-time-placeholder
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
+          NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
+      - name: Copy static export for embedding
+        run: ./scripts/embed-web-out.sh sync
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
+        with:
+          syft-version: v1.38.0
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v2.6.3
+      - name: Require package signing key
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$GPG_SIGNING_KEY" ] || { echo '::error::GPG_SIGNING_KEY is required for published packages'; exit 1; }
           printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
+          chmod 600 "$RUNNER_TEMP/crewship-signing.asc"
           echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
-          echo "deb/rpm signing enabled"
-        else
-          echo "::notice::GPG_SIGNING_KEY not set — deb/rpm packages will be UNSIGNED (see #932)"
-        fi
-    - name: Grype CVE scan — source (go.mod + pnpm lockfile)
-      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
-      with:
-        path: .
-        fail-build: true
-        severity-cutoff: critical
-        output-format: table
-    - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
-      with:
-        version: v2.6.1
-        args: release --parallelism 2 --clean --skip=publish
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-        NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
-        MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-        MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-        MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-        MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-        MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-      name: Build and sign final release assets without publishing
-    - name: Scan final release artifacts
-      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
-      with:
-        path: dist
-        fail-build: true
-        severity-cutoff: critical
-        output-format: table
-    - name: Boot the final archive before publication
-      env:
-        SHA: ${{ github.sha }}
-      run: |
-        set -euo pipefail
-        archives=(dist/crewship_*_linux_amd64.tar.gz)
-        [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
-        (cd dist && sha256sum -c checksums.txt)
-        python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
-    - name: Publish the verified signed assets
-      env:
-        GH_TOKEN: ${{ github.token }}
-        REPO: ${{ github.repository }}
-        DIGEST: ${{ needs.docker.outputs.digest }}
-      run: |
-        set -euo pipefail
-        TAG="$GITHUB_REF_NAME"
-        jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
-        mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
-        [ "${#assets[@]}" -gt 0 ]
-        flags=()
-        if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi
-        gh release create "$TAG" --repo "$REPO" --verify-tag --draft --title "Crewship $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
-        gh release edit "$TAG" --repo "$REPO" --draft=false
-    - name: Retain generated Homebrew formulas
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-      with:
-        name: release-homebrew-${{ github.sha }}
-        path: dist/homebrew/
-        if-no-files-found: error
-        retention-days: 7
+      - name: Grype CVE scan — source (go.mod + pnpm lockfile)
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          path: .
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          version: v2.6.1
+          args: release --parallelism 2 --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        name: Build and sign final release assets without publishing
+      - name: Scan final release artifacts
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          path: dist
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Boot the final archive before publication
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -s dist/checksums.txt.sig
+          test -s dist/checksums.txt.pem
+          archives=(dist/crewship_*_linux_amd64.tar.gz)
+          [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
+          (cd dist && sha256sum -c checksums.txt)
+          python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
+      - name: Publish the verified signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
+          [ "${#assets[@]}" -gt 0 ]
+          flags=()
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --draft --title "Crewship $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+      - name: Retain generated Homebrew formulas
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-homebrew-${{ github.sha }}
+          path: dist/homebrew/
+          if-no-files-found: error
+          retention-days: 7
     needs:
-    - verified
-    - docker
+      - verified
+      - docker
     permissions:
       contents: write
       id-token: write
@@ -161,152 +162,153 @@ jobs:
       packages: write
       id-token: write
     steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        fetch-depth: 0
-    - name: Set image metadata
-      id: meta
-      run: |
-        TAG="${GITHUB_REF#refs/tags/}"
-        echo "version=${TAG}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set image metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "version=${TAG}" >> "$GITHUB_OUTPUT"
 
-        # vX.Y series tag for users pinning to a major.minor line.
-        MAJMIN=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
-        echo "majmin=${MAJMIN}" >> "$GITHUB_OUTPUT"
+          # vX.Y series tag for users pinning to a major.minor line.
+          MAJMIN=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
+          echo "majmin=${MAJMIN}" >> "$GITHUB_OUTPUT"
 
-        # Commit timestamp of the tagged commit — not
-        # `github.event.repository.updated_at`, which reflects ANY recent
-        # repo push (docs, branches) and can drift between re-runs of the
-        # same tag. ISO-8601 with timezone keeps it sortable + cosign-friendly.
-        BUILD_DATE=$(git log -1 --format=%cI "$GITHUB_SHA")
-        echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          # Commit timestamp of the tagged commit — not
+          # `github.event.repository.updated_at`, which reflects ANY recent
+          # repo push (docs, branches) and can drift between re-runs of the
+          # same tag. ISO-8601 with timezone keeps it sortable + cosign-friendly.
+          BUILD_DATE=$(git log -1 --format=%cI "$GITHUB_SHA")
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
-        # `:latest` only on clean releases. Pre-release tags (v0.1.0-beta.1,
-        # v0.1.0-rc.1) must not move `:latest` or `docker pull crewship:latest`
-        # would silently deliver beta to users who expect stable.
-        if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-          echo "is_stable=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "is_stable=false" >> "$GITHUB_OUTPUT"
-        fi
-    - name: Compute tag list
-      id: tags
-      run: |
-        BASE="ghcr.io/${{ github.repository_owner }}/crewship"
-        # Always publish the full version tag (v1.2.3 / v1.2.3-beta.1).
-        # The majmin alias (v1.2) and the `latest` rolling tag are only
-        # emitted for stable releases — moving a stable-looking alias
-        # onto a beta/rc image would silently downgrade everyone pinned
-        # to v1.2 the next time they pulled. CodeRabbit caught this.
-        {
-          echo "list<<EOF"
-          echo "${BASE}:${{ steps.meta.outputs.version }}"
-          if [ "${{ steps.meta.outputs.is_stable }}" = "true" ]; then
-            echo "${BASE}:${{ steps.meta.outputs.majmin }}"
-            echo "${BASE}:latest"
+          # `:latest` only on clean releases. Pre-release tags (v0.1.0-beta.1,
+          # v0.1.0-rc.1) must not move `:latest` or `docker pull crewship:latest`
+          # would silently deliver beta to users who expect stable.
+          if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "EOF"
-        } >> "$GITHUB_OUTPUT"
-    - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
-    - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
-    - name: Login to GHCR
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Install cosign
-      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
-      with:
-        cosign-release: v2.6.3
-    - name: Build immutable release image candidate
-      id: build
-      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ghcr.io/${{ github.repository_owner }}/crewship:candidate-release-${{ github.run_id }}-${{ github.run_attempt
-          }}
-        build-args: |
-          VERSION=${{ steps.meta.outputs.version }}
-          COMMIT=${{ github.sha }}
-          DATE=${{ steps.meta.outputs.build_date }}
-          SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-          NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
-        cache-from: type=gha,scope=server-image
-        cache-to: type=gha,mode=max,scope=server-image
-        provenance: mode=max
-        sbom: true
-    - name: Scan the built image
-      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
-      with:
-        image: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
-        fail-build: true
-        severity-cutoff: critical
-        output-format: table
-    - name: Smoke both image platforms before promotion
-      env:
-        IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
-        SHA: ${{ github.sha }}
-      run: |
-        bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
-        bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
-    - name: Sign verified image digest
-      env:
-        IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
-      run: cosign sign --yes "$IMAGE"
+      - name: Compute tag list
+        id: tags
+        run: |
+          BASE="ghcr.io/${{ github.repository_owner }}/crewship"
+          # Always publish the full version tag (v1.2.3 / v1.2.3-beta.1).
+          # The majmin alias (v1.2) and the `latest` rolling tag are only
+          # emitted for stable releases — moving a stable-looking alias
+          # onto a beta/rc image would silently downgrade everyone pinned
+          # to v1.2 the next time they pulled. CodeRabbit caught this.
+          {
+            echo "list<<EOF"
+            echo "${BASE}:${{ steps.meta.outputs.version }}"
+            if [ "${{ steps.meta.outputs.is_stable }}" = "true" ]; then
+              echo "${BASE}:${{ steps.meta.outputs.majmin }}"
+              echo "${BASE}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v2.6.3
+      - name: Build immutable release image candidate
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/crewship:candidate-release-${{ github.run_id }}-${{ github.run_attempt
+            }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta.outputs.build_date }}
+            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
+          cache-from: type=gha,scope=server-image
+          cache-to: type=gha,mode=max,scope=server-image
+          provenance: mode=max
+          sbom: true
+      - name: Scan the built image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Smoke both image platforms before promotion
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          SHA: ${{ github.sha }}
+        run: |
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+      - name: Sign verified image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
     needs:
-    - verified
+      - verified
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.tags.outputs.list }}
   promote:
     name: Promote verified release image
     needs:
-    - docker
-    - release
+      - docker
+      - release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       packages: write
     steps:
-    - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
-    - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - name: Promote the tested digest after binary publication
-      env:
-        IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
-        DIGEST: ${{ needs.docker.outputs.digest }}
-        TAGS: ${{ needs.docker.outputs.tags }}
-      run: |
-        set -euo pipefail
-        args=()
-        while IFS= read -r tag; do
-          [ -z "$tag" ] || args+=(--tag "$tag")
-        done <<< "$TAGS"
-        [ "${#args[@]}" -gt 0 ]
-        docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the tested digest after binary publication
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          TAGS: ${{ needs.docker.outputs.tags }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r tag; do
+            [ -z "$tag" ] || args+=(--tag "$tag")
+          done <<< "$TAGS"
+          [ "${#args[@]}" -gt 0 ]
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
   homebrew:
     name: Publish stable Homebrew formulas
     needs:
-    - release
+      - release
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        persist-credentials: false
-    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
-      with:
-        name: release-homebrew-${{ github.sha }}
-        path: dist/homebrew
-    - name: Update stable Homebrew formulas atomically
-      env:
-        GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      run: python3 scripts/ci/publish-homebrew.py "$GITHUB_REF_NAME"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-homebrew-${{ github.sha }}
+          path: dist/homebrew
+      - name: Update stable Homebrew formulas atomically
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: python3 scripts/ci/publish-homebrew.py "$GITHUB_REF_NAME"

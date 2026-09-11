@@ -57,7 +57,7 @@ jobs:
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [ "$image" = "ghcr.io/${REPO%/*}/crewship" ]
           release=$(jq -er .release "$manifest")
-          [[ "$release" =~ ^nightly-[0-9a-f]{12}-r[0-9]+-a[0-9]+$ ]]
+          [[ "$release" =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]
           echo "release=$release" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
@@ -111,7 +111,7 @@ jobs:
           # The manifest names the exact release, even after another run of
           # this SHA publishes or the release falls outside the first API page.
           TAG="$RELEASE_TAG"
-          [[ "$TAG" =~ ^nightly-[0-9a-f]{12}-r[0-9]+-a[0-9]+$ ]]
+          [[ "$TAG" =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]
           gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
           jq -e --arg sha "$TARGET_SHA" '.prerelease == true and .target_commitish == $sha' "$RUNNER_TEMP/release.json"
           echo "Resolved nightly release: $TAG"

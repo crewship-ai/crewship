@@ -9,7 +9,7 @@ import sys
 
 def expired(releases, now):
     candidates = [r for r in releases if r.get('prerelease') and not r.get('draft')
-                  and re.fullmatch(r'nightly-[0-9a-f]{12}-r[0-9]+-a[0-9]+', r.get('tag_name', ''))
+                  and re.fullmatch(r'nightly-[0-9]{8}-r[0-9]+', r.get('tag_name', ''))
                   and r.get('published_at')]
     candidates.sort(key=lambda r: r['published_at'], reverse=True)
     cutoff = now - timedelta(days=14)

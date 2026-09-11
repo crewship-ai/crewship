@@ -52,6 +52,10 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar', dockerfile)
         self.assertIn('COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh', dockerfile)
 
+    def test_snapshot_rehearsal_does_not_parse_the_latest_nightly_tag(self):
+        job = self.job(self.text('ci.yml'), 'release-rehearsal')
+        self.assertIn('GORELEASER_CURRENT_TAG: v0.0.0-ci', job)
+
     def test_nightly_does_not_publish_from_unverified_push(self):
         text = self.text('nightly.yml')
         self.assertIn('verified_commit.py', text)

@@ -1318,15 +1318,8 @@ jobs:
   # before). Order-dependence is not proven absent by any number of seeds —
   # which is exactly why this job runs a fresh random one every push.
   #
-  # Still `continue-on-error`, and the reason is honest rather than convenient:
-  # a randomised gate earns "blocking" by being green over time, not by being
-  # green in the PR that fixed it. The known findings are closed, so this is
-  # now a soak, not a workaround.
-  #
-  # ➜ TO PROMOTE TO BLOCKING: after a handful of consecutive green runs on
-  #   main, delete `continue-on-error`. The end state is -shuffle=on folded
-  #   back into `go` and this job deleted, since shuffling costs no extra
-  #   wall-clock.
+  # Promoted after six consecutive successful sampled main runs in the
+  # 2026-09-11 audit. CI Result requires a real successful shuffle run.
   go-shuffle:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -1699,6 +1692,17 @@ jobs:
           # Keep the goroutine-dumping deadline inside the existing 55m job cap.
           bash scripts/ci/go-test.sh $pkgs -race -count=1 -timeout 35m
 
+      - name: Upload test timings and event stream
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: timings-${{ github.job }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+
   # ── Go race: the internal/api shard ──
   #
   # Same gate, one package, its own budget. internal/api is ~90% serial
@@ -1717,16 +1721,6 @@ jobs:
   # If it is ever deleted, internal/api loses race coverage silently —
   # go-race's list guard will not catch that, because from its side the
   # package is legitimately held back either way.
-
-      - name: Upload test timings and event stream
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: timings-${{ github.job }}-${{ github.sha }}
-          path: .ci-results/
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
 
   go-race-api:
     needs: [merge-conflict-markers, changes]
@@ -1906,6 +1900,17 @@ jobs:
             echo "::warning::${msg}"
           fi
 
+      - name: Upload test timings and event stream
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: timings-${{ github.job }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
+
   # ── Go: cross-platform test matrix ──
   #
   # The linux/amd64 `go` job above is the primary gate; this matrix closes
@@ -1917,16 +1922,6 @@ jobs:
   # together with the amd64 job all four released GOOS/GOARCH combos get
   # compile coverage and three get runtime coverage. Docker-dependent tests
   # skip themselves when no daemon is present (macOS runners have none).
-
-      - name: Upload test timings and event stream
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: timings-${{ github.job }}-${{ github.sha }}
-          path: .ci-results/
-          include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
 
   go-platforms:
     needs: [merge-conflict-markers, changes]
@@ -2169,12 +2164,6 @@ jobs:
       - name: Verify binary runs
         run: ./crewship version
 
-  # NOTE: E2E Devcontainer Provisioning was moved out of the per-PR gate.
-  # It pulls real base images + features from ghcr.io (slow, rate-limited)
-  # and exercises the full seed+provision path — that's ~8-15 min of CI time
-  # per push that, in practice, mostly catches infra flakes. It now lives in
-  # `.github/workflows/e2e-devcontainer.yml`, triggered nightly + on demand
-  # via `gh workflow run e2e-devcontainer.yml`.
       - name: Share the tested server
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -2185,6 +2174,13 @@ jobs:
           compression-level: 0
 
 
+
+  # NOTE: E2E Devcontainer Provisioning was moved out of the per-PR gate.
+  # It pulls real base images + features from ghcr.io (slow, rate-limited)
+  # and exercises the full seed+provision path — that's ~8-15 min of CI time
+  # per push that, in practice, mostly catches infra flakes. It now lives in
+  # `.github/workflows/e2e-devcontainer.yml`, triggered nightly + on demand
+  # via `gh workflow run e2e-devcontainer.yml`.
   result:
     name: CI Result
     if: always()
@@ -2227,6 +2223,8 @@ jobs:
         with:
           version: v2.6.1
           args: release --parallelism 2 --snapshot --clean --skip=publish,sign,sbom,homebrew
+        env:
+          GORELEASER_CURRENT_TAG: v0.0.0-ci
       - name: Boot the actual Linux archive
         env:
           SHA: ${{ github.sha }}

@@ -47,7 +47,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       # Sentry DSN injected from the SENTRY_DSN GitHub Actions secret.
@@ -77,7 +77,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
@@ -101,7 +101,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
@@ -137,7 +137,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
@@ -167,7 +167,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X main.version={{ if index .Env "CREWSHIP_NIGHTLY_VERSION" }}{{ .Env.CREWSHIP_NIGHTLY_VERSION }}{{ else }}{{ .Version }}{{ end }}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
 
