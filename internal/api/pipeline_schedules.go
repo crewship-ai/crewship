@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -211,10 +212,18 @@ func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targ
 // and an empty list stay answers rather than absences.
 //
 // Pinned plans are validated against the version they name, unpinned ones
-// against HEAD — the recipe each would actually execute. A routine whose
-// definition no longer parses is not held against the plan: the executor
-// surfaces that, and refusing to edit a plan because its target is broken
-// would take away the screen an operator fixes it from.
+// against HEAD — the recipe each would actually execute. A pin that names
+// no archived version is refused outright: there is nothing for the plan
+// to run, and the request that wrote the pin is the moment to say so (the
+// alternative, found by the opponent review of #2503, was an enabled plan
+// pinned to nothing, with a 200). A lookup that FAILS is a 500 for the same
+// reason — the gate could not judge, so it must not answer as if it had.
+// Only a target routine whose definition no longer parses is not held
+// against the plan: the executor surfaces that, and refusing to edit a plan
+// because its target is broken would take away the screen an operator fixes
+// it from. Callers only invoke the gate for a request that writes the pin,
+// the target or the inputs, so `{"enabled": false}` on a broken plan is
+// never judged and stays the way out.
 func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Request, pipelineID string, version *int, inputs map[string]any) bool {
 	if h.store == nil || pipelineID == "" {
 		return false
@@ -222,14 +231,26 @@ func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Requ
 	definition := ""
 	if version != nil {
 		v, err := h.store.GetVersion(r.Context(), pipelineID, *version)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, fmt.Sprintf("The target routine has no archived version %d. Pin the plan to a published version, or leave the version out to run the current one.", *version))
+			return true
+		}
 		if err != nil {
-			return false
+			h.logger.Error("schedule preset gate: load pinned version", "error", err, "pipeline_id", pipelineID, "version", *version)
+			replyError(w, http.StatusInternalServerError, "Could not load the pinned version to check the plan's inputs against it.")
+			return true
 		}
 		definition = v.DefinitionJSON
 	} else {
 		p, err := h.store.GetByID(r.Context(), pipelineID)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, "The target routine does not exist.")
+			return true
+		}
 		if err != nil {
-			return false
+			h.logger.Error("schedule preset gate: load target", "error", err, "pipeline_id", pipelineID)
+			replyError(w, http.StatusInternalServerError, "Could not load the target routine to check the plan's inputs against it.")
+			return true
 		}
 		definition = p.DefinitionJSON
 	}
@@ -543,25 +564,34 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		catchupPolicy = body.CatchupPolicy
 	}
 
-	// Validate only what this request WRITES. A PATCH that omits `inputs`
-	// falls back to the stored preset above, and judging that would trap an
-	// operator whose plan predates this gate: they could not disable it, nor
-	// fix its cron, without first fixing a preset the same request is not
-	// touching. A stale preset is still caught when the recipe changes
-	// (#2495) and by the executor when it fires.
+	// Judge the plan this PATCH produces — target routine, effective pin,
+	// effective inputs — whenever the request changes any of the three
+	// things the preset is fed to. A PATCH that touches none of them
+	// (disabling, a new cron, a rename) is not judged, so an operator whose
+	// plan predates this gate can still switch it off or reschedule it
+	// without first repairing a preset the request never mentions.
 	//
-	// The pinned version comes from the request when it repins and from the
-	// stored row otherwise, so the preset is always checked against the
-	// recipe this plan would actually run.
-	pinned := body.TargetPipelineVersion
-	if pinned == nil {
-		pinned = existing.TargetPipelineVersion
+	// body.TargetPipelineVersion is already the EFFECTIVE pin at this point:
+	// absent kept the stored one, explicit null cleared it (see the rawKeys
+	// resolution above). The first version of this gate re-applied the
+	// stored pin on top of that, which validated an explicit unpin against
+	// the OLD version and then saved a plan that runs HEAD with a preset HEAD
+	// rejects; and it only ran when `inputs` was present, so repinning alone
+	// walked a v1 preset onto v2 unjudged. Both reproduced by the opponent
+	// review of #2498.
+	_, versionMentioned := rawKeys["target_pipeline_version"]
+	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
+	if body.Inputs != nil || targetChanged {
+		if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
+			return
+		}
 	}
-	if body.Inputs != nil && h.gateSchedulePreset(w, r, pipelineID, pinned, body.Inputs) {
-		return
-	}
-	if wakeID != "" && body.WakeInputs != nil && h.gateSchedulePreset(w, r, wakeID, nil, body.WakeInputs) {
-		return
+	_, wakeMentioned := rawKeys["wake_pipeline_id"]
+	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned) {
+		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
+			return
+		}
 	}
 
 	maxFailures := 0

@@ -1652,11 +1652,29 @@ already rejects, sit enabled in the calendar looking healthy, and fail for the
 first time at its next firing — with no run to inspect, because the executor
 refuses before a run row exists.
 
+A pinned plan is judged against the version it names, and that version has
+to exist: pinning a plan — on create, on repin, or when retargeting it onto
+another routine — to a version the routine never archived is a `400` naming
+the version, and the plan is left as it was. A plan that already carries a
+pin to nothing (written before this check) can still be disabled,
+rescheduled or renamed, since an edit that mentions neither the pin, the
+target nor the inputs is not judged; repairing it means moving the pin onto
+a published version. If the archive cannot be read at all the edit is a
+`500`, not a pass.
+
 What is deliberately still allowed: `false`, `0` and an empty list are
 answers, not absences; inputs the recipe does not declare are passed through;
 and an input that declares no form (no `widget`, no `options`, no
 `allow_custom`) is not validated here, because it is not validated at
-execution either. A pinned plan is checked against the version it names.
+execution either.
+
+On an edit, what is judged is the plan the edit **produces**: the target
+routine, the effective pin and the effective inputs together. Changing the
+inputs, repinning to another version, unpinning onto HEAD, or retargeting the
+plan all trigger the check against the recipe the plan will actually run;
+disabling a plan, changing its cron or renaming it do not, so a plan that
+predates this check can still be switched off or rescheduled without first
+repairing a preset the edit never mentions.
 
 #### Next-fire-times preview
 
