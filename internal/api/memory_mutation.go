@@ -570,6 +570,23 @@ func (h *MemoryMutationHandler) resolveTarget(w http.ResponseWriter, r *http.Req
 		replyError(w, http.StatusForbidden, "illegal file path")
 		return t, false
 	}
+	// Keep the configured host boundary explicit after resolving the narrower
+	// agent/crew root. This check dominates every filesystem sink in Mutate,
+	// including parent-directory creation before its under-lock authorization.
+	storageRoot, err := filepath.Abs(h.storagePath)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve absolute storage root", err)
+		return t, false
+	}
+	storagePrefix := filepath.Clean(storageRoot)
+	if !strings.HasSuffix(storagePrefix, string(filepath.Separator)) {
+		storagePrefix += string(filepath.Separator)
+	}
+	full, err = filepath.Abs(full)
+	if err != nil || !strings.HasPrefix(full, storagePrefix) {
+		replyError(w, http.StatusForbidden, "memory path escapes host storage")
+		return t, false
+	}
 	t.path = full
 
 	switch {

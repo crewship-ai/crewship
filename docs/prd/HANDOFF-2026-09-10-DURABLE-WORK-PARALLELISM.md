@@ -938,3 +938,43 @@ also archived beside the earlier review evidence. Repeated go vet, frontend
 lint (0 errors, 31 warnings) and static build: all exit 0. The affected routine
 presentation test file also passed all 24 tests. No production code changes
 follow this result; this handoff-only update records it.
+
+
+### Closing review — follow-up to remote CI on 52fb715e
+
+Remote run 34613770592 completed with Go Race failing and CodeQL reporting two
+path-injection flows. Ordinary Go, shuffle, full API race, CLI race, macOS ARM64,
+Linux ARM64, lint and frontend checks passed. This is NOT a green PR.
+
+The failing empty-ledger metrics subprocess spent its two-minute limit rebuilding
+all migrations before its assertions. It now opens a fresh migrated database
+prepared by the parent, while retaining separate-process sampler isolation.
+The dispatcher harness no longer writes heartbeats every 20ms or polls cancel
+every 10ms; production intervals and state assertions are unchanged. The periodic
+recovery test additionally waits for authorization of a probe work item, proving
+boot recovery completed before expiring the old lease. Its previous sleep could
+not establish that ordering.
+
+The HTTP memory mutation resolver now checks the absolute resolved path against
+the configured host storage directory explicitly, in addition to the existing
+narrower safepath checks. This is a lexical boundary check, not a claim of
+symlink or power-loss containment. CodeQL must evaluate the new commit before
+its two findings can be considered resolved; no alerts were dismissed.
+
+Observed validation so far: complete final dispatcher package with -race passed
+in 171.731s (FINAL_DISPATCH_EXIT=0). A Go overlay removing only the periodic
+recovery action makes TestVertical_RecoveryRunsOnATimerNotOnlyAtBoot fail:
+starting after 30s, want succeeded (RECOVERY_MUTATION_EXIT=1). The tracked
+production dispatcher was never modified for this mutation. Logs are under
+/tmp/crewship-2-close-*.log; final whole-tree results follow below.
+
+Closing whole-tree run completed: CLOSE_FULL_EXIT=0, 145 packages passed and
+10 had no test files. Command: go test -p 4 ./... -count=1 -timeout 60m, with
+GOGC=50, GOMAXPROCS=4, and both TMPDIR/GOTMPDIR under the dedicated
+/dev/shm/crewship-2-close-tests directory. It covers the final production change;
+the deterministic boot-barrier TEST edit was made after this run started and
+was separately covered by the complete final dispatcher race run above.
+Complete dispatch + server race run also returned CLOSE_PACKAGES_RACE_EXIT=0
+(dispatch 98.963s, server 443.874s). go vet -p 2 ./... and golangci-lint both
+returned exit 0; lint reported 0 issues. Remote CI and CodeQL on the next pushed
+commit are still pending; CodeRabbit remained throttled at this checkpoint.

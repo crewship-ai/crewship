@@ -22,7 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/testutil"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -563,15 +565,24 @@ func TestCollectWorkMetrics_EmptyLedgerZeroFills(t *testing.T) {
 	// Exercise the first-scrape contract in a fresh process so another test's
 	// observations cannot turn an empty database into an empty process.
 	const childEnv = "WORK_METRICS_EMPTY_CHILD"
-	if os.Getenv(childEnv) != "1" {
+	if os.Getenv(childEnv) == "" {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestCollectWorkMetrics_EmptyLedgerZeroFills$", "-test.count=1", "-test.timeout=2m")
-		cmd.Env = append(os.Environ(), childEnv+"=1")
+		// Reuse a fresh copy of the parent process's migrated template. Only
+		// globals need isolation; rebuilding every migration under -race in
+		// the child consumed its whole timeout before the first assertion.
+		db := testutil.MigratedDB(t)
+		cmd.Env = append(os.Environ(), childEnv+"="+db.Path())
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("fresh-process metrics: %v\n%s", err, out)
 		}
 		return
 	}
-	s := workFixture(t)
+	db, err := database.Open("file:" + os.Getenv(childEnv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s := &Server{db: db.DB, logger: logging.New("error", "json", nil)}
 	out := renderWorkMetrics(t, s)
 
 	for _, state := range workStateSet {

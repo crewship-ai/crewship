@@ -190,10 +190,12 @@ func newHarness(t *testing.T) *harness {
 			// writes no domain kind, so this is the pair its own work really
 			// has — stating it here keeps the test honest about what it is
 			// claiming rather than relying on a filter that matches everything.
-			Kinds:              []work.Kind{{Source: work.SourceWebhook}},
-			PollInterval:       15 * time.Millisecond,
-			HeartbeatInterval:  20 * time.Millisecond,
-			CancelPollInterval: 10 * time.Millisecond,
+			Kinds: []work.Kind{{Source: work.SourceWebhook}},
+			// Exercise asynchronous polling without saturating SQLite's single
+			// writer with a heartbeat every 20ms under race instrumentation.
+			PollInterval:       100 * time.Millisecond,
+			HeartbeatInterval:  time.Second,
+			CancelPollInterval: 100 * time.Millisecond,
 			StopGrace:          time.Second,
 		},
 	}
@@ -268,7 +270,7 @@ func (h *harness) waitForState(workID string, want work.State) *work.Item {
 		if it.State == want {
 			return it
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 	h.t.Fatalf("work %s is %q after %s, want %q", workID, last, timeout, want)
 	return nil
@@ -694,11 +696,23 @@ func TestVertical_RecoveryRunsOnATimerNotOnlyAtBoot(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	_, stop := h.runDispatcher(nil)
+	// Authorization of another work item proves Run has finished its boot
+	// recovery pass. A sleep cannot establish that ordering on a busy runner.
+	h.acceptFor("boot-pass-probe", "probe-agent")
+	bootDone := make(chan struct{})
+	_, stop := h.runDispatcher(AuthorizerFunc(func(_ context.Context, a Assignment) (Decision, error) {
+		if a.Item.AgentID == "probe-agent" {
+			close(bootDone)
+			return Refuse("test boot-pass probe"), nil
+		}
+		return Allow(), nil
+	}))
 	defer stop()
-
-	// The boot pass has certainly run by now and correctly did nothing.
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-bootDone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("dispatcher did not finish boot recovery and claim the probe")
+	}
 	it, _ := h.store.Get(ctx, r.WorkID)
 	if it.State != work.StateStarting {
 		t.Fatalf("state = %q, want starting — the boot pass should not touch a live lease", it.State)
@@ -1059,7 +1073,7 @@ func TestVertical_AHeldAuthorizationDefersWithoutSpendingAnAttempt(t *testing.T)
 		if got.State.Terminal() {
 			t.Fatalf("held work went to %q; a deferral must not be terminal", got.State)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 	if it == nil {
 		t.Fatal("held work never came back to the queue")
