@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { MotionConfig } from "motion/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { AuthProvider } from "@/hooks/use-auth"
@@ -34,10 +35,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   )
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        {children}
-        <Toaster />
-      </AuthProvider>
+      <MotionConfig reducedMotion="user">
+        <AuthProvider>
+          {children}
+          <Toaster />
+        </AuthProvider>
+      </MotionConfig>
     </QueryClientProvider>
   )
 }
