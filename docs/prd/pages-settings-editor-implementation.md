@@ -139,3 +139,31 @@ its ~3186 mostly-jest-dom errors measured rather than guessed.
 Also unmeasured: contrast ratios, reduced motion, and real screen-reader
 behaviour. Focus handling after entering and leaving the preview is implemented
 and read, not asserted by a test.
+
+## 7. The dev3 seed: what it actually did
+
+`crewship seed` was run against **dev3** by mistake — `CREWSHIP_SERVER` in the
+environment loses to a per-directory profile override, so a command meant for a
+throwaway instance went to the live dev clone and reported success while the
+throwaway stayed empty. The counter-review asked for an inventory rather than a
+cleanup. Here it is; **nothing was reverted, and nothing should be.**
+
+Inventory, read back from dev3 on 2026-09-11:
+
+| Object | Effect |
+|---|---|
+| Pages | **None created.** All eight were created 2026-09-08 (`custom-operations` 09-09). Seven had `updated_at` set to 2026-09-10T22:59:50Z — their specs were rewritten with the same seed definitions. `custom-operations` was not touched at all (`= app custom-operations: publication history retained`). |
+| Panel data | 8 payloads pushed at 22:59:50–54. |
+| Crews / agents | **None created.** `ops`, `quality`, `engineering` and `credential-lab-20260908` all predate the run. |
+| Routine runs | **4 one-off runs started** at 22:59:53 — `docs-drift-audit`, `ci-nightly-triage`, `page-watch`, `site-replica-audit`. Each routine now has exactly two runs in its history: 2026-09-08 (pre-existing) and this one. The two that had *failed* on 09-08 completed this time. |
+| Schedules | **None armed.** `pages-operations-sample` (2784 invocations, still producing — its data carries today's timestamps) is a pre-existing schedule from 09-08, not this run. |
+| Crew provisioning | Triggered for the three existing crews, in the background. Compute spent; no objects created. |
+
+So the blast radius is: seven Page specs rewritten to the definitions they
+already had, eight panel payloads, four completed one-off runs, and one
+provisioning pass. No new objects and no recurring trigger was left behind.
+
+The trap itself is in `docs/prd/` only as this note; the operational lesson —
+a throwaway needs its own profile, bootstrapped over HTTP and addressed with
+`--profile` on every call, and `crewship whoami` read before believing any
+output — belongs with the CLI docs rather than here.

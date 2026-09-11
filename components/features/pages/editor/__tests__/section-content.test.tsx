@@ -589,6 +589,8 @@ describe("saving the Page's name and description", () => {
           onNavigate={vi.fn()}
           pane="section"
           onPaneChange={vi.fn()}
+          onLeaveEditor={vi.fn()}
+          onPageDeleted={vi.fn()}
           onDirtyChange={vi.fn()}
         />
       </QueryClientProvider>,

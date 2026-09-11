@@ -7,7 +7,6 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 import type { FencedPublishRequest, PublishConflictWire, ReviewSnapshotWire } from "@/lib/pages/editor-contract"
 import type { SourceProjectLike } from "@/lib/pages/source-diff"
-import type { WirePageDetail } from "@/hooks/use-page-grants"
 
 /**
  * The review screen's data.
@@ -22,6 +21,13 @@ import type { WirePageDetail } from "@/hooks/use-page-grants"
  *
  * Both answer the same `pageProjectDraft` body (`pages_project.go:25`):
  * `{git_commit, revision, digest, definition, project}`.
+ *
+ * The live Page definition the candidate is compared against is NOT a fourth
+ * read: it arrives inside the snapshot, on the same row and in the same
+ * statement as the digest the publish fence sends. A definition fetched from
+ * the Page detail route instead is a second endpoint on a second cache entry,
+ * and the two are free to disagree — which is how a consent could attest to a
+ * digest for a document the screen never rendered.
  *
  * The one rule that shapes this file: a baseline that cannot be read is
  * "comparison unavailable", never "no changes" (V05). So the baseline query is
@@ -84,128 +90,6 @@ function normalizeConflict(body: unknown): PublishConflictWire {
 async function readError(response: Response, fallback: string): Promise<Error> {
   const body = (await response.json().catch(() => null)) as { error?: string } | null
   return Object.assign(new Error(body?.error ?? fallback), { status: response.status })
-}
-
-/**
- * Shaping the live Page into something `compareDefinitions` can read.
- *
- * The definition impact is compared against the *current live Page*, not
- * against the candidate's own previous definition (V05). But the two sides
- * arrive in different shapes: the candidate carries a `pages.Document`
- * (`internal/pages/spec.go:67`) and the live Page arrives on the detail route
- * as `pageWire`/`pagePanelWire` (`internal/api/pages_handler.go:139,1308`).
- * Handing those two to the comparator raw would report every panel as
- * rewritten — a false alarm on the one screen that must not cry wolf.
- *
- * So the wire is mapped onto the document's key names here, and both sides'
- * SLA is normalised, because the wire sends `sla_seconds: 300` where the
- * document says `sla: "5m"` and those are the same promise written twice.
- * Nothing else is invented: a key the mapping does not carry over is simply
- * absent, and the comparator reports absence as unmodelled rather than as
- * unchanged.
- */
-
-const DURATION_UNIT: Readonly<Record<string, number>> = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 }
-const DURATION_SHAPE = /^-?(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+$/
-const DURATION_PART = /(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g
-
-/**
- * One spelling for an SLA on both sides of the comparison. A value that is
- * not a Go duration is returned unchanged rather than guessed at — comparing
- * two strings we do not understand is honest; inventing a number is not.
- */
-export function normalizeSla(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return `${value}s`
-  if (typeof value !== "string") return undefined
-  const text = value.trim()
-  if (text === "") return undefined
-  if (!DURATION_SHAPE.test(text)) return text
-  let total = 0
-  for (const [, amount, unit] of text.matchAll(DURATION_PART)) total += Number(amount) * DURATION_UNIT[unit]
-  return `${text.startsWith("-") ? -total : total}s`
-}
-
-/**
- * The manifest envelope every Crewship kind carries.
- *
- * `internal/pages/spec.go:32` defines it and `Document.Validate` (`:407`)
- * refuses any other value, so a document that reaches this screen always has
- * exactly this string. Getting it wrong is not cosmetic: the live side and the
- * candidate side then differ in a top-level field on every single review,
- * `identical` is never true, and the one honest reassurance this screen can
- * give — "nothing in the declaration changed" — becomes unreachable.
- *
- * Spelled here rather than imported from `page-editor.tsx`'s
- * `PAGE_DOCUMENT_API_VERSION`: this is a hook, and pulling a large client
- * component into it (and into its unit test) to read one string is the wrong
- * trade. Both copies name the Go constant so a grep finds all three.
- */
-const PAGE_DOCUMENT_API_VERSION = "crewship/v1"
-const PAGE_DOCUMENT_KIND = "Page"
-
-function isDict(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
-
-/**
- * Panels on the live Page this viewer may not read. They arrive as sealed
- * placeholders (`pageSealedPanelWire`) carrying an id and nothing else, so
- * they cannot be compared — and leaving them in would report each of them as
- * removed by the candidate, which is a lie about a panel that still exists.
- * They are excluded from both sides and named on the surface instead.
- */
-export function hiddenPanelIds(page: WirePageDetail | null): string[] {
-  if (!page || !Array.isArray(page.panels)) return []
-  return page.panels
-    .filter((panel): panel is Record<string, unknown> => isDict(panel) && panel.sealed === true)
-    .map(panel => (typeof panel.panel_id === "string" ? panel.panel_id : ""))
-    .filter(id => id !== "")
-}
-
-function livePanel(panel: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = { id: panel.id, schema: panel.schema, owner: panel.owner, producer: panel.producer }
-  // `icon` and `on_failure` are carried for opposite reasons, and both matter.
-  // Dropping `icon` made every Page that declares one show a phantom addition
-  // in `raw` plus a spurious "does not model" note. Dropping `on_failure` was
-  // worse and silent: a candidate REMOVING it — the declaration that turns a
-  // quietly stale panel into work for a human — produced no derived change, no
-  // unmodelled entry and no line in the raw diff, because neither side carried
-  // the field at all. Both are on `PanelSpec` (`internal/pages/spec.go:103,153`)
-  // and on the wire (`internal/api/pages_handler.go:160,192`).
-  for (const key of ["title", "span", "public", "tab", "actions", "refresh", "wake", "icon", "on_failure"]) {
-    if (panel[key] !== undefined) out[key] = panel[key]
-  }
-  const sla = normalizeSla(panel.sla ?? panel.sla_seconds)
-  if (sla !== undefined) out.sla = sla
-  return out
-}
-
-export function liveDefinitionFromPage(page: WirePageDetail | null): unknown {
-  if (!page) return null
-  const panels = Array.isArray(page.panels) ? page.panels : []
-  return {
-    apiVersion: PAGE_DOCUMENT_API_VERSION,
-    kind: PAGE_DOCUMENT_KIND,
-    metadata: { name: page.name ?? "", slug: page.slug ?? "", description: page.description ?? "" },
-    spec: {
-      panels: panels.filter((panel): panel is Record<string, unknown> => isDict(panel) && panel.sealed !== true).map(livePanel),
-    },
-  }
-}
-
-/** The candidate side of the same comparison: hidden panels out, SLA normalised. */
-export function candidateDefinitionForComparison(definition: unknown, hidden: readonly string[]): unknown {
-  if (!isDict(definition)) return definition
-  const spec = definition.spec
-  if (!isDict(spec) || !Array.isArray(spec.panels)) return definition
-  const panels = spec.panels
-    .filter(panel => !(isDict(panel) && typeof panel.id === "string" && hidden.includes(panel.id)))
-    .map(panel => {
-      if (!isDict(panel)) return panel
-      const sla = normalizeSla(panel.sla)
-      return sla === undefined ? panel : { ...panel, sla }
-    })
-  return { ...definition, spec: { ...spec, panels } }
 }
 
 export interface PageReview {

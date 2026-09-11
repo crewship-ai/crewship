@@ -18,18 +18,17 @@ const state = vi.hoisted(() => ({
   sourceDiff: null as unknown as SourceDiff,
   preview: null as unknown as Record<string, unknown>,
   frameProps: [] as Array<Record<string, unknown>>,
-  hidden: [] as string[],
+  comparedWith: [] as unknown[],
 }))
 
-vi.mock("@/hooks/use-page-review", () => ({
-  usePageReview: () => state.review,
-  liveDefinitionFromPage: (page: unknown) => page,
-  candidateDefinitionForComparison: (definition: unknown) => definition,
-  hiddenPanelIds: () => state.hidden,
-  publishConflictOf: () => null,
-}))
+vi.mock("@/hooks/use-page-review", () => ({ usePageReview: () => state.review }))
 vi.mock("@/hooks/use-page-preview", () => ({ usePagePreview: () => state.preview }))
-vi.mock("@/lib/pages/definition-diff", () => ({ compareDefinitions: () => state.definitionDiff }))
+vi.mock("@/lib/pages/definition-diff", () => ({
+  compareDefinitions: (live: unknown, candidate: unknown) => {
+    state.comparedWith.push(live, candidate)
+    return state.definitionDiff
+  },
+}))
 vi.mock("@/lib/pages/source-diff", () => ({ compareSources: () => state.sourceDiff }))
 vi.mock("@/components/features/pages/page-preview", () => ({
   PagePreviewFrame: (props: Record<string, unknown>) => {
@@ -40,7 +39,32 @@ vi.mock("@/components/features/pages/page-preview", () => ({
 
 import { EditorApplicationReview } from "@/components/features/pages/editor/application-review"
 
-const baseSnapshot: ReviewSnapshotWire = {
+/**
+ * The live definition the review snapshot carries.
+ *
+ * It is a `pages.Document`, read by the server in the same statement as
+ * `definition_digest` — so what this screen renders and what the publish fence
+ * attests to are one authorized read. The Page detail (`props.page`) is NOT
+ * this: it is a second endpoint on a second cache entry, and every test below
+ * that moves one without the other exists because those two could disagree.
+ */
+const liveDefinition = {
+  apiVersion: "crewship/v1",
+  kind: "Page",
+  metadata: { name: "Operations Lab", slug: "operations-lab", description: "Container fleet" },
+  spec: { panels: [{ id: "services", schema: "status.v1", owner: "crew/ops", producer: "routine/nightly", sla: "5m" }] },
+}
+
+/**
+ * `baseline.definition` and `baseline.excluded_panels` land in
+ * `editor-contract.ts` with the review endpoint that sends them; until they
+ * do, the fixture states the shape the screen is written against.
+ */
+type SnapshotFixture = Omit<ReviewSnapshotWire, "baseline"> & {
+  baseline: ReviewSnapshotWire["baseline"] & { definition?: unknown; excluded_panels?: number }
+}
+
+const baseSnapshot: SnapshotFixture = {
   issued_at: "2026-09-10T12:03:00Z",
   candidate: {
     revision: 7,
@@ -54,6 +78,8 @@ const baseSnapshot: ReviewSnapshotWire = {
     publication_version: 3,
     published: true,
     definition_digest: "sha256:live-def",
+    definition: liveDefinition,
+    excluded_panels: 0,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,
@@ -92,7 +118,7 @@ function clone<T>(value: T): DeepMutable<T> {
   return JSON.parse(JSON.stringify(value)) as DeepMutable<T>
 }
 
-function setReview(snapshot: ReviewSnapshotWire, overrides: Record<string, unknown> = {}) {
+function setReview(snapshot: SnapshotFixture, overrides: Record<string, unknown> = {}) {
   state.review = {
     snapshot: { data: snapshot, isError: false, error: null },
     candidate: { data: { git_commit: "c7", revision: 7, digest: "sha256:cand", definition: { kind: "Page" }, project: { files: [] } } },
@@ -122,7 +148,7 @@ const props: EditorSectionProps = {
 beforeEach(() => {
   vi.clearAllMocks()
   state.frameProps = []
-  state.hidden = []
+  state.comparedWith = []
   state.definitionDiff = {
     changes: [
       { kind: "action-added", tone: "add", actionId: "restart", summary: "Add action restart → routine ops-restart" },
@@ -387,11 +413,24 @@ describe("EditorApplicationReview", () => {
   })
 
 
-  it("excludes panels this viewer cannot read from the comparison and says which", () => {
-    state.hidden = ["memory"]
+  it("says how many panels the server withheld from the compared definition, on the server's count", () => {
+    // The count comes with the definition it describes. Counting sealed panels
+    // in the Page detail instead would be a second source for a fact about the
+    // very document on screen, and the two are free to disagree.
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline.excluded_panels = 2
+    setReview(snapshot)
     render(<EditorApplicationReview {...props} />)
-    expect(screen.getByText(/1 panel on this Page is not visible to you and is excluded from this comparison \(memory\)/)).toBeTruthy()
-    expect(screen.getByText(/This review does not cover it\./)).toBeTruthy()
+    expect(screen.getByText(/2 panels on this Page are not visible to you, so the server withheld them/)).toBeTruthy()
+    expect(screen.getByText(/This review does not cover them/)).toBeTruthy()
+    // The exclusion is one-sided: the candidate is not filtered, so a withheld
+    // panel it declares reads as added. Saying so is the honest version.
+    expect(screen.getByText(/appears above as added/)).toBeTruthy()
+  })
+
+  it("says nothing about withheld panels when the server withheld none", () => {
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.queryByText(/not visible to you/)).toBeNull()
   })
 
   it("says when there was no live definition to compare against, rather than listing additions alone", () => {
@@ -439,12 +478,98 @@ describe("EditorApplicationReview", () => {
     expect(screen.queryByText(/read the new candidate before publishing/)).toBeNull()
   })
 
+  it("offers no consent while the candidate's source has not arrived, and says which evidence is missing", () => {
+    // R2. `blockers` is the server's list of refusals; it has no opinion about
+    // whether the client got the evidence in front of the human.
+    setReview(clone(baseSnapshot), { candidate: { data: undefined, isPending: true, isError: false, error: null } })
+    render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText("Not everything this decision rests on is here")).toBeTruthy()
+    expect(screen.getByText("The candidate's source has not finished loading.")).toBeTruthy()
+    expect(consentBox().disabled).toBe(true)
+    fireEvent.click(consentBox())
+    expect(consentBox().checked).toBe(false)
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("renders a failed source read as an error with a retry, never as an endless Reading…", () => {
+    setReview(clone(baseSnapshot), {
+      candidate: { data: undefined, isPending: false, isError: true, error: new Error("The draft's source could not be read: 503.") },
+    })
+    const { container } = render(<EditorApplicationReview {...props} />)
+
+    expect(screen.queryByText(/Reading the source of both sides/)).toBeNull()
+    expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
+    expect(screen.getByText("The candidate's source could not be read")).toBeTruthy()
+    expect(screen.getAllByText("The draft's source could not be read: 503.").length).toBeGreaterThan(0)
+    expect(screen.getByText("The candidate's source could not be read: The draft's source could not be read: 503.")).toBeTruthy()
+    // A retry exists, and it is the control that can actually clear the state.
+    const retries = Array.from(container.querySelectorAll("button")).filter(button => button.textContent === "Try again")
+    expect(retries.length).toBeGreaterThan(0)
+    fireEvent.click(retries[0])
+    expect(state.review.refresh).toHaveBeenCalled()
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("offers no consent while the baseline source is still loading", () => {
+    setReview(clone(baseSnapshot), { baseline: { data: undefined } })
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getByText("The source behind the live publication has not finished loading.")).toBeTruthy()
+    expect(consentBox().disabled).toBe(true)
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("excepts only the previous source on an initial publication, and still requires the candidate's own", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.initial_publication = true
+    snapshot.baseline = { ...snapshot.baseline, publication_version: 0, published: false, source_revision: null, git_commit: null, source_available: false, source_unavailable_reason: null }
+    setReview(snapshot, { baseline: { data: undefined } })
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+
+    // There is no previous source to wait for: consent is offered.
+    expect(screen.queryByText(/The source behind the live publication/)).toBeNull()
+    expect(consentBox().disabled).toBe(false)
+    fireEvent.click(consentBox())
+    expect(publishButton().disabled).toBe(false)
+
+    // The candidate's own source is not excepted by anything.
+    setReview(snapshot, { baseline: { data: undefined }, candidate: { data: undefined, isPending: true, isError: false, error: null } })
+    rerender(<EditorApplicationReview {...props} />)
+    expect(screen.getByText("The candidate's source has not finished loading.")).toBeTruthy()
+    expect(consentBox().checked).toBe(false)
+    expect(consentBox().disabled).toBe(true)
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("does not report the unreadable baseline twice: the blocker says it once", () => {
+    setReview(clone(baseSnapshot), {
+      baselineUnavailable: "The retained source for publication 3 was pruned on 2026-08-01.",
+      baseline: { data: undefined },
+    })
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.queryByText(/The source behind the live publication has not finished loading/)).toBeNull()
+    // And a pruned archive is not offered a retry that can never succeed.
+    expect(screen.queryByText(/Try again/)).toBeNull()
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("offers a retry when the baseline source read FAILED rather than being gone", () => {
+    setReview(clone(baseSnapshot), {
+      baselineUnavailable: "The source of the live publication could not be read.",
+      baseline: { data: undefined, isError: true, error: new Error("The source of the live publication could not be read.") },
+    })
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getByText("Comparison unavailable")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    expect(state.review.refresh).toHaveBeenCalled()
+  })
+
   it("refuses to review a candidate when the live Page could not be loaded", () => {
     // `pages-layout.tsx:263` passes `detail.error ? null : detail.raw` while
     // capabilities come from `detail.raw`, so the two can disagree and this
     // screen can be mounted with no live definition at all.
     render(<EditorApplicationReview {...props} page={null} />)
-    expect(screen.getByRole("alert").textContent).toMatch(/could not be loaded, so there is nothing to compare the candidate against/)
+    expect(screen.getByRole("alert").textContent).toMatch(/This Page could not be loaded\. Reviewing is not offered while it is missing/)
     expect(screen.queryByRole("checkbox")).toBeNull()
     expect(screen.queryByRole("button", { name: "Publish application" })).toBeNull()
   })
@@ -467,18 +592,59 @@ describe("EditorApplicationReview", () => {
     expect(publishButton().disabled).toBe(true)
   })
 
-  it("clears consent when the live Page moves, even though the review snapshot has not caught up", () => {
+  it("compares the candidate with the definition the snapshot carries, not with the Page detail", () => {
+    // R1. The digest the publish fence sends and the document this list is
+    // derived from must come out of one authorized read, or the consent can
+    // attest to a definition the screen never showed.
+    render(<EditorApplicationReview {...props} />)
+    expect(state.comparedWith[0]).toEqual(liveDefinition)
+    expect(state.comparedWith[0]).not.toEqual(props.page)
+    expect(state.comparedWith[1]).toEqual({ kind: "Page" })
+  })
+
+  it("does not recompute or re-consent on a Page detail that moved: the detail is not the basis", () => {
     const { rerender } = render(<EditorApplicationReview {...props} />)
     fireEvent.click(consentBox())
+    state.comparedWith = []
 
-    // Only the detail query moved. `snapshot.baseline.definition_digest` is
-    // unchanged, so a basis built from the snapshot alone would miss this and
-    // the publish would then succeed against a list nobody reviewed.
+    // The detail query moved and the snapshot has not. Under the old design
+    // this cleared consent, which read as protection — while the request went
+    // on attesting to a digest from the other endpoint entirely. Now the
+    // detail is not evidence: nothing it does can change the comparison.
     const moved = { ...props.page!, panels: [{ id: "services", schema: "status.v1", owner: "crew/ops", producer: "routine/hourly", sla_seconds: 300 }] }
     rerender(<EditorApplicationReview {...props} page={moved as EditorSectionProps["page"]} />)
 
+    expect(state.comparedWith.filter(value => value === moved)).toHaveLength(0)
+    expect(consentBox().checked).toBe(true)
+  })
+
+  it("offers no consent at all when the snapshot arrives without the definition it was issued against", () => {
+    const snapshot = clone(baseSnapshot)
+    delete snapshot.baseline.definition
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText(/The live definition did not arrive with this review/)).toBeTruthy()
+    expect(screen.getByText(/did not arrive with the review, so the definition changes above are not a comparison with anything/)).toBeTruthy()
+    // Not "Reading…", and not a comparison against the Page read elsewhere.
+    expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
+    expect(consentBox().disabled).toBe(true)
+    fireEvent.click(consentBox())
     expect(consentBox().checked).toBe(false)
-    expect(screen.getByText(/The live Page changed while you were reviewing/)).toBeTruthy()
+    expect(publishButton().disabled).toBe(true)
+  })
+
+  it("clears a consent given before the definition vanished from a refetched snapshot", () => {
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+    fireEvent.click(consentBox())
+    expect(consentBox().checked).toBe(true)
+
+    const without = clone(baseSnapshot)
+    delete without.baseline.definition
+    setReview(without)
+    rerender(<EditorApplicationReview {...props} />)
+
+    expect(consentBox().checked).toBe(false)
     expect(publishButton().disabled).toBe(true)
   })
 

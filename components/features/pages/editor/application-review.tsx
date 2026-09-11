@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ReviewPreview } from "@/components/features/pages/editor/review-preview"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
-import { candidateDefinitionForComparison, hiddenPanelIds, liveDefinitionFromPage, usePageReview } from "@/hooks/use-page-review"
+import { usePageReview } from "@/hooks/use-page-review"
 import { usePagePreview } from "@/hooks/use-page-preview"
 import { compareDefinitions } from "@/lib/pages/definition-diff"
 import { compareSources } from "@/lib/pages/source-diff"
@@ -30,11 +30,14 @@ import {
  * displayed as evidence, because a summary written by the author of the change
  * is marketing and the reviewer has no way to tell the two apart.
  *
- * Three properties are load-bearing and each has a test:
+ * Four properties are load-bearing and each has a test:
  *
  *   - Consent is bound to one candidate AND one set of bases. Anything moving
  *     under it clears the checkbox *visibly*, with the reason written out. A
  *     silent reset is worse than none: the person believes they consented.
+ *   - Consent is not offered at all until every piece of evidence the decision
+ *     rests on has arrived — and the definition it attests to is the one this
+ *     screen rendered, because both came out of the same authorized read.
  *   - "Unknown" is never rendered as "unchanged" — not for a routine hash, not
  *     for a missing baseline, not for a field the comparator does not model.
  *   - There is no Reject. A rejection needs a recipient and this screen has
@@ -98,42 +101,142 @@ function conflictSentence(conflict: PublishConflictWire): string {
   }
 }
 
+/**
+ * The live definition the review was issued against, and how much of it this
+ * viewer may not see.
+ *
+ * The server reads both in the same statement, off the same row, as
+ * `definition_digest` — which is the whole point. The document rendered here
+ * and the digest the publish fence sends then come out of ONE authorized read
+ * at ONE instant, so consenting to the comparison on screen is consenting to
+ * the value the request attests to. Deriving the comparison from the Page
+ * detail query instead is the hole R1 of the 2026-09-11 counter-review
+ * reproduced: two endpoints, two cache entries, and a request that can carry a
+ * digest for a document the screen never showed. No amount of re-clearing the
+ * checkbox fixes that, because the two sides are never required to correspond.
+ *
+ * Written as an intersection because `editor-contract.ts` belongs to the
+ * stream landing these wire types; when they arrive there this alias is a
+ * no-op and goes away.
+ */
+type ReviewBaseline = ReviewSnapshotWire["baseline"] & {
+  /** The live Page document, authorized for this viewer. */
+  readonly definition?: unknown
+  /** How many panels were withheld from `definition` because this viewer may not read them. */
+  readonly excluded_panels?: number
+}
+
+/**
+ * The live definition the snapshot carries, or `undefined` when it did not
+ * arrive. Absent and null are the same fact to this screen — there is no
+ * document to compare against — and neither may be rendered as "no changes".
+ */
+function liveDefinitionOf(snapshot: ReviewSnapshotWire | undefined): unknown {
+  return (snapshot?.baseline as ReviewBaseline | undefined)?.definition ?? undefined
+}
+
+function excludedPanelsOf(snapshot: ReviewSnapshotWire | undefined): number {
+  const count = (snapshot?.baseline as ReviewBaseline | undefined)?.excluded_panels
+  return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+/** One read this decision depends on, as the screen sees it. */
+export interface EvidenceRead {
+  /** The query answered, and the answer carries what this screen needs. */
+  readonly arrived: boolean
+  /** It answered with an error instead; the server's sentence, when there was one. */
+  readonly error: string | null
+}
+
+export interface ReviewEvidence {
+  /** Every piece of evidence this decision needs is here and corresponds. */
+  readonly complete: boolean
+  /** One sentence per piece that is not, in the order a reader should read them. */
+  readonly missing: readonly string[]
+}
+
+/**
+ * Whether the person is actually looking at what they would be attesting to.
+ *
+ * `blockers` is the server's list of refusals. It says nothing about whether
+ * the CLIENT has the evidence in front of the human: the candidate's source
+ * can be pending or errored and the server would still have no objection, so
+ * without this the screen offers consent, unlocks Publish, and leaves the
+ * source diff on "Reading…" for ever (R2). `candidateMoved` does not help —
+ * it is false precisely when the data is absent.
+ *
+ * Correspondence is not checked here because it is not checkable here: it
+ * holds by construction, because the definition compared on screen and the
+ * digest the fence sends both come from `baseline` of this one snapshot.
+ * What is checked is that each piece is present at all.
+ *
+ * `baselineSource` is null for the one legitimate absence: an initial
+ * publication, where there is no previous source, and the case where the
+ * retained source cannot be read at all — which is its own blocker and its
+ * own sentence, and must not be reported twice.
+ */
+export function reviewEvidence(input: {
+  readonly snapshotArrived: boolean
+  readonly liveDefinitionArrived: boolean
+  readonly candidateDefinitionArrived: boolean
+  readonly candidateSource: EvidenceRead
+  readonly baselineSource: EvidenceRead | null
+}): ReviewEvidence {
+  const missing: string[] = []
+  if (!input.snapshotArrived) {
+    missing.push("The review of this candidate has not been read yet.")
+  }
+  if (!input.liveDefinitionArrived) {
+    missing.push(
+      "The live Page definition this candidate is compared against did not arrive with the review, so the definition changes above are not a comparison with anything.",
+    )
+  }
+  if (input.candidateSource.error !== null) {
+    missing.push(`The candidate's source could not be read: ${input.candidateSource.error}`)
+  } else if (!input.candidateSource.arrived) {
+    missing.push("The candidate's source has not finished loading.")
+  } else if (!input.candidateDefinitionArrived) {
+    missing.push("The candidate's draft arrived without a definition, so there is nothing to compare with the live Page.")
+  }
+  if (input.baselineSource !== null) {
+    if (input.baselineSource.error !== null) {
+      missing.push(`The source behind the live publication could not be read: ${input.baselineSource.error}`)
+    } else if (!input.baselineSource.arrived) {
+      missing.push("The source behind the live publication has not finished loading.")
+    }
+  }
+  return { complete: missing.length === 0, missing }
+}
+
 /** The exact values consent is bound to. A change in any of them ends it. */
 interface ConsentBasis {
   readonly revision: string
   readonly build: string
+  /**
+   * The live definition's digest — the value the fence sends, and now also the
+   * identity of the document the change list was computed from, because both
+   * come from `baseline` of the same snapshot. There is no second key for "what
+   * was rendered": a field promising that the rendered document matches the
+   * fenced digest, while the two were read from different endpoints, promised
+   * something it could not deliver.
+   */
   readonly definition: string
   readonly publication: string
   readonly routines: string
-  /**
-   * The live definition the change list on screen was actually computed from.
-   *
-   * The fence uses `snapshot.baseline.definition_digest`, which comes from the
-   * review endpoint; the change list is derived from the Page detail query,
-   * which is a different endpoint on a different cache entry. After a realtime
-   * reconnect those two can disagree for as long as the detail query lags —
-   * long enough for someone to re-consent to a list computed against a live
-   * definition that no longer exists, and for the publish to then SUCCEED,
-   * because the digest the fence checks did move back into agreement. Binding
-   * consent to what was rendered closes that window without depending on which
-   * query refetches first.
-   */
-  readonly live: string
 }
 
-function consentBasisOf(snapshot: ReviewSnapshotWire | undefined, live: string): ConsentBasis {
+function consentBasisOf(snapshot: ReviewSnapshotWire | undefined): ConsentBasis {
   return {
     revision: snapshot?.candidate ? `${snapshot.candidate.revision}:${snapshot.candidate.git_commit}:${snapshot.candidate.source_digest}` : "no-candidate",
     build: snapshot?.candidate?.build ? `${snapshot.candidate.build.id}:${snapshot.candidate.build.state}:${snapshot.candidate.build.artifact_digest}` : "no-build",
     definition: snapshot?.baseline.definition_digest ?? "no-definition",
     publication: `${snapshot?.baseline.publication_version ?? 0}:${snapshot?.baseline.published ?? false}`,
     routines: (snapshot?.routines ?? []).map(r => `${r.routine}=${r.current_digest ?? "?"}/${r.published_digest ?? "?"}/${r.in_candidate}`).join(","),
-    live,
   }
 }
 
 function basisKey(basis: ConsentBasis): string {
-  return [basis.revision, basis.build, basis.definition, basis.publication, basis.routines, basis.live].join("|")
+  return [basis.revision, basis.build, basis.definition, basis.publication, basis.routines].join("|")
 }
 
 export function EditorApplicationReview(props: EditorSectionProps) {
@@ -161,9 +264,10 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     return () => onDirtyChange(false)
   }, [onDirtyChange])
 
-  const liveDefinition = useMemo(() => liveDefinitionFromPage(page), [page])
-  const liveKey = useMemo(() => JSON.stringify(liveDefinition) ?? "no-live-definition", [liveDefinition])
-  const basis = useMemo(() => consentBasisOf(snapshot, liveKey), [snapshot, liveKey])
+  // The live definition comes off the snapshot, never off the Page detail
+  // query: `ReviewBaseline` above says why, and it is the whole of R1's fix.
+  const liveDefinition = useMemo(() => liveDefinitionOf(snapshot), [snapshot])
+  const basis = useMemo(() => consentBasisOf(snapshot), [snapshot])
   const basisRef = useRef<ConsentBasis | null>(null)
   const published = review.publish.isSuccess
   useEffect(() => {
@@ -184,8 +288,6 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       setResetReason("A new build of this candidate landed. Your review consent was cleared; consent applies to one build.")
     } else if (previous.definition !== basis.definition || previous.publication !== basis.publication) {
       setResetReason("A base you were comparing against moved. Your review consent was cleared; read the new baseline before publishing.")
-    } else if (previous.live !== basis.live) {
-      setResetReason("The live Page changed while you were reviewing, so the change list above was recomputed. Your review consent was cleared; read it again before publishing.")
     } else {
       setResetReason("A routine this application calls changed while this review was open. Your review consent was cleared; read the dependency again before publishing.")
     }
@@ -230,24 +332,18 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   }, [snapshot, review.baselineUnavailable, review.candidateMoved, conflict])
 
   const blocked = blockers.length > 0
-  // Disabling the box is not the same as clearing it. A blocker that appears
-  // and then goes away again — a transient `baseline.isError`, say — would
-  // otherwise leave the box ticked from before and Publish live the moment the
-  // blocker cleared, on a review nobody looked at again.
-  useEffect(() => {
-    if (blocked) setConsent(false)
-  }, [blocked])
 
-  // Panels this viewer may not read are excluded from BOTH sides. Leaving them
-  // on the live side reports each as removed by the candidate; leaving them on
-  // the candidate side reports each as added. Both are lies about a panel that
-  // exists and is simply not visible here, so the exclusion is stated instead.
-  const hidden = useMemo(() => hiddenPanelIds(page), [page])
+  // Panels this viewer may not read were withheld from the live definition by
+  // the server, which also says how many. Counting them here off the Page
+  // detail would be a second source for a fact the compared document already
+  // carries — and the two could disagree about the very document on screen.
+  const excludedPanels = excludedPanelsOf(snapshot)
   const definitionDiff = useMemo(() => {
+    if (liveDefinition === undefined) return null
     const candidateDefinition = review.candidate.data?.definition
     if (candidateDefinition === undefined) return null
-    return compareDefinitions(liveDefinition, candidateDefinitionForComparison(candidateDefinition, hidden))
-  }, [review.candidate.data, liveDefinition, hidden])
+    return compareDefinitions(liveDefinition, candidateDefinition)
+  }, [review.candidate.data, liveDefinition])
 
   const initial = snapshot?.initial_publication === true
   const comparisonUnavailable = review.baselineUnavailable
@@ -264,19 +360,52 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     return compareSources(baselineProject, candidateProject)
   }, [comparisonUnavailable, initial, review.candidate.data, review.baseline.data])
 
+  // A read that FAILED is not a read that is still going. Left as "Reading…"
+  // it never resolves and the screen keeps offering a decision over evidence
+  // that will never appear (R2). Both are surfaced where the missing evidence
+  // would have been, each with the control that can clear it.
+  const candidateSourceError = review.candidate.isError ? (review.candidate.error?.message ?? "No reason was given.") : null
+  const baselineSourceError = review.baseline.isError ? (review.baseline.error?.message ?? "No reason was given.") : null
+
+  const evidence = useMemo(
+    () =>
+      reviewEvidence({
+        snapshotArrived: snapshot !== undefined,
+        liveDefinitionArrived: liveDefinitionOf(snapshot) !== undefined,
+        candidateDefinitionArrived: review.candidate.data?.definition !== undefined,
+        candidateSource: { arrived: review.candidate.data?.project != null, error: candidateSourceError },
+        // The two legitimate absences, and only these: an initial publication
+        // has no previous source, and a retained source that cannot be read is
+        // already `baseline_unavailable` — a blocker with its own sentence.
+        baselineSource: initial || comparisonUnavailable ? null : { arrived: review.baseline.data !== undefined, error: baselineSourceError },
+      }),
+    [snapshot, review.candidate.data, review.baseline.data, candidateSourceError, baselineSourceError, initial, comparisonUnavailable],
+  )
+
+  // Disabling the box is not the same as clearing it. A blocker that appears
+  // and then goes away again — a transient `baseline.isError`, say — would
+  // otherwise leave the box ticked from before and Publish live the moment the
+  // blocker cleared, on a review nobody looked at again. The same is true of
+  // evidence that arrives, vanishes on a refetch, and comes back.
+  const evidenceComplete = evidence.complete
+  useEffect(() => {
+    if (blocked || !evidenceComplete) setConsent(false)
+  }, [blocked, evidenceComplete])
+
   // The shell today gates on `capabilities.hasApplication`, and those
   // capabilities are derived from `detail.raw` while `page` arrives as
   // `detail.error ? null : detail.raw` (`pages-layout.tsx:263`) — the two can
-  // disagree. With no live Page there is no definition to compare against, so
-  // every existing panel would list as ADDED under a "there was no live
-  // definition" note, and nothing in `blockers` would stop the publish.
+  // disagree. The comparison itself no longer depends on this read: it is made
+  // against the definition the snapshot carries. What still does is the
+  // candidate's preview and the permission the shell read from the same
+  // record, so a review is not offered over a Page that could not be loaded.
   if (!page) {
     return (
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Review application changes</h2>
         <p role="alert" className="text-sm">
-          This Page&apos;s current definition could not be loaded, so there is nothing to compare the candidate against. Reload before reviewing: publishing from here would
-          approve a change list computed against nothing.
+          This Page could not be loaded. Reviewing is not offered while it is missing: the candidate&apos;s preview renders with this Page&apos;s data, and the permission to
+          publish it was read from the same record. Reload before reviewing.
         </p>
         <div>
           <Button variant="outline" className="min-h-11" onClick={review.refresh}>
@@ -419,7 +548,28 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       {/* 2 — Definition changes, derived. */}
       <div className="rounded-md border p-4">
         <h3 className="text-base font-semibold">Definition changes</h3>
-        {definitionDiff === null ? (
+        {candidateSourceError !== null ? (
+          <div role="alert" className="mt-2 text-sm">
+            <strong>The candidate&apos;s definition could not be read</strong>
+            <p className="mt-1">{candidateSourceError}</p>
+            <p className="mt-1">Nothing is compared here, because there is nothing truthful to compare. This is not a statement that the definition is unchanged.</p>
+            <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
+              Try again
+            </Button>
+          </div>
+        ) : liveDefinition === undefined ? (
+          <div role="alert" className="mt-2 text-sm">
+            <strong>The live definition did not arrive with this review</strong>
+            <p className="mt-1">
+              The review carries the live Page definition the candidate is compared against, alongside the digest the publication is checked with. This one did not, so there
+              is nothing to compare the candidate with — and comparing it against the Page read elsewhere would mean approving a digest for a document this screen never
+              showed you.
+            </p>
+            <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
+              Try again
+            </Button>
+          </div>
+        ) : definitionDiff === null ? (
           <p className="mt-2 text-sm text-muted-foreground">Reading the candidate&apos;s definition…</p>
         ) : definitionDiff.identical && !definitionDiff.baselineMissing && definitionDiff.unmodelled.length === 0 ? (
           <p className="mt-2 text-sm">This candidate declares the same panels, producers and actions as the live Page.</p>
@@ -450,10 +600,11 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             is not a statement that nothing else changed.
           </p>
         )}
-        {hidden.length > 0 && (
+        {excludedPanels > 0 && (
           <p role="note" className="mt-2 text-sm">
-            {hidden.length} panel{hidden.length === 1 ? "" : "s"} on this Page {hidden.length === 1 ? "is" : "are"} not visible to you and {hidden.length === 1 ? "is" : "are"}{" "}
-            excluded from this comparison ({hidden.join(", ")}). This review does not cover {hidden.length === 1 ? "it" : "them"}.
+            {excludedPanels} panel{excludedPanels === 1 ? "" : "s"} on this Page {excludedPanels === 1 ? "is" : "are"} not visible to you, so the server withheld{" "}
+            {excludedPanels === 1 ? "it" : "them"} from the definition this comparison was made against. This review does not cover {excludedPanels === 1 ? "it" : "them"}, and
+            a panel the candidate declares that you may not read appears above as added.
           </p>
         )}
         {definitionDiff !== null && definitionDiff.unmodelled.length > 0 && (
@@ -490,6 +641,22 @@ export function EditorApplicationReview(props: EditorSectionProps) {
             <strong>Comparison unavailable</strong>
             <p className="mt-1">{comparisonUnavailable}</p>
             <p className="mt-1">This does not mean there are no changes. No diff is shown because there is nothing truthful to show, and publishing from this review is blocked.</p>
+            {/* Only when the read FAILED. A retained source that was pruned is
+                gone; a Try again there is an invitation to click for ever. */}
+            {baselineSourceError !== null && (
+              <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
+                Try again
+              </Button>
+            )}
+          </div>
+        ) : candidateSourceError !== null ? (
+          <div role="alert" className="mt-2 text-sm">
+            <strong>The candidate&apos;s source could not be read</strong>
+            <p className="mt-1">{candidateSourceError}</p>
+            <p className="mt-1">This does not mean there are no changes. No diff is shown because there is nothing truthful to show, and publishing from this review is blocked.</p>
+            <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
+              Try again
+            </Button>
           </div>
         ) : sourceDiff === null ? (
           <p className="mt-2 text-sm text-muted-foreground">Reading the source of both sides…</p>
@@ -573,12 +740,33 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           </div>
         )}
 
+        {/* Not a grey checkbox with no account of itself: the evidence that is
+            missing is named, and the control that can fetch it is here. */}
+        {!evidence.complete && (
+          <div className="mt-3" data-evidence="incomplete">
+            <h4 className="text-sm font-semibold">Not everything this decision rests on is here</h4>
+            <ul className="mt-1 flex list-disc flex-col gap-1 pl-5">
+              {evidence.missing.map(sentence => (
+                <li key={sentence} className="text-sm" data-missing-evidence="">
+                  {sentence}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Consent is not offered until all of it is on screen. Nothing above says this candidate is safe or unsafe; it says this review is incomplete.
+            </p>
+            <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
+              Try again
+            </Button>
+          </div>
+        )}
+
         <label className="mt-3 flex min-h-11 items-start gap-2 text-sm">
           <input
             type="checkbox"
             className="mt-1 size-4"
             checked={consent}
-            disabled={blocked}
+            disabled={blocked || !evidence.complete}
             onChange={event => {
               setConsent(event.target.checked)
               if (event.target.checked) setResetReason(null)
@@ -591,7 +779,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         </label>
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button className="min-h-11" disabled={!consent || blocked || review.publish.isPending} onClick={() => review.publish.mutate()}>
+          <Button className="min-h-11" disabled={!consent || blocked || !evidence.complete || review.publish.isPending} onClick={() => review.publish.mutate()}>
             {review.publish.isPending ? "Publishing…" : "Publish application"}
           </Button>
         </div>
