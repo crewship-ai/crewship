@@ -52,7 +52,7 @@ Jeden běh, dva tvrdé pády. Rutina `acc-recovery` (agentless): `prepare`
 
 Konečný stav exekucí:
 
-```
+```text
 prepare   completed  att=1     announce  completed  att=1
 decide    waiting    att=1     decide    waiting    att=2     decide  completed att=3
 hold      interrupted att=1    hold      completed  att=2
@@ -85,7 +85,7 @@ loopback i RFC1918 adresu a tento stroj nemá jinou (`192.168.1.201`, za NAT).
 Řízený recorder je tedy z reálného crewshipd nedosažitelný. Pokus o `http`
 krok na `127.0.0.1:8101` skončil doložitelně:
 
-```
+```text
 run_cmtwp2u9d00032f0d39c5  failed at "external"
 http step "external": httpsafe: invalid outbound URL: literal private/internal IP 127.0.0.1 not allowed
 ```
@@ -180,7 +180,7 @@ Tyto důkazy jsou serverové; fault injection v prohlížeči by je nenahradila.
 
 **Chybějící historický archiv, bez tichého fallbacku na současný recept.**
 
-```
+```text
 GET …/pipelines/acc-recovery/versions/1   → 200, v1 definice
 GET …/pipelines/acc-recovery/versions/99  → 404 {"error":"version not found"}
 GET …/pipelines/acc-recovery/versions/0   → 404
@@ -203,7 +203,7 @@ Reakce UI na výpadek načítání (prázdno vs. chyba) je záležitost prohlí�
 **Neprovedená větev, foreach a skutečné pokusy — živě, v jednom běhu.**
 `acc-branch-foreach-retry`, `run_cmtwqaand001db3acdea1`:
 
-```
+```text
 branch  /branch              att=1  skipped    "Condition was false"
 fan     /fan                 att=1  completed
 each    /fan/items/0/each    att=1  completed
@@ -271,7 +271,7 @@ NEOVĚŘENO.
 „EDITOR A WAS HERE“ a uložil; B napsal „EDITOR B WAS HERE“ a uložil na téže
 revizi. B dostal viditelně:
 
-```
+```text
 Save failed — routine draft changed or its published recipe changed;
 reload and review before publishing
 ```
@@ -336,7 +336,7 @@ ukládá verbatim (`json.RawMessage`). Můj skript definici mezitím
 přeserializoval v Pythonu, takže podepsal jiné bajty. Po vložení jednoho
 literálu do obou těl beze změny:
 
-```
+```text
 POST .../pipelines/drafts     → 200   (uložené bajty == můj literál, ověřeno SHA-256)
 POST .../pipelines/test_run   → 200   DRY_RUN_OK, save_token vydán
 POST .../pipelines/acc-schema2/publish → 409
@@ -367,7 +367,7 @@ Izolovaná instance na binárce sestavené z **kombinace** obou větví
 **#2496 — plán se nedá uložit s presetem, který jeho rutina odmítá.** Rutina
 `acc-live-gate` s povinným `select` a volitelným `boolean`, oba s widgetem:
 
-```
+```text
 POST /pipeline-schedules  inputs {}                                → 400 input "region" is required
                           inputs {"region":"antarctica"}           → 400 input "region": choose one of the available answers
                           inputs {"region":"eu","dry_run":"yes"}   → 400 input "dry_run": expected true or false
@@ -379,7 +379,7 @@ Uloženy **jedna** z těch čtyř — `false` je odpověď, ne nepřítomnost.
 **#2495 — přímé uložení už plán tiše nerozbije.** Táž rutina, v2 přejmenuje
 povinný vstup:
 
-```
+```text
 crewship routine save --definition v2   → API error (409): publication blocked by
                                           schedule p-ok: Input zone is required by the new recipe
 POST /pipelines/save (totéž tělo)       → 409 {"error": …,
@@ -394,7 +394,7 @@ Po odmítnutí: živý recept dál `['region','dry_run']`, preset plánu dál
 **Deadlock, který to živé ověření odhalilo, a cesta ven.** První pokus o
 nápravu skončil takto:
 
-```
+```text
 PATCH plán {"inputs":{"zone":"eu"}}  → 400  (nesplňuje recept, který je stále publikovaný)
 POST  /pipelines/save v2             → 409  (uložený preset nesplňuje nový recept)
 ```
@@ -405,7 +405,7 @@ uložení rutiny může nést `trigger` a `upsertTriggerSchedule` vlastní nejv�
 jeden plán na (workspace, rutina) — jen brána běžela dřív, než ho viděla.
 Posunuta za `createTriggerTx`:
 
-```
+```text
 POST /pipelines/save  {definition: v2, trigger:{cron, inputs:{"zone":"eu"}}}  → 201
    živé vstupy: ['zone']     plán: enabled, {"zone":"eu"}
 ```
@@ -477,7 +477,7 @@ registry nikdy neviděl.
 
 Reprodukce na izolované instanci (před opravou):
 
-```
+```text
 curl -m 5 -X POST …/pipelines/acc-nosignal/run -d '{"inputs":{…}}'   # klient odpadne po 5 s
 → run_cmtwpqgl6000fc1fbf43b  status=failed  outcome=FAILED
    error_message="context canceled"  error_fingerprint minted
@@ -520,7 +520,7 @@ draft → publish, a jen pro **povolené** a **nepřipnuté** plány. Přímé
 `crewship routine save` (dveře CLI a agentů) změní schéma pod plánem bez
 varování:
 
-```
+```text
 plán "nightly-who" (enabled, nepřipnutý), preset {"who":"alice"}
 crewship routine save …  # v2 přejmenuje povinný vstup who → recipient
 → Saved routine acc-schema (hash=eb481348ceeb)
@@ -598,7 +598,7 @@ je tento řádek doložená oprava v review, ne uzavřená vada.
 `202 SCHEDULED` s handlem — běh je přijatý. Nebyl ale připnutý, takže
 publikace během čekání změnila, co se spustí.
 
-```
+```text
 POST …/run {"inputs":{},"delay_seconds":45}
 → 202 {"pending_id":"pnd_cmtwvbad3000108716b4d","status":"SCHEDULED","pinned_version":null}
 
@@ -624,7 +624,7 @@ Issue [#2500](https://github.com/crewship-ai/crewship/issues/2500), oprava v
 Živě ověřeno na binárce s opravou (`sha256:4eb6625c…`), týž scénář, skutečná
 těla:
 
-```
+```text
 POST …/run {"inputs":{},"delay_seconds":45}
 → 202 {"pending_id":"pnd_cmtww3usu0001426ab256","status":"SCHEDULED","pinned_version":3}
 
