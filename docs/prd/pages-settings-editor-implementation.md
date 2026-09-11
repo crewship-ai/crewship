@@ -6,7 +6,12 @@ what was measured, and what is still open. The proposal stays the design; the
 untouched as a historical document. This file is the record of the delivery and
 is the only one that should be updated as it changes.
 
-**Branch** `feat/pages-editor` · **base** `origin/main` `01d4849c` · issue #2491.
+**Branch** `feat/pages-editor` · **head** `4a7373c8` · **base** `origin/main` `01d4849c` · issue #2491.
+
+Every figure in §3 was taken at that head and at the scope named in its row.
+An earlier draft of this file mixed rows from different commits — the table
+said "one head, one scope" while breaking it — which an independent review
+caught. If you change the branch, re-run §3 rather than editing a number.
 
 The proposal was verified against `01d4849c`, which is what `origin/main` was at
 the time and still is. The clone's local `main` was 173 commits stale and its
@@ -50,8 +55,10 @@ Everything below was run; nothing is inferred from a passing neighbour.
 
 | Check | Result |
 |---|---|
-| Vitest — Pages, `lib/pages`, the review hook and the navigation guard | **854 passed / 56 files**, 0 failed, 0 skipped |
-| `go test ./internal/api/` — whole package | ok, 1088 s |
+| Vitest — `components/features/pages`, `lib/pages`, `hooks/__tests__` | **1828 passed / 137 files**, 0 failed, 0 skipped |
+| Vitest — whole frontend suite | **8830 passed / 738 files** |
+| `go test ./internal/api/` — whole package | see the row below; the Pages suites are also run alone in ~25 s |
+| `go test ./cmd/crewship/` — whole package | pass. **Without `PAGES_TEST_BUILD_IMAGE` it now reports 1 skip**, which is the point: the Docker publish-and-restart half used to `t.Log` and return, so the parent went green and the run reported zero skips, and this file quoted that zero as proof. Build the image (`docker build --iidfile … tools/pages-build`, a pinned id — a tag is refused) to run it. |
 | `go test ./cmd/crewship/` (whole package, real build image) | pass, 0 skipped — includes `TestSeedPageAppLifecycle/publish` and `TestAcceptance_PageProjectGitHistoryRestore/restart` |
 | `go vet`, `go build ./...`, `gofmt` | clean |
 | `golangci-lint run` on the changed packages | 0 issues |
@@ -249,3 +256,73 @@ they may not. The screen says the comparison is partial and says which.
 Still open from that review: nothing in R1–R3. Its two process points are
 addressed — the numbers above are one head and one scope, and §5 no longer
 describes the baseline check as client-side.
+
+## 9. The follow-up review of 2026-09-11, and the live passes
+
+The counter-review's two remaining points were closed, and verifying them
+turned up more than they asked for.
+
+**Partial review is a policy now, not a warning.** It is reachable:
+`mayAdministerGrants` and `canSeePanel` never ask each other's question, so a
+Page owner who is not a workspace administrator publishes a Page while seeing
+only the panels of crews they belong to. The server holds both full documents
+and answers the one question that settles it — did anything this reviewer
+cannot see actually change? If not, publishing stays available and the consent
+narrows to what it truly covers. If so, the review cannot complete it and a
+**403 refuses it on every path**: browser, CLI and rollback. One computation
+decides the blocker and the refusal, so they cannot drift. No flag waives it,
+and an administrator is never affected.
+
+Fixing that leak exposed a second one **of our own making**: the endpoint built
+to withhold a panel was disclosing, in the same body, which routine that panel
+calls and whether its script had changed. And filtering the review alone would
+have made publishing impossible — `movedRoutines` flags every current key
+absent from the expected map, so a routine the review withholds is one the
+fence still demands. Both sides rebuild from the authorized document now. The
+cost is stated: a routine only a withheld panel calls is not fenced by a
+publisher who cannot read that panel.
+
+**"One authorized read at one instant" was not true**, and an interleaving test
+proves it rather than the wording being softened: `ReviewProject` issues about
+ten autocommit statements, `_txlock=immediate` governs explicit transactions
+only, and `pageLease` is a shared flock. A write landed between two reads
+produces a snapshot reporting one publication number beside the live
+declaration that preceded it — a pair the database never held. No interleaving
+was found in which a stale or mixed snapshot publishes: the fence inside the
+writing transaction refuses every one. Eleven tests hold that down, and the
+comments now name the real guarantee.
+
+**A blocker that refused the only action clearing it.** `definition_moved` was
+emitted by the review handler alone — the publish path never checked it — so a
+live definition that had drifted from the published one disabled consent and
+refused the publication that would have brought the two back into agreement.
+The live tester escaped through the CLI three times. It is
+`baseline.definition_diverged` now: stated prominently, naming both bases, and
+advisory, because the comparison on screen is derived from the live definition
+and is complete regardless.
+
+**Accessibility, measured rather than asserted.** Four seams moved focus to
+`<body>` — entering the editor, leaving it, and the two dialog answers that
+keep you where you were — and the headings focus is moved to carried
+`outline-none`, so the move was silent. In the diff, added versus removed was
+carried by one `aria-hidden` glyph and nothing else. A failed review read had
+no retry at all. All fixed; the first attempt at the leaving case focused on
+the next animation frame and a live pass found it still landing on `<body>`,
+because `AnimatePresence` holds the incoming view until the outgoing one has
+left.
+
+**Live browser passes** on a throwaway instance covered candidate and baseline
+sources slow and failed, a live definition changed under an open review, a
+candidate moved mid-load, first publication and republication after withdrawal,
+the unsaved-work guard through the global navigation at 360 px, Back/Forward,
+the workspace switch, the preview return, and both halves of partial review —
+the last confirmed against the server directly, not just as a hidden button.
+Zero horizontal overflow and no uncaught errors at any width. Screenshots at
+360 / 768 / 1440 are in the run's evidence directory.
+
+Two things the passes found that are recorded rather than fixed: authoring
+`sla: "90.5s"` stores `sla_seconds: 90`, so `page export` and the review
+disagree about one panel (server-side lossiness, a different surface); and the
+in-review publish receipt never renders because the content gate replaces the
+whole review on the post-publish refetch — the replacement is truthful and
+names the version, so a confirmation is lost rather than a falsehood told.
