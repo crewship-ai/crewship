@@ -49,11 +49,11 @@ type dstRig struct {
 	sched *Schedule
 }
 
-func newDSTRig(t *testing.T, cronExpr string) *dstRig {
+func newDSTRig(t *testing.T, ctx context.Context, cronExpr string) *dstRig {
 	t.Helper()
 	r := newPinningRig(t)
 	seedPipelineDef(t, r.db, "pipe_dst", "dst-main", transformPipelineDef("dst-main", "fired"))
-	sched, err := r.store.Save(context.Background(), SaveScheduleInput{
+	sched, err := r.store.Save(ctx, SaveScheduleInput{
 		WorkspaceID:      "ws_test",
 		Name:             "dst-sched",
 		TargetPipelineID: "pipe_dst",
@@ -70,18 +70,18 @@ func newDSTRig(t *testing.T, cronExpr string) *dstRig {
 // fireAt pins the clock at `now`, sets the due bar to `dueAt`, fires once,
 // and returns the next_run_at the dispatcher committed (in UTC) plus how
 // many runs the schedule has produced in total.
-func (d *dstRig) fireAt(t *testing.T, dueAt, now time.Time) (nextRun time.Time, totalRuns int) {
+func (d *dstRig) fireAt(t *testing.T, ctx context.Context, dueAt, now time.Time) (nextRun time.Time, totalRuns int) {
 	t.Helper()
 	d.rig.pinClock(now)
-	got, err := d.rig.store.GetByID(context.Background(), d.sched.ID)
+	got, err := d.rig.store.GetByID(ctx, d.sched.ID)
 	if err != nil {
 		t.Fatalf("get schedule: %v", err)
 	}
 	due := dueAt.UTC()
 	got.NextRunAt = &due
-	d.rig.scheduler.fireOne(context.Background(), got)
+	d.rig.scheduler.fireOne(ctx, got)
 
-	after, err := d.rig.store.GetByID(context.Background(), d.sched.ID)
+	after, err := d.rig.store.GetByID(ctx, d.sched.ID)
 	if err != nil {
 		t.Fatalf("reload schedule: %v", err)
 	}
@@ -101,11 +101,12 @@ func (d *dstRig) fireAt(t *testing.T, dueAt, now time.Time) (nextRun time.Time, 
 // collapsing them or skipping the day.
 func TestDSTDispatch_AutumnRepeatedLocalTime_FiresBothOccurrences(t *testing.T) {
 	loc := pragueLoc(t)
-	d := newDSTRig(t, "30 2 * * *")
+	ctx := t.Context()
+	d := newDSTRig(t, ctx, "30 2 * * *")
 
 	// The day before: 24 Oct 02:30 CEST == 23 Oct 00:30Z.
 	prev := time.Date(2026, 10, 24, 0, 30, 0, 0, time.UTC)
-	next, runs := d.fireAt(t, prev, prev)
+	next, runs := d.fireAt(t, ctx, prev, prev)
 	firstAutumn := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC) // 02:30 CEST
 	if !next.Equal(firstAutumn) {
 		t.Fatalf("after the 24 Oct fire, next = %s, want %s (02:30 CEST)", next.Format(time.RFC3339), firstAutumn.Format(time.RFC3339))
@@ -115,7 +116,7 @@ func TestDSTDispatch_AutumnRepeatedLocalTime_FiresBothOccurrences(t *testing.T) 
 	}
 
 	// First 02:30 of the doubled day.
-	next, runs = d.fireAt(t, firstAutumn, firstAutumn)
+	next, runs = d.fireAt(t, ctx, firstAutumn, firstAutumn)
 	secondAutumn := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC) // 02:30 CET, the repeat
 	if !next.Equal(secondAutumn) {
 		t.Errorf("after 02:30 CEST, next = %s, want %s (the SECOND 02:30, one hour later in UTC)",
@@ -126,7 +127,7 @@ func TestDSTDispatch_AutumnRepeatedLocalTime_FiresBothOccurrences(t *testing.T) 
 	}
 
 	// Second 02:30 of the doubled day — a distinct dispatch, not a dedupe.
-	next, runs = d.fireAt(t, secondAutumn, secondAutumn)
+	next, runs = d.fireAt(t, ctx, secondAutumn, secondAutumn)
 	dayAfter := time.Date(2026, 10, 26, 1, 30, 0, 0, time.UTC) // 02:30 CET
 	if !next.Equal(dayAfter) {
 		t.Errorf("after 02:30 CET, next = %s, want %s", next.Format(time.RFC3339), dayAfter.Format(time.RFC3339))
@@ -149,11 +150,12 @@ func TestDSTDispatch_AutumnRepeatedLocalTime_FiresBothOccurrences(t *testing.T) 
 // parks on an instant that will never arrive.
 func TestDSTDispatch_SpringMissingLocalTime_SkipsTheDayWithoutStalling(t *testing.T) {
 	loc := pragueLoc(t)
-	d := newDSTRig(t, "30 2 * * *")
+	ctx := t.Context()
+	d := newDSTRig(t, ctx, "30 2 * * *")
 
 	// 27 Mar 2027 02:30 CET == 01:30Z, the last occurrence before the jump.
 	beforeJump := time.Date(2027, 3, 27, 1, 30, 0, 0, time.UTC)
-	next, runs := d.fireAt(t, beforeJump, beforeJump)
+	next, runs := d.fireAt(t, ctx, beforeJump, beforeJump)
 	if runs != 1 {
 		t.Fatalf("runs after the 27 Mar fire = %d, want 1", runs)
 	}
@@ -169,7 +171,7 @@ func TestDSTDispatch_SpringMissingLocalTime_SkipsTheDayWithoutStalling(t *testin
 
 	// And the 29th really does fire, so the skipped day cost one run, not
 	// the schedule.
-	next, runs = d.fireAt(t, afterJump, afterJump)
+	next, runs = d.fireAt(t, ctx, afterJump, afterJump)
 	if runs != 2 {
 		t.Errorf("runs after the 29 Mar fire = %d, want 2", runs)
 	}
@@ -212,10 +214,11 @@ func TestDSTDispatch_HourlyScheduleKeepsItsCadenceAcrossBothTransitions(t *testi
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := newDSTRig(t, "0 * * * *")
+			ctx := t.Context()
+			d := newDSTRig(t, ctx, "0 * * * *")
 			at := tc.start
 			for i, want := range tc.want {
-				next, runs := d.fireAt(t, at, at)
+				next, runs := d.fireAt(t, ctx, at, at)
 				if !next.Equal(want) {
 					t.Fatalf("fire %d: next = %s, want %s", i, next.Format(time.RFC3339), want.Format(time.RFC3339))
 				}

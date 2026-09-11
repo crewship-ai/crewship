@@ -94,9 +94,16 @@ To je správné chování SSRF ochrany, ne vada — a zároveň tvrdá hranice
 přejímky. Scénář je proto uzavřen na úrovni, kde je měřitelný:
 `internal/pipeline/uncertain_external_effect_test.go`. Recorder zapisuje
 účinek **dřív**, než zvolí odpověď, takže aserce čtou jeho účetní knihu, ne
-domněnku exekutoru. Skutečný runner, skutečné egress brány, skutečná
-perzistence, skutečná resume cesta; `SetAllowPrivateHTTPForTesting` uvolňuje
-výhradně SSRF kontrolu.
+domněnku exekutoru.
+
+Rozsah té vrstvy přesně: produkční je `runHTTPStep`, run store i jeho
+perzistence výstupů kroků, boot resume sken a jeho drift gate.
+Produkční **není** crew network policy gate ani credential resolver — ty
+`NewWiredExecutor` zapojuje a tyto rigy je nechávají nil, protože soubor měří,
+co se stane *poté*, co byl požadavek povolen ven. Vrstvy rozhodující, zda smí
+odejít, pokrývají `runner_http_test.go` a `http_egress_credentials_test.go`.
+(Dřívější znění tohoto odstavce tvrdilo „skutečné egress brány“; to byla moje
+chyba, na kterou upozornilo CodeRabbit review PR #2494.)
 
 | Test | Co měří |
 |---|---|
@@ -315,7 +322,7 @@ odváže a je nyní zdokumentován v průvodci. Živě ověřeno:
 `run_cmtwprucs0010063ab752` s `Prefer: respond-async` přežil odchod klienta
 a doběhl. `crewship routine run` async cestu nepoužívá.
 
-### N2 — Kontrola presetů se obchází přes `routine save` · NEOPRAVENO
+### N2 — Kontrola presetů se obchází přes `routine save` · OPRAVENO v samostatném PR
 
 Brána kompatibility plánů žije v `consumeDraftTx`, tedy výhradně na cestě
 draft → publish, a jen pro **povolené** a **nepřipnuté** plány. Přímé
@@ -330,29 +337,61 @@ plán po změně: stále enabled, stále {"who":"alice"}
 HEAD vstupy: ["recipient"]
 ```
 
-§9 to zakazuje slovy „žádný tichý rozbitý plán“. Oprava znamená přesunout
-bránu na všechny zápisové cesty, což by začalo odmítat dnes fungující
-uložení od agentů a CLI — patří do vlastního PR s vlastním rozhodnutím.
+§9 to zakazuje slovy „žádný tichý rozbitý plán“. Oprava přesouvá bránu z
+větve `Publication != nil` do `Store.save`, kudy prochází **každá** cesta
+měnící aktivní recept — publish, přímé uložení, agentní/interní uložení,
+import i manifest apply. Vyloučení zůstávají a jsou připnutá testy: vypnutý
+plán, připnutý plán, legacy netypovaný vstup a uložení, které definici nemění.
+Konflikt se nově mapuje na 409 se strukturovaným `schedule_conflict` i na
+importní a agentní dveře — tam by dosud i plně akční odmítnutí skončilo jako
+500. Issue [#2495](https://github.com/crewship-ai/crewship/issues/2495).
 
-### N3 — Server nevaliduje typované vstupy běhu · NEOPRAVENO
+### N3 — Plán lze uložit s presetem, který jeho rutina odmítá · OPRAVENO v samostatném PR
 
-`validateFormValue` existuje a je úplný (povinnost, typ, meze, volby), ale
-volá se jen pro odpovědi rozhodovacích formulářů a pro vstupy **vnořené**
-rutiny (`nested_inputs.go`). Vstupy běhu nejvyšší úrovně neprochází ničím.
-Živě, obě cesty stejně:
+**Oprava původní formulace.** Toto zjištění jsem nejdřív zapsal jako „server
+nevaliduje typované vstupy běhu“. To je nesprávné. `pipeline.ValidateFormInputs`
+existuje a je na cestě běhu zapojený dvakrát: `PipelineHandler.Run` ho volá před
+dispatchem a exekutor znovu před prvním krokem; stejnou funkci používají
+rozhodovací formuláře i vazba vstupů vnořené rutiny.
 
-| Vstup | `POST …/run` | `POST …/pipeline-schedules` |
+Moje původní sonda prošla proto, že rozhoduje `hasInputForm`:
+
+```go
+func hasInputForm(in InputSpec) bool { return in.Widget != "" || len(in.Options) > 0 || in.AllowCustom }
+```
+
+Vstup nese formulářový kontrakt jen když deklaruje `widget`, `options` nebo
+`allow_custom`. Sonda deklarovala `type` a `required`, ale žádný `widget`, takže
+všechny její vstupy byly podle tohoto pravidla legacy a všechny kontroly se
+přeskočily. Naměřená matice je pravdivá, její vysvětlení nebylo.
+
+**Co je skutečně vada:** preset plánu se ověřuje jen tehdy, když se později
+změní *rutina* (brána z N2). Nic ho neověřuje ve chvíli, kdy se zakládá nebo
+edituje **samotný plán**. Plán tak může vzniknout s presetem, který jeho cílová
+rutina už teď odmítá, sedět v kalendáři jako zdravý a selhat poprvé ve 02:30 —
+bez run řádku k prohlédnutí, protože exekutor odmítne dřív, než nějaký vznikne.
+
+Ověřeno proti rutině, jejíž vstupy formulářový kontrakt **nesou**:
+
+| `POST /pipeline-schedules`, inputs | před | po |
 |---|---|---|
-| chybí povinný `who` | **200, běh COMPLETED** s `who=""` | **201** |
-| `count: "seven"` u `type: number` | **200, COMPLETED**, výstup `"count":seven` (nevalidní JSON) | **201** |
-| `dry_run: "yes"` u `type: boolean` | 200 | 201 |
-| pole jako objekt, objekt jako pole | 200 | 201 |
-| neznámý vstup | 200 | 201 |
+| `{}` — chybí povinný `region` (select) | **201** | 400 s názvem `region` |
+| `{"region":null}` | **201** | 400 |
+| `{"region":"antarctica"}` — mimo `options` | **201** | 400 |
+| `{"region":"eu","dry_run":"yes"}` — string za boolean | **201** | 400 |
+| `{"retries":9}` — nad deklarovaným `max` | **201** | 400 |
+| `PATCH` na `{"region":"antarctica"}` | **200** | 400, uložený preset beze změny |
 
-„Shodná validace ručně i v plánu“ tedy platí — obě cesty validují stejně,
-totiž nijak. Požadavek §11 R2 se týká toho, co vidí klient, a UI ho plní;
-tvrdší serverová brána je změna kontraktu pro agenty i webhooky a patří do
-vlastního PR.
+Beze změny a připnuto testy: `{"region":"eu"}`, `dry_run:false`, `retries:0`,
+neznámý vstup navíc i legacy netypovaná rutina s prázdným presetem se ukládají
+dál. Oprava volá `pipeline.ValidateFormInputs` — tedy tutéž funkci jako cesta
+běhu, ne druhý názor na to, co je platný vstup.
+
+**Vědomě mimo rozsah:** `type` bez `widget` se netypuje nikde. Je to jedno
+sdílené pravidlo napříč branou běhu, rozhodovacími formuláři, vazbou vnořených
+vstupů i presetovou branou z N2, a takový tvar má většina existujících rutin.
+Zpřísnění je samostatné rozhodnutí o legacy kontraktu, ne něco, co by měla
+propašovat oprava validace presetů.
 
 ## Úklid
 

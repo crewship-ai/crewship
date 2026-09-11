@@ -16,8 +16,15 @@ package pipeline
 // all: an http step refuses every loopback/RFC1918 address (httpsafe's
 // privateReachableCIDRs), so no controlled recorder can be reached from a
 // real crewshipd. SetAllowPrivateHTTPForTesting is the only hatch, and it
-// relaxes exactly that guard and nothing else — the runner, the egress
-// gates, the persistence and the resume path below are the production ones.
+// relaxes exactly that guard and nothing else.
+//
+// What IS production here: runHTTPStep itself, the run store and its step-
+// output persistence, the boot resume scan and its drift gate. What is NOT:
+// the crew network policy gate and the credential resolver, which
+// NewWiredExecutor installs and the rigs below leave nil — this file measures
+// what happens AFTER a request is allowed out, so the layers that decide
+// whether it may leave are deliberately absent and are covered by
+// runner_http_test.go and http_egress_credentials_test.go.
 
 import (
 	"context"

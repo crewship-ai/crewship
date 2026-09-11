@@ -1938,7 +1938,11 @@ When persisted state is insufficient to resume safely, the run is stamped `inter
 
 Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
 
-`cancelled` covers every way a run's context ends early, not just the Cancel button. The default synchronous `POST .../run` hands the executor the HTTP request's own context, so a caller hanging up — a closed tab, a proxy timeout, a CLI deadline — ends the run the same way, and the row reads `cancelled` with `run cancelled at step <id>` rather than a failure. That matters beyond the label: cancelled runs mint no error fingerprint, page no failure notification and run no `on_failure` hook. If you need a run to outlive the request that started it, send `Prefer: respond-async` and poll the returned `run_id`; a run parked on a `wait` step already survives, because it releases the request before it parks.
+`cancelled` covers every way a run's context is CANCELLED, not just the Cancel button. The default synchronous `POST .../run` hands the executor the HTTP request's own context, and Go cancels that context when the client connection goes away — so a closed tab, a proxy hanging up, or a CLI whose own per-call deadline fired and closed the socket all reach the server as `context.Canceled` and land a `cancelled` row reading `run cancelled at step <id>`. That matters beyond the label: cancelled runs mint no error fingerprint, page no failure notification and run no `on_failure` hook.
+
+A DEADLINE is not a cancellation. A step that blew its own `timeout_seconds`, a run whose own context carried a deadline and exceeded it, and an approval nobody answered before its `timeout_seconds` all stay `failed`, keep their fingerprint and page as before: the work ran out of the time it was given, which is a result, not an interruption. The distinction is `context.Canceled` versus `context.DeadlineExceeded`, and the run row follows it.
+
+If you need a run to outlive the request that started it, send `Prefer: respond-async` and poll the returned `run_id`; a run parked on a `wait` step already survives, because it releases the request before it parks.
 
 Set `CREWSHIP_PIPELINE_RESUME=off` to disable resume and restore the older stamp-everything-`interrupted` behaviour — useful if a crash loop would otherwise re-burn the in-flight agent step's tokens on every restart. Default is on.
 
