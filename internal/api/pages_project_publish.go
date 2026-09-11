@@ -124,7 +124,7 @@ func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc 
 //
 // It is NOT what a caller gets for a routine that was already gone. The
 // authoring gate runs first: checkPageCandidate → resolveReferences →
-// resolveActionRoutines (pages_actions.go) issues the byte-identical SELECT
+// resolveActionRoutinesIn (pages_actions.go) issues the byte-identical SELECT
 // and answers 400 with its own sentence, so a candidate calling a deleted
 // routine is refused there — measured, on both `check` and `publish`. The
 // pre-transaction digest pass below can therefore only reach this message if
@@ -183,6 +183,9 @@ type checkedPageBuild struct {
 	report   map[string]any
 	resolved map[string]resolvedPanel
 	gates    *gatePlan
+	// authorizer is the caller's standing, resolved once here and reused by
+	// the publish fence so the check and the publication ask one question.
+	authorizer pageDefinitionAuthorizer
 }
 
 func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, build string, revision int64) (*checkedPageBuild, bool) {
@@ -233,25 +236,52 @@ func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request,
 		replyError(w, 422, err.Error())
 		return nil, false
 	}
-	resolved, ok := h.resolveReferences(w, r, WorkspaceIDFromContext(r.Context()), &doc)
-	if !ok {
+	// Full validation of the candidate runs for everyone, on the whole
+	// document. What differs per caller is only whether a refusal may NAME
+	// what failed: a reference on a panel this caller may not read is refused
+	// with the neutral 403, not with a sentence carrying the panel, the
+	// action and the routine. That decision needs the caller's standing and
+	// the live definition (to say whether the withheld part is what this
+	// candidate changes), so both are read here, ahead of any resolver.
+	ws := WorkspaceIDFromContext(r.Context())
+	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), ws)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page definition authorization", err)
 		return nil, false
 	}
-	gates, ok := h.resolveGates(w, r, WorkspaceIDFromContext(r.Context()), &doc)
-	if !ok {
+	var liveSpec string
+	if err := h.db.QueryRowContext(r.Context(), `SELECT spec_json FROM pages WHERE id=?`, rec.ID).Scan(&liveSpec); err != nil {
+		replyInternalError(w, h.logger, "read live Page definition", err)
 		return nil, false
 	}
-	routines, unresolved, err := pageRoutineDigestsIn(r.Context(), h.db, WorkspaceIDFromContext(r.Context()), &doc)
+	resolved, err := h.resolvePanelReferences(r.Context(), ws, &doc)
+	if err != nil {
+		h.replyCandidateResolution(w, "resolve candidate references", err, authorizer, liveSpec, spec)
+		return nil, false
+	}
+	gates, err := h.resolveGatePlan(r.Context(), ws, &doc)
+	if err != nil {
+		h.replyCandidateResolution(w, "resolve candidate gates", err, authorizer, liveSpec, spec)
+		return nil, false
+	}
+	routines, unresolved, err := pageRoutineDigestsIn(r.Context(), h.db, ws, &doc)
 	if err != nil {
 		replyInternalError(w, h.logger, "read candidate routine definitions", err)
 		return nil, false
 	}
 	if unresolved != "" {
+		// Only reachable when a routine vanishes between the reference check
+		// above and this digest pass. The sentence names the routine, so the
+		// same question is asked of it: may this caller be told?
+		if !pageRoutineVisibleTo(&doc, unresolved, authorizer.visible) {
+			replyError(w, http.StatusForbidden, pageWithheldValidationMessage(pageWithheldPanelsBetween(liveSpec, spec, authorizer.visible).Count()))
+			return nil, false
+		}
 		replyError(w, 422, pageUnresolvedRoutineMessage(unresolved))
 		return nil, false
 	}
 	report := map[string]any{"routine_definitions": routines, "routine_revision_pinned": false, "source_integrity": "pass", "artifact_integrity": "pass", "typecheck": "pass", "build": "pass", "bindings": "pass", "toolchain": artifact.Toolchain, "browser_review": "required", "security_review": "required"}
-	return &checkedPageBuild{record: row, spec: spec, document: &doc, artifact: artifact, report: report, resolved: resolved, gates: gates}, true
+	return &checkedPageBuild{record: row, spec: spec, document: &doc, artifact: artifact, report: report, resolved: resolved, gates: gates, authorizer: authorizer}, true
 }
 func (h *PageHandler) CheckProject(w http.ResponseWriter, r *http.Request) {
 	rec, ok := h.projectPage(w, r)
@@ -373,17 +403,14 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dim := panelsToDim(candidate.document, candidate.resolved, shapes)
-	// This caller's standing and the crew directory, resolved before the
-	// transaction opens. Who this publisher is and which crews exist are not
-	// part of the window the transaction protects — that window is the live
-	// definition the withheld check below reads and the write is conditioned
-	// on — and reading them on another connection inside the transaction
-	// would be the only cross-connection read in it.
-	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), ws)
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve page definition authorization", err)
-		return
-	}
+	// This caller's standing and the crew directory, resolved by
+	// checkPageCandidate before the transaction opens. Who this publisher is
+	// and which crews exist are not part of the window the transaction
+	// protects — that window is the live definition the withheld check below
+	// reads and the write is conditioned on — and reading them on another
+	// connection inside the transaction would be the only cross-connection
+	// read in it.
+	authorizer := candidate.authorizer
 	now := h.evaluator().Now().UTC().Format(time.RFC3339Nano)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {

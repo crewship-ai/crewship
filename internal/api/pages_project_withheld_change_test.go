@@ -42,7 +42,7 @@ const withheldCreateBody = `{
 	"panels": [
 		{"id": "sluzby", "schema": "status.v1", "title": "Jede to?",
 		 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla_seconds": 30, "span": 8,
-		 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
+		 "actions": [{"id": "act-secret", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
 		{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
 		 "owner": "crew/engine", "producer": "script/load.sh", "sla_seconds": 60, "span": 4}
 	]
@@ -59,7 +59,7 @@ func withheldDefinition(withheldTitle, visibleOwner string) string {
 		"spec": {"panels": [
 			{"id": "sluzby", "schema": "status.v1", "title": "` + withheldTitle + `",
 			 "owner": "crew/lookout", "producer": "script/watch-services.sh", "sla": "30s", "span": 8,
-			 "actions": [{"id": "a1", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
+			 "actions": [{"id": "act-secret", "kind": "call", "label": "Run", "routine": "ops-secret"}]},
 			{"id": "zatizeni", "schema": "metric.v1", "title": "Zatizeni",
 			 "owner": "` + visibleOwner + `", "producer": "script/load.sh", "sla": "60s", "span": 4}
 		]}
@@ -144,7 +144,11 @@ func withheldPublishableDraft(t *testing.T, h *PageHandler, ws, admin, definitio
 // withheldProtected is everything about the panel this publisher may not read
 // — the routine it calls included, since a routine is named by a panel and a
 // panel has an owning crew.
-var withheldProtected = []string{"sluzby", "lookout", "Jede to?", "Bezi to?", "watch-services", "status.v1", "ops-secret"}
+//
+// The action id is spelled distinctively on purpose: a two-character id such
+// as "a1" is a valid hex pair and turns up inside every digest, which makes a
+// body-wide absence check lie in both directions.
+var withheldProtected = []string{"sluzby", "lookout", "Jede to?", "Bezi to?", "watch-services", "status.v1", "ops-secret", "act-secret"}
 
 // withheldAssertNeutral holds the refusal to what it is allowed to say.
 func withheldAssertNeutral(t *testing.T, where, message string) {

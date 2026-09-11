@@ -898,13 +898,13 @@ func TestPageProjectReviewStaleRoutineSnapshotCannotPublish(t *testing.T) {
 	}
 	// Which refusal, precisely. checkPageCandidate's own 422
 	// (pageUnresolvedRoutineMessage) never runs for a routine deleted before
-	// the request: resolveReferences -> resolveActionRoutines
+	// the request: resolveReferences -> resolveActionRoutinesIn
 	// (pages_actions.go) issues the identical `SELECT 1 FROM pipelines ...
 	// deleted_at IS NULL` first and answers 400. The 422 is reachable only for
 	// a routine deleted between that check and the publishing transaction.
 	// Pinned here so a change of answer is a decision, not a drift.
 	if w.Code != 400 {
-		t.Errorf("the refusal is now %d; it was 400 from resolveActionRoutines. If the 422 in checkPageCandidate "+
+		t.Errorf("the refusal is now %d; it was 400 from resolveActionRoutinesIn. If the 422 in checkPageCandidate "+
 			"has become reachable, say so in the docs rather than leaving two codes for one condition", w.Code)
 	}
 

@@ -85390,7 +85390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Integrity, compiler and current binding checks. Browser and security review still required.",
+                  "description": "Integrity, compiler and current binding checks. Browser and security review still required. A declared reference that no longer exists is a 400 naming it; on a panel the caller may not read it is a 403 saying only that a withheld part does not validate.",
                   "properties": {
                     "artifact_digest": {
                       "pattern": "^[0-9a-f]{64}$",

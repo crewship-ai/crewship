@@ -1199,9 +1199,16 @@ plus common errors.
 checks}` after source/artifact integrity and current reference checks.
 `browser_review` and `security_review` remain `required`; this is not an
 automatic safety certification and does not publish or invoke actions.
-**Statuses:** `400` malformed body, `409` incompatible source/build or failed
+**Statuses:** `400` malformed body, or a declared reference — owner crew,
+producer, `call` routine, gate target — that no longer exists, named in the
+sentence, `403` that same reference problem on a panel the caller may not read,
+where the sentence says only that a withheld part does not validate (or, when
+this candidate also changes it, that it changes it) and how many panels are
+withheld, `409` incompatible source/build or failed
 integrity checks, `413` oversized body, `422` invalid current bindings, plus
-common errors.
+common errors. Validation always runs over the whole candidate for everyone;
+only whether the refusal may name what failed depends on the caller, and a
+workspace administrator reads every panel and always gets the full sentence.
 
 ### Review a publication candidate
 
@@ -1381,11 +1388,14 @@ receipt without rewinding a newer live publication. Rollback creates a new
 publication from the old artifact and declaration; it preserves the draft and
 does not undo completed routine effects.
 **Statuses:** `400` invalid or conflicting fields, missing review confirmation
-or a malformed fence — and a `call` action naming a routine that no longer
-exists, which the authoring gate refuses ahead of the fence and therefore
-without a `conflict` kind, even when the routine was deleted concurrently,
-`403` publishing is not this caller's to do, or a panel
-they may not read differs between the live definition and the candidate, `409`
+or a malformed fence — and a declared reference that no longer exists (owner
+crew, producer, `call` routine, gate target), which the authoring gate refuses
+ahead of the fence and therefore without a `conflict` kind, even when it was
+deleted concurrently, `403` publishing is not this caller's to do, a panel
+they may not read differs between the live definition and the candidate, or a
+panel they may not read fails that reference validation — the refusal then
+says only that a withheld part changes or does not validate, and how many
+panels are withheld, never which reference or which panel, `409`
 changed draft, publication or declaration, `413`
 oversized body, `422` invalid bindings, `507` publication quota, plus common
 errors. A `409` body carries `conflict` — `definition`, `routines`,

@@ -562,6 +562,82 @@ func pageDefinitionPanelsByID(spec string) (map[string]any, bool) {
 	return out, true
 }
 
+// pageWithheldValidationMessage is the refusal for a candidate that fails
+// reference validation on a panel this caller may not read.
+//
+// It is a second sentence rather than a reuse of pageWithheldChangeMessage
+// because that one says the publication CHANGES the withheld part, and here it
+// may not: an unchanged withheld panel whose routine, producer or crew has
+// since vanished fails validation without anything in the candidate having
+// moved. A sentence that is false in that case is not neutral, it is wrong.
+//
+// What it discloses, deliberately: that a withheld part exists (already
+// disclosed by the count) and that it does not currently validate — one bit,
+// and the bit the caller needs, because "ask an administrator" is the only
+// action open to them and they cannot know to take it otherwise. Nothing about
+// which panel, which reference, or what kind of reference.
+func pageWithheldValidationMessage(withheld int) string {
+	panels := "panels are"
+	if withheld == 1 {
+		panels = "panel is"
+	}
+	return fmt.Sprintf("Part of this Page is withheld from you and it does not currently validate (%d %s withheld from this comparison). "+
+		"Publishing requires the whole candidate to validate, and the problem is in a part you cannot read. "+
+		"A workspace administrator, or a member of the crew that owns the withheld part, can see it and fix it.", withheld, panels)
+}
+
+// replyCandidateResolution answers a resolver's error on the publish and check
+// paths, where the caller may not be entitled to the sentence.
+//
+// Full candidate validation always runs — a candidate with a dangling
+// reference is refused for everyone. What must not happen is the refusal
+// naming a panel, an action, a routine or a crew that this caller cannot read.
+// The resolvers now carry the panel and its owner as fields precisely so this
+// can ask canSeePanel the same question the review and the fence ask, and:
+//
+//   - a panel the caller may read gets the full 400 it always got, because
+//     they are entitled to it and are the person who will fix it;
+//   - a panel they may not read gets a 403 that says a withheld part changed
+//     (when the candidate changes it) or does not validate (when it does not),
+//     and nothing else.
+//
+// The 403 is the same status the withheld-change refusal uses, for the same
+// reason: it is not a state conflict and no refetch changes it.
+//
+// Shape errors — *pages.ValidationError from ValidateGates or ValidateRefresh —
+// are not routed through visibility. They carry no panel field and cannot
+// arise from the world moving: the stored document passed the same checks on
+// save and validatePortableDraft a moment ago, so a shape error here is a bug
+// in this binary, not a fact about another crew's panel.
+func (h *PageHandler) replyCandidateResolution(w http.ResponseWriter, what string, err error, authorizer pageDefinitionAuthorizer, liveSpec, candidateSpec string) {
+	var ref *pageReferenceError
+	if errors.As(err, &ref) && !authorizer.visible(ref.Owner) {
+		withheld := pageWithheldPanelsBetween(liveSpec, candidateSpec, authorizer.visible)
+		if withheld.Changed {
+			replyError(w, http.StatusForbidden, pageWithheldChangeMessage(withheld.Count()))
+		} else {
+			replyError(w, http.StatusForbidden, pageWithheldValidationMessage(withheld.Count()))
+		}
+		return
+	}
+	h.replyResolution(w, what, err)
+}
+
+// pageRoutineVisibleTo says whether this caller may be told about `routine`
+// at all: true when at least one panel they may read declares it. A routine
+// called only by withheld panels is theirs to know nothing about, even when
+// it has stopped resolving.
+func pageRoutineVisibleTo(doc *pages.Document, routine string, visible func(ownerRef string) bool) bool {
+	for _, panel := range doc.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind == pages.ActionCall && action.Routine == routine && visible(panel.Owner) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // pageWithheldChangeMessage is the one sentence both refusals use: the review
 // blocker and the publish 403.
 //
