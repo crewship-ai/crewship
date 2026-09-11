@@ -1015,6 +1015,21 @@ run `crewship page project review <slug>`, read it, and pass the values back
 with the flags. If the live definition or a routine script moves between the
 snapshot and the write, the server refuses with 409 and names which one.
 
+`review` also answers whether the comparison it just printed is the whole
+change. Panels belonging to crews you are not in are withheld from it, and
+`excluded_panels` says how many; `withheld_changed` says whether any of them
+actually differs between the live definition and the candidate. When it does,
+`publish` and `rollback` are refused with 403 and `blockers` carries
+`withheld_change`. `--reviewed-code` attests that the whole change was
+reviewed, and that attestation cannot be made by a publisher who cannot read
+all of it — the rollback path included, since restoring a version replaces the
+live definition too. Publishing the Page is still yours to do; this particular
+claim is not yours to make, so there is no flag that waives it, unlike the
+baseline acknowledgement below. Ask a workspace administrator, or a member of
+the crew that owns the withheld part, to publish instead. The CLI prints the
+refusal ahead of the request, and says how many panels are withheld and
+nothing about what they are.
+
 `--acknowledge-unavailable-baseline` is separate from the digests and is never
 filled in for you. When the live publication's retained source cannot be read
 back — history compacted, a checkpoint lost — there is nothing to compare the

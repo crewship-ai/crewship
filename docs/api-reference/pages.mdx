@@ -1213,7 +1213,7 @@ common errors.
 blockers, initial_publication}`, where `baseline` is
 `{publication_version, published, definition_digest, definition,
 excluded_panels, source_revision, git_commit, source_available,
-source_unavailable_reason}` and `candidate` is
+source_unavailable_reason, withheld_changed}` and `candidate` is
 `{revision, git_commit, source_digest, created_at, actor, build, definition}`.
 `candidate` is the current draft revision with
 its actor and the build of exactly that revision, and is `null` when there is
@@ -1253,6 +1253,15 @@ about a panel that is merely not this reader's to see.
 `baseline.excluded_panels` is how many panels were withheld from the
 comparison, counting a panel withheld from both documents once, so a partial
 comparison can say so.
+`baseline.withheld_changed` is whether any of those withheld panels actually
+differs between the live definition and the candidate — added, removed,
+modified, or re-pointed between a crew this caller may see and one they may
+not. A count is a warning; this is the answer that settles what the consent
+underneath the review can honestly cover. False means the comparison on screen
+covers everything that moves and publishing stays available. True adds the
+`withheld_change` blocker and the publication is refused, and nothing about
+what changed is disclosed either way: the flag, and the count beside it, are
+the whole of it.
 `definition_digest` is unaffected by any of this, because the fence compares
 the full stored document. Either document is `null` only when the stored bytes
 cannot be read as a Page document, and there is then no basis for a comparison
@@ -1272,7 +1281,8 @@ routine and a routine that no longer resolves, and is never rendered as
 agreement. `blockers[].code` is one of
 `no_candidate`, `candidate_matches_live`, `build_missing`, `build_failed`,
 `build_stale`, `baseline_unavailable`, `routine_unresolved`,
-`definition_moved`, `not_permitted` and `storage_unavailable`.
+`definition_moved`, `withheld_change`, `not_permitted` and
+`storage_unavailable`.
 `routine_unresolved` is emitted for every `in_candidate` routine with no
 current digest: publishing such a candidate is refused, so the review says so
 rather than reporting the routine as merely `unknown` beside a ready build. Missing build storage or a missing runtime origin is a
@@ -1307,6 +1317,26 @@ because retention and compaction legitimately discard old checkpoints, and a
 workspace whose history was reclaimed must still be able to publish a sound
 candidate — by saying so, not by having it assumed.
 
+`reviewed_code: true` attests that the whole change was reviewed, and the
+server refuses an attestation the caller cannot make. Publishing requires Page
+ownership or workspace administration; seeing a panel requires membership of
+that panel's owning crew or the same administration. A Page owner who is not
+an administrator therefore may publish a Page carrying panels they cannot
+read. Nothing there leaks and nothing bypasses authorization — the operation
+was always theirs — but the claim about what was reviewed was not true of the
+part that was hidden. So when a panel this caller may not read differs between
+the live definition and the candidate, the publication is refused with `403`
+and a sentence that says such a part exists and how many panels are withheld,
+and nothing about what it is. The rollback path is included: restoring a
+retained version replaces the live definition too, and the comparison is
+against that version's archived declaration. Read
+`baseline.withheld_changed` on the review snapshot to know in advance. This is
+not a state conflict, so the body carries no `conflict` kind and refetching
+changes nothing, and unlike `acknowledged_unavailable_baseline` there is no
+flag that waives it: that one says nobody made a comparison, this one would
+say the publisher may not see what they are signing for. A workspace
+administrator reads every panel, so it never applies to one.
+
 `expected_definition_digest` and `expected_routine_digests` are required on
 both paths and are the values the reviewer was shown — read them from the
 review snapshot above. The digest is 64 lowercase hex characters; the map is
@@ -1323,7 +1353,12 @@ receipt without rewinding a newer live publication. Rollback creates a new
 publication from the old artifact and declaration; it preserves the draft and
 does not undo completed routine effects.
 **Statuses:** `400` invalid or conflicting fields, missing review confirmation
-or a malformed fence, `409` changed draft, publication or declaration, `413`
+or a malformed fence — and a `call` action naming a routine that no longer
+exists, which the authoring gate refuses ahead of the fence and therefore
+without a `conflict` kind, even when the routine was deleted concurrently,
+`403` publishing is not this caller's to do, or a panel
+they may not read differs between the live definition and the candidate, `409`
+changed draft, publication or declaration, `413`
 oversized body, `422` invalid bindings, `507` publication quota, plus common
 errors. A `409` body carries `conflict` — `definition`, `routines`,
 `publication`, `draft` or `baseline` — naming which base moved or is missing, and a `routines` conflict

@@ -432,6 +432,8 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 			DefinitionDigest        string  `json:"definition_digest"`
 			SourceAvailable         bool    `json:"source_available"`
 			SourceUnavailableReason *string `json:"source_unavailable_reason"`
+			ExcludedPanels          int     `json:"excluded_panels"`
+			WithheldChanged         bool    `json:"withheld_changed"`
 		} `json:"baseline"`
 		InitialPublication bool `json:"initial_publication"`
 		Routines           []struct {
@@ -483,6 +485,16 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 		} else {
 			fmt.Fprintln(out, "Nothing can be compared with what is running. The server refuses this publication unless you pass --acknowledge-unavailable-baseline, which records that nobody made that comparison and proves nothing about the candidate itself.")
 		}
+	}
+	// Say what the server is about to refuse, and why it is not the same kind
+	// of thing as the baseline acknowledgement above. There is no flag here on
+	// purpose: that one says "I know nobody made this comparison", this one
+	// would say "I know I am not allowed to see what I am signing for", and a
+	// publisher cannot waive that on their own behalf. The refusal itself is
+	// the server's — this only stops it arriving unexplained.
+	if snapshot.Baseline.WithheldChanged {
+		fmt.Fprintf(out, "Part of this Page is withheld from you and this publication changes it (%d withheld from this comparison).\n", snapshot.Baseline.ExcludedPanels)
+		fmt.Fprintln(out, "reviewed_code attests that the whole change was reviewed, so the server refuses this publication with 403. Publishing is yours to do; this claim is not yours to make. There is no flag for it: ask a workspace administrator, or a member of the crew that owns the withheld part, to publish.")
 	}
 	if rollbackVersion > 0 {
 		fmt.Fprintf(out, "Fencing on the retained source of publication %d.\n", rollbackVersion)

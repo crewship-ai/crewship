@@ -86740,6 +86740,7 @@
                     "type": "object"
                   },
                   "reviewed_code": {
+                    "description": "Attests that the whole change was reviewed. Refused with 403 when a panel the caller may not read differs between the live definition and the candidate — including on a rollback, which replaces the live definition too. That is not a state conflict and carries no conflict kind: refetching cannot change it, and no flag waives it. Read baseline.withheld_changed on the review snapshot before publishing.",
                     "enum": [
                       true
                     ],
@@ -87353,6 +87354,10 @@
                           "description": "A sentence shown where the comparison would have been. Unavailable is never the same as unchanged.",
                           "nullable": true,
                           "type": "string"
+                        },
+                        "withheld_changed": {
+                          "description": "At least one withheld panel differs between the live definition and the candidate: added, removed, modified, or re-pointed between a crew this caller may see and one they may not. False means the comparison on screen covers everything that moves. True adds the withheld_change blocker and the publication is refused with 403 on every path, including rollback: reviewed_code=true attests that the whole change was reviewed, and a publisher who cannot read part of it cannot make that claim. Ownership is permission to perform the operation and is not evidence about what was read; a workspace administrator sees every panel, so this is never true for one. No flag waives it. Nothing about what changed is disclosed.",
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -87361,6 +87366,7 @@
                         "definition_digest",
                         "definition",
                         "excluded_panels",
+                        "withheld_changed",
                         "source_revision",
                         "git_commit",
                         "source_available",
@@ -87381,6 +87387,7 @@
                               "baseline_unavailable",
                               "routine_unresolved",
                               "definition_moved",
+                              "withheld_change",
                               "not_permitted",
                               "storage_unavailable"
                             ],

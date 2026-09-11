@@ -119,10 +119,27 @@ func pageRoutineDigestsIn(ctx context.Context, q pageRowQuerier, ws string, doc 
 	return result, "", nil
 }
 
-// pageUnresolvedRoutineMessage is the one sentence a caller gets when the
-// candidate calls a routine that is gone. `sql: no rows in result set` used to
-// reach the wire through err.Error(); a driver string is not an API contract,
-// and it does not tell the reader which routine to go and fix.
+// pageUnresolvedRoutineMessage is the sentence for a routine that vanishes
+// inside the publication's own window, and only that window.
+//
+// It is NOT what a caller gets for a routine that was already gone. The
+// authoring gate runs first: checkPageCandidate → resolveReferences →
+// resolveActionRoutines (pages_actions.go) issues the byte-identical SELECT
+// and answers 400 with its own sentence, so a candidate calling a deleted
+// routine is refused there — measured, on both `check` and `publish`. The
+// pre-transaction digest pass below can therefore only reach this message if
+// the routine disappears BETWEEN those two statements, and the in-transaction
+// pass if it disappears between the candidate check and the transaction. Both
+// are narrow races rather than dead code, which is why the branches stay.
+//
+// That 400 carries no `conflict` discriminator, so a genuinely concurrent
+// deletion arrives as a plain 400 that PublishConflictKind cannot route. A
+// recorded limit, not a defect of this message: giving it one is a wire
+// change to a status the authoring gate has always returned.
+//
+// `sql: no rows in result set` used to reach the wire through err.Error(); a
+// driver string is not an API contract, and it does not tell the reader which
+// routine to go and fix.
 func pageUnresolvedRoutineMessage(routine string) string {
 	return fmt.Sprintf("This candidate has an action calling routine %q, which no longer exists in this workspace; restore the routine or remove the action before publishing.", routine)
 }
@@ -356,6 +373,17 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dim := panelsToDim(candidate.document, candidate.resolved, shapes)
+	// This caller's standing and the crew directory, resolved before the
+	// transaction opens. Who this publisher is and which crews exist are not
+	// part of the window the transaction protects — that window is the live
+	// definition the withheld check below reads and the write is conditioned
+	// on — and reading them on another connection inside the transaction
+	// would be the only cross-connection read in it.
+	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), ws)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page definition authorization", err)
+		return
+	}
 	now := h.evaluator().Now().UTC().Format(time.RFC3339Nano)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -418,6 +446,50 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if moved := movedRoutines(req.ExpectedRoutineDigests, currentRoutines); len(moved) > 0 {
 		replyPublishConflict(w, "A routine this candidate calls changed since it was reviewed; review the current routine definitions before publishing", "routines", moved)
+		return
+	}
+	// May this publisher make the claim at all.
+	//
+	// `reviewed_code:true` attests that the whole change was reviewed.
+	// Publishing needs mayAdministerGrants — the manage role OR Page
+	// ownership — while SEEING a panel needs canSeePanel — the manage role OR
+	// membership of that panel's owning crew. A Page owner who is not a
+	// workspace admin therefore may publish a Page whose panels include some
+	// they cannot read, and until now the server accepted their attestation
+	// over a change they could not have read. Nothing leaked and nothing
+	// bypassed authorization: the operation was always theirs to perform.
+	// What was wrong was the truthfulness of the claim about what was
+	// reviewed, and those are separate things.
+	//
+	// So it is a 403 and not a 409, and it carries no `conflict` kind: there
+	// is no value to re-review and no refetch that changes the answer. For
+	// the same reason there is no acknowledgement flag beside
+	// acknowledged_unavailable_baseline — that one says "I know nobody made
+	// this comparison", this one would say "I know I am not allowed to see
+	// what I am signing for", which is not a thing a publisher may waive.
+	// A workspace admin sees every panel, so this never fires for them.
+	//
+	// It reads `before` — the live definition read by THIS transaction, and
+	// the same value the write below is conditioned on — against
+	// `candidate.spec`, the document about to replace it on BOTH paths: for a
+	// rollback, checkPageCandidate resolved it from the retained
+	// publication's own source revision and verified it against the archived
+	// checkpoint, so a restored version is compared against exactly what it
+	// would make live.
+	//
+	// `candidate.spec` was read before this transaction opened, which is
+	// sound here for a reason worth stating rather than assuming: revision
+	// and publication rows are append-only and never rewritten, so it is an
+	// immutable snapshot, and the draft CAS above has already refused a
+	// revision that moved. The only side that can move underneath is the live
+	// definition, and that one is read here and CAS-guarded on write.
+	//
+	// Like every other fence here it runs AFTER the idempotent-retry
+	// short-circuit above. A replay is re-delivery of a publication that
+	// already committed; refusing it now would turn a delivered success into
+	// a phantom failure and invite a second publication of the same code.
+	if withheld := pageWithheldPanelsBetween(before, candidate.spec, authorizer.visible); withheld.Changed {
+		replyError(w, 403, pageWithheldChangeMessage(withheld.Count()))
 		return
 	}
 	// The baseline question is asked LAST, once everything checkable has

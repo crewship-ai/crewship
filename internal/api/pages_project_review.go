@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,8 +75,14 @@ type reviewCandidateWire struct {
 	// document was being read from `GET .../project`, a different endpoint on
 	// a different cache entry, so the two halves of the comparison a human
 	// reads could come from two moments just as the baseline and its digest
-	// could. Two documents out of one handler is the only arrangement that
-	// cannot drift.
+	// could. Both documents now come from this handler, so the two halves of
+	// one comparison can no longer be a fresh read against a lagging cache.
+	// That is per-read consistency, not a point-in-time view of the database:
+	// this handler issues about ten separate autocommit statements and a
+	// concurrent write can land between any two of them. What makes a
+	// comparison safe to consent to is that the publish fence re-reads and
+	// compares inside the writing transaction, so a stale snapshot is refused
+	// rather than published.
 	//
 	// And withholding has to happen on BOTH sides or it lies: a panel taken
 	// out of the baseline alone, with the candidate's copy of it left whole,
@@ -112,7 +119,10 @@ type reviewBaselineWire struct {
 	// request attesting to digest B — and the server accepts it, because B is
 	// genuinely current. No server-side check can catch that; it is a
 	// client-side correspondence failure, and the only cure is to stop having
-	// two reads. One authorized read now produces both values.
+	// two reads. One authorized read produces both values, so they cannot
+	// describe different documents. Both can still be stale by the time a
+	// publication arrives; `expected_definition_digest` is what closes that,
+	// inside the publishing transaction.
 	//
 	// It is NOT what the fence compares, and it is not necessarily the whole
 	// document: panels this viewer may not read are removed from it (and
@@ -135,6 +145,29 @@ type reviewBaselineWire struct {
 	// than on each document because the reader is looking at one comparison,
 	// not two lists. Zero when neither document rendered.
 	ExcludedPanels int `json:"excluded_panels"`
+
+	// WithheldChanged is true when at least one of those withheld panels
+	// actually DIFFERS between the live definition and the candidate.
+	//
+	// The count alone was a warning, not a policy. Removing a panel from both
+	// documents stops the leak and stops the phantom addition, but the
+	// consent underneath still said the whole change had been reviewed — and
+	// that is reachable, not theoretical: publishing needs
+	// mayAdministerGrants (manage role OR isPageOwner) and seeing a panel
+	// needs canSeePanel (manage role OR membership of that panel's crew), so
+	// a Page owner who is not a workspace admin may publish a Page while
+	// reading only their own crews' panels.
+	//
+	// The server holds both FULL documents and the client holds neither, so
+	// the server answers the only question that settles it. False means the
+	// reader's comparison covers everything that moves, which is a true
+	// statement they can scope their consent to; publishing stays available.
+	// True adds the `withheld_change` blocker here and is refused with a 403
+	// on every publish path — see pageWithheldChangeMessage.
+	//
+	// Nothing about WHAT changed is on the wire. The flag, and the count
+	// already beside it, are the whole disclosure.
+	WithheldChanged bool `json:"withheld_changed"`
 }
 
 type reviewRoutineWire struct {
@@ -186,6 +219,7 @@ const (
 	reviewBlockerBaselineMissing    = "baseline_unavailable"
 	reviewBlockerRoutineUnresolved  = "routine_unresolved"
 	reviewBlockerDefinitionMoved    = "definition_moved"
+	reviewBlockerWithheldChange     = "withheld_change"
 	reviewBlockerNotPermitted       = "not_permitted"
 	reviewBlockerStorageUnavailable = "storage_unavailable"
 )
@@ -354,6 +388,138 @@ func pageWithheldPanelIDs(spec string, visible func(ownerRef string) bool) (ids 
 	return ids, unnamed
 }
 
+// pageWithheldPanels is what one viewer cannot read across the two documents
+// a publication compares, and whether any of it moves.
+//
+// It exists so the review endpoint and the publish handler run ONE
+// computation. The review's `withheld_changed` is the server promising that
+// the comparison on screen covers everything; the publish refusal is the
+// server keeping that promise. Two implementations of the same sentence would
+// eventually disagree, and the direction they would disagree in is a
+// publication that the review said was complete.
+type pageWithheldPanels struct {
+	// IDs is the union across both documents: a panel withheld from either
+	// side is out of the comparison on both, so no phantom addition or
+	// removal can appear.
+	IDs map[string]bool
+	// Unnamed counts withheld panels carrying no id, which cannot be matched
+	// across the documents and therefore cannot be shown not to have moved.
+	Unnamed int
+	// Changed is the attestation question: does anything the reader cannot
+	// see differ between what is live and what would replace it.
+	Changed bool
+}
+
+// Count is what `excluded_panels` reports: panels withheld from the
+// comparison, a panel withheld from both documents counted once.
+func (p pageWithheldPanels) Count() int { return len(p.IDs) + p.Unnamed }
+
+// pageWithheldPanelsBetween decides both halves for one viewer.
+//
+// candidateSpec is "" when there is no candidate. Nothing is being published
+// then, so nobody is attesting to anything and Changed is false; the withheld
+// set is still computed from the live document, because the screen still
+// renders it.
+func pageWithheldPanelsBetween(liveSpec, candidateSpec string, visible func(ownerRef string) bool) pageWithheldPanels {
+	out := pageWithheldPanels{IDs: map[string]bool{}}
+	liveIDs, liveUnnamed := pageWithheldPanelIDs(liveSpec, visible)
+	candidateIDs, candidateUnnamed := pageWithheldPanelIDs(candidateSpec, visible)
+	for _, ids := range [][]string{liveIDs, candidateIDs} {
+		for _, id := range ids {
+			out.IDs[id] = true
+		}
+	}
+	out.Unnamed = liveUnnamed + candidateUnnamed
+	out.Changed = pageWithheldChanged(liveSpec, candidateSpec, out)
+	return out
+}
+
+// pageWithheldChanged compares the withheld panels of the two FULL documents.
+//
+// Every uncertainty resolves to "changed". A document that will not parse, or
+// a withheld panel with no id to match on, is not evidence that nothing moved
+// — and the whole point of this answer is that somebody is about to swear
+// something on it.
+//
+// A panel being RE-POINTED between a crew the viewer may see and one they may
+// not needs no special case: whichever side withholds it puts its id in the
+// union, and its `owner` then differs between the two documents. That is the
+// change which would otherwise vanish completely, since the panel is removed
+// from both rendered documents.
+func pageWithheldChanged(liveSpec, candidateSpec string, withheld pageWithheldPanels) bool {
+	if candidateSpec == "" {
+		return false
+	}
+	if withheld.Unnamed > 0 {
+		return true
+	}
+	if len(withheld.IDs) == 0 {
+		return false
+	}
+	live, liveOK := pageDefinitionPanelsByID(liveSpec)
+	candidate, candidateOK := pageDefinitionPanelsByID(candidateSpec)
+	if !liveOK || !candidateOK {
+		return true
+	}
+	for id := range withheld.IDs {
+		before, inLive := live[id]
+		after, inCandidate := candidate[id]
+		if inLive != inCandidate {
+			return true
+		}
+		if inLive && !reflect.DeepEqual(before, after) {
+			return true
+		}
+	}
+	return false
+}
+
+// pageDefinitionPanelsByID parses each panel to a VALUE rather than keeping
+// its bytes: key order and whitespace carry no meaning in JSON, and a
+// document that was merely re-marshalled must not read as a change. An
+// unparseable panel makes the whole document unknown, which fails closed.
+func pageDefinitionPanelsByID(spec string) (map[string]any, bool) {
+	_, _, panels, ok := pageDefinitionPanels(spec)
+	if !ok {
+		return nil, false
+	}
+	out := make(map[string]any, len(panels))
+	for _, panel := range panels {
+		var declared pageDeclaredPanel
+		if err := json.Unmarshal(panel, &declared); err != nil {
+			return nil, false
+		}
+		// Unnamed panels are counted separately and never reach this map.
+		if declared.ID == "" {
+			continue
+		}
+		var value any
+		if err := json.Unmarshal(panel, &value); err != nil {
+			return nil, false
+		}
+		out[declared.ID] = value
+	}
+	return out, true
+}
+
+// pageWithheldChangeMessage is the one sentence both refusals use: the review
+// blocker and the publish 403.
+//
+// Neutral by construction. It says that such a part exists and how many
+// panels are withheld — a number `excluded_panels` already carries — and
+// nothing about what changed, which crew owns it, or what it is called. It
+// also says who CAN publish, because the alternative is a person retrying a
+// request that will never succeed for them.
+func pageWithheldChangeMessage(withheld int) string {
+	panels := "panels are"
+	if withheld == 1 {
+		panels = "panel is"
+	}
+	return fmt.Sprintf("Part of this Page is withheld from you and this publication changes it (%d %s withheld from this comparison). "+
+		"Publishing attests that the whole change was reviewed, and that attestation cannot be made by a publisher who cannot read all of it. "+
+		"A workspace administrator, or a member of the crew that owns the withheld part, can publish it.", withheld, panels)
+}
+
 // pageAuthorizedDefinition removes from a document every panel this viewer may
 // not read, and every panel whose id is in `drop`.
 //
@@ -435,6 +601,14 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// SHARED, not exclusive (pageLease → ProjectStore.Lease(..., false)). It
+	// keeps this read off a compacting or checkpoint-rewriting storage
+	// operation; it serialises nothing against an ordinary publication, and
+	// this handler opens no transaction, so the statements below are ten
+	// separate autocommit reads that a concurrent write can interleave with.
+	// The snapshot is therefore per-read consistent and not a point-in-time
+	// view — see Baseline.Definition for what actually makes it safe to
+	// consent to.
 	release, leased := h.pageLease(w, r)
 	if !leased {
 		return
@@ -478,10 +652,11 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	snapshot.Baseline.DefinitionDigest = pageDefinitionDigest(liveSpec)
 	// The same bytes, rendered for this viewer. Reading them here rather than
 	// leaving the screen to fetch the document from the Page detail route is
-	// the whole point: the digest above and the document below describe one
-	// instant of one row. The candidate's document goes through the same
-	// authorizer further down, so the two sides of the comparison are one
-	// decision at one moment as well.
+	// the whole point: the digest above and the document below are derived
+	// from one statement's result, so they always describe the same document.
+	// They do not describe the same instant as anything else on this snapshot
+	// — the publication rows, the draft and the routines are separate
+	// statements and can move between them.
 	authorizer, err := h.reviewDefinitionAuthorizer(ctx, ws)
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve page definition authorization", err)
@@ -555,26 +730,25 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	if snapshot.Candidate == nil {
 		candidateSpec, contextSpec = "", liveSpec
 	}
-	// Both documents the reviewer compares, out of one handler, one instant
-	// and one rule. The withheld set is the UNION of what each side had to
+	// Both documents the reviewer compares, out of one handler and one rule.
+	// Each document is internally consistent with the statement that produced
+	// it; they are not a joint snapshot of the database, and nothing here
+	// needs them to be. The withheld set is the UNION of what each side had to
 	// keep back, applied to both, so a panel this reader may not see is
 	// absent from the comparison rather than showing up as the candidate
 	// adding or removing it.
-	drop := map[string]bool{}
-	baselineIDs, baselineUnnamed := pageWithheldPanelIDs(liveSpec, authorizer.visible)
-	candidateIDs, candidateUnnamed := []string(nil), 0
+	withheld := pageWithheldPanelsBetween(liveSpec, candidateSpec, authorizer.visible)
+	snapshot.Baseline.Definition = pageAuthorizedDefinition(liveSpec, authorizer.visible, withheld.IDs)
+	snapshot.Baseline.ExcludedPanels = withheld.Count()
+	snapshot.Baseline.WithheldChanged = withheld.Changed
 	if snapshot.Candidate != nil {
-		candidateIDs, candidateUnnamed = pageWithheldPanelIDs(candidateSpec, authorizer.visible)
+		snapshot.Candidate.Definition = pageAuthorizedDefinition(candidateSpec, authorizer.visible, withheld.IDs)
 	}
-	for _, ids := range [][]string{baselineIDs, candidateIDs} {
-		for _, id := range ids {
-			drop[id] = true
-		}
-	}
-	snapshot.Baseline.Definition = pageAuthorizedDefinition(liveSpec, authorizer.visible, drop)
-	snapshot.Baseline.ExcludedPanels = len(drop) + baselineUnnamed + candidateUnnamed
-	if snapshot.Candidate != nil {
-		snapshot.Candidate.Definition = pageAuthorizedDefinition(candidateSpec, authorizer.visible, drop)
+	// A count is a warning; this is the policy. The same computation refuses
+	// the publication with a 403, so the button being absent here and the
+	// request being refused there can never disagree.
+	if withheld.Changed {
+		blocked(reviewBlockerWithheldChange, pageWithheldChangeMessage(withheld.Count()))
 	}
 	routines, err := h.reviewRoutines(ctx, ws, candidateSpec, contextSpec, comparisonChecks)
 	if err != nil {
