@@ -198,8 +198,27 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		// Read inside the tx so the "did the recipe change" question and the
+		// write that answers it cannot straddle another writer.
+		var existingDefinition string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT definition_json FROM pipelines WHERE id = ?`, existingID,
+		).Scan(&existingDefinition); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("pipeline: read existing definition: %w", err)
+		}
 		if err := s.consumeDraftTx(ctx, tx, in); err != nil {
 			return nil, nil, err
+		}
+		// Schedule-preset gate (#2495). Every door that changes an active
+		// recipe lands here — publish, plain save, internal/agent save,
+		// import, manifest apply — so this is where the check belongs
+		// rather than inside the publication branch above. Skipped when the
+		// definition is byte-identical: a rename or a description edit must
+		// not start failing over a preset that was already imperfect.
+		if existingDefinition != in.DefinitionJSON {
+			if err := s.checkSchedulePresetsTx(ctx, tx, existingID, in.DefinitionJSON); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
