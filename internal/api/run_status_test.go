@@ -53,7 +53,7 @@ func TestRunStatus_AnswersWhetherTheRunMayStillAct(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", "/api/v1/internal/runs/"+tc.runID+"/status", nil)
+			req := httptest.NewRequest("GET", "/api/v1/internal/runs/"+tc.runID+"/status?workspace_id="+ws, nil)
 			req.SetPathValue("runId", tc.runID)
 			rr := httptest.NewRecorder()
 			h.Status(rr, req)
@@ -90,7 +90,7 @@ func TestRunStatus_UnknownRunIsAnAnswerNotA404(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewRunStatusHandler(db, quietLogger())
 
-	req := httptest.NewRequest("GET", "/api/v1/internal/runs/nope/status", nil)
+	req := httptest.NewRequest("GET", "/api/v1/internal/runs/nope/status?workspace_id=ws-any", nil)
 	req.SetPathValue("runId", "nope")
 	rr := httptest.NewRecorder()
 	h.Status(rr, req)
@@ -101,6 +101,68 @@ func TestRunStatus_UnknownRunIsAnAnswerNotA404(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+}
+
+// A run that exists in ANOTHER workspace is answered exactly as one that does
+// not exist. Anything else turns the endpoint into a cross-tenant oracle: a
+// crew's sidecar could learn whether an arbitrary run id is live somewhere else
+// in the installation. Run ids are unguessable, which makes it narrow — but
+// "you cannot guess the identifier" is not an access control.
+func TestRunStatus_DoesNotAnswerAboutAnotherWorkspacesRun(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	user := seedTestUser(t, db)
+	theirs := seedTestWorkspace(t, db, user)
+	h := NewRunStatusHandler(db, quietLogger())
+
+	seedWorkItem(t, db, seededWork{ID: "wk-theirs", WorkspaceID: theirs, State: "running", Generation: 1})
+	seedWorkAttempt(t, db, "wk-theirs", "run-theirs", 1)
+
+	req := httptest.NewRequest("GET", "/api/v1/internal/runs/run-theirs/status?workspace_id=ws-someone-else", nil)
+	req.SetPathValue("runId", "run-theirs")
+	rr := httptest.NewRecorder()
+	h.Status(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var out runStatusResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Active {
+		t.Fatal("answered active=true about a run belonging to another workspace")
+	}
+
+	// And the same call from the owning workspace still works, so the scoping
+	// refuses the right thing rather than everything.
+	req = httptest.NewRequest("GET", "/api/v1/internal/runs/run-theirs/status?workspace_id="+theirs, nil)
+	req.SetPathValue("runId", "run-theirs")
+	rr = httptest.NewRecorder()
+	h.Status(rr, req)
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Active {
+		t.Errorf("the owning workspace was told active=false (reason %q)", out.Reason)
+	}
+}
+
+// A call with no workspace binding is refused, and refused in a way a caller
+// cannot mistake for a verdict — 403, not a 200 saying inactive.
+func TestRunStatus_NoWorkspaceBindingIsRefusedNotAnswered(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	h := NewRunStatusHandler(db, quietLogger())
+
+	req := httptest.NewRequest("GET", "/api/v1/internal/runs/run-x/status", nil)
+	req.SetPathValue("runId", "run-x")
+	rr := httptest.NewRecorder()
+	h.Status(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 — a refusal returned as 200 inactive would be read as a revocation", rr.Code)
 	}
 }
 
@@ -116,7 +178,7 @@ func TestRunStatus_AnUnavailableLedgerIsNotAVerdict(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/internal/runs/run-x/status", nil)
+	req := httptest.NewRequest("GET", "/api/v1/internal/runs/run-x/status?workspace_id=ws-any", nil)
 	req.SetPathValue("runId", "run-x")
 	rr := httptest.NewRecorder()
 	h.Status(rr, req)
@@ -138,7 +200,7 @@ func TestRunStatus_AgreesWithTheMemoryMutationFence(t *testing.T) {
 	seedWorkItem(t, db, seededWork{ID: "wk-agree", WorkspaceID: ws, State: "running", Generation: 5, AgentID: "ag-1"})
 	seedWorkAttempt(t, db, "wk-agree", "run-agree", 5)
 
-	active, _, err := runIsLiveAttempt(context.Background(), db, "run-agree")
+	active, _, err := runIsLiveAttempt(context.Background(), db, ws, "run-agree")
 	if err != nil {
 		t.Fatalf("run status: %v", err)
 	}

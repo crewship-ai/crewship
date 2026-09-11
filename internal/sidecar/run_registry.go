@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -766,12 +767,21 @@ const (
 	// that is a deliberate, temporary state — see newHostRunAuthority.
 	runAuthorityEnv = "CREWSHIP_SIDECAR_RUN_AUTHORITY"
 
-	// runAuthorityPathFmt is the contract the host must serve. GET, with the
+	// runAuthorityPathFmt is the route the host serves (internal/api's
+	// RunStatusHandler, registered in router_internal.go). GET, with the
 	// sidecar's crew-bound internal token, answering 200 with
-	// {"run_id": "...", "active": <bool>} where `active` is true only while the
-	// run is the live attempt of a live work item — the same predicate
-	// MemoryMutationHandler.authorizeRun already applies against work_attempts
-	// / work_items.
+	// {"run_id": "...", "active": <bool>, "reason": "..."} where `active` is
+	// true only while the run is the live attempt of a live work item — the same
+	// predicate MemoryMutationHandler.authorizeRun applies against
+	// work_attempts / work_items, shared as runIsLiveAttempt rather than copied.
+	//
+	// The two answers that matter to this client, verified against that handler:
+	// an unknown run is 200 active:false (deliberately NOT 404, which on this
+	// surface is indistinguishable from an unregistered path and from a refused
+	// caller), and an unavailable ledger is 503 — a non-answer, routed to the
+	// unreachable-host policy rather than read as a revocation.
+	//
+	// The run id is one path segment and is escaped as one; see runIsActive.
 	runAuthorityPathFmt = "/api/v1/internal/runs/%s/status"
 )
 
@@ -785,25 +795,40 @@ type runAuthority interface {
 // hostRunAuthority asks crewshipd over the sidecar's existing outbound IPC
 // channel. There is no inbound channel, so this is a pull.
 //
-// # Why it is opt-in
+// # Why it is still opt-in
 //
-// The route above DOES NOT EXIST YET. Building it belongs to internal/api,
-// which this change does not own, and until it lands the sidecar cannot safely
-// enable the probe — not because a missing route is hard to detect, but because
-// it is UNDETECTABLE here by design: internal/api's serveInternal answers an
-// unregistered path and a refused caller with the same byte-identical JSON 404,
-// precisely so the internal surface cannot be mapped. So a 404 is either "this
-// host predates the endpoint" or "this sidecar's token was revoked", and the
-// two demand opposite responses.
+// The route EXISTS now — internal/api's RunStatusHandler, registered at
+// `GET /api/v1/internal/runs/{runId}/status` behind internalAuth — and the two
+// halves have been proven to fit against the real handler
+// (run_authority_host_test.go): the path, the crew-bound X-Internal-Token, the
+// `run_id`/`active` fields, 200 as a verdict either way, and every non-200 as a
+// non-answer. So the original reason for the switch is gone.
 //
-// Enabling the probe by default would therefore pick one of two bad outcomes on
-// every crew today: treat 404 as "unsupported" and a revoked sidecar token
-// silently disables revocation checking, or treat it as unreachable and every
-// unverified run in every crew is refused once the grace window lapses.
+// A different one replaced it, and it is not a disagreement between the two
+// halves — they agree exactly. The endpoint's predicate is work_attempts JOIN
+// work_items, and a run with no attempt row is answered 200 active:false ("no
+// such run in the work ledger"). Nothing distinguishes that from "this run
+// ended", so the registry does the only thing a negative verdict allows and
+// revokes durably.
 //
-// So: the client is complete, the contract is written down, the policy is
-// implemented and tested, and the switch is off until the host serves the
-// route. Flip CREWSHIP_SIDECAR_RUN_AUTHORITY=1 then; nothing else changes.
+// Today NOTHING in production writes work_attempts: work.Store.Claim is its only
+// writer and has no non-test caller, and internal/dispatch is imported by
+// nothing — while the orchestrator mints a per-run token for every crew run.
+// Turning this on now would therefore lock every run, including the sidecar's
+// own boot run, out of every sidecar route on its first call, permanently and
+// across restarts. TestRunAuthorityRealHost_ARunAbsentFromTheLedgerIsDurablyRevoked
+// pins that and says so.
+//
+// The 404 ambiguity has NOT gone away and still shapes the client: internal/api's
+// serveInternal answers an unregistered path and a refused caller with the same
+// byte-identical JSON 404, so a 404 is "this host predates the endpoint" OR
+// "this sidecar's token was revoked" and can never be read as "no such run".
+// That is why every non-200 is a non-answer below.
+//
+// So: the client is complete and verified against the real handler, the contract
+// is written down, the policy is implemented and tested, and the switch stays off
+// until the dispatcher (R3) owns runs and the ledger is the register of who is
+// running. Flip CREWSHIP_SIDECAR_RUN_AUTHORITY=1 then; nothing else changes.
 type hostRunAuthority struct {
 	baseURL string
 	token   string
@@ -828,8 +853,22 @@ func newHostRunAuthority(ipc *IPCConfig, logger *slog.Logger) runAuthority {
 }
 
 func (a *hostRunAuthority) runIsActive(ctx context.Context, runID string) (bool, error) {
-	url := a.baseURL + fmt.Sprintf(runAuthorityPathFmt, runID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// The run id is a PATH SEGMENT and is escaped as one. It arrives from
+	// ValidateAgentRunToken — a MAC'd value, so not attacker-chosen today — but
+	// the ids are opaque to this code and interpolating one raw is a wire bug
+	// waiting for the first id that contains a reserved character: a `/` splits
+	// the segment and the router answers its canonical 404, a `?` turns the tail
+	// into a query the crew-token middleware then refuses, and a literal `%2F`
+	// arrives at the handler decoded as `/` — which the run_id echo check below
+	// catches as an answer about a different run. All three read as "the
+	// authority could not answer", so a perfectly live run would be driven into
+	// the unreachable-host policy by nothing but URL construction.
+	//
+	// Escaping closes it in the direction the handler already expects:
+	// ServeMux's {runId} wildcard matches one escaped segment and PathValue
+	// hands the handler the decoded value back, so the id round-trips.
+	probeURL := a.baseURL + fmt.Sprintf(runAuthorityPathFmt, url.PathEscape(runID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
 	if err != nil {
 		return false, err
 	}

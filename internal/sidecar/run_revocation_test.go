@@ -443,9 +443,13 @@ func TestHostRunAuthority_AnswerContract(t *testing.T) {
 	}
 }
 
-// The switch is off by default and that is load-bearing: the route it probes
-// does not exist in internal/api yet, and a 404 from that surface cannot be
-// told apart from a refused caller.
+// The switch is off by default and that is load-bearing. The route it probes
+// now EXISTS (internal/api's RunStatusHandler) and the two halves are proven to
+// fit in run_authority_host_test.go — what still keeps the switch off is that
+// nothing in production writes work_attempts, so the ledger would answer
+// "no such run" for every live run and the sidecar would revoke it. See
+// hostRunAuthority's comment and
+// TestRunAuthorityRealHost_ARunAbsentFromTheLedgerIsDurablyRevoked.
 func TestHostRunAuthority_OffUnlessEnabled(t *testing.T) {
 	ipc := &IPCConfig{BaseURL: "http://127.0.0.1:1", Token: "internal-token"}
 	if a := newHostRunAuthority(ipc, runTestLogger()); a != nil {

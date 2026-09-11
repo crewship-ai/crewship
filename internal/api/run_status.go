@@ -55,7 +55,25 @@ func (h *RunStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	active, reason, err := runIsLiveAttempt(r.Context(), h.db, runID)
+	// Scope to the caller's workspace. requireInternal pins workspace_id into
+	// the query for a crew-bound token — the sidecar's token is exactly that —
+	// so the binding is server-side and unforgeable, and a caller-supplied
+	// value that disagrees has already been refused before reaching here.
+	//
+	// Without this the endpoint answered about any run id in any workspace. Run
+	// ids are unguessable, so it was a narrow oracle rather than an open door,
+	// but it was the one place on this surface where a bound token bought no
+	// binding — and "you cannot guess the identifier" is not an access control.
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		// A token that carries no workspace cannot be told about a run. Refusing
+		// is not a verdict on the run: 403 is distinguishable from the 200s
+		// below, so a caller cannot read it as "inactive" and revoke on it.
+		replyError(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	active, reason, err := runIsLiveAttempt(r.Context(), h.db, workspaceID, runID)
 	if err != nil {
 		// An unavailable ledger is not an answer. Saying "inactive" here would
 		// revoke every live run in the crew during a database blip; saying
@@ -77,7 +95,7 @@ func (h *RunStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 // The reason string is for a human reading logs. It is returned alongside the
 // boolean rather than encoded in it, because a caller that has to parse prose
 // to learn whether a token is valid will eventually parse it wrong.
-func runIsLiveAttempt(ctx context.Context, db *sql.DB, runID string) (bool, string, error) {
+func runIsLiveAttempt(ctx context.Context, db *sql.DB, workspaceID, runID string) (bool, string, error) {
 	var (
 		itemState      string
 		itemGeneration int64
@@ -88,10 +106,13 @@ func runIsLiveAttempt(ctx context.Context, db *sql.DB, runID string) (bool, stri
 		SELECT wi.state, wi.generation, wa.generation, wa.ended_at
 		  FROM work_attempts wa
 		  JOIN work_items wi ON wi.id = wa.work_id
-		 WHERE wa.run_id = ?`, runID).
+		 WHERE wa.run_id = ? AND wi.workspace_id = ?`, runID, workspaceID).
 		Scan(&itemState, &itemGeneration, &attemptGen, &endedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, "no such run in the work ledger", nil
+		// Absent, or present in another workspace — deliberately the same
+		// answer, so this cannot be used to probe for runs the caller has no
+		// business knowing about.
+		return false, "no such run in this workspace's work ledger", nil
 	}
 	if err != nil {
 		return false, "", err
