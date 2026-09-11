@@ -81,6 +81,13 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	// invoke saved routines through this internal surface (workspace + invoker
 	// identity injected from IPC, same trust boundary as save).
 	r.mux.Handle("POST /api/v1/internal/pipelines/run", internalAuth(http.HandlerFunc(pipes.InternalRun)))
+	// The sidecar's revocation authority. Its local journal survives a sidecar
+	// restart but not the container being recreated, and nothing local can
+	// notice a run-end notification dropped in flight — so for a run it cannot
+	// account for, it asks the process that owns the ledger.
+	runStatus := NewRunStatusHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/internal/runs/{runId}/status", internalAuth(http.HandlerFunc(runStatus.Status)))
+
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
