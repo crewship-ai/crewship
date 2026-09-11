@@ -122,9 +122,6 @@ jobs:
   registry-smoke:
     name: Smoke existing registry image (both platforms)
     if: github.event_name == 'workflow_dispatch' && inputs.registry_image != ''
-    permissions:
-      contents: read
-      packages: read
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -142,11 +139,6 @@ jobs:
       - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
         with:
           platforms: arm64
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
       - name: Boot both platforms from the same immutable index
         run: |
           bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
