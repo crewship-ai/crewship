@@ -4,8 +4,20 @@ name: PR Image Build
 # CI Result requires this job when code changes. Build locally, then boot the
 # exact image without pushing PR code to the registry.
 on:
-  workflow_call: {}
-  workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        default: linux/amd64
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Image architecture to build and boot without publication
+        type: choice
+        default: linux/amd64
+        options:
+          - linux/amd64
+          - linux/arm64
 
 permissions:
   contents: read
@@ -20,12 +32,28 @@ jobs:
     # signing — a PR wants a verdict quickly, and every failure class this
     # guards against (#849/#886's missing COPY, a `pnpm prisma generate` or
     # `pnpm build` break, the #1567 web/out gate) is architecture-independent,
-    # so amd64-only loses no coverage that matters here.
+    # so the default stays amd64; dispatch can rehearse ARM before release.
     timeout-minutes: 15
+    env:
+      PLATFORM: ${{ inputs.platform || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Resolve commit timestamp
+        id: metadata
+        run: echo "date=$(git log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate target platform
+        run: |
+          case "$PLATFORM" in
+            linux/amd64|linux/arm64) ;;
+            *) echo 'Unsupported image smoke platform' >&2; exit 1 ;;
+          esac
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+        if: inputs.platform == 'linux/arm64'
+        with:
+          platforms: arm64
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -41,16 +69,16 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6.18.0
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ env.PLATFORM }}
           load: true
           provenance: false
           tags: crewship:pr-build
           build-args: |
             VERSION=ci-${{ github.sha }}
             COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
-          cache-from: type=gha,scope=pr-image-build
-          cache-to: type=gha,mode=max,scope=pr-image-build
+            DATE=${{ steps.metadata.outputs.date }}
+          cache-from: type=gha,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
+          cache-to: type=gha,mode=max,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
 
       # Same probe smoke-test.yml's "Smoke Docker image" job runs post-release
       # against the published tag, minus the registry pull — the image never
@@ -61,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="ci-${{ github.sha }}"
-          OUT=$(docker run --rm crewship:pr-build version)
+          OUT=$(docker run --rm --platform "$PLATFORM" crewship:pr-build version)
           echo "$OUT"
           if ! echo "$OUT" | grep -qF "$VERSION"; then
             echo "::error::container 'crewship version' output did not contain the build's own version string ($VERSION)"
@@ -71,4 +99,4 @@ jobs:
       - name: Verify image boot and embedded UI
         env:
           EXPECTED_SHA: ${{ github.sha }}
-        run: bash scripts/ci/smoke-image.sh crewship:pr-build "$EXPECTED_SHA"
+        run: bash scripts/ci/smoke-image.sh crewship:pr-build "$EXPECTED_SHA" "$PLATFORM"
