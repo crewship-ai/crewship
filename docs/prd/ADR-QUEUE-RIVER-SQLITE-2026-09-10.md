@@ -99,18 +99,39 @@ yet"* outside its own recommended configuration.
 These are properties of SQLite and the modernc driver, not of River. They survive the
 reject and become stage-B requirements.
 
-**FULL is affordable.** Cost of `synchronous=FULL` on this host, 200 ops each:
+**FULL is affordable**, and costs about three times what the first run of this
+spike reported — that run used SQLite's inline autocheckpoint, which the daemon
+never does. Under the managed-WAL configuration the server actually runs
+(`wal_autocheckpoint(0)` plus a 2 s checkpointer), 200 ops each:
 
 | | delivery row only | full acceptance transaction |
 |---|---|---|
-| NORMAL p50 / p95 | 20 µs / 32 µs | 261 µs / 459 µs |
-| FULL p50 / p95 / p99 | 6371 µs / 12381 µs | 7901 µs / 13807 µs / 21334 µs |
+| NORMAL p50 / p95 / p99 | 21 µs / 33 µs | 288 µs / 539 µs / 688 µs |
+| FULL p50 / p95 / p99 | 20844 µs / 47418 µs | **21488 µs / 55770 µs / 95279 µs** |
+| *(superseded, inline autocheckpoint)* | *6371 / 12381 µs* | *7901 / 13807 / 21334 µs* |
 
-FULL costs roughly 6.4 ms of fsync per commit — a ~300× multiple on the bare write, and
-~30× on the acceptance transaction. In absolute terms p95 13.8 ms against a 500 ms budget,
-so §3's "FULL on every authoritative connection" is affordable at the design load. It is
-**not** free at high write rates: 6.4 ms of serialised fsync puts a ceiling near 150
-commits/s on a single writer, which the capacity report must state rather than assume.
+So roughly 21 ms of fsync per acceptance commit. In absolute terms p95 55.8 ms
+against a 500 ms budget, so §3's "FULL on every authoritative connection" is
+affordable at the design load with an order of magnitude of headroom.
+
+**On the capacity number, and how not to read it.** At 21 ms of serialised fsync,
+*this benchmark, on this host, under this load* reached roughly **42 commits/s**
+on the single writer. That is a measurement, not a property of SQLite and not a
+webhook throughput figure — hardware, filesystem, concurrent load and transaction
+size all move it, and the same suite has produced very different numbers on a
+quieter box.
+
+It is also not a request rate. One piece of work costs several transactions —
+acceptance, claim, start intent, heartbeats, completion — so turning commits per
+second into webhooks per second needs the whole flow measured, which this harness
+does not do. What the figure is good for is the order of magnitude of the write
+budget, and for knowing it sits close enough to §10's 10 req/s design load to be
+worth measuring properly rather than assumed away.
+
+Why managed WAL makes FULL *worse* is worth stating: with autocheckpoint off the
+WAL grows between ticks, so each commit's fsync flushes a larger file, and the
+checkpointer competes for the single writer. That trade already bought a large
+p99 win on ordinary writes, so this is the cost of an existing deliberate choice.
 
 **A context deadline does not bound an acceptance request.** With a 500 ms context and a
 write lock held elsewhere for 5 s, the acceptance path returned after 5044 ms with
@@ -132,12 +153,22 @@ handle whose `busy_timeout` sits under its budget, and measured against a lock h
 
 ## Decision
 
-**Reject River for 1.0.** Four reasons, in order of weight:
+**Reject River for 1.0**, on the narrower ground that it does not earn its
+integration cost at this scope. None of what follows shows River cannot be
+integrated correctly: the fencing could be added on our side, and the pool
+finding is about this way of integrating it rather than about the library. The
+claim is about cost against benefit for 1.0, and it should be read that way.
 
-1. It does not discharge the invariant it would have been adopted for (I5); Crewship-side
-   fencing is required either way.
-2. Adopting it means running an explicitly early-testing driver outside its own
-   recommended pool configuration, on the database that holds every domain row.
+Four reasons, in order of weight:
+
+1. It does not discharge the invariant it would have been adopted for (I5) — its
+   completion predicate carries no attempt term — so Crewship-side fencing is
+   required either way. Adding that fencing around River is possible; it just
+   removes the reason to adopt it.
+2. Integrating it the obvious way means running an explicitly early-testing
+   driver outside its own recommended single-connection pool, on the database
+   that holds every domain row. A different integration might avoid that; none
+   was cheap enough to be worth designing for 1.0.
 3. It buys little that is missing. Per the stage-A audit, `assignments` already carries
    `lease_owner`/`lease_expires_at` with a 20 s heartbeat, a 15 s owner-aware lease
    sweeper, a stuck-RUNNING sweeper and a boot recovery pass
@@ -169,8 +200,9 @@ moot for 1.0.
   document, and because four of its scenarios (`tx`, `dup`, `fencing`, `pool`) are the
   correctness bar the in-house implementation must clear too.
 - Stage B inherits three requirements from the measurements above, all now
-  implemented: FULL on authoritative connections with its ~42 commits/s ceiling
-  stated in the capacity report; an explicit acceptance budget guard that does not
+  implemented: FULL on authoritative connections, with its measured ~42 commits/s
+  on this host carried into the capacity report as a benchmark result rather than
+  a limit; an explicit acceptance budget guard that does not
   rely on context cancellation; and a generation/fencing term on the work rows.
 - Revisit if a measured single-writer limit appears, or if the driver leaves early testing
   *and* grows attempt-level fencing. Neither is a 1.0 concern.

@@ -40,12 +40,7 @@ func TestCancel_DoesNotDeclareALiveRuntimeStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := s.MarkStarting(ctx, r.WorkID, c.RunID, c.Generation, "crew-1/tmux:live"); err != nil {
-		t.Fatalf("mark starting: %v", err)
-	}
-	if err := s.StartRunning(ctx, r.WorkID, c.RunID, c.Generation, "crew-1/tmux:live"); err != nil {
-		t.Fatalf("start running: %v", err)
-	}
+	startRuntime(t, s, r.WorkID, c, "crew-1/tmux:live")
 
 	// The cancel now arrives, carrying the handler's stale view of the world.
 	res, err := s.RequestCancel(ctx, r.WorkID, "operator", "user pressed stop")
@@ -170,9 +165,7 @@ func TestTransition_RefusesARunFromAnotherWorkItem(t *testing.T) {
 		t.Fatalf("generations %d and %d differ; this test is only meaningful when they collide",
 			ca.Generation, cb.Generation)
 	}
-	if err := s.StartRunning(ctx, a.WorkID, ca.RunID, ca.Generation, "a-runtime"); err != nil {
-		t.Fatalf("start A: %v", err)
-	}
+	startRuntime(t, s, a.WorkID, ca, "a-runtime")
 
 	err = s.Transition(ctx, TransitionRequest{
 		WorkID: a.WorkID, RunID: cb.RunID, Generation: ca.Generation, To: StateSucceeded,
@@ -218,6 +211,9 @@ func TestStartRunning_RefusesARunThatDoesNotExist(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
+	if err := s.MarkStarting(ctx, r.WorkID, c.RunID, c.Generation, "real-locator"); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
 	err = s.StartRunning(ctx, r.WorkID, "nonexistent-run", c.Generation, "locator")
 	if !errors.Is(err, ErrNotBound) {
 		t.Fatalf("unknown run = %v, want ErrNotBound", err)
@@ -367,5 +363,52 @@ func TestMarkStarting_IsBoundAndHappensOnce(t *testing.T) {
 	}
 	if err := s.MarkStarting(ctx, r.WorkID, c.RunID, c.Generation, "loc-2"); !errors.Is(err, ErrNotBound) {
 		t.Errorf("second start intent = %v, want ErrNotBound", err)
+	}
+}
+
+// The start protocol has to be ENFORCED, not merely offered.
+//
+// The review caught this: MarkStarting existed, and StartRunning accepted a
+// planned attempt anyway, so the protocol could be skipped by any caller that
+// did not know about it — and the caller that skips it is exactly the one that
+// crashes in the window the protocol exists to cover.
+func TestStartRunning_RequiresAStartIntent(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	ctx := context.Background()
+	r := accept(t, s, db, backgroundReq("agent-jamie"))
+	c, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker"})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// planned -> confirmed is not an edge. Passing a locator here does not
+	// establish one: an intent has to be durable BEFORE the runtime exists,
+	// and one written at confirmation time is written after the danger passed.
+	err = s.StartRunning(ctx, r.WorkID, c.RunID, c.Generation, "a-locator")
+	if !errors.Is(err, ErrNotBound) {
+		t.Fatalf("confirming a runtime with no start intent = %v, want ErrNotBound", err)
+	}
+	it, _ := s.Get(ctx, r.WorkID)
+	if it.State != StateStarting {
+		t.Errorf("state = %q, want starting — a refused confirmation moved the work", it.State)
+	}
+
+	// And the attempt must still look un-started to recovery, or the refusal
+	// would have quietly done half the job it declined to do.
+	var phase, locator string
+	if err := db.QueryRow(
+		`SELECT runtime_phase, runtime_locator FROM work_attempts WHERE run_id = ?`, c.RunID,
+	).Scan(&phase, &locator); err != nil {
+		t.Fatalf("read attempt: %v", err)
+	}
+	if phase != runtimePhasePlanned || locator != "" {
+		t.Errorf("attempt is phase %q locator %q after a refused confirmation, want planned and empty",
+			phase, locator)
+	}
+
+	// With the intent in place it works, and only then.
+	startRuntime(t, s, r.WorkID, c, "a-locator")
+	if it, _ = s.Get(ctx, r.WorkID); it.State != StateRunning {
+		t.Errorf("state = %q, want running", it.State)
 	}
 }

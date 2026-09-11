@@ -262,9 +262,7 @@ func TestRecoverExpiredLeases_LocatorMeansReconcileNotRequeue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if err := s.StartRunning(ctx, r.WorkID, c.RunID, c.Generation, "crew-1/tmux:agent-jamie-"+c.RunID); err != nil {
-		t.Fatalf("start running: %v", err)
-	}
+	startRuntime(t, s, r.WorkID, c, "crew-1/tmux:agent-jamie-"+c.RunID)
 
 	clock.Advance(LeaseDuration + time.Second)
 	out, err := s.RecoverExpiredLeases(ctx)
@@ -513,6 +511,22 @@ func TestTransition_RejectsIllegalEdgeAndTerminalWork(t *testing.T) {
 	})
 	if !errors.Is(err, ErrTerminal) {
 		t.Fatalf("cancel after completion = %v, want ErrTerminal", err)
+	}
+}
+
+// startRuntime runs the whole start protocol: declare where the runtime will
+// be, then confirm it. StartRunning requires the intent, because an attempt
+// that reaches `running` without one is an attempt recovery cannot reason
+// about — it cannot tell a process that was never created from one we failed
+// to write down.
+func startRuntime(t *testing.T, s *Store, workID string, c *Claimed, locator string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.MarkStarting(ctx, workID, c.RunID, c.Generation, locator); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
+	if err := s.StartRunning(ctx, workID, c.RunID, c.Generation, locator); err != nil {
+		t.Fatalf("start running: %v", err)
 	}
 }
 
@@ -803,9 +817,7 @@ func TestNeedsReconciliation_HoldsCapacityUntilResolved(t *testing.T) {
 	// A reaches a real runtime and records where it is. This is what makes its
 	// disappearance ambiguous rather than clean.
 	locator := "crew-1/tmux:agent-jamie-" + claimA.RunID
-	if err := s.StartRunning(ctx, a.WorkID, claimA.RunID, claimA.Generation, locator); err != nil {
-		t.Fatalf("start running: %v", err)
-	}
+	startRuntime(t, s, a.WorkID, claimA, locator)
 
 	clock.Advance(LeaseDuration + time.Second)
 	out, err := s.RecoverExpiredLeases(ctx)

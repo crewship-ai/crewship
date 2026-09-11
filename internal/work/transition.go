@@ -203,12 +203,19 @@ func (s *Store) MarkStarting(ctx context.Context, workID, runID string, generati
 
 // StartRunning records that the runtime is confirmed live.
 //
-// The locator is normally already there from MarkStarting; passing one here
-// updates it, for the case where the confirmed identity differs from the
-// planned one. What changed is that the UPDATE is now checked: it used to
-// ignore how many rows it touched, so a run id that existed nowhere still moved
-// the work item to `running`, leaving work marked live with no attempt behind
-// it. That is one of the three defects the review reproduced.
+// It REQUIRES a prior MarkStarting. There is no planned -> confirmed edge,
+// deliberately: an attempt that reaches `running` without ever having declared
+// where its runtime would be is an attempt recovery cannot reason about, and
+// offering the protocol without enforcing it means the one caller that skips it
+// is the one that crashes in the window the protocol exists to cover.
+//
+// The locator argument updates the planned one, for the case where the
+// confirmed identity differs from what was predicted. It cannot ESTABLISH one.
+//
+// The UPDATE is also checked. It used to ignore how many rows it touched, so a
+// run id that existed nowhere still moved the work item to `running`, leaving
+// work marked live with no attempt behind it — one of the three defects the
+// review reproduced.
 func (s *Store) StartRunning(ctx context.Context, workID, runID string, generation int64, locator string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -231,14 +238,17 @@ func (s *Store) StartRunning(ctx context.Context, workID, runID string, generati
 		UPDATE work_attempts
 		SET runtime_locator = CASE WHEN ? != '' THEN ? ELSE runtime_locator END,
 		    runtime_phase = 'confirmed'
-		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
+		  AND runtime_phase IN ('starting', 'confirmed')`,
 		locator, locator, runID, workID, generation)
 	if err != nil {
 		return fmt.Errorf("work: record locator: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return fmt.Errorf("%w: confirming runtime for attempt %s of %s affected %d rows",
-			ErrNotBound, runID, workID, n)
+		return fmt.Errorf("%w: attempt %s of %s has no start intent to confirm; "+
+			"call MarkStarting with the locator BEFORE creating the runtime, or recovery "+
+			"cannot tell a process that was never started from one we failed to record",
+			ErrNotBound, runID, workID)
 	}
 	if err := s.setStateTx(ctx, tx, it, StateRunning, runID, generation, "runtime confirmed", now); err != nil {
 		return err

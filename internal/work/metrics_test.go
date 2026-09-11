@@ -233,6 +233,9 @@ func TestLeaseExpiredReasonPrefixMatchesRecovery(t *testing.T) {
 	if withRuntime == nil {
 		t.Fatal("the item under test was never claimed")
 	}
+	if err := s.MarkStarting(ctx, r2.WorkID, withRuntime.RunID, withRuntime.Generation, "crew/run-1"); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
 	if err := s.StartRunning(ctx, r2.WorkID, withRuntime.RunID, withRuntime.Generation, "crew/run-1"); err != nil {
 		t.Fatalf("start running: %v", err)
 	}

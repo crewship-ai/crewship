@@ -14,6 +14,22 @@ background run at the same time is proven at the admission layer only — in a G
 test, against real SQLite, with no runtime. T06 (a real Claude adapter, two live
 runtimes, overlapping in wall-clock time) has not been attempted.
 
+## 0. How to read this file
+
+Three levels of claim, kept apart on purpose, because collapsing them is how a
+handoff starts lying:
+
+- **Store mechanism implemented and tested.** The operation exists, has tests,
+  and several have been mutation-checked. It says nothing about whether anything
+  in production calls it.
+- **Production path wired.** A real request or a real dispatcher goes through it.
+- **End-to-end guarantee proven.** The behaviour the PRD promises has been
+  observed through the whole path, with real runtimes where the PRD says real.
+
+Almost everything below is at level one or two. **Nothing is at level three**, and
+the release commitment — one Jamie holding a chat and a background run at once —
+is not met.
+
 ## 1. What is demonstrated
 
 | Commit | What it establishes |
@@ -80,7 +96,7 @@ context. It needs a handle whose `busy_timeout` is shorter than the budget, or
 an admission guard in front of the transaction. No false `202` was produced
 either way — the cancelled operation left no row.
 
-### `internal/work` — one owner for dispatch
+### Level 1 — store mechanisms, implemented and tested
 
 Migration `20260910200255_durable_work_ledger.sql`: `work_items`,
 `work_attempts`, `work_events`, `webhook_deliveries`, `external_operations`,
@@ -127,7 +143,7 @@ keeping, not the individual results:
 - removing `needs_reconciliation` from the capacity set makes the reconciliation
   test fail with `claim B while A is unreconciled = <nil>`.
 
-### Durability
+### Level 1 — durability
 
 `database.Open` now defaults to `synchronous=FULL`, with `WithSynchronous` and
 `WithBusyTimeout` as explicit opt-outs. Tests assert the pragma reaches **every
@@ -255,6 +271,30 @@ session rediscover them.**
     Likewise `issue_handler_hard_stop.go:250-253` claims it never touches another
     run's session, which the slug-only session name makes false.
 
+## 4a. Level 2 and 3: what is actually wired, and what is proven
+
+**Wired into a production path:** webhook acceptance (both surfaces), the work
+and delivery read API and its CLI, the work UI, the metrics collectors, the
+memory host mutation endpoint, the sidecar's revocation journal and its
+run-status authority, per-run runtime identity in the orchestrator.
+
+**Implemented, tested, and called by NOTHING in production yet:** `work.Claim`,
+`MarkStarting`, `Heartbeat`, `Transition`, `RecoverExpiredLeases`,
+`RequestCancel`'s live-runtime half, `RetentionPolicy.Sweep`, the ingress
+capacity check. This is the R3 gap and it is the biggest one: acceptance commits
+work and then the old orchestrator path runs the agent without claiming it, so
+`queued` can mean "an agent is running" and a restart does not resume anything.
+
+**Proven end to end: nothing.** No T01–T14 is a PASS.
+
+A note on R4 specifically, because an earlier version of this file overstated it.
+The store protocol is complete and enforced — `StartRunning` now refuses an
+attempt with no prior `MarkStarting`, so the sequence cannot be skipped. But
+**only tests call `MarkStarting` today.** The production dispatcher that would
+use it does not exist, and the crash test that matters — kill after the process
+is really created, restart, prove no second runtime — has not been written. R4 is
+"protocol ready, not wired, not proven".
+
 ## 5. The six pumps I7 has to collapse
 
 Each can start agent work independently today:
@@ -331,30 +371,50 @@ replace. Both are recorded as unverified rather than presented as checked.
 
 ## 6. The next concrete step
 
-In order. The first two are what the release commitment actually waits on.
+In the order the 2026-09-11 review sets, which is also dependency order.
 
-1. **Thread a run id to the agent.** This is the smallest change with the
-   largest effect: it is what makes memory writes run-verified, and it is the
-   last thing standing between the guaranteed profile and production. It must
-   travel per attempt, not per container.
-2. **Nothing claims queued work.** Acceptance is durable and correct, and then
-   the work sits there — a dispatch failure leaves it `queued` forever rather
-   than retrying, because no dispatcher owns `retry_wait` yet. `work.Claim`,
-   `Heartbeat`, `Transition` and `RecoverExpiredLeases` all exist and are tested;
-   what is missing is the loop that calls them, and the scheduling of
-   `RetentionPolicy.Sweep` beside it.
-3. **Collapse the six pumps onto `work.Claim` (I7).** The largest remaining
-   invariant gap, and the change most likely to break live behaviour — which is
-   why it comes after the crash harness exists rather than before. Three
-   producers still start runs with no shared lock at all: the agent webhook
-   (which permits eight concurrent runs of one agent), the direct IPC start
-   route, and peer query.
-4. **Prove T06.** A real Claude adapter, two runtimes overlapping in wall-clock
-   time, a third piece of work waiting. Everything below it is now in place; this
-   is the release commitment and it has not been attempted. **Do not enable the
-   parallel flag before it passes.**
-5. **T14.** OS-crash or storage-fault evidence, explicitly not a `kill -9`, with
-   the fsync and storage assumptions written down.
+1. **R3 — one dispatcher that actually runs the work.** It must use the whole
+   protocol: `Claim` → `MarkStarting` → create the runtime → `StartRunning` →
+   heartbeat → completion or reconciliation. And the existing direct path from
+   acceptance into `orchestrator.RunAgent` must be REMOVED in the same change,
+   not left beside it — two owners of the same work is worse than one wrong one.
+2. **Prove the crash R4 exists for.** Kill the dispatcher after the process is
+   genuinely created and before `StartRunning`; restart; assert no second
+   runtime. Until this runs, R4 is a protocol, not a guarantee.
+3. **R6 — per-attempt identity through to the memory clients**, and a parallel
+   profile that can never fall back to a legacy write. The run id must travel
+   per attempt; a container-boot environment variable is specifically wrong,
+   because a container outlives many attempts.
+4. **R8 — ingress and dedup under overload.** A throttled same-id/different-body
+   delivery must be 409, not a duplicate; a lookup failure is 503, not a capacity
+   claim; a busy agent with free ingress capacity is 202 queued, because §6
+   separates "the queue is full" from "this agent is busy".
+5. **Real T06/T07 and an integration cancel**, over a live runtime. Only then may
+   the parallel profile be enabled.
+
+## 6a. The rest of the release gates, which do not disappear
+
+R3/R6/R7/R8 are not the remainder of the PRD. Still outstanding, and still
+required by it:
+
+- **Durable chat mailbox wired** (§7). The table exists and nothing uses it, so a
+  busy agent still bounces a message before persisting it — finding P1, unfixed.
+- **Dispatch-time permission and budget re-checks** (I8). Columns exist; nothing
+  re-checks at dispatch, so a right removed while work waited still runs.
+- **External operations with an unclear result** (§4, T09). The table exists and
+  nothing writes to it: no intent before a call, no receipt after, no
+  reconciliation path.
+- **Scheduling recovery and retention.** `RecoverExpiredLeases` and
+  `RetentionPolicy.Sweep` are implemented and nothing runs them on a timer.
+- **The remaining producers onto shared admission** (I7): the agent webhook, the
+  direct IPC start route and peer query still start runs with no shared lock.
+- **UI reconnect and stream separation under a real server** (T12) — built
+  against mocks only.
+- **Load and soak** (§10): acceptance p95/p99 at 10 req/s for 60 minutes, the
+  1000-request burst, the capacity invariant under 50 producers.
+- **T14**: OS-crash or storage-fault evidence, explicitly not a `kill -9`.
+- **Upgrade, drain and rollback drill** (§12), and the adapter capability matrix
+  that may only list adapters actually verified.
 
 ## 7. Practical notes for the next session
 
