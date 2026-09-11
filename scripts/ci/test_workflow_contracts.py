@@ -94,7 +94,7 @@ class WorkflowContracts(unittest.TestCase):
                 result = subprocess.run(['bash', '-c', script], cwd=root, env=env, capture_output=True, text=True)
                 commands = (root / 'commands').read_text().splitlines()
                 self.assertIn('--draft --prerelease', commands[0])
-                self.assertTrue(commands[1].startswith('api '))
+                self.assertEqual(commands[1], 'api repos/example/repo/commits/main --jq .sha')
                 published = current == env['SHA'] and api_status == 0
                 self.assertEqual(any(c.startswith('release edit ') for c in commands), published)
                 if api_status:
