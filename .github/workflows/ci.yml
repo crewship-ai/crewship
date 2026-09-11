@@ -1132,7 +1132,7 @@ jobs:
 
       - name: Type-check tests (no new diagnostics)
         run: |
-          node --test scripts/typecheck-tests.test.mjs
+          node --test scripts/typecheck-tests-node-test.mjs
           pnpm test:types
 
       # Coverage, not a bare test run: vitest exits non-zero when the
