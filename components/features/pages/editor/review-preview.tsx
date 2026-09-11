@@ -84,10 +84,27 @@ export function ReviewPreview({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           className="min-h-11"
-          disabled={!data || running || query.isError}
+          // Not disabled by `query.isError`, because that wedges the one
+          // control that can clear the state — and `retry: false` means a
+          // single network blip is enough to set it.
+          //
+          // The endpoint's own 404 is narrower than it looks: it fires only
+          // when there is no draft at all (`pages_build.go:187`), and a draft
+          // with no build answers 200 with `build: null` (`:212`). So the
+          // first build was never blocked by a 404. What does block it is a
+          // 503 (`builds == nil` at `:182`, or a runtime origin that does not
+          // isolate the Studio host at `:207`) — and there, building fails
+          // again with the same message, loudly, which is better than an
+          // inert grey button with no account of itself.
+          //
+          // `candidateRevision` comes from the review snapshot, not from this
+          // endpoint, so it is known even when the preview read failed. With
+          // no revision from either source there is genuinely nothing to
+          // build, and only then is the control dead.
+          disabled={running || (data == null && candidateRevision == null)}
           onClick={() => {
             setStopped(false)
-            build.mutate(data!.revision)
+            build.mutate(data?.revision ?? candidateRevision!)
           }}
         >
           {running ? "Building…" : "Build preview"}

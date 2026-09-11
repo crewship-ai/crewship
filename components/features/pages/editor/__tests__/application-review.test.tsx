@@ -65,8 +65,31 @@ const baseSnapshot: ReviewSnapshotWire = {
   initial_publication: false,
 }
 
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T
+/**
+ * A fixture is not a wire record, and the type says so.
+ *
+ * Every field of `ReviewSnapshotWire` is `readonly` on purpose: it models what
+ * the server sent, and nothing in the product may write to it. A deep clone
+ * built here is a different thing — a local fixture nobody has sent anywhere —
+ * so `clone` hands back a genuinely mutable view of it, and each test says
+ * "start from the base and change exactly this".
+ *
+ * This is the honest encoding rather than a way round the contract: building
+ * a variant needs no cast of any kind, and `editor-contract.ts` keeps every
+ * `readonly` it has. Mutable is assignable to readonly, so `setReview` still
+ * takes the real wire type and the product code still sees an immutable
+ * snapshot. (The `as unknown as` calls elsewhere in this file are unrelated —
+ * `vi.hoisted` null-initialisers and a happy-dom probe.)
+ *
+ * Chosen over a `snapshot(overrides)` spread builder because the variants in
+ * this file reach two and three levels deep and one of them sets
+ * `candidate: null` — a deep-partial merge would need an "explicitly null vs
+ * absent" rule, which is more machinery than the tests it serves.
+ */
+type DeepMutable<T> = T extends readonly (infer U)[] ? DeepMutable<U>[] : T extends object ? { -readonly [K in keyof T]: DeepMutable<T[K]> } : T
+
+function clone<T>(value: T): DeepMutable<T> {
+  return JSON.parse(JSON.stringify(value)) as DeepMutable<T>
 }
 
 function setReview(snapshot: ReviewSnapshotWire, overrides: Record<string, unknown> = {}) {

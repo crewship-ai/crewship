@@ -199,8 +199,22 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
  * moment — so the honest offer is "discard" or "stay", not "save everything".
  */
 function UnsavedWorkDialog({ pending }: { pending: EditorNavigation["pending"] }) {
+  // Radix closes the dialog after a Cancel or Action handler runs, and the
+  // close calls `onOpenChange(false)` with the same captured `pending`. Left
+  // ungated, Stay pushes the restored Back entry twice and Discard performs
+  // the navigation twice.
+  const answered = React.useRef(false)
+  React.useEffect(() => {
+    if (pending != null) answered.current = false
+  }, [pending])
+  const answer = (choice: "keep" | "discard") => {
+    if (answered.current) return
+    answered.current = true
+    if (choice === "keep") pending?.keep()
+    else pending?.discard()
+  }
   return (
-    <AlertDialog open={pending != null} onOpenChange={(open) => { if (!open) pending?.keep() }}>
+    <AlertDialog open={pending != null} onOpenChange={(open) => { if (!open) answer("keep") }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
@@ -210,8 +224,8 @@ function UnsavedWorkDialog({ pending }: { pending: EditorNavigation["pending"] }
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => pending?.keep()}>Stay here</AlertDialogCancel>
-          <AlertDialogAction onClick={() => pending?.discard()}>Discard changes</AlertDialogAction>
+          <AlertDialogCancel onClick={() => answer("keep")}>Stay here</AlertDialogCancel>
+          <AlertDialogAction onClick={() => answer("discard")}>Discard changes</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

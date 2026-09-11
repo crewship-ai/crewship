@@ -418,13 +418,23 @@ function PublicationsCard({
   const blockers = snapshot?.blockers ?? []
   const routines = snapshot?.routines ?? []
   /**
+   * `routines` is a UNION: the ones the version being published declares, and
+   * the ones only the live publication called. Only the first kind belongs in
+   * the fence — sending a routine this version drops produces a 409 naming a
+   * routine nobody moved, and refetching never clears it because the snapshot
+   * says the same thing again.
+   */
+  const fencedRoutines = routines.filter((r) => r.in_candidate)
+  /** Dropped by this version. Shown, never fenced: a reviewer has to see the loss. */
+  const droppedRoutines = routines.filter((r) => !r.in_candidate)
+  /**
    * The case this whole panel exists for: restoring old code binds it to the
    * routine as it is NOW, which is not the routine anybody approved for that
-   * version.
+   * version. Only routines this version actually calls can do that to it.
    */
-  const changedRoutines = routines.filter((r) => r.state === "changed")
+  const changedRoutines = fencedRoutines.filter((r) => r.state === "changed")
   /** No current digest means the publish cannot fence on it. Say so; never imply it is covered. */
-  const uncoveredRoutines = routines.filter(
+  const uncoveredRoutines = fencedRoutines.filter(
     (r) => typeof r.current_digest !== "string" || r.current_digest === "",
   )
   /**
@@ -439,7 +449,7 @@ function PublicationsCard({
     ? {
         expected_definition_digest: snapshot.baseline.definition_digest,
         expected_routine_digests: Object.fromEntries(
-          routines
+          fencedRoutines
             .filter((r): r is typeof r & { current_digest: string } =>
               typeof r.current_digest === "string" && r.current_digest !== "",
             )
@@ -719,19 +729,32 @@ function PublicationsCard({
                                 key={routine.routine}
                                 data-slot="fence-routine"
                                 data-state={routine.state}
+                                data-in-candidate={routine.in_candidate ? "true" : "false"}
                                 className="type-page-meta text-muted-foreground-soft"
                               >
                                 <span className="font-mono text-foreground/85">
                                   {routine.routine}
                                 </span>
-                                {routine.state === "changed"
-                                  ? " — changed since this version was published"
-                                  : routine.state === "unknown"
-                                    ? " — its current definition could not be read"
-                                    : " — unchanged since this version was published"}
+                                {!routine.in_candidate
+                                  ? ` — called by the live application; version ${selected.version} does not call it, so it is not fenced`
+                                  : routine.state === "changed"
+                                    ? " — changed since this version was published"
+                                    : routine.state === "unknown"
+                                      ? " — its current definition could not be read"
+                                      : " — unchanged since this version was published"}
                               </li>
                             ))}
                           </ul>
+                        )}
+
+                        {droppedRoutines.length > 0 && (
+                          <ControlRefusal>
+                            Version {selected.version} does not call{" "}
+                            {droppedRoutines.map((r) => r.routine).join(", ")}, which the live
+                            application does. Publishing this version stops calling{" "}
+                            {droppedRoutines.length === 1 ? "it" : "them"}; work already completed
+                            by {droppedRoutines.length === 1 ? "it" : "them"} is not undone.
+                          </ControlRefusal>
                         )}
 
                         {changedRoutines.length > 0 && (

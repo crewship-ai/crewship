@@ -501,7 +501,14 @@ export function AccessCard({
             size="inline"
             icon={KeyRound}
             title="No grants on this page"
-            description={`It is reachable by its owner, by workspace admins, and by the crews that own its panels. Widen it with the form below, or run crewship page grant ${slug} --crew <slug> --level read.`}
+            description={
+              canManage
+                ? `It is reachable by its owner, by workspace admins, and by the crews that own its panels. Widen it with the form below, or run crewship page grant ${slug} --crew <slug> --level read.`
+                // Pointing a reader at a form that is not rendered for them
+                // makes the missing right read as a missing feature. The
+                // refusal below already names what they do not have.
+                : "It is reachable by its owner, by workspace admins, and by the crews that own its panels."
+            }
           />
         )}
 

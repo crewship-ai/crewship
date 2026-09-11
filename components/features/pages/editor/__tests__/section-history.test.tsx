@@ -136,7 +136,15 @@ function reviewSnapshot(overrides: Partial<ReviewSnapshotWire> = {}): ReviewSnap
       source_unavailable_reason: null,
     },
     routines: [
-      { routine: "nightly-close", published_digest: "r1", current_digest: "r1", state: "unchanged" },
+      {
+        routine: "nightly-close",
+        published_digest: "r1",
+        current_digest: "r1",
+        state: "unchanged",
+        // Declared by the version being published, so it is in the fence.
+        // The list is a union and the flag is what separates the two halves.
+        in_candidate: true,
+      },
     ],
     capabilities: { may_edit_spec: true, may_publish: true },
     blockers: [],
@@ -710,8 +718,20 @@ describe("what the reviewer is attesting to", () => {
   it("names a routine that changed, refuses to let it pass on the code tick alone, and still fences on it", async () => {
     snapshotBody = reviewSnapshot({
       routines: [
-        { routine: "nightly-close", published_digest: "r1", current_digest: "r2", state: "changed" },
-        { routine: "sweep", published_digest: "s1", current_digest: "", state: "unknown" },
+        {
+          routine: "nightly-close",
+          published_digest: "r1",
+          current_digest: "r2",
+          state: "changed",
+          in_candidate: true,
+        },
+        {
+          routine: "sweep",
+          published_digest: "s1",
+          current_digest: "",
+          state: "unknown",
+          in_candidate: true,
+        },
       ],
     })
     const { sent } = mount()
@@ -832,5 +852,58 @@ describe("when the fence trips", () => {
     expect(
       (screen.getByRole("button", { name: "Publish this version" }) as HTMLButtonElement).disabled,
     ).toBe(true)
+  })
+})
+
+// ── 6. The routine list is a union ─────────────────────────────────────────
+
+describe("a routine the published version does not call", () => {
+  it("is shown as dropped and kept out of the fence", async () => {
+    snapshotBody = reviewSnapshot({
+      routines: [
+        {
+          routine: "nightly-close",
+          published_digest: "r1",
+          current_digest: "r1",
+          state: "unchanged",
+          in_candidate: true,
+        },
+        {
+          // Only the LIVE publication calls this one. Version 2 drops it.
+          routine: "hourly-sweep",
+          published_digest: "s1",
+          current_digest: "s2",
+          state: "changed",
+          in_candidate: false,
+        },
+      ],
+    })
+    const { sent } = mount()
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
+    )
+
+    const publish = await readyToPublish(2)
+
+    // The reviewer sees the loss: a routine the live application calls and
+    // this version does not.
+    const dropped = document.querySelector("[data-slot='fence-routine'][data-in-candidate='false']")!
+    expect(dropped.textContent).toContain("hourly-sweep")
+    expect(dropped.textContent).toContain("does not call it, so it is not fenced")
+    expect(sectionText()).toContain("Publishing this version stops calling")
+
+    // It is `changed`, but it cannot bind this version to anything — this
+    // version never calls it — so it raises no acknowledgement gate.
+    expect(screen.queryByLabelText(/I understand version 2 will run against/)).toBeNull()
+    expect(publish.disabled).toBe(false)
+
+    fireEvent.click(publish)
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish this version" }))
+
+    // And it is absent from the fence. Sending it would 409 on a routine
+    // nobody moved, and no refetch would ever clear that.
+    const body = await publishRequest(sent)
+    expect(body.expected_routine_digests).toEqual({ "nightly-close": "r1" })
   })
 })

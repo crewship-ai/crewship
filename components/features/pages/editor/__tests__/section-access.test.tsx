@@ -116,7 +116,7 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response
 }
 
-function mount(capabilities: Partial<PageCapabilities> = {}) {
+function mount(capabilities: Partial<PageCapabilities> = {}, grants: unknown = GRANTS) {
   const calls: Array<{ method: string; url: string }> = []
   vi.stubGlobal(
     "fetch",
@@ -151,7 +151,7 @@ function mount(capabilities: Partial<PageCapabilities> = {}) {
         return jsonResponse(200, WEBHOOKS)
       }
       if (url.includes("/public")) return jsonResponse(200, LINKS)
-      if (url.includes("/grants")) return jsonResponse(200, GRANTS)
+      if (url.includes("/grants")) return jsonResponse(200, grants)
       return jsonResponse(404, { error: `unrouted ${method} ${url}` })
     }),
   )
@@ -316,7 +316,38 @@ describe("producer tokens", () => {
   })
 })
 
-// ── 3. A missing right hides controls, not the section ─────────────────────
+// ── 3. An empty ACL says different things to different readers ─────────────
+
+const NO_GRANTS = { page: "fleet-201", grants: [] }
+
+describe("a page with no grants on it", () => {
+  it("offers the form to somebody who may use it", async () => {
+    mount({}, NO_GRANTS)
+    await waitFor(() => expect(screen.getByText(/No grants on this page/)).toBeTruthy())
+
+    // The reachability half is true for everybody; the call to action is
+    // only true for a reader who has the form.
+    expect(sectionText()).toContain("reachable by its owner")
+    expect(sectionText()).toContain("Widen it with the form below")
+    expect(sectionText()).toContain("crewship page grant")
+  })
+
+  it("does not send a reader without the right to a form they cannot see", async () => {
+    mount({ mayManageAccess: false }, NO_GRANTS)
+    await waitFor(() => expect(screen.getByText(/No grants on this page/)).toBeTruthy())
+
+    expect(sectionText()).toContain("reachable by its owner")
+    // Pointing at a form that is not rendered for them makes a missing
+    // right read as a missing feature — and the CLI would refuse them for
+    // the same reason, so it is not an escape hatch either.
+    expect(sectionText()).not.toContain("Widen it with the form below")
+    expect(sectionText()).not.toContain("crewship page grant")
+    // What they are missing is named instead.
+    expect(sectionText()).toContain("Only its owner or a workspace admin")
+  })
+})
+
+// ── 4. A missing right hides controls, not the section ─────────────────────
 
 describe("without mayManageAccess", () => {
   it("keeps the whole section readable and names the missing right on each card", async () => {

@@ -236,6 +236,8 @@ function mount(harness: Harness = {}) {
         onNavigate={onNavigate}
         pane="section"
         onPaneChange={onPaneChange}
+        onLeaveEditor={vi.fn()}
+        onPageDeleted={vi.fn()}
         onDirtyChange={onDirtyChange}
       />
     </QueryClientProvider>,

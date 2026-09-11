@@ -161,3 +161,28 @@ it("labels a stale build by the revision that is actually running, not the one u
   expect(screen.getByText(/Showing draft 5 — not the draft 7 under review/)).toBeTruthy()
   expect(screen.queryByText(/^Draft 7 ·/)).toBeNull()
 })
+
+it("can still start a build when the preview read failed but the revision under review is known", () => {
+  // `retry: false`, so one blip is enough to set this. Disabling Build here
+  // wedges the only control that clears the state.
+  state.query.data = null
+  state.query.isError = true
+  state.query.error = new Error("Could not load the application preview.")
+  render(<ReviewPreview {...props} />)
+
+  const build = screen.getByRole("button", { name: "Build preview" }) as HTMLButtonElement
+  expect(build.disabled).toBe(false)
+  fireEvent.click(build)
+  // The revision comes from the review snapshot, not from the failed read.
+  expect(state.build.mutate).toHaveBeenCalledWith(7)
+  // And the failure is still accounted for on screen, not swallowed.
+  expect(screen.getByRole("alert").textContent).toMatch(/Could not load the application preview/)
+})
+
+it("leaves Build dead only when no revision is known from either source", () => {
+  state.query.data = null
+  state.query.isError = true
+  state.query.error = new Error("This Page has no application draft yet.")
+  render(<ReviewPreview {...props} candidateRevision={null} />)
+  expect((screen.getByRole("button", { name: "Build preview" }) as HTMLButtonElement).disabled).toBe(true)
+})

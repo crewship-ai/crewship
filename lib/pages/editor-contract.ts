@@ -79,7 +79,18 @@ export function isEditorSection(value: unknown): value is EditorSection {
  */
 export function readEditorRoute(pathname: string, search: string): EditorRoute {
   const match = /^\/pages\/([^/]+)\/?$/.exec(pathname)
-  const slug = match ? decodeURIComponent(match[1]) : null
+  // `decodeURIComponent` throws on a malformed percent sequence — `/pages/%`
+  // is a URL a browser will happily be pointed at. This file's own rule is
+  // that an odd or stale address degrades to the overview rather than
+  // failing the parse and taking the surface down with it.
+  let slug: string | null = null
+  if (match) {
+    try {
+      slug = decodeURIComponent(match[1])
+    } catch {
+      slug = match[1]
+    }
+  }
   const params = new URLSearchParams(search)
   const section = isEditorSection(params.get("section")) ? (params.get("section") as EditorSection) : DEFAULT_EDITOR_SECTION
   // Edit mode without a page is not a state; it would render a header for
