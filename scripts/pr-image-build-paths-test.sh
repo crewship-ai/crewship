@@ -76,6 +76,8 @@ make_workflow() {
       for p in "Dockerfile" ".dockerignore" "go.mod" "go.sum" "package.json" \
                "pnpm-lock.yaml" "pnpm-workspace.yaml" "prisma/**" "cmd/**" \
                "internal/**" "schemas/**" "web/**" \
+               "app/**" "components/**" "hooks/**" "lib/**" "stores/**" "public/**" \
+               "next.config.*" "tsconfig*.json" "postcss.config.*" \
                "docker/server-entrypoint.sh" \
                ".github/workflows/pr-image-build.yml"; do
         [ "$p" = "$drop_path" ] && continue
@@ -209,6 +211,13 @@ mkdir -p "$d"
 make_dockerfile "$d"
 make_workflow "$d" "" 0 1 0
 expect_fail "missing paths: list entirely is fatal" "$d" "no 'paths:' list"
+
+# COPY . . must not make frontend build inputs disappear from the trigger.
+d="$TMPROOT/missing-frontend"
+mkdir -p "$d"
+make_dockerfile "$d"
+make_workflow "$d" "app/**"
+expect_fail "frontend COPY-dot input is required" "$d" "app/"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

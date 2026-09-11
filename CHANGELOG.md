@@ -10,6 +10,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+
+- **The Docker image could report its version but fail to start.** Bundle the target-platform sidecar and agent entrypoint, configure writable non-root storage defaults, and verify boot, health and the embedded UI before promoting images. CI now requires the image check and all race shards; nightly publication is tied to verified commits and immutable artifact identities.
+
+
+### Fixed
 - **Editing a routine plan's target now re-checks its inputs against the recipe it will actually run.** Two gaps in the previous fix: unpinning a plan onto the current recipe validated its inputs against the *old* pinned version and then stored a plan the current recipe rejects, and repinning to another version without touching the inputs was not checked at all. An edit that changes the inputs, the pinned version, or the target routine is now judged as the plan it produces; disabling, rescheduling and renaming remain unchecked so a plan that predates the check can still be switched off. Pinning a plan to a version the routine never archived — on create, repin or retarget — is now refused naming the version, instead of storing an enabled plan with nothing to run; and an archive that cannot be read is an error, not a pass (#2496 follow-up).
 
 - **A routine's schema can no longer change out from under a live plan through a side door.** The check that refuses a recipe an enabled, unpinned plan's stored preset can no longer satisfy ran only on Edit → Publish. `crewship routine save`, the agent save, an import and a manifest apply all walked past it and left the plan pointing at a recipe its preset no longer fits — a plan that looks healthy in the calendar and fails for the first time at its next firing. The check now runs on every door that changes an active recipe, inside the same transaction, so a refusal leaves the original recipe and the original plan untouched; the 409 names which plan to repair, on the import and agent doors too, where an entirely actionable refusal used to surface as a server error. Disabled plans, pinned plans, legacy untyped inputs and saves that do not touch the definition are unaffected (#2495).

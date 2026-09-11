@@ -14,24 +14,12 @@ name: CodeQL
 # once the baseline is clean.
 
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
-      - 'THIRD-PARTY-NOTICES.md'
-      - '.github/ISSUE_TEMPLATE/**'
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
-      - 'THIRD-PARTY-NOTICES.md'
-      - '.github/ISSUE_TEMPLATE/**'
   schedule:
     # Re-scan main weekly even without a code change so CodeQL's own
     # query updates surface new findings on stable branches. Sunday
@@ -77,10 +65,16 @@ jobs:
         with:
           filters: |
             go:
+              - ".github/workflows/codeql.yml"
+              - ".github/codeql/**"
+              - ".github/actions/**"
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
             js:
+              - ".github/workflows/codeql.yml"
+              - ".github/codeql/**"
+              - ".github/actions/**"
               - '**/*.ts'
               - '**/*.tsx'
               - '**/*.js'
@@ -186,3 +180,24 @@ jobs:
           # findings are visible without blocking the PR while the
           # baseline gets triaged.
           upload: always
+
+  result:
+    name: CodeQL Result
+    if: always()
+    needs: [changes, analyze]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require planned security checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          n = json.loads(os.environ['RESULTS'])
+          assert n['changes']['result'] == 'success', 'language detection failed'
+          plan = json.loads(n['changes']['outputs']['include'])
+          expected = 'success' if plan else 'skipped'
+          assert n['analyze']['result'] == expected, f"CodeQL expected {expected}, got {n['analyze']['result']}"
+          PY

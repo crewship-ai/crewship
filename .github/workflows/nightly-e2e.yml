@@ -146,6 +146,8 @@ env:
   # `playwright.nightly.config.ts`, standalone and again alongside
   # create-crew-wizard at the nightly's own `CI=1 --workers=2`.
   GATE_SPECS: >-
+    e2e/routine-reliability-editor.spec.ts
+    e2e/provider-login-onboarding.spec.ts
     e2e/create-crew-wizard.spec.ts
     e2e/routine-run-inputs.spec.ts
     e2e/shell-overflow.spec.ts
@@ -212,12 +214,49 @@ env:
   # into a "known-stale, never fatal" rot issue every night, which is how a live
   # gate gets read as dead code and deleted. Listed here, with its real owner
   # named, instead.
+  # Credential reveal and provider pools have their own blocking PR configs.
   EXCLUDED_SPECS: >-
+    e2e/credential-reveal.spec.ts
+    e2e/provider-pools.spec.ts
     e2e/visual.spec.ts
     e2e/onboarding-wizard.spec.ts
     e2e/pr-contract.spec.ts
 
 jobs:
+  build-tools:
+    name: Build shared test binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build the shared web export
+        env:
+          NEXTAUTH_SECRET: build-time-placeholder
+        run: |
+          pnpm build
+          ./scripts/embed-web-out.sh sync
+      - name: Build server and sidecar once
+        run: |
+          make build:sidecar
+          go build -ldflags "$(scripts/build-stamp.sh ldflags)" -o crewship ./cmd/crewship
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+          path: |
+            crewship
+            crewship-sidecar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   # ── Guard: no spec may silently belong to no bucket ──
   coverage-guard:
     name: Every spec is in a bucket
@@ -255,36 +294,24 @@ jobs:
 
   # ── Hard gate ──
   e2e-gate:
+    needs: [build-tools]
     name: E2E gate (verified specs)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
 
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Build web UI into the embed dir
-        # A bare checkout carries only web/out/.placeholder.html, which lets
-        # `go:embed` compile (#1567) but makes every UI route answer 503:
-        # globalSetup's CSRF fetch would have nothing to talk to and every
-        # spec would die in setup. Export the real UI before the binary is
-        # compiled — same two steps as `make build`, and the same thing the
-        # onboarding job does.
-        run: |
-          set -euo pipefail
-          pnpm build
-          ./scripts/embed-web-out.sh sync
-
-      - name: Build CLI
-        run: go build -o crewship ./cmd/crewship
-
+      - name: Download shared test binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+      - run: chmod +x crewship crewship-sidecar
       - name: Generate ephemeral instance secrets
         run: |
           set -euo pipefail
@@ -395,6 +422,7 @@ jobs:
 
   # ── Drift report: run the stale specs, never fail on them ──
   e2e-drift:
+    needs: [build-tools]
     name: E2E drift report (non-blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -404,24 +432,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
 
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Build web UI into the embed dir
-        run: |
-          set -euo pipefail
-          pnpm build
-          ./scripts/embed-web-out.sh sync
-
-      - name: Build CLI
-        run: go build -o crewship ./cmd/crewship
-
+      - name: Download shared test binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+      - run: chmod +x crewship crewship-sidecar
       - name: Generate ephemeral instance secrets
         run: |
           set -euo pipefail

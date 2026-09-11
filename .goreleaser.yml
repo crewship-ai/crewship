@@ -10,7 +10,7 @@ version: 2
 
 before:
   hooks:
-    - go mod tidy
+    - go mod tidy -diff
 
 # Snapshot builds (goreleaser release --snapshot) get a digit-leading version.
 # The default derives from `git describe`, which on this repo yields
@@ -176,7 +176,7 @@ archives:
     builds:
       - crewship
       - crewship-sidecar
-    format: tar.gz
+    formats: [tar.gz]
     # An explicit `files:` REPLACES goreleaser's defaults, so the legal/docs
     # files it bundles by default (LICENSE*, README*, CHANGELOG*) must be
     # listed back explicitly — an Apache-2.0 binary shipping without its
@@ -202,7 +202,7 @@ archives:
   - id: default-darwin
     builds:
       - crewship-darwin
-    format: tar.gz
+    formats: [tar.gz]
     files:
       - LICENSE*
       - README*
@@ -223,7 +223,7 @@ archives:
   - id: default-windows
     builds:
       - crewship-windows
-    format: zip
+    formats: [zip]
     files:
       - LICENSE*
       - README*
@@ -239,12 +239,12 @@ archives:
   - id: cli
     builds:
       - crewship-cli
-    format: tar.gz
+    formats: [tar.gz]
     # Windows convention is zip; AssetNameForTag (internal/update) and any
     # installer must pick .zip for GOOS=windows.
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     name_template: >-
       {{ .ProjectName }}-cli_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 

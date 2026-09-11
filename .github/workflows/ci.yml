@@ -1,43 +1,13 @@
 name: CI
 
 on:
-  # Manual re-trigger. Useful for cases where the original push's run
-  # got stranded in `queued` (GitHub-hosted runner pool saturated, rare
-  # but observed during peak hours). With workflow_dispatch the run
-  # can be re-queued from the Actions tab or via:
-  #   gh workflow run ci.yml --ref <branch>
-  # without needing an empty commit.
   workflow_dispatch: {}
   pull_request:
     branches: [main]
-    # Skip CI on changes that can't affect lint/typecheck/build/test:
-    # docs (Mintlify-rendered, separate pipeline), markdown reference
-    # files, license/notices files, the GitHub issue templates, and
-    # the wireframe HTML mocks. Code changes that *also* touch these
-    # paths still trigger CI because GitHub treats paths-ignore as
-    # "trigger if ANY changed file is outside the ignore list".
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
-      - 'THIRD-PARTY-NOTICES.md'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.claude/**'
-      - '.factory/**'
-      - '.cloud/**'
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
-      - 'THIRD-PARTY-NOTICES.md'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.claude/**'
-      - '.factory/**'
-      - '.cloud/**'
 
 # ── CONCURRENCY: PR runs supersede, `main` runs never do ──
 #
@@ -189,6 +159,27 @@ env:
 # own `timeout-minutes`. That is the whole lesson of #1813 and #1998.
 
 jobs:
+  image:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/pr-image-build.yml
+
+  changes:
+    name: CI change plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      code: ${{ steps.plan.outputs.code }}
+      go: ${{ steps.plan.outputs.go }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        run: python3 scripts/ci/plan.py
+
   # ── Sentinel: reject leaked git merge-conflict markers ──
   #
   # Background (2026-05-21 incident): a literal `<<<<<<<` / `=======` /
@@ -250,6 +241,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate GitHub workflow syntax and expressions
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
+      - name: CI gate regression tests
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
       - name: AGENTS.md checkable invariants
         run: go run ./scripts/agents-invariants
       - name: dev.sh helpers
@@ -377,7 +372,8 @@ jobs:
   # a provider key remain in nightly-harness.yml; they are listed there with
   # the reason they cannot be deterministic on an ordinary PR runner.
   harness-pr:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: Harness PR subset
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -616,7 +612,8 @@ jobs:
 
   # ── CLI breadth contract ──
   cli-command-smoke:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: CLI command breadth smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -651,7 +648,8 @@ jobs:
   # accepts zero credentials — so there is nothing to defer it for. Measured
   # ~4s warm, ~76s on a cold cache.
   onboarding-default-boots:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: Default crew boots an agent
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -672,7 +670,8 @@ jobs:
 
   # Required evidence for Pages: no Docker env opt-in can silently skip this lane.
   pages-apps:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: Pages compiler and browser isolation
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -707,7 +706,8 @@ jobs:
   # provider-backed chat send/receive path and the remaining specs stay in the
   # explicit nightly buckets; they are not silently treated as PR coverage.
   playwright-pr:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes, binary]
+    if: needs.changes.outputs.code == 'true'
     name: Playwright PR subset
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -715,20 +715,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
-      - name: Build web UI and CLI from this commit
-        timeout-minutes: 15
-        run: |
-          set -euo pipefail
-          pnpm build
-          ./scripts/embed-web-out.sh sync
-          go build -o crewship ./cmd/crewship
+      - name: Download the shared embedded server
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ci-server-${{ github.sha }}
+      - run: chmod +x crewship
+
       - name: Generate ephemeral instance secrets
         run: |
           set -euo pipefail
@@ -863,7 +859,8 @@ jobs:
   # Go jobs and this pipeline's critical path is `Go Race` at ~24 min. Even a
   # full 20-minute timeout finishes inside that window.
   onboarding-journey:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes, binary]
+    if: needs.changes.outputs.code == 'true'
     name: Onboarding journey (fresh DB)
     runs-on: ubuntu-latest
     # Was 20, sized on "the ~11.7 min worst case observed nightly (a 521 s
@@ -886,30 +883,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-go-embed
-        with:
-          go-version: ${{ env.GO_VERSION }}
 
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Build web UI into the embed dir
-        timeout-minutes: 12
-        # A bare checkout carries only web/out/.placeholder.html, which is
-        # enough for `go:embed` to compile (#1567) and fine for the API-only
-        # jobs — but this job drives the UI with a browser, and against the
-        # placeholder every UI route answers 503, so the client-side redirect
-        # to /bootstrap never happens and the first spec times out. Export the
-        # real UI (same two steps as `make build`) before the binary is built.
-        run: |
-          set -euo pipefail
-          pnpm build
-          ./scripts/embed-web-out.sh sync
-
-      - name: Build CLI
-        run: go build -o crewship ./cmd/crewship
+      - name: Download the shared embedded server
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ci-server-${{ github.sha }}
+      - run: chmod +x crewship
 
       - name: Generate ephemeral test secrets
         # Per-run keys, and ::add-mask:: BEFORE the write: Actions prints the
@@ -1017,7 +1001,8 @@ jobs:
 
   # ── Frontend: lint, typecheck, build ──
   frontend:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: Frontend
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1101,12 +1086,14 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: nextjs-static-export
+          include-hidden-files: true
           path: out/
           retention-days: 1
 
   # ── Frontend tests (Vitest) ──
   frontend-test:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.code == 'true'
     name: Frontend Test
     runs-on: ubuntu-latest
     # 15, not 10: on 2026-09-04 the job ran 8 min on main under org-wide
@@ -1147,7 +1134,8 @@ jobs:
 
   # ── Go: vet, build, test ──
   go:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go
     runs-on: ubuntu-latest
     #
@@ -1340,10 +1328,10 @@ jobs:
   #   back into `go` and this job deleted, since shuffling costs no extra
   #   wall-clock.
   go-shuffle:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go Shuffle
     runs-on: ubuntu-latest
-    continue-on-error: true
     # Same invariant as `go`: cap MUST exceed overhead + `go test -timeout`
     # so Go's goroutine dump wins over GitHub's opaque cancel. Measured at
     # 11m52s for the full suite (job 90889450094) back when internal/api and
@@ -1572,10 +1560,11 @@ jobs:
   # package passed in 1163.213s on C's retry (run 34460363617). Its isolated
   # fresh-database regression passes in 45–51s locally. Keep the full suite
   # and its 25m bound; remove competition with other package binaries.
-  # go-race depends on this shard, so deleting it fails workflow validation
-  # and Binary Build cannot become green without CLI race coverage.
+  # CI Result requires this shard directly; the other race shard runs in
+  # parallel. A dependency between the two adds their durations together.
   go-race-cli:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go Race (CLI)
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -1587,10 +1576,22 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
       - name: Go test (race, CLI)
-        run: go test ./cmd/crewship -race -count=1 -timeout 25m
+        run: bash scripts/ci/go-test.sh ./cmd/crewship -race -count=1 -timeout 25m
+
+
+      - name: Upload test timings and event stream
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: timings-${{ github.job }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   go-race:
-    needs: [merge-conflict-markers, go-race-cli]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go Race
     runs-on: ubuntu-latest
     # BLOCKING, with no continue-on-error. A red run means a race landed —
@@ -1696,7 +1697,7 @@ jobs:
           # #2472: the 4,032-test CLI binary reached the 25m package cap while
           # starting TestSetOptIn_FreshDB_DoesNotPanic (0s), with no race report.
           # Keep the goroutine-dumping deadline inside the existing 55m job cap.
-          go test $pkgs -race -count=1 -timeout 35m
+          bash scripts/ci/go-test.sh $pkgs -race -count=1 -timeout 35m
 
   # ── Go race: the internal/api shard ──
   #
@@ -1716,8 +1717,20 @@ jobs:
   # If it is ever deleted, internal/api loses race coverage silently —
   # go-race's list guard will not catch that, because from its side the
   # package is legitimately held back either way.
+
+      - name: Upload test timings and event stream
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: timings-${{ github.job }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   go-race-api:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go Race (internal/api)
     runs-on: ubuntu-latest
     # BLOCKING, same as go-race.
@@ -1848,7 +1861,7 @@ jobs:
 
           log="${RUNNER_TEMP:-/tmp}/race-api.log"
           status=0
-          go test "$pkg" -race -count=1 -timeout "${timeout_s}s" 2>&1 | tee "$log" || status=$?
+          bash scripts/ci/go-test.sh "$pkg" -race -count=1 -timeout "${timeout_s}s" 2>&1 | tee "$log" || status=$?
 
           # `ok  <pkg>  1155.745s` on success, `FAIL <pkg> 1800.087s` on a
           # timeout panic — both carry the number, so the budget is reported
@@ -1904,8 +1917,20 @@ jobs:
   # together with the amd64 job all four released GOOS/GOARCH combos get
   # compile coverage and three get runtime coverage. Docker-dependent tests
   # skip themselves when no daemon is present (macOS runners have none).
+
+      - name: Upload test timings and event stream
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: timings-${{ github.job }}-${{ github.sha }}
+          path: .ci-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   go-platforms:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     #
@@ -1949,7 +1974,8 @@ jobs:
 
   # ── Go lint: golangci-lint ──
   go-lint:
-    needs: [merge-conflict-markers]
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
     name: Go Lint
     runs-on: ubuntu-latest
     # 15 min: same calculus as the Go job above. golangci-lint
@@ -2096,11 +2122,7 @@ jobs:
       - name: API and CLI documentation is complete
         run: go run ./scripts/docs-inventory -strict
 
-  # ── Full binary build (push to main only — verifies embed works) ──
-  #
-  # Stays push-only to conserve runner minutes. The Go job already catches
-  # compile errors; embed-path regressions are rare enough that post-merge
-  # detection is acceptable for the budget.
+  # Build the real embedded server once for all browser journeys.
   binary:
     name: Binary Build
     runs-on: ubuntu-latest
@@ -2108,13 +2130,8 @@ jobs:
     # would usually do, but we keep a small buffer for first-run
     # cache miss on the Go SDK download.
     timeout-minutes: 15
-    # go-api is gone — internal/api now runs inside `go` again (see that
-    # job's comment). go-race and go-race-api are listed because they are
-    # blocking (no continue-on-error); go-shuffle is deliberately NOT
-    # listed — it is still advisory while its two known findings are fixed
-    # elsewhere.
-    needs: [frontend, go, go-race, go-race-api]
-    if: github.event_name == 'push'
+    needs: [frontend, changes]
+    if: needs.changes.outputs.code == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2147,7 +2164,7 @@ jobs:
         run: ./scripts/embed-web-out.sh verify
 
       - name: Build single binary with embedded frontend
-        run: go build -o crewship ./cmd/crewship
+        run: go build -ldflags "$(scripts/build-stamp.sh ldflags)" -o crewship ./cmd/crewship
 
       - name: Verify binary runs
         run: ./crewship version
@@ -2158,3 +2175,64 @@ jobs:
   # per push that, in practice, mostly catches infra flakes. It now lives in
   # `.github/workflows/e2e-devcontainer.yml`, triggered nightly + on demand
   # via `gh workflow run e2e-devcontainer.yml`.
+      - name: Share the tested server
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ci-server-${{ github.sha }}
+          path: crewship
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+
+  result:
+    name: CI Result
+    if: always()
+    needs: [release-rehearsal, image, changes, merge-conflict-markers, shell, frontend, frontend-test, binary, go, go-race, go-race-cli, go-race-api, go-platforms, go-lint, go-shuffle, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Require every planned check
+        env:
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/verdict.py
+
+  release-rehearsal:
+    name: Release packaging rehearsal
+    needs: [changes, frontend]
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nextjs-static-export
+          path: web/out
+      - run: bash scripts/embed-web-out.sh verify
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          version: v2.6.1
+          args: check
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          version: v2.6.1
+          args: release --parallelism 2 --snapshot --clean --skip=publish,sign,sbom,homebrew
+      - name: Boot the actual Linux archive
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          archives=(dist/crewship_*_linux_amd64.tar.gz)
+          [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
+          (cd dist && sha256sum -c checksums.txt)
+          python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
