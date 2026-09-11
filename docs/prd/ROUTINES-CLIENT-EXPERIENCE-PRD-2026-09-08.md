@@ -374,13 +374,38 @@ Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavk
 
 - [x] Nasazení čitelnosti na dev1 a nové měření stejným postupem (§14).
 - [x] Pět přihlášených úloh z §9 interním browser walkthrough (§14); nejde o uživatelskou studii.
-- [ ] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
+- [x] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
       běžný reload nedokazuje recovery po náhlém ukončení ani exactly-once účinky.
+      Doloženo 11. 9. dvěma `kill -9` na izolované instanci nad jedním během
+      (`run_cmtwp7vt700033e66cfc6`): obnovené rozhodnutí na témže tokenu,
+      rozpracovaný krok proveden znovu (`att=1 interrupted` → `att=2 completed`),
+      přijatá v1 přežila publikaci v2. Exactly-once se **netvrdí**: at-least-once
+      je změřeno recorderem na 1× dokončený a 2× rozpracovaný krok.
 - [x] Souběh startů, editorů a rozhodnutí nad skutečným serverem (§14).
+      11. 9. doplněno o timeout vs. opožděnou odpověď (409) a o čtyři souběhy
+      dvou opačných odpovědí (vždy jedno 200 a jedno 409).
 - [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
+
+## 12b. Technická přejímka §9 — 11. září
+
+Protokol s run IDs, přesným rozsahem každého scénáře a seznamem toho, co
+zůstává NEOVĚŘENO: [routines-acceptance-2026-09-11](reports/routines-acceptance-2026-09-11.md).
+Doplněny byly náhlý pád a obnova, nejistý externí účinek, timeout a souběh
+rozhodnutí, serverová izolace oprávnění, neprovedená větev / foreach /
+skutečné pokusy, dva editoři a DST na skutečné dispatch cestě (dosud byla
+doložena jen projekce kalendáře).
+
+Protokol nese tři nálezy. **N1 je opravený** — běh zrušený jinak než tlačítkem
+Cancel (odpojený klient, timeout proxy, deadline CLI, řádné vypnutí) se
+zapisoval jako `failed` s důvodem `context canceled`, razil error fingerprint,
+posílal failure notifikaci a pouštěl `on_failure` hook, zatímco journal tentýž
+okamžik označoval `CANCELLED`. **N2 a N3 opravené nejsou** a jsou to změny
+kontraktu pro vlastní PR: kontrola kompatibility presetů se obchází přímým
+`routine save`, a server nevaliduje typované vstupy běhu ani presetu (UI je
+validuje, a to jednou sdílenou komponentou pro ruční start i pro plán).
 
 ## 13. Historický podklad pro oponenturu — před živou přejímkou
 

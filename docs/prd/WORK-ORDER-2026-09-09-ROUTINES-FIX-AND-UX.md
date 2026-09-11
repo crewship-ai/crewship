@@ -603,9 +603,15 @@ zůstávají samostatné otevřené brány v živém PRD.
 
 ### Blok 3 — přejímka
 
-- [ ] Přihlášený průchod na dev1: pět úloh z PRD včetně chyby, čekání,
+- [x] Přihlášený průchod na dev1: pět úloh z PRD včetně chyby, čekání,
       restartu a souběhu. Přiložit run IDs a pozorované výsledky. Živé testy
       s externími akcemi označit a použít kontrolovaný recept.
+      Pět úloh a souběh: §14 PRD (10. 9.). Náhlý pád, timeout, souběh
+      rozhodnutí, oprávnění, větvení/foreach/pokusy a DST na dispatch cestě:
+      [routines-acceptance-2026-09-11](reports/routines-acceptance-2026-09-11.md),
+      s run IDs a s výčtem toho, co zůstává NEOVĚŘENO. Externí účinek je
+      doložen řízeným recorderem v `internal/pipeline/uncertain_external_effect_test.go` —
+      živá vrstva ho hostit nemůže, SSRF ochrana odmítá každou dosažitelnou adresu.
 - [ ] **Uživatel bez výkladu odpoví na pěti rutinách:** co ta rutina dělá, co
       má zadat, jestli něco skutečně spustí, co výsledek znamená, co udělat dál.
 - [ ] Uživatel potvrdil, že Edit/Test je srozumitelný.
