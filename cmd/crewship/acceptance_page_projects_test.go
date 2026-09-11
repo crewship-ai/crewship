@@ -133,8 +133,12 @@ func TestAcceptance_PageProjectGitHistoryRestore(t *testing.T) {
 		t.Fatal("CLI restore lost source bytes")
 	}
 	if image == "" {
-		t.Log("Docker publication path requires PAGES_TEST_BUILD_IMAGE")
-		return
+		// Skip, not log-and-return. A bare return left the publish-and-restart
+		// half unexecuted while the parent still reported PASS and the run
+		// reported zero skips — so "0 skipped" was evidence of nothing, and
+		// this branch's own handover quoted it as proof. An absence has to be
+		// visible to be read.
+		t.Skip("Docker publication path requires PAGES_TEST_BUILD_IMAGE (a pinned image ID or repo@sha256, not a tag)")
 	}
 	var job struct {
 		ID string `json:"id"`

@@ -61,6 +61,70 @@ describe("panel fields", () => {
   })
 })
 
+describe("SLA durations", () => {
+  const sla = (value: string) => doc([panel({ sla: value })])
+
+  const equivalent: Array<[string, string]> = [
+    ["180s", "3m0s"],
+    ["1h", "60m"],
+    ["5m", "300s"],
+    ["0", "0s"],
+    ["1h30m", "90m"],
+    // Whitespace: `ParseDuration` itself rejects it, but `PanelSpec.SLADuration`
+    // trims first, so the trimmed form is what the server actually enforces.
+    ["  30s ", "30s"],
+    ["90.5s", "90s500ms"],
+    ["1.5h", "90m"],
+    ["2m30.5s", "150.5s"],
+    ["100µs", "100us"],
+    ["+1h", "1h"],
+    ["-30s", "-30000ms"],
+  ]
+  it.each(equivalent)("reports no change between %s and %s", (before, after) => {
+    // The server stores seconds, so a round trip can respell an SLA nobody
+    // edited. Two spellings of one duration are not a change.
+    expect(compareDefinitions(sla(before), sla(after)).changes).toEqual([])
+    expect(compareDefinitions(sla(after), sla(before)).changes).toEqual([])
+  })
+
+  const different: Array<[string, string]> = [
+    ["30s", "45s"],
+    ["90.5s", "90s"],
+    ["1h", "1h1ns"],
+    ["5m", "5h"],
+  ]
+  it.each(different)("still reports a real change between %s and %s", (before, after) => {
+    const diff = compareDefinitions(sla(before), sla(after))
+    expect(diff.changes.map(change => change.kind)).toEqual(["panel-sla-changed"])
+    // Authored spellings, never a canonical form of our own.
+    expect(diff.changes[0].summary).toBe(`Panel "ops" changes SLA from ${before} to ${after}.`)
+    expect([diff.changes[0].before, diff.changes[0].after]).toEqual([before, after])
+  })
+
+  const unparseable: Array<[string, unknown]> = [
+    ["a bare number", 30],
+    ["no unit", "30"],
+    ["nonsense", "soon"],
+    ["an empty string", ""],
+    ["a unit with no number", "s"],
+    ["an object", { minutes: 5 }],
+  ]
+  it.each(unparseable)("falls back to the strings when one side is %s", (_what, value) => {
+    const diff = compareDefinitions(sla("30s"), doc([panel({ sla: value })]))
+    expect(() => compareDefinitions(sla("30s"), doc([panel({ sla: value })]))).not.toThrow()
+    // Never silently "unchanged": an SLA nobody can parse is worth looking at.
+    expect(diff.changes.map(change => change.kind)).toEqual(["panel-sla-changed"])
+    // ...and identical unparseable strings are still not a change.
+    expect(compareDefinitions(doc([panel({ sla: value })]), doc([panel({ sla: value })])).changes).toEqual([])
+  })
+
+  it("is silent when neither side declares an SLA", () => {
+    const none = doc([{ id: "ops", title: "Ops" }])
+    expect(compareDefinitions(none, none).changes).toEqual([])
+    expect(compareDefinitions(none, doc([{ id: "ops", title: "Ops", sla: "" }])).changes).toEqual([])
+  })
+})
+
 describe("failure handling and icon", () => {
   const failing = (issue: string) => panel({ on_failure: { issue } })
 

@@ -6,6 +6,7 @@ const push = vi.fn()
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }) }))
 
 import {
+  useGuardedRouter,
   interceptableHref,
   navigationAllowed,
   registerNavigationGuard,
@@ -120,6 +121,40 @@ describe("navigationAllowed", () => {
     captured!()
     expect(retry).toHaveBeenCalledTimes(1)
     off()
+  })
+})
+
+describe("useGuardedRouter over programmatic navigation", () => {
+  // The capture listener only ever sees anchors. The dashboard chrome the
+  // editor lives inside navigates without one — the command palette, the
+  // activity bell and the inbox bell all call `router.push` — so closing R3
+  // for links alone left the same hole one layer further in.
+  it("asks before a push, and does not navigate when refused", () => {
+    const off = registerNavigationGuard(() => false)
+    const { result } = renderHook(() => useGuardedRouter())
+    act(() => result.current.push("/routines"))
+    expect(push).not.toHaveBeenCalled()
+    off()
+  })
+
+  it("performs the push once the guard's retry is called", () => {
+    let retry: (() => void) | null = null
+    const off = registerNavigationGuard(r => {
+      retry = r
+      return false
+    })
+    const { result } = renderHook(() => useGuardedRouter())
+    act(() => result.current.push("/routines"))
+    expect(push).not.toHaveBeenCalled()
+    act(() => retry!())
+    expect(push).toHaveBeenCalledWith("/routines")
+    off()
+  })
+
+  it("pushes straight through when nothing is guarding", () => {
+    const { result } = renderHook(() => useGuardedRouter())
+    act(() => result.current.push("/routines"))
+    expect(push).toHaveBeenCalledWith("/routines")
   })
 })
 

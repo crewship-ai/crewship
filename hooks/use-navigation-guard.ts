@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 
@@ -55,6 +56,36 @@ export function navigationAllowed(retry: () => void): boolean {
     }
   }
   return true
+}
+
+/**
+ * A router whose `push` asks the same question a link click does.
+ *
+ * The capture listener only sees anchors, and the dashboard chrome the editor
+ * lives inside navigates without one: the command palette, the activity bell
+ * and the inbox bell all call `router.push` directly. Closing R3 for links
+ * alone left those three walking past the guard — which is exactly the shape
+ * of the finding it was meant to close, one layer further in.
+ *
+ * Use it in place of `useRouter()` anywhere a push can leave a surface that
+ * may be holding unsaved work. `replace`, `back` and the rest are passed
+ * through untouched; only `push` asks.
+ */
+export function useGuardedRouter(): ReturnType<typeof useRouter> {
+  const router = useRouter()
+  return React.useMemo(
+    () => ({
+      ...router,
+      // Forwarded exactly as received. Passing an explicit `undefined` for an
+      // omitted second argument changes the observable call and broke two
+      // tests that assert the shape of it — a wrapper has no business
+      // rewriting what it is asked to pass on.
+      push: ((...args: Parameters<typeof router.push>) => {
+        if (navigationAllowed(() => router.push(...args))) router.push(...args)
+      }) as typeof router.push,
+    }),
+    [router],
+  )
 }
 
 /**

@@ -363,6 +363,22 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     if (conflict && !has("definition_moved")) {
       out.push({ code: "definition_moved", message: conflictSentence(conflict) })
     }
+    // The server's sentence for this blocker names "the running application".
+    // When the last publication was withdrawn there is no running application
+    // — the header says exactly that — so the screen would assert and deny one
+    // thing five lines apart. Composed here rather than echoed, the way
+    // `baseline_unavailable` above already composes the server's reason.
+    // (The server string wants fixing too: `pages_project_review.go:695`.)
+    if (!snapshot.baseline.published && snapshot.baseline.publication_version > 0) {
+      const moved = out.findIndex(b => b.code === "definition_moved")
+      if (moved !== -1 && !conflict) {
+        out[moved] = {
+          code: "definition_moved",
+          message:
+            "The live Page definition no longer matches the definition the last publication shipped with. That publication was withdrawn, so nothing is running it; review the current definition.",
+        }
+      }
+    }
     // The server sends this blocker; the flag is what the screen refuses on.
     // Same belt-and-braces as `baseline_unavailable` above: a snapshot that
     // reports the fact but omits the row must still block, because the whole
@@ -489,55 +505,35 @@ export function EditorApplicationReview(props: EditorSectionProps) {
   // nothing is the honest outcome. The parent is already saying what happened.
   if (!snapshot) return null
 
-  // Independent review §5 rule 6: with no draft, or a draft identical to the
-  // live publication, this screen must not present itself as a pending review.
-  // The candidate query is never enabled in that state, so the two "Reading…"
-  // placeholders below would sit there for ever.
-  if (!snapshot.candidate) {
-    return (
-      <section className="flex flex-col gap-3" aria-labelledby="application-review-heading">
-        <h2
-          id="application-review-heading"
-          ref={heading}
-          tabIndex={-1}
-          // Focus lands here programmatically — on return from the preview,
-          // and after a discard — and a programmatic focus on a tabIndex={-1}
-          // element does not reliably match `:focus-visible`, so a
-          // `focus-visible:` ring is silent in exactly the case it exists
-          // for. Plain `:focus` always matches. Same utilities as the shell's
-          // heading (`page-editor-shell.tsx:136`), so the two moves look
-          // identical to the person following them.
-          className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-        >
-          {published ? "Application published" : "Nothing to review"}
-        </h2>
-        {published && review.publish.data ? (
-          <p role="status" className="text-sm">
-            Published as version {review.publish.data.version}. The draft that was reviewed is now the live application.
-          </p>
-        ) : (
-          <p className="text-sm">
-            This Page&apos;s application has no draft awaiting review: there is either no draft at all, or the draft is identical to the live publication. Nothing here needs a
-            decision.
-          </p>
-        )}
-        {snapshot.blockers.map(blocker => (
-          <p key={blocker.code} className="text-sm text-muted-foreground" data-blocker={blocker.code}>
-            {blocker.message}
-          </p>
-        ))}
-        <div>
-          <Button variant="outline" className="min-h-11" onClick={() => props.onNavigate("content")}>
-            Go to Page content
-          </Button>
-        </div>
-      </section>
-    )
-  }
+  // No candidate: not this screen's state either, and for the same reason as
+  // the unreadable one above. `reviewGateOf` returns `kind: "nothing"` both
+  // when the snapshot has no candidate and when the server calls the draft
+  // identical to what is live, and it prints a sentence that names the live
+  // version (`section-content.tsx:157-183`). It never mounts this component
+  // in either.
+  //
+  // So the "Application published" screen that lived here could not render:
+  // a successful publish consumes the draft, the refetched snapshot comes
+  // back with `candidate: null`, and the gate above swaps this whole
+  // component out in the same commit. A browser pass sampling every 400 ms
+  // across three publications never saw it once. Its replacement is truthful
+  // and names the version, so the confirmation is not lost — it is the
+  // gate's to give, and a second copy here could only drift from it.
+  //
+  // What remains for the moment between the mutation resolving and that
+  // refetch landing is the receipt under the Publish button below. That one
+  // is reachable — it is the immediate answer to the press, for as long as
+  // this component is still mounted — and it stays.
+  if (!snapshot.candidate) return null
 
   const candidate = snapshot.candidate
   const baseline = snapshot.baseline
   const withdrawn = !initial && !baseline.published && baseline.publication_version > 0
+  // Nothing is running: never published, or published and withdrawn. Every
+  // sentence on this screen that speaks of "the live application" is false
+  // here, and one of them used to sit five lines under the note saying there
+  // is none.
+  const nothingLive = !baseline.published || baseline.publication_version === 0
   const build = candidate?.build ?? null
 
   return (
@@ -591,8 +587,19 @@ export function EditorApplicationReview(props: EditorSectionProps) {
         )}
       </header>
 
-      {/* Conflict — a base moved. A fresh build does not fix this. */}
-      {blockers.some(b => b.code === "definition_moved") && (
+      {/* One blocker code, two entirely different facts.
+
+          A 409 means a base moved BETWEEN this render and the click: the
+          snapshot is stale, and re-reading it is exactly the cure. A
+          `definition_moved` that arrives in the snapshot itself means
+          something else — the live definition has drifted from the one the
+          published application shipped with, because somebody edited panels
+          outside the application flow. Refreshing never clears that, and the
+          screen used to offer it as the only way out of a state the editor
+          could not leave at all. It is a divergence to name, not an accident
+          to retry, and the comparison above — live definition against the
+          candidate, since R1 — is complete and correct either way. */}
+      {conflict && blockers.some(b => b.code === "definition_moved") && (
         <div role="alert" className="rounded-md border border-destructive p-3 text-sm">
           <strong>A base you reviewed moved</strong>
           <p className="mt-1">{blockers.find(b => b.code === "definition_moved")!.message}</p>
@@ -600,6 +607,21 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
             Refresh review
           </Button>
+        </div>
+      )}
+      {!conflict && blockers.some(b => b.code === "definition_moved") && (
+        <div role="note" data-note="definition-diverged" className="rounded-md border-2 border-notice p-3 text-sm">
+          <strong>Two definitions have drifted apart</strong>
+          <p className="mt-1">{blockers.find(b => b.code === "definition_moved")!.message}</p>
+          <p className="mt-1">
+            The two are different things. The <strong>live Page definition</strong> is what the Page declares right now; the{" "}
+            <strong>{nothingLive ? "withdrawn publication's definition" : "published application's definition"}</strong> is what publication{" "}
+            {baseline.publication_version} shipped with. They differ because the live one was edited outside the application flow.
+          </p>
+          <p className="mt-1">
+            The comparison above is made against the live definition, so it is complete and unaffected by this. Publishing this candidate republishes against that same live
+            definition, which is what brings the two back into agreement — refreshing this review does not.
+          </p>
         </div>
       )}
 
@@ -799,7 +821,14 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       {/* 6 — Publish. */}
       <div className="rounded-md border p-4">
         <h3 className="text-base font-semibold">Publish</h3>
-        <p className="mt-1 text-sm text-muted-foreground">{SAVE_EFFECT_NOTE.publication}</p>
+        {/* `SAVE_EFFECT_NOTE.publication` describes replacing something that
+            is running. After a withdrawal, and before a first publication,
+            there is nothing to replace — and the header has just said so. */}
+        <p className="mt-1 text-sm text-muted-foreground">
+          {nothingLive
+            ? "Publishing makes this application live and sets the Page's definition. There is no live application right now, so this replaces nothing — it starts it."
+            : SAVE_EFFECT_NOTE.publication}
+        </p>
 
         {resetReason && (
           <p role="status" className="mt-3 rounded-md border border-dashed p-3 text-sm">

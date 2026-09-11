@@ -184,7 +184,9 @@ function comparePanel(live: ModelledPanel, candidate: ModelledPanel, changes: De
       String(candidate.public),
     )
   }
-  if (live.sla !== candidate.sla) {
+  if (!sameDuration(live.sla, candidate.sla)) {
+    // The summary and the before/after keep what the documents actually say.
+    // A reviewer reading "180s" in the editor must not be shown "3m0s" here.
     field("panel-sla-changed", `Panel ${id} changes SLA from ${bare(live.sla)} to ${bare(candidate.sla)}.`, live.sla, candidate.sla)
   }
   if (live.tab !== candidate.tab) {
@@ -515,6 +517,75 @@ function modelPanel(id: string, entry: Dict, unmodelled: Set<string>): ModelledP
     panel.actionsById.set(actionId, action)
   }
   return panel
+}
+
+/**
+ * `sla` is an authored Go duration, and "180s" and "3m0s" are the same SLA
+ * spelled two ways — the server stores seconds, so a round trip through it can
+ * change the spelling without anyone editing anything. Comparing the strings
+ * reported that as a change, which is a false positive in the one list that is
+ * supposed to be evidence.
+ *
+ * Only the COMPARISON is normalised. Nothing canonical is ever shown.
+ */
+function sameDuration(before: string, after: string): boolean {
+  if (before === after) return true
+  const left = parseGoDuration(before)
+  const right = parseGoDuration(after)
+  // Empty or unparseable on either side: the strings are the only thing left to
+  // trust, and they already differ. Reporting a change is the safe direction —
+  // an SLA nobody can parse is exactly what a reviewer should be looking at.
+  if (left === null || right === null) return false
+  return left === right
+}
+
+/** Nanoseconds per unit, as `time.ParseDuration` defines them. */
+const DURATION_UNITS: Readonly<Record<string, number>> = {
+  ns: 1,
+  us: 1e3,
+  "µs": 1e3,
+  "μs": 1e3,
+  ms: 1e6,
+  s: 1e9,
+  m: 6e10,
+  h: 3.6e12,
+}
+
+/**
+ * `time.ParseDuration` in TypeScript: a signed run of decimal numbers, each
+ * with an optional fraction and a required unit, plus Go's one special case of
+ * a bare "0". Returns nanoseconds, or null for anything it will not vouch for —
+ * the caller falls back to comparing strings rather than guessing.
+ */
+function parseGoDuration(value: string): number | null {
+  // Trimmed first: `ParseDuration` rejects surrounding whitespace, but
+  // `PanelSpec.SLADuration` trims before parsing, so the trimmed string is the
+  // SLA the server actually enforces.
+  let rest = value.trim()
+  if (rest === "") return null
+  let sign = 1
+  if (rest[0] === "+" || rest[0] === "-") {
+    sign = rest[0] === "-" ? -1 : 1
+    rest = rest.slice(1)
+  }
+  if (rest === "0") return 0
+  let total = 0
+  while (rest !== "") {
+    // Two-character units are listed first so "ms" never matches as "m".
+    const match = /^(\d*)(?:\.(\d*))?(ns|us|µs|μs|ms|s|m|h)/.exec(rest)
+    if (match === null) return null
+    const [matched, whole, fraction = "", unit] = match
+    if (whole === "" && fraction === "") return null // a unit with no number
+    const scale = DURATION_UNITS[unit]
+    // Fraction digits past nanosecond resolution cannot change the answer and
+    // would only risk losing integer precision, so they are dropped.
+    const digits = fraction.slice(0, 12)
+    total += (whole === "" ? 0 : Number(whole)) * scale
+    if (digits !== "") total += Math.round((Number(digits) / 10 ** digits.length) * scale)
+    if (!Number.isSafeInteger(total)) return null
+    rest = rest.slice(matched.length)
+  }
+  return sign * total
 }
 
 function modelFailure(value: unknown): ModelledFailure {

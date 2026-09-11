@@ -449,6 +449,25 @@ export interface ReviewBaselineWire {
    * means it cannot, and this review may not complete the publication.
    */
   readonly withheld_changed: boolean
+  /**
+   * The live Page definition and the definition the live publication shipped
+   * with have drifted apart — somebody changed panels outside the application
+   * flow.
+   *
+   * It is a **statement, not a refusal**. The comparison on screen is derived
+   * from the current live definition and the candidate, so it is complete and
+   * correct regardless; what has drifted is a third thing, and the design asks
+   * for that divergence to be shown rather than for the publication to be
+   * blocked. Blocking it was worse than useless: publishing the candidate is
+   * exactly what brings the two back into agreement, and refusing left no way
+   * out of the editor at all — the live tester had to escape through the CLI
+   * three times.
+   *
+   * Not to be confused with the `definition_moved` conflict, which means the
+   * fence tripped: a base moved between the render and the click, the snapshot
+   * is stale, and refreshing is genuinely the cure.
+   */
+  readonly definition_diverged: boolean
   readonly source_revision: number | null
   readonly git_commit: string | null
   /**
@@ -506,6 +525,11 @@ export type ReviewBlockerCode =
    * new permission or a delegation button the product does not have.
    */
   | "withheld_change"
+  /**
+   * Reserved for the publish fence tripping, not for a standing divergence
+   * between the live definition and the published one — that is
+   * `baseline.definition_diverged`, and it is advisory.
+   */
   | "definition_moved"
   | "not_permitted"
   | "storage_unavailable"

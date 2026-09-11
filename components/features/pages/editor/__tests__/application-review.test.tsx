@@ -287,23 +287,51 @@ describe("EditorApplicationReview", () => {
     expect(screen.getByText(/You returned from the preview/)).toBeTruthy()
   })
 
-  it("blocks publishing on a moved base, and a fresh build does not clear it", () => {
+  it("names both bases when the live definition has drifted from the published one, and offers no retry that cannot work", () => {
+    // The server raises this when the live Page declaration differs from the
+    // one the published application shipped with — somebody edited panels
+    // outside the application flow. It is a standing divergence, not a stale
+    // snapshot: a live tester hit it three times and had to leave the editor
+    // for `crewship page rollback`, because the only control offered was a
+    // refresh that re-reads the same two values.
     const snapshot = clone(baseSnapshot)
-    snapshot.blockers = [{ code: "definition_moved", message: "A different user changed the Services producer while you were reviewing." }]
+    snapshot.blockers = [
+      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
+    ]
     setReview(snapshot)
-    const { rerender } = render(<EditorApplicationReview {...props} />)
-    expect(screen.getByRole("alert").textContent).toMatch(/A base you reviewed moved/)
-    expect(consentBox().disabled).toBe(true)
-    expect(publishButton().disabled).toBe(true)
+    const { container } = render(<EditorApplicationReview {...props} />)
 
-    const rebuilt = clone(snapshot)
-    rebuilt.candidate!.build = { id: "build-9", state: "ready", artifact_digest: "sha256:art3" }
-    setReview(rebuilt)
-    rerender(<EditorApplicationReview {...props} />)
+    const note = container.querySelector('[data-note="definition-diverged"]')!
+    expect(note.textContent).toMatch(/Two definitions have drifted apart/)
+    // Both bases, named, and said to be different things.
+    expect(note.textContent).toMatch(/live Page definition/)
+    expect(note.textContent).toMatch(/published application.s definition/)
+    expect(note.textContent).toMatch(/publication 3 shipped with/)
+    // And what it does NOT invalidate: the comparison on screen.
+    expect(note.textContent).toMatch(/comparison above is made against the live definition, so it is complete and unaffected/)
+    expect(note.textContent).toMatch(/refreshing this review does not/)
 
-    expect(consentBox().disabled).toBe(true)
-    expect(publishButton().disabled).toBe(true)
+    // Not the 409 alert — that is a different fact with a different cure —
+    // and no refresh button, which is the control that never helped.
+    expect(screen.queryByText("A base you reviewed moved")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Refresh review" })).toBeNull()
+    expect(screen.queryByText(/Building the candidate again does not clear this/)).toBeNull()
+  })
+
+  it("still treats a publish 409 as the stale snapshot it is, with the refresh that does cure it", () => {
+    setReview(clone(baseSnapshot), {
+      conflict: { error: "the live definition changed", conflict: "definition" } as PublishConflictWire,
+      publish: { mutate: vi.fn(), isPending: false, isError: true, isSuccess: false, error: new Error("the live definition changed"), data: null },
+    })
+    const { container } = render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText("A base you reviewed moved")).toBeTruthy()
     expect(screen.getByText(/Building the candidate again does not clear this/)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Refresh review" }))
+    expect(state.review.refresh).toHaveBeenCalled()
+    // The standing-divergence note is not the account of a fence failure.
+    expect(container.querySelector('[data-note="definition-diverged"]')).toBeNull()
+    expect(publishButton().disabled).toBe(true)
   })
 
   it("renders a missing baseline as comparison unavailable, with no empty diff and no publishing", () => {
@@ -342,6 +370,54 @@ describe("EditorApplicationReview", () => {
     render(<EditorApplicationReview {...props} />)
     expect(screen.getByText(/No live application: the last publication was withdrawn/)).toBeTruthy()
     expect(screen.getByText(/history, not a live basis/)).toBeTruthy()
+  })
+
+  it("never says it will replace a live application that a sentence above says does not exist", () => {
+    // A live pass found these five lines apart, at every width: "There is no
+    // live application right now" over "Publishing replaces the live
+    // application and its definition."
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline = { ...snapshot.baseline, published: false }
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText(/There is no live application right now\. The receipt of the withdrawn publication is history/)).toBeTruthy()
+    expect(screen.getByText(/There is no live application right now, so this replaces nothing — it starts it\./)).toBeTruthy()
+    expect(screen.queryByText("Publishing replaces the live application and its definition.")).toBeNull()
+  })
+
+  it("says the same about the definition drift after a withdrawal: nothing is running it", () => {
+    // The server's sentence for this blocker names "the running application",
+    // which is the thing the header has just denied. Composed here in that
+    // one state, the way the baseline reason already is.
+    const snapshot = clone(baseSnapshot)
+    snapshot.baseline = { ...snapshot.baseline, published: false }
+    snapshot.blockers = [
+      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
+    ]
+    setReview(snapshot)
+    const { container } = render(<EditorApplicationReview {...props} />)
+
+    expect(document.body.textContent).not.toMatch(/the running application/)
+    const note = container.querySelector('[data-note="definition-diverged"]')!
+    expect(note.textContent).toMatch(/That publication was withdrawn, so nothing is running it/)
+    // And the note names the withdrawn publication, not a live one.
+    expect(note.textContent).toMatch(/withdrawn publication.s definition/)
+    expect(note.textContent).not.toMatch(/published application.s definition/)
+    // The blocker list under Publish carries the same composed sentence, so
+    // the two places cannot say different things.
+    expect(document.querySelector('[data-blocker="definition_moved"]')!.textContent).toMatch(/nothing is running it/)
+  })
+
+  it("keeps the server's own words when a publication IS live", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.blockers = [
+      { code: "definition_moved", message: "The live Page definition no longer matches the one published with the running application; review the current definition, not the publication's." },
+    ]
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+    expect(screen.getAllByText(/no longer matches the one published with the running application/).length).toBe(2)
+    expect(screen.getByText("Publishing replaces the live application and its definition.")).toBeTruthy()
   })
 
   it("renders an unknown routine hash as unknown and never as unchanged", () => {
@@ -546,41 +622,53 @@ describe("EditorApplicationReview", () => {
   })
 
 
-  it("does not present a Page with no candidate as a pending review", () => {
-    // Independent review §5 rule 6. The candidate query is never enabled here,
-    // so the two "Reading…" placeholders would otherwise sit there for ever.
+  it("leaves a Page with no candidate to the gate above it, and presents nothing as a pending review", () => {
+    // `reviewGateOf` holds `kind: "nothing"` for both "no candidate" and the
+    // server's "identical to what is live", and names the live version in its
+    // sentence. This component is not mounted in either state; answering them
+    // here again would put two surfaces on one condition.
     const snapshot = clone(baseSnapshot)
     snapshot.candidate = null
     snapshot.blockers = [{ code: "candidate_matches_live", message: "The current draft is identical to the live publication; there is nothing new to review." }]
     setReview(snapshot, { candidate: { data: undefined }, baseline: { data: undefined } })
-    render(<EditorApplicationReview {...props} />)
+    const { container } = render(<EditorApplicationReview {...props} />)
 
-    expect(screen.getByRole("heading", { name: "Nothing to review" })).toBeTruthy()
-    expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
-    expect(screen.queryByText(/Reading the source of both sides/)).toBeNull()
+    expect(container.innerHTML).toBe("")
     expect(screen.queryByRole("checkbox")).toBeNull()
     expect(screen.queryByRole("button", { name: "Publish application" })).toBeNull()
-    // The server's own reason is carried through, alongside the plain-English one.
-    expect(document.querySelector('[data-blocker="candidate_matches_live"]')!.textContent).toMatch(/nothing new to review/)
+    expect(screen.queryByText(/Reading the source of both sides/)).toBeNull()
   })
 
-  it("reports a successful publish as a publication, not as the candidate changing under the reviewer", () => {
+  it("answers the press immediately, and never as the candidate changing under the reviewer", () => {
     const { rerender } = render(<EditorApplicationReview {...props} />)
     fireEvent.click(consentBox())
 
-    // What the server actually sends back after the draft is consumed.
+    // The window this component is still mounted for: the mutation has
+    // resolved, the invalidated snapshot has not come back yet.
+    setReview(clone(baseSnapshot), {
+      publish: { mutate: vi.fn(), isPending: false, isError: false, isSuccess: true, error: null, data: { version: 4, build_id: "build-7", source_revision: 7 } },
+    })
+    rerender(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText("Published as version 4.")).toBeTruthy()
+    expect(screen.getByText("Published as version 4.").getAttribute("role")).toBe("status")
+    // A publish moves every value consent was bound to, on purpose. Announcing
+    // "the candidate changed while this review was open" over the receipt is a
+    // false account of what the person just did.
+    expect(screen.queryByText(/The candidate changed while this review was open/)).toBeNull()
+    expect(screen.queryByText(/read the new candidate before publishing/)).toBeNull()
+
+    // Then the refetch lands, the draft is gone, and the durable confirmation
+    // is the gate's sentence — this component renders nothing rather than a
+    // second copy of it.
     const after = clone(baseSnapshot)
     after.candidate = null
     setReview(after, {
       candidate: { data: undefined },
       publish: { mutate: vi.fn(), isPending: false, isError: false, isSuccess: true, error: null, data: { version: 4, build_id: "build-7", source_revision: 7 } },
     })
-    rerender(<EditorApplicationReview {...props} />)
-
-    expect(screen.getByRole("heading", { name: "Application published" })).toBeTruthy()
-    expect(screen.getByRole("status").textContent).toMatch(/Published as version 4/)
-    expect(screen.queryByText(/The candidate changed while this review was open/)).toBeNull()
-    expect(screen.queryByText(/read the new candidate before publishing/)).toBeNull()
+    const { container } = render(<EditorApplicationReview {...props} />)
+    expect(container.innerHTML).toBe("")
   })
 
   it("offers no consent while the candidate's source has not arrived, and says which evidence is missing", () => {

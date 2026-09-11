@@ -176,9 +176,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // is the one that can hand focus from one to the other; the view's heading
   // is addressed by a ref rather than an id, because two page views can share
   // a document and a fixed id collides.
-  const viewHeading = React.useRef<HTMLHeadingElement>(null)
+  // A pending request rather than a timed one. The first attempt focused on
+  // the next animation frame and a live pass found it still landing on
+  // `<body>`: `AnimatePresence mode="wait"` holds the incoming view until the
+  // outgoing one has finished leaving, so the heading does not exist yet.
+  // Guessing a longer delay would only move the race. The callback ref fires
+  // when the node actually attaches, which is the moment that matters.
+  const wantsFocus = React.useRef(false)
+  const viewHeading = React.useCallback((node: HTMLHeadingElement | null) => {
+    if (node === null || !wantsFocus.current) return
+    wantsFocus.current = false
+    node.focus()
+  }, [])
   const focusTheView = React.useCallback(() => {
-    window.requestAnimationFrame(() => viewHeading.current?.focus())
+    wantsFocus.current = true
   }, [])
 
   return (

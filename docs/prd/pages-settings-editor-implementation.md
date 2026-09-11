@@ -118,9 +118,12 @@ Worth recording, because each is a class of thing a green suite does not catch.
 - **The preview does not execute actions** and renders with available live
   data, so a new or changed panel may legitimately show an empty state. It is
   not a test of the actions.
-- **A fractional-second SLA** (`"90.5s"`) round-trips through an integer on the
-  wire and produces a false "SLA changed". It fails towards a false alarm, not
-  a false reassurance.
+- **A fractional-second SLA is lossy on the server.** Authoring `sla: "90.5s"`
+  stores `sla_seconds: 90`, so `page export` and the review report different
+  values for one panel. The review screen's own false "SLA changed" is gone —
+  it compares two documents now, not a document against the lossy wire — but
+  Data & actions still reads `sla_seconds`, and the underlying truncation is
+  the server's.
 - **`mayManageAccess` is the only capability lowered from a live signal.** The
   others stay optimistic and the server's refusal renders at the control, which
   is the rule the design sets — a refusal must be visible where the action was.
@@ -177,9 +180,18 @@ output — belongs with the CLI docs rather than here.
 
 [`pages-settings-editor-counter-review-2026-09-11.md`](pages-settings-editor-counter-review-2026-09-11.md)
 found three gaps in the approval path itself. All three were reproduced against
-the shipped code before being fixed — its three probes are in the suite now, as
-`components/features/pages/editor/__tests__/counter-review-probes.test.tsx`, and
-they were confirmed to fail on the pristine `93246b89`.
+the shipped code before being fixed, and confirmed to fail on the pristine
+`93246b89`.
+
+Where that coverage lives, precisely, because an earlier draft of this file
+said it carelessly: `counter-review-probes.test.tsx` holds **four** tests — the
+review's two R2 probes verbatim, plus two written here. Its R1 probe was
+deliberately **replaced**: the structural fix makes its original scenario
+impossible, so re-running the original assertion would have demanded the wrong
+behaviour; the file's header records the original scenario and why. R3's
+coverage is not in that file at all — it is in
+`components/features/pages/editor/__tests__/leaving-the-editor.test.tsx` and
+`hooks/__tests__/use-navigation-guard.test.tsx`.
 
 - **R1 — a new digest could be approved over an old comparison.** The change
   list came from the Page detail query while the fence attested to the review
@@ -213,11 +225,24 @@ they were confirmed to fail on the pristine `93246b89`.
   the workspace switcher consulted it; the global sidebar is plain `next/link`.
   The question is asked in the guard registry now, so it covers links this
   module has never heard of, and claims none of the clicks that mean "take me
-  out of here" — a new tab, a download, another origin, a modified click.
+  out of here" — a new tab, a download, another origin, a modified click. A
+  later review found that closing it for links alone still left the command
+  palette, the activity bell and the inbox bell walking past it, because they
+  navigate with `router.push` and no anchor; `useGuardedRouter` covers those.
 
-A consequence worth stating, because it is a real loss and not a bug: withheld
-panels are removed from **both** documents rather than stubbed, so no phantom
-addition can appear — but a change confined to a withheld panel is invisible
+**`excluded_panels` and `withheld_changed` are not a confidentiality boundary,
+and nothing here should be read as one.** They keep the review surface from
+rendering and comparing what this reader cannot read, and they stop an
+attestation nobody could honestly make. The declaration itself is still
+obtainable: `GET .../project` and `GET .../project/history/{revision}` serve
+the complete document to any caller who passes the same `mayEditSpec` gate,
+panels included. That is inherited, not introduced here, and filtering those
+handlers naively would delete withheld panels on the next save — the round-trip
+question is #2502.
+
+A second consequence worth stating, because it is a real loss and not a bug:
+withheld panels are removed from **both** documents rather than stubbed, so no
+phantom addition can appear — but a change confined to a withheld panel is invisible
 here, including a panel re-pointed between a crew the reader may see and one
 they may not. The screen says the comparison is partial and says which.
 
