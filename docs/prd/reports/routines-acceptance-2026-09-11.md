@@ -261,17 +261,145 @@ nereprodukoval kanonický `definition_hash`, který podepisuje `save_token`;
 jde o chybu harnessu, ne o produkt. Živě je naopak doložen **obchvat**
 brány, viz nález **N2**.
 
-### Co tento protokol nedoplnil
+### P6 — Druhé kolo: browser, dlouhý journal a publikační průchod
 
-| Scénář | Stav |
+Doplněno poté, co první verze tohoto protokolu označila tyto scénáře za
+NEOVĚŘENO.
+
+**Dva skutečné browser kontexty nad jedním draftem.** Dvě nezávislé
+`browserContext` instance, obě přihlášené, obě v editoru téže rutiny. A napsal
+„EDITOR A WAS HERE“ a uložil; B napsal „EDITOR B WAS HERE“ a uložil na téže
+revizi. B dostal viditelně:
+
+```
+Save failed — routine draft changed or its published recipe changed;
+reload and review before publishing
+```
+
+a **jeho text zůstal v editoru**. To je ta část řádku 5, kterou serverový
+409 dokázat nemohl. Screenshot `B-editor-B-after-conflict.png`.
+
+**Selhání načtení, s Retry a zachovaným kontextem.** Nejdřív bylo změřeno,
+které zdroje detail běhu skutečně volá (jinak by „injektoval jsem 500 a nic
+se nezměnilo“ nešlo odlišit od „pohled se na to nikdy neptal“). Volá run,
+`executions`, `artifacts`, `waitpoints` a `journal/lookup`. Nevolá
+`/api/v1/journal` ani `/logs` ani archiv verzí — na těch injekce nic
+nedokazuje.
+
+| Injekce | Co UI řekne |
 |---|---|
-| Issue takeover × opožděná odpověď | NEOVĚŘENO (souběžná varianta má testy) |
-| UI chování při selhání načtení outputs/journalu | NEOVĚŘENO (server ověřen) |
-| „Výsledek existuje, chybí completion signal“ jako živý průchod | NEOVĚŘENO; kontrakt existuje (`routineRunExplanation`, `no outcome reported`), živý stav se na tomto kódu nepodařilo vyrobit — recovery ho buď obnoví, nebo výslovně označí `interrupted` |
-| Dlouhý journal, lazy loading | NEOVĚŘENO nad rámec důkazů z 10. 9. (100 kroků / 1 100 exekucí / 11 stran) |
-| Zbývající klávesnicové interakce, úplný accessibility audit | NEOVĚŘENO |
-| Zachování rozepsaného textu ve dvou prohlížečích | NEOVĚŘENO (serverový konflikt ověřen) |
-| Živý Edit → Publish s nekompatibilním presetem | NEOVĚŘENO (pokryto testy na obou vrstvách) |
+| run 500 | „Could not load this run. **Try again**“ |
+| executions 500 | „Recorded step executions could not be loaded, so per-step state is missing below. **Try again**“ — a netvrdí nula kroků |
+| artifacts 500 | „Results could not be loaded. **Retry**“ |
+| journal/lookup 500 | nic viditelného (dekorace odkazu, ne výsledková plocha) |
+
+Ve všech případech zůstal blok RESULTS s výsledkem běhu vykreslený — chyba se
+nezobrazila jako prázdná data. Screenshoty `D-*.png`.
+
+**Výsledek bez completion signal.** Vyrobeno bez agenta: rutina s jediným
+`call_pipeline` krokem je „outcome-capable“, dítě vrátí výsledek bez
+CHECKPOINT/HANDOFF bloku. Běh `run_cmtwt2dfj000560dd6f13`:
+`status=completed`, `outcome=FAILED`, `error_message="no outcome reported"`,
+výstup přítomen. V prohlížeči pilulka **„Result failed“**, nadpis **„A result
+was recorded, but completion was not confirmed“**, důvod „no outcome
+reported“ a RESULTS dál ukazuje `{"result":"a real answer with no handoff
+block"}`. Nikde v panelu není falešný úspěch. Screenshot
+`E-no-completion-signal.png`.
+
+**Dlouhý journal.** Rutina o 121 krocích (120 transform + jeden, který
+skutečně třikrát opakuje), běh `run_cmtwt67ne000fedede3b3`:
+
+- **245 journal záznamů** pro jeden běh (121 `step.started`, 120
+  `step.completed`, 2 `step.retrying`, 2 run-level), přečtené průchodem přes
+  kurzor po 200; **166 exekucí**, API stránkuje po 100 s `next_cursor`.
+- Browser: první zobrazení seznamu kroků **770 ms**, vykresleno **12 ze 121**
+  kroků s ovládáním pro rozbalení; po rozbalení 121 kroků, bez horizontálního
+  přetečení na 1440 px.
+- Klíčové pro poctivost: pod seznamem stojí **„Only the first recorded
+  executions were loaded for this run. Later attempts are not shown here.
+  Load more executions“** — UI neříká, že vidíte všechno.
+- Panel „Run activity“ hlásí 124 událostí s vlastním stránkováním.
+
+770 ms je jedno měření na jednom stroji, ne benchmark.
+
+Pozorování k zaznamenání, nikoli nález: `GET /api/v1/journal?run_id=<run_…>`
+vrací pro běh rutiny nula záznamů — ty nesou identitu běhu v `actor_id`, a
+`run_id` je sloupec pro běhy agentů. UI tuto cestu nepoužívá (čte
+`/pipelines/{slug}/runs` a `/journal/lookup`). Zamýšlenou sémantiku toho
+sloupce jsem neověřoval.
+
+**Publikační průchod a oprava vlastního harnessu.** První verze protokolu
+uvedla, že živý Edit → Publish s nekompatibilním presetem se nepodařil kvůli
+`save_token`. To byla chyba harnessu, ne produktu, a je opravená.
+`DefinitionHash` je prosté SHA-256 nad *přesnými bajty* definice; draft je
+ukládá verbatim (`json.RawMessage`). Můj skript definici mezitím
+přeserializoval v Pythonu, takže podepsal jiné bajty. Po vložení jednoho
+literálu do obou těl beze změny:
+
+```
+POST .../pipelines/drafts     → 200   (uložené bajty == můj literál, ověřeno SHA-256)
+POST .../pipelines/test_run   → 200   DRY_RUN_OK, save_token vydán
+POST .../pipelines/acc-schema2/publish → 409
+  {"error":"publication blocked by schedule nightly-who2: Input recipient is required by the draft",
+   "schedule_conflict":{"schedule_id":"psched_cmtwt3yna0001cd0e0145","name":"nightly-who2",
+                        "reason":"Input recipient is required by the draft"}}
+```
+
+Draft zůstal (revize 1), živý recept zůstal na `['who']`, head_version 1.
+Po opravě presetu plánu (`PATCH … {"recipient":"alice"}` → 200) a novém
+tokenu nad týmiž bajty: **publish 201**, živý recept `['recipient']`, draft
+spotřebován. Token byl vždy vydán skutečným `/test_run`; žádná serverová
+privátní funkce, žádné obejití podpisu.
+
+**Issue takeover versus opožděná odpověď.** Souběžnou variantu pokrývaly
+testy; sekvenční ne, a přitom je to ta, která se stává.
+`internal/api/inbox_takeover_late_answer_test.go` pokrývá oba pořadí —
+takeover a pak odpověď, odpověď a pak takeover — obojí **409**, přijatý
+verdikt na kartě beze změny, a žádný komentář ani obnovené přiřazení po
+odmítnuté akci. Opakovaná opožděná odpověď dostane stejné odmítnutí a
+payload karty nenaroste.
+
+## Závěrečná tabulka §9 — všech 16 řádků
+
+Rozsah Release 1.0 podle §11. **PASS znamená „doložené v pojmenovaném
+rozsahu“, ne „bez vad“.** Smíšený scénář není celý PASS proto, že prošla
+jedna jeho část — sloupec Rozsah říká přesně která.
+
+Vrstvy se v protokolu nezaměňují: *server* = test nebo HTTP proti skutečnému
+handleru; *živě* = běžící crewshipd a skutečné run/decision identity;
+*browser* = přihlášený Chromium proti nasazenému buildu; *fault injection* =
+vynucená chyba v prohlížeči, která dokazuje reakci UI a nikdy ne serverovou
+autorizaci; *lidské porozumění* = §11, neodškrtnuto.
+
+| # | Scénář §9 | Stav | Rozsah důkazu | Zbývající omezení |
+|---|---|---|---|---|
+| 1 | Recept bez vstupů, jednoduchý úspěch | PASS | §14 (10. 9.), interní browser walkthrough pěti úloh | Není uživatelská studie; §11 lidská brána otevřená |
+| 2 | Typované vstupy, defaulty, neplatné hodnoty | PASS | Server: `ValidateFormInputs` v handleru i v exekutoru, `TestPresetValidation_RunPathAlreadyRejects`. UI: jediná sdílená `InputsForm` pro ruční start i plán. Živě: `run_cmtvp6yn4001555f2552a` (§14) | **Vstup s `type` bez `widget` se netypuje nikde** — jedno sdílené pravidlo (`hasInputForm`), většina existujících rutin má tento tvar. Viz N3 |
+| 3 | Dvojklik / opakovaný request | PASS | Živě: dva požadavky se stejným idempotency klíčem → jediný `run_cmtvp9dkr001eaf494dda` (§14) | Není to přejímka všech gest v UI |
+| 4 | Edit během běhu, publish během čekání ve frontě | PASS | Živě 11. 9.: v2 publikována uprostřed běhu `run_cmtwp7vt700033e66cfc6`, běh doběhl na v1 (`afa10a995ec7`), v1 znění účinku, krok `v2only` neproveden | Běh čekající *ve frontě* (queued, ne waiting/running) v okamžiku publikace nebyl samostatně vyzkoušen |
+| 5 | Dva editoři | PASS | Server: 200/409 nad stejnou revizí. **Browser 11. 9.: dva skutečné kontexty**, B dostal „Save failed — routine draft changed…“ a **podržel si svůj text** | — |
+| 6 | Změna schématu s existujícími plány | PASS | Živě 11. 9. celý průchod Edit → Test → Publish: 409 `schedule_conflict` (`psched_cmtwt3yna0001cd0e0145`, „Input recipient is required by the draft“), draft zachován, živý recept nezměněn → oprava presetu → publish 201. Testy na obou vrstvách | Brána platí pro **povolené a nepřipnuté** plány; vypnuté a připnuté jsou vyňaté záměrně |
+| 7 | Větev neprovedena, foreach, více pokusů | PASS | Živě `run_cmtwqaand001db3acdea1`: skipped s důvodem „Condition was false“; foreach položky `/fan/items/N/each att=1`; skutečné pokusy `/flaky att=1..3` — rozlišené cestou, ne počtem | — |
+| 8 | HTTP chyba po možném externím zápisu | PASS na měřitelné vrstvě | `uncertain_external_effect_test.go` s recorderem: účinek 1×, běh FAILED, důvod zachován, následující krok 0× | **Živě nelze**: SSRF ochrana odmítá každou dosažitelnou adresu. Egress brány v tom rigu nejsou zapojené |
+| 9 | Restart u waitpointu a rozpracovaného kroku | PASS | Živě: dva `kill -9` nad `run_cmtwp7vt700033e66cfc6`; obnovené rozhodnutí na témže tokenu; `hold att=1 interrupted → att=2 completed`. Počitatelné at-least-once (1× vs 2×) v `…_ResumeReappliesTheInFlightStep` | **Exactly-once se netvrdí.** Počitatelný důkaz dvojího účinku je testový, ne živý — viz řádek 8 |
+| 10 | Dvě rozhodnutí / timeout / Issue takeover | PASS | Živě: timeout → 409 na opožděnou odpověď, stav nezměněn; čtyři souběhy, vždy jedno 200 a jedno 409, výsledek následoval verdikt. Server: `inbox_takeover_late_answer_test.go` — takeover→opožděná odpověď a odpověď→opožděný takeover, obojí 409 bez vedlejších účinků | Takeover × opožděná odpověď je doložen na serverové vrstvě, ne živým průchodem UI |
+| 11 | Výsledek existuje, chybí completion signal | PASS | Živě `run_cmtwt2dfj000560dd6f13`: `status=completed`, `outcome=FAILED`, `error="no outcome reported"`, výstup přítomen. **Browser:** pilulka „Result failed“, nadpis „A result was recorded, but completion was not confirmed“, RESULTS dál zobrazen | Vyrobeno `call_pipeline` krokem (token-zero); s agentem nevyzkoušeno |
+| 12 | Načtení outputs/journalu selže, archiv chybí | PASS částečně | **Browser fault injection:** run 500 → „Could not load this run. Try again“; executions 500 → „Recorded step executions could not be loaded… Try again“ a netvrdí nula kroků; artifacts 500 → „Results could not be loaded. Retry“. **Server:** 404 pro neexistující běh i verzi, žádný fallback na současný recept (v1 a v2 se prokazatelně liší) | `/journal/lookup` selže **beze stopy v UI** (dekorace odkazu, ne výsledková plocha). Stránka Journal a záložka Versions nebyly fault-injectované |
+| 13 | Jednorázový start + recurrence + DST | PASS | Projekce (API + browser, 10.–11. 9.) **a nově skutečná dispatch cesta**: `schedules_dst_dispatch_test.go` — 25. 10. 2026 dvě odpálení (00:30Z, 01:30Z), 28. 3. 2027 žádné a due bar postoupí; hodinový kontrolní vzorek | Řízené hodiny v testu; hostitelský čas se nikdy neměnil |
+| 14 | Neoprávněný uživatel, cizí soubor | PASS | Živě, úplná matice se **skutečným druhým uživatelem**: 401 anonym, 403 čtení i všechny mutace, 404 při záměně workspace id, 403/400 na stažení souboru a path traversal; waitpoint zůstal pending pro vlastníka | Serverová vrstva; browser by ji nenahradil |
+| 15 | Klávesnice, úzký displej, reduced motion | PASS v rozsahu §9 | Browser: 390 px bez horizontálního přetečení (`scrollWidth == 390`), `/` fokusuje hledání (desktop), Escape čistí a nechá fokus v poli, Tab dosáhne akčních prvků s viditelným fokusem, reduced-motion → nula běžících animací | **Není to certifikace přístupnosti.** `/` na 390 px nefokusuje — vstup není vykreslen ve sbalené liště |
+| 16 | 100 kroků, 1 000 pokusů, dlouhý journal | PASS | 10. 9.: 100 kroků, 1 100 exekucí, 11 stran. 11. 9. **dlouhý journal**: 245 journal záznamů a 166 exekucí pro jeden běh; API stránkuje kurzorem; browser vykreslí 12 ze 121 kroků a **řekne** „Only the first recorded executions were loaded… Load more executions“; první zobrazení 770 ms | 770 ms je jedno měření, ne benchmark. „1 000 pokusů“ je doloženo jako 1 100 foreach exekucí, ne jako 1 000 retry pokusů |
+
+### Co zůstává NEOVĚŘENO
+
+| Položka | Proč |
+|---|---|
+| Běh čekající **ve frontě** (queued) v okamžiku publikace novější verze | Doložen běh `waiting` a `running`; queued zvlášť ne |
+| Issue takeover × opožděná odpověď **živým průchodem UI** | Serverová vrstva doložena testy |
+| Selhání načtení journalu na stránce Journal a archivu na záložce Versions | Run detail tyto zdroje nevolá; ověřeno, které volá |
+| `/journal/lookup` selže tiše | Pozorováno, nezměřen dopad; dekorace odkazu |
+| Úplný accessibility audit | Mimo rozsah §9 |
+| Retry pokusy v řádu tisíců | Doloženy 3 skutečné pokusy a 1 100 foreach exekucí |
 
 ## Nálezy
 
@@ -396,7 +524,13 @@ propašovat oprava validace presetů.
 ## Úklid
 
 Izolovaná instance i recorder zastaveny, jejich data zůstávají mimo repozitář
-ve scratchpadu relace. Na dev1 byla založena jediná dočasná rutina
-`zz-acceptance-cancel-probe` (a jeden běh k ní) — po přejímce smazána; žádná
-původní rutina, žádný cizí běh a žádný plán nebyl změněn. Pět testovacích
-plánů na izolované instanci bylo smazáno hned po měření.
+ve scratchpadu relace a v soukromé záloze
+`/srv/crewship/backups/crewship_1/acceptance-20260911/`.
+
+Na dev1 byly založeny **dvě** dočasné rutiny — `zz-acceptance-cancel-probe`
+(ověření opravy N1 v prohlížeči) a `zz-acceptance-ui-probe` (browser scénáře
+řádků 5, 12 a 15) — obě po přejímce smazané, spolu s běhy, které k nim
+patřily. Žádná původní rutina, žádný cizí běh a žádný plán na dev1 nebyl
+změněn a databáze nebyla nulována. Pět testovacích plánů na izolované
+instanci bylo smazáno hned po měření. Pomocné Playwright skripty žily v
+`e2e/` jen po dobu běhu a do repozitáře se necommitovaly.
