@@ -13,6 +13,11 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+# Classic Docker stores cannot retain two architectures under one index digest.
+# Pull the selected child instead; publication/signatures still identify the index.
+if [[ "$image" == *@* ]]; then
+  image=$(docker manifest inspect "$image" | python3 "$(dirname "$0")/image-platform.py" "$image" "$platform")
+fi
 version=$(docker run --rm --platform "$platform" "$image" version --format json)
 printf '%s\n' "$version"
 [[ "$expected" =~ ^[0-9a-f]{40}$ ]] && [ "$(jq -er .client.commit <<< "$version")" = "$expected" ] || { echo 'Image commit identity mismatch' >&2; exit 1; }

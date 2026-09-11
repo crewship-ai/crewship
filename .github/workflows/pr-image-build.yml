@@ -18,6 +18,12 @@ on:
         options:
           - linux/amd64
           - linux/arm64
+      registry_image:
+        description: Existing immutable image to smoke on BOTH architectures (skips build)
+        type: string
+      expected_sha:
+        description: Required with registry_image; full embedded source SHA
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +31,7 @@ permissions:
 # Cancellation is owned by the calling workflow.
 jobs:
   build:
+    if: ${{ !inputs.registry_image }}
     name: PR Image Build
     runs-on: ubuntu-latest
     # release.yml's docker job gets 45 for a multi-arch (amd64+arm64) push
@@ -111,3 +118,36 @@ jobs:
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash scripts/ci/smoke-image.sh crewship:pr-build "$EXPECTED_SHA" "$PLATFORM"
+
+  registry-smoke:
+    name: Smoke existing registry image (both platforms)
+    if: github.event_name == 'workflow_dispatch' && inputs.registry_image != ''
+    permissions:
+      contents: read
+      packages: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE: ${{ inputs.registry_image }}
+      SHA: ${{ inputs.expected_sha }}
+    steps:
+      - name: Validate immutable identity
+        shell: bash
+        run: |
+          [[ "$IMAGE" =~ ^ghcr\.io/crewship-ai/crewship@sha256:[0-9a-f]{64}$ ]]
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+        with:
+          platforms: arm64
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Boot both platforms from the same immutable index
+        run: |
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
