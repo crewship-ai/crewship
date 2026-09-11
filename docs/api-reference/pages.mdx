@@ -1261,13 +1261,10 @@ about a panel that is merely not this reader's to see.
 `baseline.excluded_panels` is how many panels were withheld from the
 comparison, counting a panel withheld from both documents once, so a partial
 comparison can say so.
-Withholding here is about what this screen renders and compares, not about
-confidentiality: `GET /api/v1/pages/{slug}/project` and
-`GET /api/v1/pages/{slug}/project/history/{revision}` serve the complete
-unfiltered Page document to the same callers behind the same edit permission,
-and the review screen reads the first of them on every render. Read
-`excluded_panels` as "this comparison is partial", never as "this caller
-cannot obtain that panel".
+Full authoring reads require visibility of every declared panel. The review
+screen reads `/project/source` and `/project/history/{revision}/source`, which
+omit the definition; the authorized comparison comes from this snapshot.
+Application source remains shared Page code, not automatically redacted text.
 `baseline.withheld_changed` is whether any of those withheld panels actually
 differs between the live definition and the candidate — added, removed,
 modified, or re-pointed between a crew this caller may see and one they may
@@ -1502,3 +1499,48 @@ An unhealthy result is still HTTP 200: callers must inspect `healthy`.
 This checks source, checkpoint contents, referenced artifacts and reachable Git
 objects without changing them. **Statuses:** 403 no edit access; 404 unavailable
 Page; 503 storage disabled or maintenance busy; 500 database/read failure.
+
+
+### Whole-document authoring and source review
+
+A Page write grant does not grant visibility of another crew's panels.
+`GET /pages/{slug}/project`, `GET /pages/{slug}/project/history/{revision}`,
+and Page export return 403 unless the caller can read every panel in the
+returned definition. Agent project reads apply the same rule. These endpoints
+never return a truncated document that could delete hidden panels on save.
+
+`PUT /pages/{slug}/project` (including source restore) requires visibility of
+all panels in the live definition, existing draft, and proposed definition.
+A rejected save leaves the draft revision unchanged.
+
+For reviewing application source, use `GET /pages/{slug}/project/source` and
+`GET /pages/{slug}/project/history/{revision}/source`. Both retain the Page
+edit-permission gate and return `revision`, `digest`, `git_commit`, and `project`,
+with no `definition`. The review snapshot supplies the authorized panel
+comparison. Application source is shared Page code; these reads do not redact
+panel names or other text an author has written into source files.
+
+
+### Read candidate source evidence
+
+`GET /api/v1/pages/{slug}/project/source`
+
+**Request:** path `slug`, workspace context; no body. Requires Page edit permission.
+**Response 200:** `{revision, digest, git_commit, project}` with exact source
+files and no `definition`. Panel comparisons belong to the review snapshot.
+**Statuses:** `401` unauthenticated, `403` no edit authority, `404` Page or draft
+missing, `500` storage/integrity error, `503` project storage unavailable.
+The response is `no-store`.
+
+### Read archived source evidence
+
+`GET /api/v1/pages/{slug}/project/history/{revision}/source`
+
+**Request:** path `slug` and positive `revision`, workspace context; no body.
+Requires Page edit permission.
+**Response 200:** `{revision, digest, git_commit, project}` verified against the
+archived source digest, without the archived panel definition.
+**Statuses:** `400` invalid revision, `401` unauthenticated, `403` no edit
+authority, `404` Page or revision missing, `409` unsupported legacy revision,
+`500` archive/integrity error, `503` project storage unavailable.
+The response is `no-store`.

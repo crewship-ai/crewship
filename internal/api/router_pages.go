@@ -105,6 +105,10 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages/runtime/bootstrap", http.HandlerFunc(p.PageRuntime))
 	// openapi: responses 200,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/project", authed(wsCtx(http.HandlerFunc(p.GetProject))))
+	// openapi: responses 200,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/source", authed(wsCtx(http.HandlerFunc(p.GetProjectSource))))
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/project/history/{revision}/source", authed(wsCtx(http.HandlerFunc(p.GetProjectRevisionSource))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,503,507
 	r.authedMut("PUT", "/api/v1/pages/{slug}/project", roleSelf, p.PutProject)
 	// openapi: responses 202,400,401,403,404,409,413,429,500,503,507

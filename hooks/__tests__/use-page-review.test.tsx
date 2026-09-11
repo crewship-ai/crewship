@@ -72,8 +72,8 @@ const snapshot: ReviewSnapshotWire = {
 function route(overrides: { snapshot?: ReviewSnapshotWire; draftRevision?: number } = {}) {
   apiFetch.mockImplementation(async (url: string) => {
     if (url.includes("/project/review")) return json(overrides.snapshot ?? snapshot)
-    if (url.includes("/project/history/")) return json({ git_commit: "c4", revision: 4, digest: "sha256:base", definition: { kind: "Page" }, project: { files: [{ path: "src/App.tsx", content: "old" }] } })
-    if (url.includes("/project?")) return json({ git_commit: "c7", revision: overrides.draftRevision ?? 7, digest: "sha256:cand", definition: { kind: "Page" }, project: { files: [{ path: "src/App.tsx", content: "new" }] } })
+    if (url.includes("/project/history/")) return json({ git_commit: "c4", revision: 4, digest: "sha256:base", project: { files: [{ path: "src/App.tsx", content: "old" }] } })
+    if (url.includes("/project/source?")) return json({ git_commit: "c7", revision: overrides.draftRevision ?? 7, digest: "sha256:cand", project: { files: [{ path: "src/App.tsx", content: "new" }] } })
     throw new Error(`unexpected request ${url}`)
   })
 }
@@ -91,8 +91,8 @@ describe("usePageReview", () => {
 
     const urls = apiFetch.mock.calls.map(call => call[0] as string)
     expect(urls.some(u => u.startsWith("/api/v1/pages/operations%20lab/project/review?workspace_id=ws1"))).toBe(true)
-    expect(urls.some(u => u.startsWith("/api/v1/pages/operations%20lab/project?workspace_id=ws1"))).toBe(true)
-    expect(urls.some(u => u.startsWith("/api/v1/pages/operations%20lab/project/history/4?workspace_id=ws1"))).toBe(true)
+    expect(urls.some(u => u.startsWith("/api/v1/pages/operations%20lab/project/source?workspace_id=ws1"))).toBe(true)
+    expect(urls.some(u => u.startsWith("/api/v1/pages/operations%20lab/project/history/4/source?workspace_id=ws1"))).toBe(true)
     // The query must be cancellable: every read is handed the query's signal.
     expect(apiFetch.mock.calls.every(call => "signal" in (call[1] ?? {}))).toBe(true)
     expect(result.current.baselineUnavailable).toBeNull()

@@ -77,6 +77,10 @@ func (h *PageHandler) loadProject(r *http.Request, rec *pageRecord) (*pageProjec
 }
 
 func (h *PageHandler) GetProject(w http.ResponseWriter, r *http.Request) {
+	h.getProject(w, r, false)
+}
+
+func (h *PageHandler) getProject(w http.ResponseWriter, r *http.Request, sourceOnly bool) {
 	rec, ok := h.projectPage(w, r)
 	if !ok {
 		return
@@ -96,6 +100,13 @@ func (h *PageHandler) GetProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if sourceOnly {
+		writeJSON(w, 200, projectSource(d))
+		return
+	}
+	if !h.requireProjectDefinitions(w, r, &d.Definition) {
+		return
+	}
 	writeJSON(w, 200, d)
 }
 
@@ -146,6 +157,18 @@ func (h *PageHandler) PutProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if rev != *req.ExpectedRevision {
 		replyError(w, 409, "project revision changed; reload before saving")
+		return
+	}
+	// Authorize the existing document before accepting a replacement: an
+	// omitted hidden panel must never turn into an authorized deletion.
+	live, readable := h.currentDocument(w, rec)
+	if !readable || !h.requireProjectDefinitions(w, r, live) {
+		return
+	}
+	if !h.requireStoredProjectDefinitions(w, r, spec) {
+		return
+	}
+	if !h.requireProjectDefinitions(w, r, req.Definition) {
 		return
 	}
 	if rev == 0 && req.Definition == nil {

@@ -313,19 +313,9 @@ func (a pageDefinitionAuthorizer) visible(ownerRef string) bool {
 // crew's panels, so `excluded_panels` can say the comparison is partial, and
 // so `withheld_changed` can refuse an attestation nobody could honestly make.
 //
-// It is NOT a confidentiality boundary, and nothing here should be cited as
-// one. `GET .../project` (pages_project.go, loadProject) and
-// `GET .../project/history/{revision}` (pages_project_history.go,
-// projectRevision) serve the COMPLETE unfiltered Page document to the same
-// callers behind the identical projectPage → mayEditSpec gate, and the review
-// screen calls the first of them on every render. A caller withheld from here
-// is one request away from the whole document.
-//
-// Those two are not filtered here on purpose: PutProject writes the whole
-// document back, so serving a filtered draft to a caller who then saves it
-// would DELETE the withheld panels — the failure that closed the document
-// editor on sealed pages in the first place. Fixing them needs a round-trip
-// story, and that is a separate change with its own issue.
+// Whole-document authoring reads separately require visibility of every panel.
+// Source-review reads omit the definition; they do not redact references an
+// author may have written into application code.
 func (h *PageHandler) reviewDefinitionAuthorizer(ctx context.Context, ws string) (pageDefinitionAuthorizer, error) {
 	auth := pageDefinitionAuthorizer{h: h, viewer: h.reviewViewer(ctx, ws), crews: map[string]string{}}
 	rows, err := h.db.QueryContext(ctx, `SELECT slug,id FROM crews WHERE workspace_id=? AND deleted_at IS NULL`, ws)

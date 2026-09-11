@@ -16,11 +16,11 @@ import type { SourceProjectLike } from "@/lib/pages/source-diff"
  * source projects are the *evidence*. They come from endpoints that already
  * exist and are verified here:
  *
- *   GET /api/v1/pages/{slug}/project            → internal/api/pages_project.go:79
- *   GET /api/v1/pages/{slug}/project/history/{r} → internal/api/pages_project_history.go:111
+ *   GET /api/v1/pages/{slug}/project/source     → internal/api/pages_project.go:79
+ *   GET /api/v1/pages/{slug}/project/history/{r}/source → internal/api/pages_project_history.go:111
  *
- * Both answer the same `pageProjectDraft` body (`pages_project.go:25`):
- * `{git_commit, revision, digest, definition, project}`.
+ * Both answer the same source-only body (`pages_project_authoring.go`):
+ * `{git_commit, revision, digest, project}`.
  *
  * The live Page definition the candidate is compared against is NOT a fourth
  * read: it arrives inside the snapshot, on the same row and in the same
@@ -36,12 +36,11 @@ import type { SourceProjectLike } from "@/lib/pages/source-diff"
  * project for it.
  */
 
-/** The body both project reads answer with. `definition` is a `pages.Document`. */
+/** Source evidence intentionally carries no panel definition. */
 export interface PageProjectDraftWire {
   readonly git_commit: string
   readonly revision: number
   readonly digest: string
-  readonly definition: unknown
   readonly project: SourceProjectLike | null
 }
 
@@ -95,7 +94,7 @@ async function readError(response: Response, fallback: string): Promise<Error> {
 export interface PageReview {
   /** The authorized snapshot: candidate, both bases, routine hashes, blockers. */
   readonly snapshot: UseQueryResult<ReviewSnapshotWire, Error>
-  /** The candidate's own draft (`GET .../project`). */
+  /** The candidate's source (`GET .../project/source`). */
   readonly candidate: UseQueryResult<PageProjectDraftWire, Error>
   /**
    * The retained source behind the live publication. `isFetching` stays false
@@ -107,7 +106,7 @@ export interface PageReview {
   readonly baselineUnavailable: string | null
   /**
    * The draft moved under the review: the snapshot describes revision N and
-   * `GET .../project` now answers M. Publishing would fence-fail; say so here
+   * `GET .../project/source` now answers M. Publishing would fence-fail; say so here
    * instead of letting the server say it after the click.
    */
   readonly candidateMoved: boolean
@@ -153,7 +152,7 @@ export function usePageReview(workspaceId: string, slug: string, enabled: boolea
     retry: false,
     gcTime: 0,
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(`${endpoint}/project?${params}`, { signal })
+      const response = await apiFetch(`${endpoint}/project/source?${params}`, { signal })
       if (!response.ok) throw await readError(response, "Could not read the candidate's source.")
       return (await response.json()) as PageProjectDraftWire
     },
@@ -167,7 +166,7 @@ export function usePageReview(workspaceId: string, slug: string, enabled: boolea
     retry: false,
     gcTime: 0,
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(`${endpoint}/project/history/${baselineRevision}?${params}`, { signal })
+      const response = await apiFetch(`${endpoint}/project/history/${baselineRevision}/source?${params}`, { signal })
       if (!response.ok) throw await readError(response, "Could not read the source of the live publication.")
       return (await response.json()) as PageProjectDraftWire
     },

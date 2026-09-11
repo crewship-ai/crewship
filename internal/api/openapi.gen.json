@@ -86217,6 +86217,266 @@
         ]
       }
     },
+    "/api/v1/pages/{slug}/project/history/{revision}/source": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_history_revision_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "git_commit",
+                    "project"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
     "/api/v1/pages/{slug}/project/preview": {
       "get": {
         "operationId": "get_api_v1_pages_slug_project_preview",
@@ -87318,7 +87578,7 @@
                     "baseline": {
                       "properties": {
                         "definition": {
-                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison. This is about what the review surface renders and compares, not confidentiality: GET .../project and GET .../project/history/{revision} serve the complete unfiltered document to the same callers behind the same edit permission.",
+                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison. Full project and revision reads require visibility of every declared panel; source-review endpoints omit the definition.",
                           "nullable": true,
                           "type": "object"
                         },
@@ -87572,6 +87832,240 @@
                     "capabilities",
                     "blockers",
                     "initial_publication"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/source": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "git_commit",
+                    "project"
                   ],
                   "type": "object"
                 }
