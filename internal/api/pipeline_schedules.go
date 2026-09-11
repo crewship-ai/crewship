@@ -543,25 +543,34 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		catchupPolicy = body.CatchupPolicy
 	}
 
-	// Validate only what this request WRITES. A PATCH that omits `inputs`
-	// falls back to the stored preset above, and judging that would trap an
-	// operator whose plan predates this gate: they could not disable it, nor
-	// fix its cron, without first fixing a preset the same request is not
-	// touching. A stale preset is still caught when the recipe changes
-	// (#2495) and by the executor when it fires.
+	// Judge the plan this PATCH produces — target routine, effective pin,
+	// effective inputs — whenever the request changes any of the three
+	// things the preset is fed to. A PATCH that touches none of them
+	// (disabling, a new cron, a rename) is not judged, so an operator whose
+	// plan predates this gate can still switch it off or reschedule it
+	// without first repairing a preset the request never mentions.
 	//
-	// The pinned version comes from the request when it repins and from the
-	// stored row otherwise, so the preset is always checked against the
-	// recipe this plan would actually run.
-	pinned := body.TargetPipelineVersion
-	if pinned == nil {
-		pinned = existing.TargetPipelineVersion
+	// body.TargetPipelineVersion is already the EFFECTIVE pin at this point:
+	// absent kept the stored one, explicit null cleared it (see the rawKeys
+	// resolution above). The first version of this gate re-applied the
+	// stored pin on top of that, which validated an explicit unpin against
+	// the OLD version and then saved a plan that runs HEAD with a preset HEAD
+	// rejects; and it only ran when `inputs` was present, so repinning alone
+	// walked a v1 preset onto v2 unjudged. Both reproduced by the opponent
+	// review of #2498.
+	_, versionMentioned := rawKeys["target_pipeline_version"]
+	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
+	if body.Inputs != nil || targetChanged {
+		if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
+			return
+		}
 	}
-	if body.Inputs != nil && h.gateSchedulePreset(w, r, pipelineID, pinned, body.Inputs) {
-		return
-	}
-	if wakeID != "" && body.WakeInputs != nil && h.gateSchedulePreset(w, r, wakeID, nil, body.WakeInputs) {
-		return
+	_, wakeMentioned := rawKeys["wake_pipeline_id"]
+	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned) {
+		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
+			return
+		}
 	}
 
 	maxFailures := 0

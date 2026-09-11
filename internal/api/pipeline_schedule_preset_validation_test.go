@@ -21,6 +21,7 @@ package api
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -398,5 +399,132 @@ func TestPresetValidation_TriggerWithNoInputsIsStillJudged(t *testing.T) {
 	h.Save(rr2, req2)
 	if rr2.Code != http.StatusOK && rr2.Code != http.StatusCreated {
 		t.Errorf("a bare trigger on a recipe with no inputs was refused: %d %s", rr2.Code, rr2.Body.String())
+	}
+}
+
+// The two holes the opponent review of #2498 reproduced. Both are the same
+// mistake from different sides: the gate judged the preset against the
+// recipe the plan used to point at, not the one it will point at once the
+// PATCH lands.
+
+// presetV2Def is presetValidationDef with the required input renamed, so a
+// preset that fits v1 does not fit v2.
+const presetV2Def = `{"name":"planned","inputs":[` +
+	`{"name":"zone","type":"string","widget":"select","options":["eu","us"],"required":true}],` +
+	`"steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`
+
+// pinnedPlanOnV1 publishes v1 then v2 and returns a plan pinned to v1 whose
+// preset fits v1 only.
+func pinnedPlanOnV1(t *testing.T, h *PipelineHandler, user, ws string) (*pipeline.Pipeline, string) {
+	t.Helper()
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	now := time.Now()
+	if _, err := h.store.Save(t.Context(), pipeline.SaveInput{
+		WorkspaceID: ws, Slug: "planned", Name: "Planned",
+		DefinitionJSON: presetV2Def, LastTestRunAt: &now, LastTestRunPassed: true,
+	}); err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+	one := 1
+	body, _ := json.Marshal(map[string]any{
+		"name": "Pinned", "target_pipeline_id": p.ID, "target_pipeline_version": &one,
+		"cron_expr": "0 9 * * *", "timezone": "UTC", "enabled": true,
+		"inputs": map[string]any{"region": "eu"},
+	})
+	req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/pipeline-schedules", bytes.NewReader(body)), ws), user, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("seed pinned plan: %d %s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("decode plan: %v %s", err, rr.Body.String())
+	}
+	return p, created.ID
+}
+
+func patchPlan(t *testing.T, h *PipelineHandler, user, ws, id, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("PATCH", "/pipeline-schedules/"+id, bytes.NewBufferString(body)), ws), user, "OWNER")
+	req.SetPathValue("scheduleId", id)
+	rr := httptest.NewRecorder()
+	h.UpdateSchedule(rr, req)
+	return rr
+}
+
+func storedPlan(t *testing.T, h *PipelineHandler, id string) (inputs string, pinned *int) {
+	t.Helper()
+	var pv sql.NullInt64
+	if err := h.db.QueryRowContext(t.Context(), `SELECT inputs_json, target_pipeline_version FROM pipeline_schedules WHERE id=?`, id).Scan(&inputs, &pv); err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if pv.Valid {
+		v := int(pv.Int64)
+		pinned = &v
+	}
+	return inputs, pinned
+}
+
+// TestPresetValidation_UnpinningIsJudgedAgainstHead — an explicit
+// `target_pipeline_version: null` moves the plan onto HEAD. The handler
+// already resolves that (absent keeps the pin, explicit null clears it); the
+// gate then re-applied the OLD pin on top, validated a v1 preset against v1,
+// and let a plan that will run v2 store a preset v2 rejects.
+func TestPresetValidation_UnpinningIsJudgedAgainstHead(t *testing.T) {
+	h, user, ws := presetRig(t)
+	_, id := pinnedPlanOnV1(t, h, user, ws)
+
+	rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":null,"inputs":{"region":"eu"}}`)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("unpinning onto HEAD with a preset HEAD rejects returned 200: %s", rr.Body.String())
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	inputs, pinned := storedPlan(t, h, id)
+	if inputs != `{"region":"eu"}` || pinned == nil || *pinned != 1 {
+		t.Errorf("the refused PATCH changed the row: inputs=%s pinned=%v", inputs, pinned)
+	}
+
+	// The same unpin with a preset that fits HEAD goes through.
+	if rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":null,"inputs":{"zone":"eu"}}`); rr.Code != http.StatusOK {
+		t.Errorf("a correct unpin was refused: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPresetValidation_RepinningWithoutInputsIsJudgedToo — moving the pin
+// changes what the stored preset will be fed to. "Validate only what the
+// request writes" was right about disabling a plan and wrong about this: a
+// PATCH that changes the target has changed what the preset means.
+func TestPresetValidation_RepinningWithoutInputsIsJudgedToo(t *testing.T) {
+	h, user, ws := presetRig(t)
+	_, id := pinnedPlanOnV1(t, h, user, ws)
+
+	rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":2}`)
+	if rr.Code == http.StatusOK {
+		t.Fatalf("repinning onto a version that rejects the stored preset returned 200: %s", rr.Body.String())
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rr.Code)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte("zone")) {
+		t.Errorf("refusal does not name the unsatisfied input: %s", rr.Body.String())
+	}
+	_, pinned := storedPlan(t, h, id)
+	if pinned == nil || *pinned != 1 {
+		t.Errorf("the refused repin changed the stored pin: %v", pinned)
+	}
+
+	// Disabling that same plan is still free — it changes nothing the preset
+	// is fed to.
+	if rr := patchPlan(t, h, user, ws, id, `{"enabled":false}`); rr.Code != http.StatusOK {
+		t.Errorf("disabling a plan must stay possible: %d %s", rr.Code, rr.Body.String())
+	}
+	// And repinning together with a matching preset goes through.
+	if rr := patchPlan(t, h, user, ws, id, `{"target_pipeline_version":2,"inputs":{"zone":"us"}}`); rr.Code != http.StatusOK {
+		t.Errorf("a repin with a matching preset was refused: %d %s", rr.Code, rr.Body.String())
 	}
 }

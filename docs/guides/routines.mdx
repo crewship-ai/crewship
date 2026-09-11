@@ -1656,7 +1656,15 @@ What is deliberately still allowed: `false`, `0` and an empty list are
 answers, not absences; inputs the recipe does not declare are passed through;
 and an input that declares no form (no `widget`, no `options`, no
 `allow_custom`) is not validated here, because it is not validated at
-execution either. A pinned plan is checked against the version it names.
+execution either.
+
+On an edit, what is judged is the plan the edit **produces**: the target
+routine, the effective pin and the effective inputs together. Changing the
+inputs, repinning to another version, unpinning onto HEAD, or retargeting the
+plan all trigger the check against the recipe the plan will actually run;
+disabling a plan, changing its cron or renaming it do not, so a plan that
+predates this check can still be switched off or rescheduled without first
+repairing a preset the edit never mentions.
 
 #### Next-fire-times preview
 
