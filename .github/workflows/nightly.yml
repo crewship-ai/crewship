@@ -209,6 +209,13 @@ jobs:
           test -s dist/checksums.txt.sig
           test -s dist/checksums.txt.pem
           (cd dist && sha256sum -c checksums.txt)
+      - name: Scan final nightly artifacts
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          path: dist
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
       - name: Boot the packaged Linux archive before publication
         env:
           SHA: ${{ needs.verified.outputs.sha }}

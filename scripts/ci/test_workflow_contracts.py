@@ -119,6 +119,11 @@ class WorkflowContracts(unittest.TestCase):
         job = self.job(self.text('ci.yml'), 'release-rehearsal')
         self.assertIn('GORELEASER_CURRENT_TAG: v0.0.0-ci', job)
 
+    def test_both_publishers_scan_final_binary_artifacts(self):
+        for workflow, job in [('nightly.yml', 'binaries'), ('release.yml', 'release')]:
+            block = self.job(self.text(workflow), job)
+            self.assertRegex(block, r'path: dist\n +fail-build: true\n +severity-cutoff: critical')
+
     def test_nightly_does_not_publish_from_unverified_push(self):
         text = self.text('nightly.yml')
         self.assertIn('verified_commit.py', text)
