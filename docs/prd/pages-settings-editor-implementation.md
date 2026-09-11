@@ -6,7 +6,7 @@ what was measured, and what is still open. The proposal stays the design; the
 untouched as a historical document. This file is the record of the delivery and
 is the only one that should be updated as it changes.
 
-**Branch** `feat/pages-editor` · **head** `4a7373c8` · **base** `origin/main` `01d4849c` · issue #2491.
+**Branch** `feat/pages-editor` · **head** `fe9d0037` · **base** `origin/main` `01d4849c` · issue #2491.
 
 Every figure in §3 was taken at that head and at the scope named in its row.
 An earlier draft of this file mixed rows from different commits — the table
@@ -57,7 +57,7 @@ Everything below was run; nothing is inferred from a passing neighbour.
 |---|---|
 | Vitest — `components/features/pages`, `lib/pages`, `hooks/__tests__` | **1828 passed / 137 files**, 0 failed, 0 skipped |
 | Vitest — whole frontend suite | **8830 passed / 738 files** |
-| `go test ./internal/api/` — whole package | see the row below; the Pages suites are also run alone in ~25 s |
+| `go test ./internal/api/` — whole package | **ok, 561 s**, 0 failures. An earlier run on this branch failed with `database or disk is full`; that was the dev box at 100 %, not the branch, and is recorded here so nobody chases it |
 | `go test ./cmd/crewship/` — whole package | pass. **Without `PAGES_TEST_BUILD_IMAGE` it now reports 1 skip**, which is the point: the Docker publish-and-restart half used to `t.Log` and return, so the parent went green and the run reported zero skips, and this file quoted that zero as proof. Build the image (`docker build --iidfile … tools/pages-build`, a pinned id — a tag is refused) to run it. |
 | `go test ./cmd/crewship/` (whole package, real build image) | pass, 0 skipped — includes `TestSeedPageAppLifecycle/publish` and `TestAcceptance_PageProjectGitHistoryRestore/restart` |
 | `go vet`, `go build ./...`, `gofmt` | clean |
@@ -326,3 +326,34 @@ disagree about one panel (server-side lossiness, a different surface); and the
 in-review publish receipt never renders because the content gate replaces the
 whole review on the post-publish refetch — the replacement is truthful and
 names the version, so a confirmation is lost rather than a falsehood told.
+
+## 10. The counter-review of `6fdc2cef`
+
+Two blockers, both accepted.
+
+**A validation error named what the caller may not read.** `checkPageCandidate`
+validates the whole candidate before the withheld check runs, so a routine a
+withheld panel calls, deleted after the build, came back as a 400 naming the
+panel, the action and the routine — one step before the neutral 403.
+Reproduced with a real-handler probe, now in the suite unweakened. The fix is
+structural: the resolvers return a typed error carrying the panel and its
+owner, validation still runs in full for everyone, and only the reply differs
+by the same `canSeePanel` question the review and the fence ask. Ten branches
+covered, not the four the review named; forty responses asserted across five
+branches, two panels, two callers and both endpoints. An unchanged withheld
+panel that merely stopped validating gets a second neutral sentence, because
+"this publication changes a part you cannot see" would be false for it.
+
+**The Shell job's skip budget.** Replacing a silent log-and-return with
+`t.Skip` was more honest and pushed the ratchet one past its baseline. The gate
+was right to refuse a bare bump; the skip now carries the waiver the gate asks
+for, on the same precedent as #2472's image-gated guards, and the baseline is
+raised with its note in the same commit.
+
+The review also recommended, for #2502, keeping the rule that a write grant
+does not widen panel visibility and separating a full authoring path from a
+filtered reading one rather than filtering the draft. Recorded on the issue.
+
+**A statement this file no longer makes:** that all findings are closed.
+Two independent checks in a row found otherwise after that sentence was
+written. What is claimed here is what is listed, at the head named at the top.
