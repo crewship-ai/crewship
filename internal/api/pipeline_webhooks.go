@@ -1054,7 +1054,7 @@ func (h *PipelineHandler) acceptRoutineDelivery(
 	req := work.AcceptRequest{
 		WorkspaceID:    wh.WorkspaceID,
 		Source:         work.SourceWebhook,
-		DomainKind:     "pipeline_run",
+		DomainKind:     work.DomainPipelineRun,
 		DomainID:       runID,
 		Class:          work.ClassBackground,
 		InputJSON:      string(inputJSON),

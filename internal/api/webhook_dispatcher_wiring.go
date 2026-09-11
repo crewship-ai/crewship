@@ -28,10 +28,17 @@ var ErrNoWebhookRoute = errors.New("api: the agent-webhook route is not register
 //     verified — T06 and T07 have not been run against a real Claude runtime —
 //     and a dispatcher that quietly allowed two concurrent runs would be
 //     enabling that profile by omission.
-//   - the sources are declared. This dispatcher can execute webhook work and
-//     nothing else, and claiming another producer's work would not merely fail
-//     it, it would CONSUME it: the attempt is burned and the producer that
-//     could have handled it never sees it again.
+//   - the executable KINDS are declared, and as (source, domain) pairs rather
+//     than as a source. `webhook` is not a work type: an agent webhook accepts
+//     {webhook, agent_run} and a routine webhook accepts {webhook,
+//     pipeline_run}, into the same table, and they are run by different code.
+//     A filter on the source alone looks specific and takes both — and taking
+//     another executor's work does not merely fail it, it CONSUMES it, because
+//     the claim has already bumped the generation and burned an attempt by the
+//     time anything can object. Pipeline work carries no agent id, so this
+//     dispatcher's authorizer would then have refused it as work naming no
+//     agent, and a routine trigger would have died as `failed` with a reason
+//     about agents.
 //   - recovery and shutdown live in the same lifecycle as the loop, so a stop
 //     is a drain rather than an abandonment.
 func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger) (stop func(), err error) {
@@ -47,9 +54,9 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 
 	limits := work.SerialAgentLimits()
 	d := dispatch.New(work.NewStore(r.db), runtime, authz, dispatch.Config{
-		Owner:   "webhook-dispatcher",
-		Limits:  limits,
-		Sources: []work.Source{work.SourceWebhook},
+		Owner:  "webhook-dispatcher",
+		Limits: limits,
+		Kinds:  []work.Kind{{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}},
 		// Modest, because the hint carries the common case and the poll is
 		// only the guarantee behind it.
 		PollInterval:        2 * time.Second,
@@ -72,7 +79,7 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 
 	logger.Info("webhook dispatcher started",
 		"limits", "serial (parallel profile not enabled)",
-		"sources", "webhook",
+		"kinds", work.Kind{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}.String(),
 		"agent_total", limits.AgentTotal)
 
 	var stopped bool

@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/work"
@@ -857,4 +858,276 @@ func TestVerticalServer_TheTimelineOfOneDelivery(t *testing.T) {
 	if n := rig.runRecords(runID); n != 1 {
 		t.Errorf("%d run records traced by %s, want 1", n, runID)
 	}
+}
+
+// Two producers write `webhook` work into one table, and only one of them is
+// this dispatcher's to run.
+//
+// `webhook` is not a work type. An agent webhook accepts
+// {webhook, agent_run}; a routine webhook accepts {webhook, pipeline_run},
+// through a different handler, into the same `work_items`, to be executed by a
+// different engine. A dispatcher that filtered on the source alone would look
+// specific and take both.
+//
+// And taking is the harm, not refusing. By the time anything could object the
+// claim has already bumped the generation, burned an attempt and moved the item
+// out of `queued` — so a check after the claim cannot undo it. Worse here,
+// because pipeline work carries no agent id: this dispatcher's authorizer would
+// have refused it as "work naming no agent", and a routine trigger would have
+// died as `failed` with a reason about agents it never had.
+//
+// Both halves go through their REAL acceptance routes, over HTTP, into one
+// database, with the dispatcher running throughout — which is the only
+// arrangement in which the mistake is observable at all.
+func TestVerticalServer_TheAgentDispatcherLeavesPipelineWebhookWorkAlone(t *testing.T) {
+	rig := newVerticalRig(t)
+	// The stores the daemon attaches after route registration (server.go's boot
+	// path does the same through Router.PipelinesHandler). Without them the
+	// route answers 503 and accepts nothing, and there would be no second
+	// producer for the dispatcher to get wrong.
+	rig.router.PipelinesHandler.SetWebhookStore(pipeline.NewWebhookStore(rig.db))
+	rig.router.PipelinesHandler.SetRunStore(pipeline.NewRunStore(rig.db))
+	rig.router.PipelinesHandler.SetRunner(unusedVerticalRunner{})
+
+	seedAgentRunPipeline(t, rig.db, rig.wsID, "pln_vertical", "vertical-target")
+	wh := seedWebhookRow(t, rig.db, rig.wsID, "pln_vertical", "routine-secret", true)
+
+	rig.startDispatcher()
+
+	// The routine delivery lands FIRST, so it is sitting in the queue while the
+	// dispatcher is actively claiming.
+	routine := rig.fireRoutineWebhook(wh.Token, "routine-secret", `{"event":"deploy"}`)
+	if routine.Status != http.StatusAccepted {
+		t.Fatalf("routine webhook status = %d, want 202", routine.Status)
+	}
+	if routine.WorkID == "" {
+		t.Fatalf("the routine receipt names no work: %+v", routine)
+	}
+
+	// Then the agent delivery, which this dispatcher DOES own. Its completion
+	// is what proves the dispatcher was claiming during the window — without
+	// it, "the routine work was untouched" would also be true of a dispatcher
+	// that was asleep.
+	agent := rig.deliver(verticalBody)
+	if agent.Status != http.StatusAccepted {
+		t.Fatalf("agent webhook status = %d, want 202", agent.Status)
+	}
+	rig.waitForState(agent.WorkID, work.StateSucceeded)
+
+	// Several more poll ticks with both items in the table.
+	time.Sleep(5 * time.Second)
+
+	var state, domainKind string
+	var generation, attempts int
+	if err := rig.db.QueryRow(
+		`SELECT state, domain_kind, generation, attempts FROM work_items WHERE id = ?`, routine.WorkID).
+		Scan(&state, &domainKind, &generation, &attempts); err != nil {
+		t.Fatalf("read the routine work: %v", err)
+	}
+	if domainKind != work.DomainPipelineRun {
+		t.Fatalf("the routine work's domain is %q, not %q — this test is not exercising what it "+
+			"claims to", domainKind, work.DomainPipelineRun)
+	}
+	if state != string(work.StateQueued) {
+		t.Errorf("the routine work is %q, want queued — the agent dispatcher consumed work "+
+			"belonging to the pipeline engine", state)
+	}
+	// State alone is not enough: a claim followed by a requeue would land back
+	// on `queued` having still burned an attempt and moved the fence.
+	if generation != 0 {
+		t.Errorf("the routine work's generation is %d, want 0 — it was claimed and fenced by a "+
+			"dispatcher that cannot run it", generation)
+	}
+	if attempts != 0 {
+		t.Errorf("the routine work has %d attempts, want 0 — one of its five was spent by the "+
+			"wrong executor", attempts)
+	}
+	if n := rig.count(`SELECT COUNT(*) FROM work_attempts WHERE work_id = ?`, routine.WorkID); n != 0 {
+		t.Errorf("%d attempt rows opened against routine work, want 0", n)
+	}
+
+	// And exactly one runtime over the whole test: the agent's.
+	if got := rig.proc.runsStarted(); len(got) != 1 {
+		t.Errorf("%d runtimes started, want 1 (the agent delivery's)", len(got))
+	}
+}
+
+// fireRoutineWebhook posts a signed routine delivery at the production pipeline
+// webhook route — a different handler on the same server as the agent route.
+func (rig *verticalRig) fireRoutineWebhook(token, secret, body string) receipt {
+	rig.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, rig.baseURL+"/api/v1/webhooks/"+token, strings.NewReader(body))
+	if err != nil {
+		rig.t.Fatalf("build routine request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Crewship-Signature", covPSWSign(secret, body))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		rig.t.Fatalf("POST the routine webhook: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var r receipt
+	if err := json.Unmarshal(raw, &r); err != nil {
+		rig.t.Fatalf("routine receipt %d is not JSON: %s", resp.StatusCode, raw)
+	}
+	r.Status = resp.StatusCode
+	return r
+}
+
+// unusedVerticalRunner satisfies the routine executor's runner dependency. The
+// routine's own dispatch is not what this file is about — the assertion is that
+// the AGENT dispatcher leaves its work_items row alone — so the step runner only
+// has to exist and fail.
+type unusedVerticalRunner struct{}
+
+func (unusedVerticalRunner) RunStep(context.Context, pipeline.AgentStepRequest) (pipeline.AgentStepResult, error) {
+	return pipeline.AgentStepResult{}, errors.New("the routine engine is not under test here")
+}
+
+// I8, stated precisely: the checks that are actually made at dispatch, each one
+// driven by changing the answer BETWEEN acceptance and dispatch.
+//
+// That ordering is the whole test. A check that runs at acceptance and is then
+// carried forward proves nothing about I8 — the point is that work waits for
+// capacity, and the answer is allowed to change while it does. So every subtest
+// accepts first, with the dispatcher stopped, mutates the world, and only then
+// lets a dispatcher look.
+func TestVerticalServer_WhatIsRecheckedAtDispatchAndWhatIsNot(t *testing.T) {
+	// A deleted agent is terminal: nothing brings it back.
+	t.Run("a deleted agent is refused", func(t *testing.T) {
+		rig := newVerticalRig(t)
+		rec := rig.deliver(verticalBody)
+		if _, err := rig.db.Exec(`UPDATE agents SET deleted_at = ? WHERE id = ?`,
+			time.Now().UTC().Format(time.RFC3339), rig.agentID); err != nil {
+			t.Fatal(err)
+		}
+		rig.startDispatcher()
+
+		it := rig.waitForState(rec.WorkID, work.StateFailed)
+		if !strings.Contains(it.StateReason, "deleted") {
+			t.Errorf("reason = %q, want it to name the deletion", it.StateReason)
+		}
+		if got := rig.proc.runsStarted(); len(got) != 0 {
+			t.Errorf("%d runtimes for a deleted agent, want 0", len(got))
+		}
+	})
+
+	// An agent that moved workspace is refused: the delivery's authorization
+	// belonged to the workspace it arrived in.
+	t.Run("an agent that changed workspace is refused", func(t *testing.T) {
+		rig := newVerticalRig(t)
+		rec := rig.deliver(verticalBody)
+		if _, err := rig.db.Exec(
+			`INSERT INTO workspaces (id, name, slug) VALUES ('ws-elsewhere', 'Elsewhere', 'elsewhere')`,
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rig.db.Exec(`UPDATE agents SET workspace_id = 'ws-elsewhere' WHERE id = ?`,
+			rig.agentID); err != nil {
+			t.Fatal(err)
+		}
+		rig.startDispatcher()
+
+		it := rig.waitForState(rec.WorkID, work.StateFailed)
+		if !strings.Contains(it.StateReason, "workspace") {
+			t.Errorf("reason = %q, want it to name the workspace", it.StateReason)
+		}
+	})
+
+	// A deleted crew is refused.
+	t.Run("a deleted crew is refused", func(t *testing.T) {
+		rig := newVerticalRig(t)
+		rec := rig.deliver(verticalBody)
+		if _, err := rig.db.Exec(`UPDATE crews SET deleted_at = ? WHERE id = ?`,
+			time.Now().UTC().Format(time.RFC3339), rig.crewID); err != nil {
+			t.Fatal(err)
+		}
+		rig.startDispatcher()
+
+		it := rig.waitForState(rec.WorkID, work.StateFailed)
+		if !strings.Contains(it.StateReason, "crew") {
+			t.Errorf("reason = %q, want it to name the crew", it.StateReason)
+		}
+	})
+
+	// A HELD agent is the one that is not a refusal.
+	//
+	// PENDING_REVIEW is the single agents.status value that means "created, but
+	// inert until an operator says otherwise" — it is what the guided hire and
+	// the autonomy gate write. Approval is the expected outcome, so the work
+	// waits for it. Failing it would repeat the mistake refuseHeldAgent
+	// documents: the approval arrives at something that already gave up.
+	t.Run("a held agent waits for approval instead of failing", func(t *testing.T) {
+		rig := newVerticalRig(t)
+		rec := rig.deliver(verticalBody)
+		if _, err := rig.db.Exec(`UPDATE agents SET status = 'PENDING_REVIEW' WHERE id = ?`,
+			rig.agentID); err != nil {
+			t.Fatal(err)
+		}
+		rig.startDispatcher()
+
+		// Long enough for many poll ticks and several deferrals.
+		time.Sleep(6 * time.Second)
+
+		it, err := rig.store.Get(context.Background(), rec.WorkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it.State.Terminal() {
+			t.Fatalf("held work is %q (%s); approval would arrive at work that had given up",
+				it.State, it.StateReason)
+		}
+		if it.Attempts != 0 {
+			t.Errorf("held work has spent %d of its %d attempts waiting for a person, want 0",
+				it.Attempts, work.MaxAttempts)
+		}
+		if !strings.Contains(it.StateReason, "PENDING_REVIEW") {
+			t.Errorf("reason = %q, want it to say what is being waited on", it.StateReason)
+		}
+		if got := rig.proc.runsStarted(); len(got) != 0 {
+			t.Errorf("%d runtimes for a held agent, want 0", len(got))
+		}
+
+		// The wait is long on purpose — it is waiting on a person, and checking
+		// more often buys nothing while costing a claim each time. Assert that
+		// rather than sitting through it.
+		if wait := time.Until(it.EligibleAt); wait < 20*time.Second {
+			t.Errorf("the deferral comes back in %s; a hold on an operator must not spin", wait)
+		}
+
+		// The operator approves. Then the remaining wait is spent rather than
+		// waited out: what is under test is that an approved hold resumes with
+		// its budget intact, not how long a deferral sleeps.
+		if _, err := rig.db.Exec(`UPDATE agents SET status = 'IDLE' WHERE id = ?`, rig.agentID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rig.db.Exec(`UPDATE work_items SET eligible_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`,
+			rec.WorkID); err != nil {
+			t.Fatal(err)
+		}
+		done := rig.waitForState(rec.WorkID, work.StateSucceeded)
+		if done.Attempts != 1 {
+			t.Errorf("the approved run was attempt %d, want 1 — the wait spent budget it should not have",
+				done.Attempts)
+		}
+		if got := rig.proc.runsStarted(); len(got) != 1 {
+			t.Errorf("%d runtimes after approval, want 1", len(got))
+		}
+	})
+
+	// And the negative half of the claim: an ordinary lifecycle status is NOT a
+	// decision. Refusing on RUNNING would mean an agent could never be given a
+	// second piece of work; refusing on ERROR would let one failed run brick it.
+	t.Run("an ordinary lifecycle status is not a gate", func(t *testing.T) {
+		rig := newVerticalRig(t)
+		rec := rig.deliver(verticalBody)
+		if _, err := rig.db.Exec(`UPDATE agents SET status = 'ERROR' WHERE id = ?`, rig.agentID); err != nil {
+			t.Fatal(err)
+		}
+		rig.startDispatcher()
+		rig.waitForState(rec.WorkID, work.StateSucceeded)
+	})
 }

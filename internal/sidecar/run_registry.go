@@ -811,13 +811,20 @@ type runAuthority interface {
 // ended", so the registry does the only thing a negative verdict allows and
 // revokes durably.
 //
-// Today NOTHING in production writes work_attempts: work.Store.Claim is its only
-// writer and has no non-test caller, and internal/dispatch is imported by
-// nothing — while the orchestrator mints a per-run token for every crew run.
-// Turning this on now would therefore lock every run, including the sidecar's
-// own boot run, out of every sidecar route on its first call, permanently and
-// across restarts. TestRunAuthorityRealHost_ARunAbsentFromTheLedgerIsDurablyRevoked
-// pins that and says so.
+// The blocker is that only SOME runs are in that ledger. This used to read
+// "nothing in production writes work_attempts", and that is no longer true:
+// internal/dispatch is wired and claims agent-webhook work, so those runs do
+// have attempt rows. Every other producer — chat, assignment, schedule,
+// pipeline, peer query — still starts a run without one, while the orchestrator
+// mints a per-run token for all of them alike.
+//
+// So turning this on today would lock every non-webhook run, including the
+// sidecar's own boot run, out of every sidecar route on its first call,
+// permanently and across restarts. The condition to check before flipping it is
+// not "does a dispatcher exist" but "does EVERY producer dispatch through the
+// ledger" — that is I7, and it is not met.
+// TestRunAuthorityRealHost_ARunAbsentFromTheLedgerIsDurablyRevoked pins the
+// consequence and says so.
 //
 // The 404 ambiguity has NOT gone away and still shapes the client: internal/api's
 // serveInternal answers an unregistered path and a refused caller with the same
@@ -827,8 +834,9 @@ type runAuthority interface {
 //
 // So: the client is complete and verified against the real handler, the contract
 // is written down, the policy is implemented and tested, and the switch stays off
-// until the dispatcher (R3) owns runs and the ledger is the register of who is
-// running. Flip CREWSHIP_SIDECAR_RUN_AUTHORITY=1 then; nothing else changes.
+// until every producer dispatches through the ledger and it is the register of
+// who is running. Flip CREWSHIP_SIDECAR_RUN_AUTHORITY=1 then; nothing else
+// changes.
 type hostRunAuthority struct {
 	baseURL string
 	token   string

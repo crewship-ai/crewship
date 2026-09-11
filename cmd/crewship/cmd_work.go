@@ -30,66 +30,77 @@ import (
 // The wire shapes. Only the fields the CLI renders are declared; the API is
 // free to add more, and `-f json` prints the decoded struct, so anything shown
 // here is something a script can rely on.
-type workItemRow struct {
+//
+// Every multi-word field carries an explicit `yaml:` tag because yaml.v3 does
+// not read json tags — it lowercases the Go field name — so without them
+// `-f json` and `-f yaml` print the same data under different keys, and a
+// script written against one silently fails against the other.
+
+// WorkItemRow is exported because workItemDetail embeds it and both are
+// rendered as machine output. yaml.v3 cannot reflect into an unexported
+// embedded struct, so `-f yaml` on a work item panicked while `-f json`
+// worked — the shape of the whole class of defect TestEmbeddedJSONInlineIsAlsoYAMLSafe
+// exists to catch.
+type WorkItemRow struct {
 	ID                 string  `json:"id"`
 	Source             string  `json:"source"`
-	SourceRef          string  `json:"source_ref"`
-	DomainKind         string  `json:"domain_kind"`
-	DomainID           string  `json:"domain_id"`
-	AgentID            string  `json:"agent_id"`
-	CrewID             string  `json:"crew_id"`
-	SessionID          string  `json:"session_id"`
+	SourceRef          string  `json:"source_ref" yaml:"source_ref"`
+	DomainKind         string  `json:"domain_kind" yaml:"domain_kind"`
+	DomainID           string  `json:"domain_id" yaml:"domain_id"`
+	AgentID            string  `json:"agent_id" yaml:"agent_id"`
+	CrewID             string  `json:"crew_id" yaml:"crew_id"`
+	SessionID          string  `json:"session_id" yaml:"session_id"`
 	Class              string  `json:"class"`
-	AuthorizedByUserID string  `json:"authorized_by_user_id"`
-	InputSHA256        string  `json:"input_sha256"`
-	TargetRevision     string  `json:"target_revision"`
+	AuthorizedByUserID string  `json:"authorized_by_user_id" yaml:"authorized_by_user_id"`
+	InputSHA256        string  `json:"input_sha256" yaml:"input_sha256"`
+	TargetRevision     string  `json:"target_revision" yaml:"target_revision"`
 	State              string  `json:"state"`
-	StateReason        string  `json:"state_reason"`
+	StateReason        string  `json:"state_reason" yaml:"state_reason"`
 	Generation         int64   `json:"generation"`
-	AttemptCount       int     `json:"attempt_count"`
+	AttemptCount       int     `json:"attempt_count" yaml:"attempt_count"`
 	Priority           int     `json:"priority"`
-	EligibleAt         string  `json:"eligible_at"`
-	DeadlineAt         *string `json:"deadline_at"`
-	ReplayOf           *string `json:"replay_of"`
-	ReplayReason       string  `json:"replay_reason"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
-	TerminalAt         *string `json:"terminal_at"`
+	EligibleAt         string  `json:"eligible_at" yaml:"eligible_at"`
+	DeadlineAt         *string `json:"deadline_at" yaml:"deadline_at"`
+	ReplayOf           *string `json:"replay_of" yaml:"replay_of"`
+	ReplayReason       string  `json:"replay_reason" yaml:"replay_reason"`
+	CreatedAt          string  `json:"created_at" yaml:"created_at"`
+	UpdatedAt          string  `json:"updated_at" yaml:"updated_at"`
+	TerminalAt         *string `json:"terminal_at" yaml:"terminal_at"`
 }
 
 type workAttemptRow struct {
-	RunID          string  `json:"run_id"`
+	RunID          string  `json:"run_id" yaml:"run_id"`
 	Attempt        int     `json:"attempt"`
 	Generation     int64   `json:"generation"`
-	LeaseOwner     string  `json:"lease_owner"`
-	LeaseExpiresAt string  `json:"lease_expires_at"`
-	RuntimeLocator string  `json:"runtime_locator"`
-	StartedAt      string  `json:"started_at"`
-	EndedAt        *string `json:"ended_at"`
-	EndReason      string  `json:"end_reason"`
-	ExitEvidence   string  `json:"exit_evidence"`
-	CostUSD        float64 `json:"cost_usd"`
+	LeaseOwner     string  `json:"lease_owner" yaml:"lease_owner"`
+	LeaseExpiresAt string  `json:"lease_expires_at" yaml:"lease_expires_at"`
+	RuntimeLocator string  `json:"runtime_locator" yaml:"runtime_locator"`
+	StartedAt      string  `json:"started_at" yaml:"started_at"`
+	EndedAt        *string `json:"ended_at" yaml:"ended_at"`
+	EndReason      string  `json:"end_reason" yaml:"end_reason"`
+	ExitEvidence   string  `json:"exit_evidence" yaml:"exit_evidence"`
+	CostUSD        float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 type workEventRow struct {
 	Seq        int64  `json:"seq"`
 	At         string `json:"at"`
-	FromState  string `json:"from_state"`
-	ToState    string `json:"to_state"`
-	RunID      string `json:"run_id"`
+	FromState  string `json:"from_state" yaml:"from_state"`
+	ToState    string `json:"to_state" yaml:"to_state"`
+	RunID      string `json:"run_id" yaml:"run_id"`
 	Generation int64  `json:"generation"`
 	Reason     string `json:"reason"`
 }
 
 type workItemDetail struct {
-	workItemRow
-	Attempts []workAttemptRow `json:"attempts"`
-	Events   []workEventRow   `json:"events"`
+	WorkItemRow `json:",inline" yaml:",inline"`
+	Attempts    []workAttemptRow `json:"attempts"`
+	Events      []workEventRow   `json:"events"`
 }
 
 type workItemPageBody struct {
-	Items      []workItemRow `json:"items"`
-	NextCursor *string       `json:"next_cursor"`
+	Items      []WorkItemRow `json:"items"`
+	NextCursor *string       `json:"next_cursor" yaml:"next_cursor"`
 }
 
 type workCancelBody struct {
@@ -101,28 +112,28 @@ type workCancelBody struct {
 
 type workDeliveryRow struct {
 	ID               string  `json:"id"`
-	EndpointID       string  `json:"endpoint_id"`
-	EndpointKind     string  `json:"endpoint_kind"`
+	EndpointID       string  `json:"endpoint_id" yaml:"endpoint_id"`
+	EndpointKind     string  `json:"endpoint_kind" yaml:"endpoint_kind"`
 	Profile          string  `json:"profile"`
-	SourceDeliveryID string  `json:"source_delivery_id"`
-	EventType        string  `json:"event_type"`
-	EventAction      string  `json:"event_action"`
-	SigningKeyID     string  `json:"signing_key_id"`
-	BodySHA256       string  `json:"body_sha256"`
-	BodyBytes        int64   `json:"body_bytes"`
-	FilterDecision   string  `json:"filter_decision"`
-	FilterReason     string  `json:"filter_reason"`
-	TargetRevision   string  `json:"target_revision"`
-	WorkID           *string `json:"work_id"`
-	ReceivedAt       string  `json:"received_at"`
-	DedupExpiresAt   string  `json:"dedup_expires_at"`
-	RawBodyAvailable bool    `json:"raw_body_available"`
-	RawBodyExpiresAt *string `json:"raw_body_expires_at"`
+	SourceDeliveryID string  `json:"source_delivery_id" yaml:"source_delivery_id"`
+	EventType        string  `json:"event_type" yaml:"event_type"`
+	EventAction      string  `json:"event_action" yaml:"event_action"`
+	SigningKeyID     string  `json:"signing_key_id" yaml:"signing_key_id"`
+	BodySHA256       string  `json:"body_sha256" yaml:"body_sha256"`
+	BodyBytes        int64   `json:"body_bytes" yaml:"body_bytes"`
+	FilterDecision   string  `json:"filter_decision" yaml:"filter_decision"`
+	FilterReason     string  `json:"filter_reason" yaml:"filter_reason"`
+	TargetRevision   string  `json:"target_revision" yaml:"target_revision"`
+	WorkID           *string `json:"work_id" yaml:"work_id"`
+	ReceivedAt       string  `json:"received_at" yaml:"received_at"`
+	DedupExpiresAt   string  `json:"dedup_expires_at" yaml:"dedup_expires_at"`
+	RawBodyAvailable bool    `json:"raw_body_available" yaml:"raw_body_available"`
+	RawBodyExpiresAt *string `json:"raw_body_expires_at" yaml:"raw_body_expires_at"`
 }
 
 type workDeliveryPageBody struct {
 	Items      []workDeliveryRow `json:"items"`
-	NextCursor *string           `json:"next_cursor"`
+	NextCursor *string           `json:"next_cursor" yaml:"next_cursor"`
 }
 
 var workCmd = &cobra.Command{
@@ -427,7 +438,7 @@ again.`,
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var created workItemRow
+		var created WorkItemRow
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
 		}

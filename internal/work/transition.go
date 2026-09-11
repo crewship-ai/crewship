@@ -669,3 +669,87 @@ func (s *Store) Resolve(ctx context.Context, workID string, to State, resolvedBy
 	}
 	return tx.Commit()
 }
+
+// Defer returns a claimed attempt to the queue WITHOUT spending it, eligible
+// again at `until`.
+//
+// It exists for one answer an authorizer has to be able to give and could not:
+// "not this agent, not yet". An agent staged PENDING_REVIEW is not refused and
+// is not broken — it is held until an operator approves it, and the approval
+// may be minutes or hours away. Failing such work would repeat a mistake this
+// repository already documents at length in refuseHeldAgent: the first version
+// of that gate returned an ordinary error, the mission engine recorded a
+// terminally FAILED task, and the operator's approval arrived at something that
+// had given up minutes earlier. Retrying it as an ordinary failure is no better
+// — five attempts of capped backoff is about twenty minutes, and then the same
+// dead end.
+//
+// Giving the attempt back is the load-bearing part, and it is safe only under a
+// condition this method CHECKS rather than assumes: the attempt must still be
+// in runtime phase `planned`, meaning no start intent was ever recorded and
+// therefore nothing can possibly have been created. An attempt that got as far
+// as `starting` may have a runtime somewhere, and handing its budget back would
+// let it be retried forever beside a process nobody stopped.
+//
+// The generation is NOT rolled back, and the deferred attempt row is closed
+// rather than deleted. Those are the two things that keep the fence pointing
+// forwards: a straggler still holding the deferred run id is refused because
+// its attempt has ended, and the next claim moves the generation on as usual.
+// Rolling either of them back to make the retry look like a first try would be
+// handing a superseded worker a way to report a result.
+//
+// What bounds a deferral loop is the item's own deadline_at, not an attempt
+// count — which is the right instrument, because "how long may this wait for a
+// human" is a question about wall-clock patience and not about retries. Work
+// with no deadline waits indefinitely, on purpose.
+func (s *Store) Defer(ctx context.Context, workID, runID string, generation int64, until time.Time, reason string) error {
+	if reason == "" {
+		return fmt.Errorf("%w: a deferral without a reason is indistinguishable from a stall", ErrNotBound)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("work: begin defer: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	it, err := getItemTx(ctx, tx, workID)
+	if err != nil {
+		return err
+	}
+	if it.State.Terminal() {
+		return fmt.Errorf("%w: %s is %s", ErrTerminal, workID, it.State)
+	}
+	if err := verifyAttemptBindingTx(ctx, tx, workID, runID, generation, it.Generation); err != nil {
+		return err
+	}
+
+	now := s.now().UTC()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE work_attempts SET ended_at = ?, end_reason = ?
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
+		  AND runtime_phase = 'planned'`,
+		tsformat.Format(now), "deferred: "+reason, runID, workID, generation)
+	if err != nil {
+		return fmt.Errorf("work: close deferred attempt: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		// Either the attempt is gone, or it declared a start intent. The second
+		// is the one that matters: a runtime may exist, so this attempt is not
+		// free to give back.
+		return fmt.Errorf("%w: attempt %s of %s is not a planned attempt; a deferral may only "+
+			"return work that provably started nothing", ErrNotBound, runID, workID)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE work_items
+		SET state = 'queued', state_reason = ?, attempts = MAX(attempts - 1, 0),
+		    eligible_at = ?, updated_at = ?
+		WHERE id = ? AND generation = ?`,
+		reason, tsformat.Format(until.UTC()), tsformat.Format(now), workID, generation); err != nil {
+		return fmt.Errorf("work: requeue deferred work: %w", err)
+	}
+	if err := appendEventTx(ctx, tx, workID, string(it.State), StateQueued, runID, generation, reason, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

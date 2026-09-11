@@ -37,11 +37,27 @@ import (
 
 const (
 	crashChildEnv  = "CREWSHIP_DISPATCH_CRASH_CHILD"
+	crashOrphanEnv = "CREWSHIP_DISPATCH_ORPHAN_RUNTIME"
 	crashChildMark = "RUNTIME-STARTED "
+	// orphanLifetime outlives the test by a wide margin. The orphan is killed
+	// by the test that made it; this is only a backstop so a harness that dies
+	// before its cleanup cannot leave a process behind forever.
+	orphanLifetime = 10 * time.Minute
 )
 
-// TestMain lets this binary re-exec itself as the dispatcher that dies.
+// TestMain lets this binary re-exec itself as two other things: the dispatcher
+// that dies, and the runtime process that outlives it.
+//
+// The runtime is this same binary rather than /bin/sleep so the test depends on
+// nothing outside the repository. An external tool would have to be probed for
+// and skipped around, and a skip reports the same "ok" as a pass — which is
+// exactly the wrong property for the one test that proves a restart does not
+// start a second runtime.
 func TestMain(m *testing.M) {
+	if os.Getenv(crashOrphanEnv) != "" {
+		time.Sleep(orphanLifetime)
+		os.Exit(0)
+	}
 	if spec := os.Getenv(crashChildEnv); spec != "" {
 		runCrashingDispatcher(spec)
 		return // unreachable: the child always dies
@@ -82,7 +98,11 @@ func (p *pidfileRuntime) Classify(_ Assignment, err error) Outcome {
 
 func (p *pidfileRuntime) Run(ctx context.Context, a Assignment, started func()) error {
 	p.starts.Add(1)
-	cmd := exec.Command("sleep", "600")
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), crashOrphanEnv+"=1")
+	// The crash-child variable must not be inherited, or the orphan would build
+	// a dispatcher of its own against the same database.
+	cmd.Env = append(cmd.Env, crashChildEnv+"=")
 	// No inherited pipes: this process outlives its parent on purpose, and a
 	// grandchild holding the parent's stdout would keep the harness's
 	// CombinedOutput blocked long after the crash it is waiting for.
@@ -178,6 +198,7 @@ func runCrashingDispatcher(spec string) {
 
 	d := New(work.NewStore(db.DB), rt, nil, Config{
 		Owner:              "crashing-dispatcher",
+		Kinds:              []work.Kind{{Source: work.SourceWebhook}},
 		PollInterval:       15 * time.Millisecond,
 		HeartbeatInterval:  20 * time.Millisecond,
 		CancelPollInterval: time.Hour,
@@ -224,10 +245,6 @@ func die() {
 // ---------------------------------------------------------------------------
 
 func TestChildCrash_ARestartFindsTheOrphanedRuntimeAndStartsNoSecondOne(t *testing.T) {
-	if _, err := exec.LookPath("sleep"); err != nil {
-		t.Skipf("no sleep binary to make a findable runtime out of: %v", err)
-	}
-
 	db := testutil.MigratedDB(t)
 	path := db.Path()
 	store := work.NewStore(db.DB)
@@ -306,6 +323,7 @@ func TestChildCrash_ARestartFindsTheOrphanedRuntimeAndStartsNoSecondOne(t *testi
 	rt := &pidfileRuntime{dir: runtimeDir}
 	d := New(store, rt, nil, Config{
 		Owner:               "restarted-dispatcher",
+		Kinds:               []work.Kind{{Source: work.SourceWebhook}},
 		PollInterval:        15 * time.Millisecond,
 		HeartbeatInterval:   20 * time.Millisecond,
 		CancelPollInterval:  10 * time.Millisecond,

@@ -278,10 +278,16 @@ func sidecarRunEndScript(runToken string) string {
 	if runToken == "" {
 		return ""
 	}
+	// The heredoc delimiter deliberately does NOT start with CREWSHIP_. The
+	// configuration inventory (scripts/docs-inventory) finds environment
+	// variables by scanning source text for that prefix, so a delimiter wearing
+	// it is reported as an undocumented setting that does not exist — and the
+	// only way to make that gate green is to write documentation for a thing
+	// nobody can set.
 	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/end " +
-		"-K /dev/fd/3 3<<'CREWSHIP_RUNEND_AUTH' >/dev/null 2>&1 || true\n" +
+		"-K /dev/fd/3 3<<'RUNEND_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
 		"header = \"Authorization: Bearer " + runToken + "\"\n" +
-		"CREWSHIP_RUNEND_AUTH\n"
+		"RUNEND_AUTH_HEREDOC\n"
 }
 
 // PreRunInstallPackages installs system packages as root before the agent starts.

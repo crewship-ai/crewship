@@ -69,14 +69,23 @@ type ClaimOptions struct {
 	// AgentID, when set, restricts the claim to one agent — the shape the
 	// existing per-agent pump uses when a run finishes and frees its slot.
 	AgentID string
-	// Sources, when set, restricts the claim to work from these producers.
+	// Kinds, when set, restricts the claim to the work types this dispatcher
+	// can actually execute.
 	//
 	// A dispatcher can only run what its Runtime knows how to run. Without this
 	// the first dispatcher to exist would claim every producer's work and then
 	// fail it, which is worse than not running it: the work is consumed, its
-	// attempt is burned, and the producer that could have handled it never sees
-	// it. A dispatcher declares what it can execute, and claims nothing else.
-	Sources []Source
+	// attempt is burned, its generation and attempt count move, and the
+	// executor that could have handled it never sees it again.
+	//
+	// It is a (source, domain kind) PAIR and not two independent lists,
+	// because the source alone does not identify a work type and assuming it
+	// does is a live bug rather than a hypothetical: `webhook` carries both
+	// `agent_run` and `pipeline_run`, so a dispatcher that filtered on the
+	// source would look specific and silently swallow the other one. Two
+	// independent lists would be no better — they match the cross product, so
+	// {webhook, chat} x {agent_run, pipeline_run} admits pairs nobody declared.
+	Kinds []Kind
 	// WorkID, when set, restricts the claim to one work item. This is what a
 	// wake-up hint turns into: acceptance commits and says "there is something
 	// for you", and the dispatcher tries to claim THAT item rather than
@@ -280,13 +289,18 @@ func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOpti
 		q += ` AND w.id = ?`
 		args = append(args, opts.WorkID)
 	}
-	if len(opts.Sources) > 0 {
-		placeholders := make([]string, 0, len(opts.Sources))
-		for _, src := range opts.Sources {
-			placeholders = append(placeholders, "?")
-			args = append(args, string(src))
+	// The executable-kind filter, applied HERE — inside the transaction that
+	// selects candidates, before anything is taken. Checking after the claim
+	// would not prevent the harm it is for: the claim has already bumped the
+	// generation, burned an attempt and moved the item out of `queued` by then,
+	// so "take it and then decline it" is indistinguishable from destroying it.
+	if len(opts.Kinds) > 0 {
+		terms := make([]string, 0, len(opts.Kinds))
+		for _, k := range opts.Kinds {
+			terms = append(terms, "(w.source = ? AND w.domain_kind = ?)")
+			args = append(args, string(k.Source), k.DomainKind)
 		}
-		q += ` AND w.source IN (` + strings.Join(placeholders, ",") + `)`
+		q += ` AND (` + strings.Join(terms, " OR ") + `)`
 	}
 
 	// One active turn per session (I3). needs_reconciliation counts here: the
@@ -401,8 +415,19 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 // startAttemptTx bumps the generation, writes the attempt and moves the item to
 // starting. The generation bump is what makes every later transition fenceable.
 func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner string, now time.Time) (*Claimed, error) {
-	attempt := it.Attempts + 1
-	if attempt > MaxAttempts {
+	// Two different numbers, which used to be one.
+	//
+	// `spent` is the BUDGET: how many attempts have counted against MaxAttempts.
+	// `seq` is the attempt's IDENTITY within this work item, and it only ever
+	// goes up, because work_attempts is UNIQUE(work_id, attempt) and an attempt
+	// row is never rewritten.
+	//
+	// They diverge the moment anything gives an attempt back — a deferral does,
+	// for work held on a human. Keeping them as one field meant the next claim
+	// reused a sequence number that already had a row, and the insert failed
+	// with a constraint error the dispatcher could only log and retry, forever.
+	spent := it.Attempts + 1
+	if spent > MaxAttempts {
 		// Reachable: recovery returns an abandoned attempt to the queue without
 		// consulting the attempt count, so an item that lost its lease on its
 		// last attempt arrives here eligible and out of budget. Fail it in this
@@ -416,6 +441,13 @@ func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner 
 		return nil, errAttemptsExhausted
 	}
 
+	var seq int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(attempt), 0) + 1 FROM work_attempts WHERE work_id = ?`, it.ID).
+		Scan(&seq); err != nil {
+		return nil, fmt.Errorf("work: next attempt number: %w", err)
+	}
+
 	generation := it.Generation + 1
 	runID := s.idFn()
 	leaseUntil := now.Add(LeaseDuration)
@@ -424,7 +456,7 @@ func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner 
 		UPDATE work_items
 		SET state = 'starting', state_reason = '', generation = ?, attempts = ?, updated_at = ?
 		WHERE id = ? AND generation = ? AND state IN ('queued','retry_wait')`,
-		generation, attempt, tsformat.Format(now), it.ID, it.Generation)
+		generation, spent, tsformat.Format(now), it.ID, it.Generation)
 	if err != nil {
 		return nil, fmt.Errorf("work: claim update: %w", err)
 	}
@@ -442,7 +474,7 @@ func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner 
 			run_id, work_id, attempt, generation, lease_owner, lease_expires_at,
 			heartbeat_at, started_at, start_reason
 		) VALUES (?,?,?,?,?,?,?,?,?)`,
-		runID, it.ID, attempt, generation, owner,
+		runID, it.ID, seq, generation, owner,
 		tsformat.Format(leaseUntil), tsformat.Format(now), tsformat.Format(now), "claimed",
 	); err != nil {
 		return nil, fmt.Errorf("work: insert attempt: %w", err)
@@ -455,11 +487,11 @@ func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner 
 	claimedItem := *it
 	claimedItem.State = StateStarting
 	claimedItem.Generation = generation
-	claimedItem.Attempts = attempt
+	claimedItem.Attempts = spent
 	return &Claimed{
 		Item:       &claimedItem,
 		RunID:      runID,
-		Attempt:    attempt,
+		Attempt:    seq,
 		Generation: generation,
 		LeaseUntil: leaseUntil,
 	}, nil

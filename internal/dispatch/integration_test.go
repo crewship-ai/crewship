@@ -176,7 +176,12 @@ func newHarness(t *testing.T) *harness {
 		store: work.NewStore(db),
 		rt:    newFakeRuntime(),
 		cfg: Config{
-			Owner:              "dispatcher-1",
+			Owner: "dispatcher-1",
+			// Declared, because a dispatcher must be. The harness's acceptance
+			// writes no domain kind, so this is the pair its own work really
+			// has — stating it here keeps the test honest about what it is
+			// claiming rather than relying on a filter that matches everything.
+			Kinds:              []work.Kind{{Source: work.SourceWebhook}},
 			PollInterval:       15 * time.Millisecond,
 			HeartbeatInterval:  20 * time.Millisecond,
 			CancelPollInterval: 10 * time.Millisecond,
@@ -626,8 +631,8 @@ func TestVertical_AuthorizationIsRecheckedAtDispatch(t *testing.T) {
 	h := newHarness(t)
 	r := h.accept("dlv-revoked")
 
-	_, stop := h.runDispatcher(AuthorizerFunc(func(context.Context, Assignment) (string, error) {
-		return "the agent was disabled while this work waited", nil
+	_, stop := h.runDispatcher(AuthorizerFunc(func(context.Context, Assignment) (Decision, error) {
+		return Refuse("the agent was deleted while this work waited"), nil
 	}))
 	defer stop()
 
@@ -646,8 +651,8 @@ func TestVertical_AnUndecidableAuthorizationParksRatherThanGuesses(t *testing.T)
 	h := newHarness(t)
 	r := h.accept("dlv-undecidable")
 
-	_, stop := h.runDispatcher(AuthorizerFunc(func(context.Context, Assignment) (string, error) {
-		return "", errors.New("the permissions service is unreachable")
+	_, stop := h.runDispatcher(AuthorizerFunc(func(context.Context, Assignment) (Decision, error) {
+		return Decision{}, errors.New("the permissions service is unreachable")
 	}))
 	defer stop()
 
@@ -962,5 +967,133 @@ func TestVertical_AnUnwritableOutcomeIsParkedRatherThanLost(t *testing.T) {
 	}
 	if !strings.Contains(got.StateReason, "completed") {
 		t.Errorf("reason = %q; it must carry what the outcome was trying to say", got.StateReason)
+	}
+}
+
+// A dispatcher that declares nothing must not start.
+//
+// The filter is what stands between this loop and another executor's work, and
+// there is no safe default for it: only the caller knows what its Runtime can
+// run. An empty declaration is not "run everything" — it is a caller who forgot,
+// and the cost of guessing on their behalf is destroyed work.
+func TestVertical_ADispatcherThatDeclaresNothingRefusesToStart(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.Kinds = nil
+	d := New(h.store, h.rt, nil, h.cfg, quiet())
+
+	err := d.Run(context.Background())
+	if err == nil {
+		t.Fatal("a dispatcher with no declared kinds started; it would claim every producer's work")
+	}
+	if !strings.Contains(err.Error(), "executable kinds") {
+		t.Errorf("err = %v; it must say what is missing", err)
+	}
+}
+
+// "Not yet" is a third answer, and it must cost the work nothing.
+//
+// An authorizer that can only allow or refuse has to call a held agent's work
+// FAILED, and then the operator's approval arrives at something that already
+// gave up. Retrying it as an ordinary failure is no better: MaxAttempts of
+// capped backoff is about twenty minutes, and the answer does not change on
+// that timescale — it changes when a person acts.
+//
+// So a deferral returns the work to the queue with its attempt GIVEN BACK, and
+// this asserts the whole of that: the state, the unspent budget, the fence that
+// still moved forward, and that no runtime was created on the way.
+func TestVertical_AHeldAuthorizationDefersWithoutSpendingAnAttempt(t *testing.T) {
+	h := newHarness(t)
+	r := h.accept("dlv-held")
+
+	var held atomic.Bool
+	held.Store(true)
+	_, stop := h.runDispatcher(AuthorizerFunc(func(context.Context, Assignment) (Decision, error) {
+		if held.Load() {
+			// Short, so the test observes the requeue rather than the wait.
+			return NotYet("agent is PENDING_REVIEW", 50*time.Millisecond), nil
+		}
+		return Allow(), nil
+	}))
+	defer stop()
+
+	// It comes back to the queue rather than failing.
+	deadline := time.Now().Add(10 * time.Second)
+	var it *work.Item
+	for time.Now().Before(deadline) {
+		got, err := h.store.Get(context.Background(), r.WorkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State == work.StateQueued && got.Generation > 0 {
+			it = got
+			break
+		}
+		if got.State.Terminal() {
+			t.Fatalf("held work went to %q; a deferral must not be terminal", got.State)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if it == nil {
+		t.Fatal("held work never came back to the queue")
+	}
+	if it.Attempts != 0 {
+		t.Errorf("attempts = %d after a deferral, want 0 — a held agent would burn its whole "+
+			"budget waiting for a person", it.Attempts)
+	}
+	if it.StateReason == "" {
+		t.Error("requeued with no reason; nothing tells an operator why it is waiting")
+	}
+	if got := h.rt.starts.Load(); got != 0 {
+		t.Errorf("%d runtimes created for deferred work, want 0", got)
+	}
+
+	// And when the answer changes, it runs — on a fresh attempt, with the fence
+	// ahead of where it was.
+	before := it.Generation
+	held.Store(false)
+	done := h.waitForState(r.WorkID, work.StateSucceeded)
+	if done.Generation <= before {
+		t.Errorf("generation went from %d to %d across a deferral; the fence must never run "+
+			"backwards, or a deferred attempt's run id could still report a result",
+			before, done.Generation)
+	}
+	if got := h.rt.starts.Load(); got != 1 {
+		t.Errorf("%d runtimes created once the hold cleared, want 1", got)
+	}
+}
+
+// The attempt may only be given back when nothing could have been started.
+//
+// A deferral hands an attempt back, so it is the one operation that could let
+// an item be retried forever. That is safe exactly while the attempt never
+// declared a start intent, and the store checks that rather than trusting its
+// caller — because the caller is the thing most likely to be wrong about it.
+func TestVertical_ADeferralIsRefusedOnceAStartWasIntended(t *testing.T) {
+	h := newHarness(t)
+	r := h.accept("dlv-defer-late")
+	ctx := context.Background()
+
+	claimed, err := h.store.Claim(ctx, work.ClaimOptions{
+		LeaseOwner: "dispatcher-1", Limits: work.DefaultLimits(),
+		Kinds: []work.Kind{{Source: work.SourceWebhook}},
+	})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// Past the point of no return: an identity is written down, so a runtime
+	// may exist under it.
+	if err := h.store.MarkStarting(ctx, r.WorkID, claimed.RunID, claimed.Generation,
+		"fake-runtime:"+claimed.RunID); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
+
+	err = h.store.Defer(ctx, r.WorkID, claimed.RunID, claimed.Generation,
+		time.Now().Add(time.Minute), "too late")
+	if err == nil {
+		t.Fatal("an attempt that declared a start intent was given back; it could now be retried " +
+			"beside a runtime nobody stopped")
+	}
+	if !errors.Is(err, work.ErrNotBound) {
+		t.Errorf("err = %v, want ErrNotBound", err)
 	}
 }

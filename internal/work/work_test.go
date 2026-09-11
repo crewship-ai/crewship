@@ -1190,3 +1190,94 @@ func TestTransition_ASuccessBeforeConfirmationIsStillRecordable(t *testing.T) {
 		}
 	}
 }
+
+// The attempt NUMBER and the attempt BUDGET are two different quantities, and
+// the ledger cannot store them in one field.
+//
+// work_attempts is UNIQUE(work_id, attempt), so an attempt number, once used,
+// is used. The budget is what a deferral gives back — work held on a person
+// must not spend its five attempts waiting for one. While the two were the same
+// column, the claim after a deferral tried to reuse a number that already had a
+// row, and the insert failed with a constraint error the dispatcher could only
+// log and retry: a hot loop that never ran the work and never gave up either.
+func TestDefer_GivesTheBudgetBackWithoutReusingAnAttemptNumber(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := context.Background()
+
+	rec := accept(t, s, db, backgroundReq("agent-held"))
+
+	var runIDs []string
+	for i := 0; i < 3; i++ {
+		claimed, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d", Limits: DefaultLimits()})
+		if err != nil {
+			t.Fatalf("claim %d: %v", i, err)
+		}
+		runIDs = append(runIDs, claimed.RunID)
+		if err := s.Defer(ctx, rec.WorkID, claimed.RunID, claimed.Generation,
+			clock.Now().Add(-time.Second), "held on an operator"); err != nil {
+			t.Fatalf("defer %d: %v", i, err)
+		}
+		it, err := s.Get(ctx, rec.WorkID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if it.State != StateQueued {
+			t.Fatalf("after deferral %d the work is %q, want queued", i, it.State)
+		}
+		if it.Attempts != 0 {
+			t.Fatalf("after deferral %d the budget is %d, want 0 — a held item would run out of "+
+				"attempts waiting for a person", i, it.Attempts)
+		}
+	}
+
+	// Three attempt rows, three distinct numbers, three distinct run ids: the
+	// history of having looked is kept, which is the reason the numbers cannot
+	// be reused.
+	rows, err := db.Query(`SELECT attempt, run_id FROM work_attempts WHERE work_id = ? ORDER BY attempt`, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	seen := map[int]string{}
+	for rows.Next() {
+		var n int
+		var runID string
+		if err := rows.Scan(&n, &runID); err != nil {
+			t.Fatal(err)
+		}
+		if prev, dup := seen[n]; dup {
+			t.Fatalf("attempt number %d used by both %s and %s", n, prev, runID)
+		}
+		seen[n] = runID
+	}
+	if len(seen) != 3 {
+		t.Errorf("%d attempt rows, want 3 — a deferral must leave a record that it happened", len(seen))
+	}
+
+	// And the budget really is intact: five full attempts remain.
+	for i := 0; i < MaxAttempts; i++ {
+		claimed, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d", Limits: DefaultLimits()})
+		if err != nil {
+			t.Fatalf("claim %d after the deferrals: %v", i, err)
+		}
+		if err := s.Transition(ctx, TransitionRequest{
+			WorkID: rec.WorkID, RunID: claimed.RunID, Generation: claimed.Generation,
+			To: StateRetryWait, Reason: "failed",
+		}); err != nil {
+			t.Fatalf("fail attempt %d: %v", i, err)
+		}
+		clock.Advance(BackoffCap + time.Second)
+	}
+	if _, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d", Limits: DefaultLimits()}); !errors.Is(err, ErrNoWork) {
+		t.Errorf("claim after %d real attempts = %v, want ErrNoWork", MaxAttempts, err)
+	}
+	it, err := s.Get(ctx, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != StateFailed {
+		t.Errorf("state = %q after exhausting the budget, want failed — deferrals must not "+
+			"extend it either", it.State)
+	}
+	_ = runIDs
+}

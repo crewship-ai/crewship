@@ -756,6 +756,36 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 | Daily log size | 30 KB per file | Maximum single `daily/*.md` file (lowered from 100 KB so one day can't eat ~20% of a 200k context window) |
 | Crew memory reindex | Every 60 seconds | Automatic periodic reindex by Lead sidecar |
 
+## Requiring the guaranteed write profile
+
+A memory write goes through one of two profiles. `legacy` performs the write and
+reports honestly that it was not revision-checked (`revision_checked: false`,
+`degraded: true`). `guaranteed` refuses a write it cannot check — a missing
+caller-supplied operation id, no expected revision, undeclared removals, or no
+durable ledger behind it — rather than performing it and labelling it as
+verified.
+
+`CREWSHIP_MEMORY_REQUIRE_GUARANTEED` makes the guaranteed profile mandatory for
+every agent-side write, whatever the caller asked for.
+
+| | |
+|---|---|
+| **Default** | unset, meaning **off** — the caller chooses its profile |
+| **Accepted values** | `1`, `true`, `yes`, `on` enable it; anything else, including unset, leaves it off |
+| **Who sets it** | whatever launches the agent container, as part of the container's environment |
+| **Scope** | one agent container, for the life of that container |
+| **Read by** | the sidecar, on every `POST /memory/write` |
+
+It is set on the container from outside precisely so that nothing **inside** the
+container can clear it: a correctness rule an agent may opt out of is not a rule.
+
+**Turning it on today makes agent memory writes fail.** The guaranteed profile
+needs a per-attempt run identity, and no dispatch path supplies one to an agent
+yet, so every write that would have been recorded as degraded becomes a `503`
+instead. That is the correct failure direction for the parallel profile and the
+wrong one for the current default, which is why it ships off. Leave it unset
+until the run identity reaches the memory clients.
+
 ## Load-time injection scan
 
 Memory files are authored by prior agent runs, so a file on disk can carry an

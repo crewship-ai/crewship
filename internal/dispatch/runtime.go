@@ -140,16 +140,69 @@ type Runtime interface {
 // Refusing here is not an error: it is the system declining to run work it is
 // no longer allowed to run, and the reason is what the user will be shown.
 type Authorizer interface {
-	// Authorize returns a refusal reason, or "" to proceed. An error means the
-	// check could not be made, which is not permission — the dispatcher parks
-	// the work rather than assuming either answer.
-	Authorize(ctx context.Context, a Assignment) (refusal string, err error)
+	// Authorize answers with a Decision. An error means the check could not be
+	// MADE, which is not permission — the dispatcher parks the work rather than
+	// assuming either answer.
+	Authorize(ctx context.Context, a Assignment) (Decision, error)
 }
 
-// AuthorizerFunc adapts a function to Authorizer.
-type AuthorizerFunc func(ctx context.Context, a Assignment) (string, error)
+// Decision is an authorizer's answer, and it has three values rather than two.
+//
+// "Refused" and "allowed" are not enough, and the gap between them is not
+// theoretical. An agent staged PENDING_REVIEW is neither: it is held until an
+// operator approves it, and that may be hours away. Failing such work is the
+// mistake refuseHeldAgent documents in internal/api — an ordinary error there
+// made the mission engine record a terminally FAILED task, so the operator's
+// approval arrived at something that had already given up. Retrying it as a
+// failure is no better: five attempts of capped backoff is twenty minutes and
+// then the same dead end.
+//
+// So the third answer is "not yet", and it is a first-class one.
+type Decision struct {
+	kind       decisionKind
+	reason     string
+	retryAfter time.Duration
+}
 
-func (f AuthorizerFunc) Authorize(ctx context.Context, a Assignment) (string, error) {
+type decisionKind int
+
+const (
+	decisionAllow decisionKind = iota
+	decisionRefuse
+	decisionNotYet
+)
+
+// Allow lets the work run.
+func Allow() Decision { return Decision{kind: decisionAllow} }
+
+// Refuse fails the work, terminally, with a reason a user will be shown. Use it
+// when the answer will not change on its own: the agent is gone, the crew was
+// deleted, the permission was revoked.
+func Refuse(reason string) Decision {
+	return Decision{kind: decisionRefuse, reason: reason}
+}
+
+// NotYet returns the work to the queue without spending an attempt, eligible
+// again after retryAfter. Use it when the answer is expected to change by
+// itself or by somebody acting — approval pending, a gate temporarily closed.
+//
+// A zero or negative retryAfter is raised to a small floor rather than
+// producing a hot loop.
+func NotYet(reason string, retryAfter time.Duration) Decision {
+	if retryAfter <= 0 {
+		retryAfter = defaultNotYetRetry
+	}
+	return Decision{kind: decisionNotYet, reason: reason, retryAfter: retryAfter}
+}
+
+// defaultNotYetRetry is the floor for a deferral. Deferrals wait on a human or
+// on another system, so checking often buys nothing and costs a claim each time.
+const defaultNotYetRetry = 30 * time.Second
+
+// AuthorizerFunc adapts a function to Authorizer.
+type AuthorizerFunc func(ctx context.Context, a Assignment) (Decision, error)
+
+func (f AuthorizerFunc) Authorize(ctx context.Context, a Assignment) (Decision, error) {
 	return f(ctx, a)
 }
 
@@ -181,11 +234,19 @@ type Config struct {
 	// dispatcher escalates. §4: after the grace, an unconfirmed stop is
 	// reconciliation, not a cancellation.
 	StopGrace time.Duration
-	// Sources are the producers this dispatcher can execute. Required in
-	// production: a dispatcher that claims work its Runtime cannot run does not
-	// merely fail it, it CONSUMES it — the attempt is burned and the producer
-	// that could have handled it never sees the work again.
-	Sources []work.Source
+	// Kinds are the work TYPES this dispatcher can execute, as (source, domain
+	// kind) pairs. Required in production.
+	//
+	// A dispatcher that claims work its Runtime cannot run does not merely fail
+	// it, it CONSUMES it: by the time anything notices, the claim has bumped the
+	// generation, burned an attempt and taken the item out of `queued`, and the
+	// executor that could have run it never sees it again.
+	//
+	// The source alone is not enough to say what a dispatcher can run, and that
+	// is not a hypothetical — `webhook` carries both `agent_run` and
+	// `pipeline_run`. Declaring the source only would look specific and swallow
+	// the other producer's work.
+	Kinds []work.Kind
 	// ConfirmPollInterval is how often the dispatcher asks the provider whether
 	// the runtime exists yet. It backs the stream-event hint, and it is what
 	// makes a SILENT process confirmable.

@@ -711,7 +711,7 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	req := work.AcceptRequest{
 		WorkspaceID: info.WorkspaceID,
 		Source:      work.SourceWebhook,
-		DomainKind:  "agent_run",
+		DomainKind:  work.DomainAgentRun,
 		DomainID:    runID,
 		AgentID:     agentID,
 		CrewID:      info.CrewID,

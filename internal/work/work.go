@@ -238,6 +238,46 @@ const (
 	SourceManual       Source = "manual"
 )
 
+// Kind is a work TYPE: the producer that made it, and the domain it belongs to.
+//
+// The source alone does not identify one. `webhook` is written by two different
+// producers into two different domains — an agent webhook accepts
+// {webhook, agent_run} and a routine webhook accepts {webhook, pipeline_run} —
+// and they are executed by different code. A dispatcher that declared only the
+// source would look specific, claim both, and consume the half it cannot run.
+//
+// An empty DomainKind is a value, not a wildcard: it matches work whose domain
+// kind is empty and nothing else. That is deliberate. A wildcard here is
+// precisely the shape of the bug this type exists to prevent, and it would be
+// invisible at the declaration — which is where it has to be visible.
+type Kind struct {
+	Source     Source
+	DomainKind string
+}
+
+func (k Kind) String() string {
+	if k.DomainKind == "" {
+		return string(k.Source) + "/(no domain)"
+	}
+	return string(k.Source) + "/" + k.DomainKind
+}
+
+// The domain kinds in use. They are named here rather than left as string
+// literals at each call site so that the producer writing one and the
+// dispatcher claiming it cannot drift apart by a typo — which would not fail,
+// it would silently claim nothing, or claim something else.
+const (
+	// DomainAgentRun is one agent turn, executed by the agent runtime.
+	DomainAgentRun = "agent_run"
+	// DomainPipelineRun is one routine/pipeline run, executed by the pipeline
+	// engine. It carries no agent id, which is why an agent dispatcher that
+	// claimed it would refuse it as work naming no agent — after having already
+	// taken it.
+	DomainPipelineRun = "pipeline_run"
+	// DomainAssignment is one assignment dispatch.
+	DomainAssignment = "assignment"
+)
+
 // Lease and attempt geometry, from §4. These are the contract's numbers, not
 // tuning knobs: recovery correctness depends on scan < lease and on heartbeat
 // being well under lease.

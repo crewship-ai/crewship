@@ -417,6 +417,107 @@ were invisible to tests that covered each half separately.
    that an outcome the ledger refuses is parked immediately instead of logged and
    dropped (`TestVertical_AnUnwritableOutcomeIsParkedRatherThanLost`).
 
+### A blocker the review found, and what it cost
+
+`webhook` is not a work type. Two producers write it:
+
+| Producer | Source | Domain kind | Agent id | Executed by |
+|---|---|---|---|---|
+| agent webhook (`webhook.go`) | `webhook` | `agent_run` | set | the dispatcher in `internal/dispatch` |
+| routine webhook (`pipeline_webhooks.go`) | `webhook` | `pipeline_run` | **empty** | the pipeline engine |
+
+The first version of `StartWebhookDispatcher` declared `Sources:
+[]work.Source{work.SourceWebhook}` and therefore claimed both. Refusal was not
+the harm: **taking** was. By the time the authorizer could object, the claim had
+already bumped the generation, opened an attempt row and moved the item out of
+`queued`, and none of that is undoable. The authorizer would then have refused
+routine work as "the work names no agent" — so a routine trigger would have died
+as `failed`, with a reason about agents it never had, and the pipeline engine
+would never have seen it again.
+
+The fix is in the atomic candidate selection, not after the claim: `ClaimOptions`
+now takes `Kinds []work.Kind` — (source, domain kind) PAIRS — filtered in the
+same SQL statement that selects candidates, inside the same transaction that
+takes the item. Two independent lists would not have been enough either: they
+match the cross product, so `{webhook, chat} × {agent_run, pipeline_run}` would
+admit pairs nobody declared. An empty `DomainKind` is a value and not a wildcard.
+
+Two more consequences, both deliberate:
+
+- **A dispatcher that declares nothing refuses to start** (`Run` returns an
+  error). There is no safe default: only the caller knows what its Runtime can
+  run, and an undeclared filter claims everything.
+- The regression test drives **both real acceptance routes** over HTTP into one
+  database with the dispatcher running throughout, and asserts the routine work
+  is untouched in four ways — state, generation, attempt count, and the absence
+  of any attempt row. State alone would not do: a claim followed by a requeue
+  lands back on `queued` having still spent an attempt and moved the fence.
+  Mutation-checked: reverting to a source-only filter reproduces exactly the
+  reported bug (`failed`, generation 1, one attempt burned).
+
+### I8, stated precisely
+
+The earlier version of this section rested on one test of a deleted agent and a
+comment that claimed more than the code did — it mentioned a disabled agent and
+an exhausted budget, and `WebhookAuthorizer` checked neither.
+
+**Checked at dispatch, and tested by changing the answer between acceptance and
+dispatch** (`TestVerticalServer_WhatIsRecheckedAtDispatchAndWhatIsNot`):
+
+| Condition | Answer | Why that answer |
+|---|---|---|
+| the agent no longer exists | refuse | nothing brings it back |
+| the agent was deleted while the work waited | refuse | same |
+| the agent now belongs to a different workspace | refuse | the delivery's authorization belonged to the workspace it arrived in |
+| the agent's crew was deleted | refuse | same |
+| the agent is `PENDING_REVIEW` | **defer** | it is held until an operator approves, and approval is the expected outcome |
+| any other `agents.status` (IDLE, RUNNING, ERROR) | allow | these are lifecycle states, not decisions — refusing on RUNNING would mean an agent could never be given a second task, and refusing on ERROR would let one failed run brick it |
+
+**Not checked here, and where each one actually lives:**
+
+| Concern | Enforced |
+|---|---|
+| concurrency admission (server, agent, class) | `work.Claim`, inside the transaction that takes the item — it has to be there, or two dispatchers both see a free slot |
+| per-agent ingress rate and in-flight cap | acceptance (`agentRateLimit`, the `agentRuns` registry) — their job is to refuse a flood at the door, not to queue it |
+| a workspace backup holding the write lock | inside the run (`refuseIfBackupInProgress`), where the lock is held for the duration rather than sampled |
+| egress policy | when the run request is built — an externally triggered run is forced to restricted network mode regardless of the crew's setting |
+| **spend budget** | **nowhere. There is none in 1.0.** §6's `work.CheckIngressTx` is a queue-depth and byte limit, not money, and nothing calls it on this path. When a spend gate exists it belongs in the authorizer, because it is exactly the kind of answer that changes while work waits. |
+
+There is no agent "disabled" flag in this system; `PENDING_REVIEW` is the one
+status that is a decision rather than a state, and `refuseHeldAgent` in
+`assignments.go` owns that rule.
+
+### "Not yet" had to become a third answer
+
+A held agent cannot be refused and cannot be allowed. Failing it repeats a
+mistake this repository already documents at length: the first version of
+`refuseHeldAgent` returned an ordinary error, the mission engine recorded a
+terminally FAILED task, and the operator's approval arrived at something that had
+given up minutes earlier. Retrying it as an ordinary failure is no better —
+`MaxAttempts` of capped backoff is about twenty minutes, and the answer changes
+when a person acts, not on that timescale.
+
+So `dispatch.Decision` has three values (`Allow`, `Refuse`, `NotYet`), and
+`work.Store.Defer` returns a claimed attempt to the queue **with its budget
+given back**, eligible again later. Giving the budget back is safe only under a
+condition the store CHECKS rather than assumes: the attempt must still be in
+runtime phase `planned`, so nothing can possibly have been created. What is not
+given back is the fence: the generation is not rolled back and the deferred
+attempt row is closed rather than deleted, so a straggler holding the deferred
+run id is still refused.
+
+That exposed a second defect. `work_attempts` is `UNIQUE(work_id, attempt)`, and
+the attempt number and the attempt budget were the same column, so the claim
+after a deferral reused a number that already had a row: the insert failed with a
+constraint error the dispatcher could only log and retry, forever. They are two
+quantities now — `work_items.attempts` is the budget, `work_attempts.attempt` is
+a monotonic identity — and both are mutation-checked.
+
+What bounds a deferral loop is the item's own `deadline_at`, not an attempt
+count. That is the right instrument: "how long may this wait for a human" is a
+question about patience, not about retries. Work with no deadline waits
+indefinitely, on purpose.
+
 ### What the parallel profile still rests on
 
 `StartWebhookDispatcher` uses `work.SerialAgentLimits()` — one run per agent, of
@@ -425,6 +526,48 @@ off until T06/T07 run against a real Claude runtime. A dispatcher that quietly
 allowed two concurrent runs would be enabling that profile by omission.
 
 **Proven end to end with a real CLI: nothing.** No T01–T14 is a PASS.
+
+### Test evidence, and what each run actually covered
+
+Runs are listed separately rather than combined, because combining them is how a
+green claim gets made that nobody observed.
+
+| Run | Tree | Result |
+|---|---|---|
+| `internal/api`, full, 1123 s | 163bd2ef **before** the background-guard fix | 20,216 pass, 6 skip, **1 fail** — `TestBackgroundWork_EverySpawnSiteIsAccountedFor`, tripped by the new dispatcher daemon |
+| `internal/api -run TestBackgroundWork…\|TestWebhookAcceptance…\|TestWebhookRuntime…`, 0.7 s | with the fix | pass |
+| `internal/work`, `internal/dispatch`, `internal/server`, and every other package except `cmd/crewship` | 163bd2ef | pass |
+| `cmd/crewship`, `internal/server`, `internal/work`, `internal/dispatch`, `internal/orchestrator`, `internal/sidecar`, full | after the kind-filter, I8 and CLI-YAML work, on a disk with room | pass (383 s / 54 s / 15 s / 15 s / 39 s / 83 s) |
+| `internal/api`, full, 1101 s | same tree, same disk | **20,224 pass, 0 fail, 6 skip**, exit 0, zero `no space left` lines — the first full green run of this package on the branch |
+| `cmd/crewship`, full | 163bd2ef | **1 fail** — `TestEmbeddedJSONInlineIsAlsoYAMLSafe`, and it had been red since the work CLI landed. Only `-run TestDaemon\|TestAcceptance` had been run on that package, so nothing had looked. |
+
+The `cmd/crewship` failure is worth naming rather than filing away as
+pre-existing: `workItemDetail` embedded an unexported `workItemRow`, so
+`crewship work get -f yaml` **panicked** while `-f json` worked, and every
+multi-word field printed a different key under the two formats. It is this
+programme's own CLI, shipped by commit `6659886`, and the only reason it looked
+green was that nobody had run the package. Fixed by exporting the type, marking
+the embed inline for both encoders, adding the explicit `yaml:` tags, and adding
+all four work types to the parity list so the next field cannot drift.
+
+One more entry, because a void run is not a failing one and the difference is
+invisible unless somebody writes it down: a full `internal/api` run taken with
+the kind-filter and I8 work reported **35 failures** and is worthless. The disk
+(`/` on crewship-dev, 290 GB shared with a dozen worktrees) reached 100 % with
+130 MB free mid-run. The log carries 22 `no space left on device` lines and the
+failures are the signature pattern — whole families failing in 0.03 s each,
+which reads exactly like a regression in the change under test. `~/.cache/go-build`
+was 59 GB with every byte touched inside 24 h, so age-based trimming frees
+nothing; dropping half the content-addressed directories brought it to 30 GB
+without the full-rebuild cost of `go clean -cache`. **Re-run anything that
+overlapped such a window rather than reading it.**
+
+**No full `internal/api` run was green at 163bd2ef.** The earlier summary said
+the package was "green apart from that one, which is now green" — that was an
+inference from the guard being a pure source-scan test that cannot affect
+others, not something observed, and it should have been written as the two rows
+above. The first full run on a tree with the fix is the one taken with the
+kind-filter and I8 work, recorded below it.
 
 ## 5. The six pumps I7 has to collapse
 
@@ -570,14 +713,20 @@ required by it:
   reason to go deleting new coverage; the same suite measured 543 s and 613 s on
   a quieter box earlier the same day. If it does start failing in CI, the lever
   is the package's existing bulk, not this branch's tests.
-- **`scripts/docs-inventory -strict` is red on this branch and not because of
-  this work.** Four environment variables have no documentation row:
-  `CREWSHIP_MEMORY_REQUIRE_GUARANTEED`, `CREWSHIP_RUNEND_AUTH`,
-  `CREWSHIP_SIDECAR_RUN_AUTHORITY`, `CREWSHIP_SIDECAR_STATE_DIR`. All four come
-  from the sidecar and memory work already committed here, none appears in this
-  session's diff, and documenting them means describing someone else's feature —
-  so they are named here rather than guessed at. They must be documented before
-  the branch merges.
+- **`scripts/docs-inventory -strict` matches a variable name anywhere under
+  `docs/`, so a mention is not documentation.** Worth knowing because it has
+  already produced a false green here: a previous version of this file listed
+  four undocumented variables by name in a sentence complaining that they were
+  undocumented, and that alone turned the gate green. A reviewer re-running it
+  on the same commit saw a pass and reasonably read it as the gate being
+  satisfied. The four are documented properly now — `CREWSHIP_MEMORY_REQUIRE_GUARANTEED`
+  in the agent-memory guide, `CREWSHIP_SIDECAR_STATE_DIR` and
+  `CREWSHIP_SIDECAR_RUN_AUTHORITY` in the orchestration guide, each with
+  purpose, default, who sets it, scope and what a misconfiguration does. The
+  fourth, `CREWSHIP_RUNEND_AUTH`, was never a variable at all: it was a shell
+  heredoc delimiter that happened to wear the prefix the inventory scans for, so
+  the only way to satisfy the gate would have been to write documentation for a
+  setting nobody can set. It is renamed instead.
 - The vertical pass adds ~35 s to `internal/api`, most of it one test that waits
   out the shipped 10 s cancel grace on purpose. If that package's runtime becomes
   the problem, that test is the first candidate for a build tag — but shortening

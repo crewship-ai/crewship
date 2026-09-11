@@ -26,6 +26,19 @@ type Dispatcher struct {
 
 	mu      sync.Mutex
 	running map[string]*liveAttempt
+
+	// clock is nil in production. Tests set it so a deferral's wait can be
+	// asserted without spending it.
+	clock func() time.Time
+}
+
+// now is the dispatcher's clock, overridable in tests that need a deferral to
+// come back without waiting for it.
+func (d *Dispatcher) now() time.Time {
+	if d.clock != nil {
+		return d.clock()
+	}
+	return time.Now()
 }
 
 type liveAttempt struct {
@@ -70,6 +83,16 @@ func (d *Dispatcher) Hint(workID string) {
 // means a restart cannot start a second runtime for work the previous process
 // had already begun.
 func (d *Dispatcher) Run(ctx context.Context) error {
+	// A dispatcher that declared nothing claims everything, which is the same
+	// harm as declaring the wrong thing: work it cannot execute is taken, its
+	// generation moves, its attempt is burned, and the executor that could have
+	// run it never sees it again. There is no safe default to fall back on —
+	// only the caller knows what its Runtime can run — so this refuses to start
+	// rather than starting something indiscriminate.
+	if len(d.cfg.Kinds) == 0 {
+		return errors.New("dispatch: no executable kinds declared; a dispatcher must say " +
+			"what it can run, because claiming work it cannot run destroys it")
+	}
 	if err := d.recover(ctx); err != nil {
 		d.logger.Error("dispatch: recovery pass failed; not claiming until it succeeds", "error", err)
 		return err
@@ -130,7 +153,7 @@ func (d *Dispatcher) claimOne(ctx context.Context) (bool, error) {
 	c, err := d.store.Claim(ctx, work.ClaimOptions{
 		LeaseOwner: d.cfg.Owner,
 		Limits:     d.cfg.Limits,
-		Sources:    d.cfg.Sources,
+		Kinds:      d.cfg.Kinds,
 	})
 	if errors.Is(err, work.ErrNoWork) {
 		return false, nil
@@ -154,15 +177,29 @@ func (d *Dispatcher) claimOne(ctx context.Context) (bool, error) {
 	// I8: re-check here, not at acceptance. Work waits for capacity, and in
 	// that gap a permission can be revoked, a budget spent or a target deleted.
 	if d.authz != nil {
-		refusal, err := d.authz.Authorize(ctx, a)
+		decision, err := d.authz.Authorize(ctx, a)
 		if err != nil {
 			// Could not decide. Not permission, and not a failure of the work
 			// either — park it rather than guess in either direction.
 			d.park(ctx, a, "authorization could not be checked at dispatch: "+err.Error())
 			return true, nil
 		}
-		if refusal != "" {
-			d.finish(ctx, a, work.StateFailed, "refused at dispatch: "+refusal)
+		switch decision.kind {
+		case decisionRefuse:
+			d.finish(ctx, a, work.StateFailed, "refused at dispatch: "+decision.reason)
+			return true, nil
+		case decisionNotYet:
+			// Back on the queue with the attempt given back. Nothing was
+			// started — the start intent is not written until below — so the
+			// budget is genuinely unspent, and the store re-checks that rather
+			// than taking this code's word for it.
+			until := d.now().Add(decision.retryAfter)
+			if err := d.store.Defer(ctx, a.Item.ID, a.RunID, a.Generation, until,
+				"deferred at dispatch: "+decision.reason); err != nil {
+				d.logger.Error("dispatch: could not defer work the authorizer held",
+					"work_id", a.Item.ID, "run_id", a.RunID, "error", err)
+				d.park(ctx, a, "authorization deferred this work and it could not be requeued: "+err.Error())
+			}
 			return true, nil
 		}
 	}
