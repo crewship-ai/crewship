@@ -59,6 +59,11 @@ describe("readEditorRoute", () => {
       want: { slug: "operations-lab", mode: "view", section: "content", pane: "section" },
     },
     {
+      name: "an undecodable slug is kept, so the address and the screen agree on a Page that is not there",
+      href: "/pages/%",
+      want: { slug: "%", mode: "view", section: "content", pane: "section" },
+    },
+    {
       name: "a percent-encoded slug decodes",
       href: "/pages/q4%20review",
       want: { slug: "q4 review", mode: "view", section: "content", pane: "section" },

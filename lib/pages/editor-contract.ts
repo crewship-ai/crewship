@@ -80,9 +80,16 @@ export function isEditorSection(value: unknown): value is EditorSection {
 export function readEditorRoute(pathname: string, search: string): EditorRoute {
   const match = /^\/pages\/([^/]+)\/?$/.exec(pathname)
   // `decodeURIComponent` throws on a malformed percent sequence — `/pages/%`
-  // is a URL a browser will happily be pointed at. This file's own rule is
-  // that an odd or stale address degrades to the overview rather than
-  // failing the parse and taking the surface down with it.
+  // is a URL a browser will happily be pointed at, and an unguarded throw
+  // takes the whole route parse down with it.
+  //
+  // The undecodable segment is kept rather than dropped. Returning the
+  // overview instead would leave the address saying `/pages/%` while the
+  // screen shows the index — the address and the screen disagreeing is the
+  // failure this module exists to prevent. Kept, it addresses a Page that
+  // does not exist, the detail read answers 404, and the surface says so
+  // by name. A wrong address should say it is wrong, not quietly become a
+  // different page.
   let slug: string | null = null
   if (match) {
     try {
