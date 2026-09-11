@@ -53,26 +53,44 @@ func acceptDelivery(t *testing.T, s *Store, db *sql.DB, d Delivery, w AcceptRequ
 }
 
 // finish drives a queued work item to a terminal state along legal edges only,
-// so terminal_at is written by the same code the server uses. `succeeded` is not
-// reachable from `queued` — work has to have run to succeed — so the walk goes
-// through starting and running when it needs to.
+// so terminal_at is written by the same code the server uses.
+//
+// It claims first, because a worker transition now has to present a real
+// attempt — work, run and generation, bound to one another. The old version
+// transitioned with no attempt at all, which the store used to allow and which
+// was the shape of the cross-work bug the review reproduced. Going through a
+// claim is also simply what happens in production: nothing reaches `running`
+// without having been claimed.
 func finish(t *testing.T, s *Store, workID string, to State) {
 	t.Helper()
+	ctx := context.Background()
+
+	// Cancel is not a worker transition; it is its own operation.
+	if to == StateCancelled {
+		if _, err := s.RequestCancel(ctx, workID, "test", "test"); err != nil {
+			t.Fatalf("finish %s: cancel: %v", workID, err)
+		}
+		return
+	}
+
+	c, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "finish-helper", WorkID: workID})
+	if err != nil {
+		t.Fatalf("finish %s: claim: %v", workID, err)
+	}
 	step := func(from, target State) {
 		t.Helper()
-		if err := s.Transition(context.Background(), TransitionRequest{
-			WorkID: workID, To: target, Reason: "test",
+		if err := s.Transition(ctx, TransitionRequest{
+			WorkID: workID, RunID: c.RunID, Generation: c.Generation, To: target, Reason: "test",
 		}); err != nil {
 			t.Fatalf("finish %s: %s -> %s: %v", workID, from, target, err)
 		}
 	}
-	if !CanTransition(StateQueued, to) {
-		step(StateQueued, StateStarting)
+	if !CanTransition(StateStarting, to) {
 		step(StateStarting, StateRunning)
 		step(StateRunning, to)
 		return
 	}
-	step(StateQueued, to)
+	step(StateStarting, to)
 }
 
 func rawBodyOf(t *testing.T, db *sql.DB, deliveryID string) []byte {

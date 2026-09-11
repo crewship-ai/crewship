@@ -1,0 +1,23 @@
+package work
+import("context";"testing")
+func TestCodexReviewCancelAfterClaim(t *testing.T){
+ s,db,_:=newTestStore(t);ctx:=context.Background();r:=accept(t,s,db,backgroundReq("a"))
+ c,e:=s.Claim(ctx,ClaimOptions{LeaseOwner:"worker"});if e!=nil{t.Fatal(e)}
+ if e=s.StartRunning(ctx,r.WorkID,c.RunID,c.Generation,"live-runtime");e!=nil{t.Fatal(e)}
+ // HTTP handler read queued before the claim; its later call has no precondition.
+ e=s.Transition(ctx,TransitionRequest{WorkID:r.WorkID,To:StateCancelled})
+ if e==nil{t.Fatal("BUG: stale queued cancel marks a running item cancelled without stopping runtime")}
+}
+func TestCodexReviewCrossWorkRun(t *testing.T){
+ s,db,_:=newTestStore(t);ctx:=context.Background();a:=accept(t,s,db,backgroundReq("a"));accept(t,s,db,backgroundReq("b"))
+ ca,e:=s.Claim(ctx,ClaimOptions{LeaseOwner:"worker",AgentID:"a"});if e!=nil{t.Fatal(e)}
+ cb,e:=s.Claim(ctx,ClaimOptions{LeaseOwner:"worker",AgentID:"b"});if e!=nil{t.Fatal(e)}
+ if e=s.StartRunning(ctx,a.WorkID,ca.RunID,ca.Generation,"a-runtime");e!=nil{t.Fatal(e)}
+ e=s.Transition(ctx,TransitionRequest{WorkID:a.WorkID,RunID:cb.RunID,Generation:ca.Generation,To:StateSucceeded})
+ if e==nil{t.Fatal("BUG: run B can complete work A and close B attempt")}
+}
+func TestCodexReviewUnknownRunStart(t *testing.T){
+ s,db,_:=newTestStore(t);ctx:=context.Background();r:=accept(t,s,db,backgroundReq("a"));c,e:=s.Claim(ctx,ClaimOptions{LeaseOwner:"worker"});if e!=nil{t.Fatal(e)}
+ e=s.StartRunning(ctx,r.WorkID,"nonexistent-run",c.Generation,"locator")
+ if e==nil{t.Fatal("BUG: item becomes running with no matching runtime attempt")}
+}

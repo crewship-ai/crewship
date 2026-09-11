@@ -42,6 +42,21 @@ type seededWork struct {
 	TerminalAt  string
 }
 
+// seedWorkAttempt gives a work item the open attempt its live state implies.
+// Seeding a running item with no attempt described a state the ledger cannot
+// be in, and the store now refuses to guess which run a cancel is meant for.
+func seedWorkAttempt(t *testing.T, db *sql.DB, workID, runID string, generation int64) {
+	t.Helper()
+	now := tsformat.Format(time.Now().UTC())
+	if _, err := db.Exec(`
+		INSERT INTO work_attempts (run_id, work_id, attempt, generation, lease_owner,
+			lease_expires_at, heartbeat_at, started_at, runtime_phase)
+		VALUES (?, ?, ?, ?, 'test', ?, ?, ?, 'confirmed')`,
+		runID, workID, generation, generation, now, now, now); err != nil {
+		t.Fatalf("seed attempt: %v", err)
+	}
+}
+
 func seedWorkItem(t *testing.T, db *sql.DB, w seededWork) string {
 	t.Helper()
 	if w.Class == "" {
@@ -288,6 +303,15 @@ func TestWorkCancel_SaysWhatItActuallyDid(t *testing.T) {
 			ws := seedTestWorkspace(t, db, user)
 			h := NewWorkItemsHandler(db, quietLogger())
 			seedWorkItem(t, db, seededWork{ID: "wk-cancel", WorkspaceID: ws, State: tc.state, Generation: 3})
+			// A state that holds a runtime has an open attempt behind it. The
+			// store now refuses to guess which run a cancel is meant for, so
+			// seeding the item alone would describe a row the ledger cannot
+			// hold — and the honest answer to it is reconciliation, not a
+			// cancel. needs_reconciliation is deliberately left without one:
+			// that state IS "the attempt is over and nobody knows what it did".
+			if work.State(tc.state).Live() || work.State(tc.state) == work.StateWaiting {
+				seedWorkAttempt(t, db, "wk-cancel", "run-cancel", 3)
+			}
 
 			req := workReq(t, "POST", "/work-items/wk-cancel/cancel", "", user, ws, "MANAGER")
 			req.SetPathValue("workItemId", "wk-cancel")
@@ -327,6 +351,10 @@ func TestWorkCancel_RequestIsRecordedOnceAndIsIdempotent(t *testing.T) {
 	ws := seedTestWorkspace(t, db, user)
 	h := NewWorkItemsHandler(db, quietLogger())
 	seedWorkItem(t, db, seededWork{ID: "wk-signal", WorkspaceID: ws, State: "running", Generation: 4})
+	// Running work has an open attempt. Seeding the item alone described a
+	// state the ledger cannot actually be in, and the store now says so rather
+	// than guessing which run a cancel is meant for.
+	seedWorkAttempt(t, db, "wk-signal", "run-signal", 4)
 
 	for i := 0; i < 3; i++ {
 		req := workReq(t, "POST", "/work-items/wk-signal/cancel", "", user, ws, "MANAGER")

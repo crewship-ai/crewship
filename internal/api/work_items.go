@@ -34,7 +34,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/work"
@@ -441,124 +440,55 @@ func (h *WorkItemsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state := work.State(item.State)
-	if state.Terminal() {
-		outcome, detail := workCancelOutcomeTerminal, "This work finished as "+item.State+" before the cancel was applied; nothing was stopped."
-		if state == work.StateCancelled {
+	// One store call decides everything, from the row as it is HERE.
+	//
+	// This handler used to read the state, branch on it, and then ask for
+	// `cancelled` with no precondition — so a claim landing in the gap turned a
+	// live run's row terminal while its process carried on, and the reply said
+	// "Cancelled before it started; no runtime was involved". Both halves of
+	// that sentence were false. Review finding R1.
+	res, err := work.NewStore(h.db).RequestCancel(r.Context(), item.ID,
+		user.ID, cancelRequestedReason+" by "+user.ID)
+	if errors.Is(err, work.ErrNotFound) {
+		replyError(w, http.StatusNotFound, "Work item not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "cancel work item", err)
+		return
+	}
+
+	switch res.Outcome {
+	case work.CancelOutcomeCancelled:
+		auditFromRequest(r, h.db, "work.cancel", "WORK_ITEM", item.ID,
+			map[string]interface{}{"outcome": workCancelOutcomeCancelled, "from_state": item.State})
+		writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: string(res.State),
+			Outcome: workCancelOutcomeCancelled, Detail: "Cancelled before it started; no runtime was involved."})
+
+	case work.CancelOutcomeAlreadyTerminal:
+		detail := "This work finished as " + string(res.State) + " before the cancel was applied; nothing was stopped."
+		outcome := workCancelOutcomeTerminal
+		if res.State == work.StateCancelled {
 			// A repeat of a cancel that already completed. Idempotent, and it
 			// reads as success rather than as a race it lost.
 			outcome, detail = workCancelOutcomeCancelled, "Already cancelled."
 		}
-		writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: item.State, Outcome: outcome, Detail: detail})
-		return
-	}
+		writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: string(res.State),
+			Outcome: outcome, Detail: detail})
 
-	// Nothing is executing: take the stop atomically and confirm it.
-	if state == work.StateQueued || state == work.StateRetryWait {
-		err := work.NewStore(h.db).Transition(r.Context(), work.TransitionRequest{
-			WorkID: item.ID,
-			To:     work.StateCancelled,
-			Reason: cancelRequestedReason + " by " + user.ID,
-		})
-		switch {
-		case err == nil:
-			auditFromRequest(r, h.db, "work.cancel", "WORK_ITEM", item.ID, map[string]interface{}{"outcome": workCancelOutcomeCancelled, "from_state": item.State})
-			writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: string(work.StateCancelled),
-				Outcome: workCancelOutcomeCancelled, Detail: "Cancelled before it started; no runtime was involved."})
-			return
-		case errors.Is(err, work.ErrTerminal), errors.Is(err, work.ErrIllegalTransition):
-			// It moved under us between the read and the transition — a claim
-			// or a completion won. Re-read and answer with what is true now
-			// rather than with what we intended.
-			h.replyCancelRace(w, r, ws, item.ID)
-			return
-		default:
-			replyInternalError(w, h.logger, "cancel work item", err)
-			return
-		}
+	default:
+		// A live runtime. The request is durable and recorded against the
+		// attempt that was current inside that transaction — not against the
+		// snapshot this handler read a moment ago, which is what made the old
+		// version wrong. The dispatcher owns delivering the signal and the
+		// grace escalation, and only a confirmed stop writes `cancelled`.
+		auditFromRequest(r, h.db, "work.cancel", "WORK_ITEM", item.ID,
+			map[string]interface{}{"outcome": workCancelOutcomeRequested, "from_state": string(res.State), "run_id": res.RunID})
+		writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: string(res.State), Outcome: workCancelOutcomeRequested,
+			Detail: "Cancel requested. This work holds a runtime, so it is signalled rather than stopped here; it becomes cancelled only once the stop is confirmed, and an unstoppable process goes to needs_reconciliation instead."})
 	}
-
-	// A live runtime. Record the request; the dispatcher owns delivering the
-	// signal and the 10s grace escalation, and only a confirmed stop writes
-	// `cancelled`.
-	recorded, err := h.recordCancelRequest(r, item, user.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "record cancel request", err)
-		return
-	}
-	if recorded {
-		auditFromRequest(r, h.db, "work.cancel", "WORK_ITEM", item.ID, map[string]interface{}{"outcome": workCancelOutcomeRequested, "from_state": item.State})
-	}
-	writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: item.State, Outcome: workCancelOutcomeRequested,
-		Detail: "Cancel requested. This work holds a runtime, so it is signalled rather than stopped here; it becomes cancelled only once the stop is confirmed, and an unstoppable process goes to needs_reconciliation instead."})
 }
 
-// replyCancelRace answers with the item's state as of now, after a transition
-// lost a race. It never invents an outcome: whatever the ledger says is what
-// the caller is told.
-func (h *WorkItemsHandler) replyCancelRace(w http.ResponseWriter, r *http.Request, workspaceID, workItemID string) {
-	item, found, err := h.readItem(r, workspaceID, workItemID)
-	if err != nil {
-		replyInternalError(w, h.logger, "re-read work item after cancel race", err)
-		return
-	}
-	if !found {
-		replyError(w, http.StatusNotFound, "Work item not found")
-		return
-	}
-	outcome, detail := workCancelOutcomeRequested, "The item changed state while the cancel was being applied; its current state is authoritative."
-	if work.State(item.State).Terminal() {
-		outcome = workCancelOutcomeTerminal
-		detail = "This work finished as " + item.State + " before the cancel was applied; nothing was stopped."
-		if work.State(item.State) == work.StateCancelled {
-			outcome, detail = workCancelOutcomeCancelled, "Already cancelled."
-		}
-	}
-	writeJSON(w, http.StatusOK, workCancelResponse{ID: item.ID, State: item.State, Outcome: outcome, Detail: detail})
-}
-
-// recordCancelRequest appends the request to the item's history without
-// touching its authoritative state, and reports whether it wrote anything.
-//
-// It is an event with from_state == to_state ON PURPOSE. §3 requires an
-// authoritative state change to carry an event; it does not require every
-// event to be a state change, and a cancel request that left no durable trace
-// would be a promise made only in an HTTP response — gone the moment the
-// process that answered it restarts. Keying idempotency on the item's current
-// generation is what makes polling this endpoint safe: one request per
-// attempt, not one per poll.
-func (h *WorkItemsHandler) recordCancelRequest(r *http.Request, item workItemView, userID string) (bool, error) {
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var existing int
-	if err := tx.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM work_events WHERE work_id=? AND generation=? AND reason LIKE ?`,
-		item.ID, item.Generation, cancelRequestedReason+"%").Scan(&existing); err != nil {
-		return false, err
-	}
-	if existing > 0 {
-		return false, nil
-	}
-	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO work_events (work_id, seq, at, from_state, to_state, run_id, generation, reason)
-		VALUES (?, (SELECT COALESCE(MAX(seq), 0) + 1 FROM work_events WHERE work_id = ?), ?, ?, ?, '', ?, ?)`,
-		item.ID, item.ID, tsformat.Format(time.Now().UTC()), item.State, item.State, item.Generation,
-		cancelRequestedReason+" by "+userID); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
-}
-
-// Replay mints a NEW work item from a finished one (§4).
-//
-// It is not a retry. A retry keeps the work id and mints a run id, and the
-// queue does that on its own for a safely repeatable failure. A replay is a
-// new authorization: it carries the CURRENT caller's identity, not the
-// original one, and it says so in the ledger via replay_of and a reason.
 func (h *WorkItemsHandler) Replay(w http.ResponseWriter, r *http.Request) {
 	ws, ok := workReadContext(w, r)
 	if !ok {

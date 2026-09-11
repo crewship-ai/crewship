@@ -482,15 +482,26 @@ func TestTransition_RejectsIllegalEdgeAndTerminalWork(t *testing.T) {
 
 	r := accept(t, s, db, backgroundReq("agent-jamie"))
 
-	// queued -> succeeded is not an edge: work cannot finish without running.
+	// A worker transition with no attempt is refused for NOT BEING BOUND, before
+	// the edge is even considered — presenting no attempt is the stale worker's
+	// signature, so it is refused first and on its own terms.
 	err := s.Transition(ctx, TransitionRequest{WorkID: r.WorkID, To: StateSucceeded})
-	if !errors.Is(err, ErrIllegalTransition) {
-		t.Fatalf("queued->succeeded = %v, want ErrIllegalTransition", err)
+	if !errors.Is(err, ErrNotBound) {
+		t.Fatalf("unbound transition = %v, want ErrNotBound", err)
 	}
 
 	c, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "w"})
 	if err != nil {
 		t.Fatalf("claim: %v", err)
+	}
+
+	// With a real attempt in hand, the edge itself is what refuses:
+	// starting -> succeeded skips the running state entirely.
+	err = s.Transition(ctx, TransitionRequest{
+		WorkID: r.WorkID, RunID: c.RunID, Generation: c.Generation, To: StateSucceeded,
+	})
+	if !errors.Is(err, ErrIllegalTransition) {
+		t.Fatalf("starting->succeeded = %v, want ErrIllegalTransition", err)
 	}
 	mustTransition(t, s, r.WorkID, c, StateRunning)
 	mustTransition(t, s, r.WorkID, c, StateSucceeded)
@@ -843,10 +854,11 @@ func TestNeedsReconciliation_HoldsCapacityUntilResolved(t *testing.T) {
 	}
 
 	// Resolving it explicitly is what frees the capacity, and only then does B run.
-	if err := s.Transition(ctx, TransitionRequest{
-		WorkID: a.WorkID, RunID: claimA.RunID, Generation: claimA.Generation,
-		To: StateFailed, Reason: "operator verified the runtime was gone",
-	}); err != nil {
+	// Resolution is the ADMIN path, not a worker transition: A's attempt is
+	// over, so there is no live attempt to present and the worker path is
+	// unsatisfiable here by construction.
+	if err := s.Resolve(ctx, a.WorkID, StateFailed, "operator",
+		"checked the container; the runtime was gone"); err != nil {
 		t.Fatalf("resolve A: %v", err)
 	}
 	claimB, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "worker-b", AgentID: "agent-jamie"})

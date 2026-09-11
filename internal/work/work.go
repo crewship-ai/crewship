@@ -253,6 +253,12 @@ var (
 	// the fencing refusal: the caller must not retry it as if it were a
 	// transient error, because a newer attempt owns the work now.
 	ErrStaleGeneration = errors.New("work: stale generation")
+	// ErrNotBound means the work, the attempt and the generation the caller
+	// presented do not describe one real, current attempt. It is a refusal to
+	// guess: the caller may be a stale worker, a confused one, or one that
+	// simply omitted a field — and the first of those must never be allowed to
+	// report a result, so none of them are.
+	ErrNotBound = errors.New("work: work, run and generation are not bound to one live attempt")
 	// ErrTerminal means the work already reached a terminal state. A cancel that
 	// loses the race to a completion gets this, and the API must answer with the
 	// real finished state rather than claiming a cancel it did not perform.

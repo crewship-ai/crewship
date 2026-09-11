@@ -27,14 +27,27 @@ type TransitionRequest struct {
 
 // Transition applies a fenced state change and its event in one transaction.
 //
-// It refuses three things, each with its own error, because the caller must
-// react differently to each: a stale generation is not retryable (someone else
-// owns the work), a terminal item is not an error to report to the user as a
-// failure (the API answers with the real finished state), and an illegal edge
-// is a bug in the caller.
+// This is the WORKER path and it demands the full binding: work id, run id and
+// generation, all three verified against each other inside the transaction.
+// Anything less was not enough, and the review proved it twice.
+//
+// Generation alone is not identity. Two work items claimed once each both sit
+// at generation 1, so run B could report a result for work A — and the follow-up
+// UPDATE would then close B's own attempt, losing the live run as well as
+// corrupting the finished one. The attempt must belong to THIS work item, be
+// the current one, and still be open.
+//
+// There is deliberately no generation == 0 escape hatch here. It existed as a
+// convenience for callers that did not have an attempt, and what it actually
+// did was disable the fence for anyone who omitted a field. Callers without an
+// attempt want RequestCancel or Resolve, which say what they are.
 func (s *Store) Transition(ctx context.Context, req TransitionRequest) error {
 	if !req.To.valid() {
 		return fmt.Errorf("%w: unknown state %q", ErrIllegalTransition, req.To)
+	}
+	if req.RunID == "" || req.Generation == 0 {
+		return fmt.Errorf("%w: a worker transition needs run id and generation; "+
+			"use RequestCancel or Resolve for an operation that owns no attempt", ErrNotBound)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -49,8 +62,8 @@ func (s *Store) Transition(ctx context.Context, req TransitionRequest) error {
 	if it.State.Terminal() {
 		return fmt.Errorf("%w: %s is %s", ErrTerminal, it.ID, it.State)
 	}
-	if req.Generation != 0 && req.Generation != it.Generation {
-		return fmt.Errorf("%w: attempt generation %d, live generation %d", ErrStaleGeneration, req.Generation, it.Generation)
+	if err := verifyAttemptBindingTx(ctx, tx, req.WorkID, req.RunID, req.Generation, it.Generation); err != nil {
+		return err
 	}
 	if !CanTransition(it.State, req.To) {
 		return fmt.Errorf("%w: %s -> %s", ErrIllegalTransition, it.State, req.To)
@@ -82,25 +95,120 @@ func (s *Store) Transition(ctx context.Context, req TransitionRequest) error {
 
 	// Close the attempt whenever the work stops occupying a slot. `waiting`
 	// deliberately does not close it: the runtime is parked, not finished, and
-	// §4 requires the slot to be released only once that parking is confirmed —
-	// which the caller does with ReleaseSlot.
-	if req.RunID != "" && (to.Terminal() || to == StateRetryWait || to == StateQueued || to == StateNeedsReconciliation) {
-		if _, err := tx.ExecContext(ctx, `
+	// §4 requires the slot to be released only once that parking is confirmed.
+	if to.Terminal() || to == StateRetryWait || to == StateQueued || to == StateNeedsReconciliation {
+		res, err := tx.ExecContext(ctx, `
 			UPDATE work_attempts
 			SET ended_at = ?, end_reason = ?, exit_evidence = ?, cost_usd = ?
-			WHERE run_id = ? AND ended_at IS NULL`,
-			tsformat.Format(now), reason, req.ExitEvidence, req.CostUSD, req.RunID); err != nil {
+			WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
+			tsformat.Format(now), reason, req.ExitEvidence, req.CostUSD,
+			req.RunID, req.WorkID, req.Generation)
+		if err != nil {
 			return fmt.Errorf("work: close attempt: %w", err)
+		}
+		// The binding was verified above, so zero rows here means something
+		// changed under us inside the transaction — which cannot happen, and if
+		// it ever does the state change must not commit alone.
+		if n, _ := res.RowsAffected(); n != 1 {
+			return fmt.Errorf("%w: closing attempt %s of %s affected %d rows",
+				ErrNotBound, req.RunID, req.WorkID, n)
 		}
 	}
 
 	return tx.Commit()
 }
 
-// StartRunning records that the runtime is confirmed live, together with where
-// it is. The locator is what recovery consults before deciding a process is
-// gone: §4 forbids treating an expired lease alone as permission to start a
-// second one.
+// verifyAttemptBindingTx is the whole of the fence, in one place so that every
+// worker-facing operation gets the same answer.
+//
+// It proves four things at once: the attempt exists, it belongs to this work
+// item, it is the CURRENT attempt (its generation matches both the caller's and
+// the item's), and it has not already ended. A caller that satisfies all four
+// is the live worker; anything else is a stale one, a confused one, or a bug.
+func verifyAttemptBindingTx(ctx context.Context, tx *sql.Tx, workID, runID string, reqGeneration, itemGeneration int64) error {
+	if reqGeneration != itemGeneration {
+		return fmt.Errorf("%w: attempt generation %d, live generation %d",
+			ErrStaleGeneration, reqGeneration, itemGeneration)
+	}
+	var attemptWorkID string
+	var attemptGeneration int64
+	var endedAt sql.NullString
+	err := tx.QueryRowContext(ctx,
+		`SELECT work_id, generation, ended_at FROM work_attempts WHERE run_id = ?`, runID,
+	).Scan(&attemptWorkID, &attemptGeneration, &endedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: no attempt %s exists", ErrNotBound, runID)
+	}
+	if err != nil {
+		return fmt.Errorf("work: read attempt: %w", err)
+	}
+	if attemptWorkID != workID {
+		return fmt.Errorf("%w: attempt %s belongs to work %s, not %s",
+			ErrNotBound, runID, attemptWorkID, workID)
+	}
+	if attemptGeneration != reqGeneration {
+		return fmt.Errorf("%w: attempt %s is generation %d, caller claims %d",
+			ErrStaleGeneration, runID, attemptGeneration, reqGeneration)
+	}
+	if endedAt.Valid {
+		return fmt.Errorf("%w: attempt %s already ended at %s", ErrStaleGeneration, runID, endedAt.String)
+	}
+	return nil
+}
+
+// MarkStarting records, durably, that we are ABOUT to create a runtime — and
+// where it will be — before the external start happens.
+//
+// This is review finding R4. The previous shape wrote the locator only once the
+// runtime answered, so recovery read "no locator" as proof that no process had
+// been created. A crash between the real start and that write broke the proof:
+// the work went back on the queue while its process kept running, and the next
+// claim started a second one alongside it.
+//
+// The locator must therefore be DETERMINISTIC — derivable from the run id
+// before anything exists — so that recovery can go looking for a runtime by an
+// identity it knew in advance, instead of inferring absence from silence.
+func (s *Store) MarkStarting(ctx context.Context, workID, runID string, generation int64, plannedLocator string) error {
+	if plannedLocator == "" {
+		return fmt.Errorf("%w: a start intent without a locator tells recovery nothing", ErrNotBound)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("work: begin mark-starting: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	it, err := getItemTx(ctx, tx, workID)
+	if err != nil {
+		return err
+	}
+	if err := verifyAttemptBindingTx(ctx, tx, workID, runID, generation, it.Generation); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE work_attempts
+		SET runtime_locator = ?, runtime_phase = 'starting'
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
+		  AND runtime_phase = 'planned'`,
+		plannedLocator, runID, workID, generation)
+	if err != nil {
+		return fmt.Errorf("work: record start intent: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("%w: attempt %s of %s is not a planned attempt awaiting a start",
+			ErrNotBound, runID, workID)
+	}
+	return tx.Commit()
+}
+
+// StartRunning records that the runtime is confirmed live.
+//
+// The locator is normally already there from MarkStarting; passing one here
+// updates it, for the case where the confirmed identity differs from the
+// planned one. What changed is that the UPDATE is now checked: it used to
+// ignore how many rows it touched, so a run id that existed nowhere still moved
+// the work item to `running`, leaving work marked live with no attempt behind
+// it. That is one of the three defects the review reproduced.
 func (s *Store) StartRunning(ctx context.Context, workID, runID string, generation int64, locator string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -112,17 +220,25 @@ func (s *Store) StartRunning(ctx context.Context, workID, runID string, generati
 	if err != nil {
 		return err
 	}
-	if generation != it.Generation {
-		return fmt.Errorf("%w: attempt generation %d, live generation %d", ErrStaleGeneration, generation, it.Generation)
+	if err := verifyAttemptBindingTx(ctx, tx, workID, runID, generation, it.Generation); err != nil {
+		return err
 	}
 	if !CanTransition(it.State, StateRunning) {
 		return fmt.Errorf("%w: %s -> %s", ErrIllegalTransition, it.State, StateRunning)
 	}
 	now := s.now().UTC()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE work_attempts SET runtime_locator = ? WHERE run_id = ? AND generation = ?`,
-		locator, runID, generation); err != nil {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE work_attempts
+		SET runtime_locator = CASE WHEN ? != '' THEN ? ELSE runtime_locator END,
+		    runtime_phase = 'confirmed'
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
+		locator, locator, runID, workID, generation)
+	if err != nil {
 		return fmt.Errorf("work: record locator: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("%w: confirming runtime for attempt %s of %s affected %d rows",
+			ErrNotBound, runID, workID, n)
 	}
 	if err := s.setStateTx(ctx, tx, it, StateRunning, runID, generation, "runtime confirmed", now); err != nil {
 		return err
@@ -151,6 +267,14 @@ func (s *Store) Heartbeat(ctx context.Context, runID string, generation int64) e
 	return nil
 }
 
+// runtimePhasePlanned is the only attempt phase that proves nothing external
+// was attempted. See the migration that introduced the column.
+const (
+	runtimePhasePlanned   = "planned"
+	runtimePhaseStarting  = "starting"
+	runtimePhaseConfirmed = "confirmed"
+)
+
 // RecoveryOutcome is what one recovery pass did.
 type RecoveryOutcome struct {
 	Requeued       []string // work ids returned to the queue
@@ -163,9 +287,11 @@ type RecoveryOutcome struct {
 // lease is evidence that a worker stopped reporting — not that its runtime
 // stopped running. So:
 //
-//   - No runtime locator was ever recorded: the attempt died before it started
-//     anything outside the database. Safe to return to the queue.
-//   - A locator exists: something may still be executing under it. The work goes
+//   - The attempt is still `planned`: it was claimed, capacity was reserved, and
+//     nothing outside the database was ever attempted. Safe to return to the
+//     queue, because there is no process to collide with.
+//   - It reached `starting` or `confirmed`: an external start was REQUESTED, so
+//     something may be executing under the locator we wrote down first. The work goes
 //     to needs_reconciliation and keeps its conflicting capacity until someone
 //     verifies the locator, stops or adopts that runtime, and revokes the old
 //     capability. Starting a second process here is exactly the "two live
@@ -184,7 +310,7 @@ func (s *Store) RecoverExpiredLeases(ctx context.Context) (RecoveryOutcome, erro
 
 	now := s.now().UTC()
 	rows, err := tx.QueryContext(ctx, `
-		SELECT a.run_id, a.work_id, a.generation, a.runtime_locator
+		SELECT a.run_id, a.work_id, a.generation, a.runtime_locator, a.runtime_phase
 		FROM work_attempts a
 		JOIN work_items w ON w.id = a.work_id
 		WHERE a.ended_at IS NULL
@@ -196,13 +322,13 @@ func (s *Store) RecoverExpiredLeases(ctx context.Context) (RecoveryOutcome, erro
 		return out, fmt.Errorf("work: scan expired leases: %w", err)
 	}
 	type expired struct {
-		runID, workID, locator string
-		generation             int64
+		runID, workID, locator, phase string
+		generation                    int64
 	}
 	var list []expired
 	for rows.Next() {
 		var e expired
-		if err := rows.Scan(&e.runID, &e.workID, &e.generation, &e.locator); err != nil {
+		if err := rows.Scan(&e.runID, &e.workID, &e.generation, &e.locator, &e.phase); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -218,9 +344,15 @@ func (s *Store) RecoverExpiredLeases(ctx context.Context) (RecoveryOutcome, erro
 		if err != nil {
 			return out, err
 		}
-		to, reason := StateQueued, "lease expired before any runtime started"
-		if e.locator != "" {
-			to, reason = StateNeedsReconciliation, "lease expired with a runtime locator recorded: "+e.locator
+		// The PHASE decides, not the presence of a locator. Reading an empty
+		// locator as "nothing started" is exactly the inference R4 broke: it
+		// cannot tell "never started" from "started, and we died before writing
+		// it down". Only `planned` licenses a blind requeue.
+		to, reason := StateQueued, "lease expired while the attempt was still planned; no runtime was ever requested"
+		if e.phase != runtimePhasePlanned {
+			to = StateNeedsReconciliation
+			reason = fmt.Sprintf("lease expired in runtime phase %q; a runtime may exist at %q and must be checked",
+				e.phase, e.locator)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE work_attempts SET ended_at = ?, end_reason = ? WHERE run_id = ? AND ended_at IS NULL`,
@@ -283,4 +415,247 @@ func (s *Store) History(ctx context.Context, workID string) ([]Event, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// CancelOutcome is what a cancel request actually achieved, which is not always
+// what the caller asked for.
+type CancelOutcome string
+
+const (
+	// CancelOutcomeCancelled means the work is confirmed stopped. It is only
+	// ever returned for work that had not started: nothing was running, so
+	// there was nothing to stop.
+	CancelOutcomeCancelled CancelOutcome = "cancelled"
+	// CancelOutcomeRequested means a live runtime was asked to stop and the
+	// request is durable. The work is still running until a worker confirms
+	// otherwise, and the caller must not describe it as stopped.
+	CancelOutcomeRequested CancelOutcome = "requested"
+	// CancelOutcomeAlreadyTerminal means the work finished on its own before
+	// the cancel arrived. The real finished state comes back with it, because
+	// telling someone "cancelled" about work that succeeded is a lie in the one
+	// direction that matters.
+	CancelOutcomeAlreadyTerminal CancelOutcome = "already_terminal"
+)
+
+// CancelResult reports what happened and the state the work is actually in.
+type CancelResult struct {
+	Outcome CancelOutcome
+	State   State
+	// RunID is the attempt the request was recorded against, empty when the
+	// work had not started. A dispatcher signals THIS run, not the agent.
+	RunID string
+	// Generation the request was recorded against, so a worker that has since
+	// been superseded cannot satisfy a cancel meant for its replacement.
+	Generation int64
+}
+
+// RequestCancel is the whole of cancellation, in one transaction.
+//
+// Review finding R1. The previous shape read the work item's state over here,
+// decided what to do, and then asked for `cancelled` over there with no
+// precondition at all. A claim landing in the gap turned a live run's row
+// terminal while its process carried on, and the API answered "Cancelled before
+// it started; no runtime was involved" — a sentence that was false about both
+// halves.
+//
+// So the read and the decision are now the same transaction, and what is
+// decided is decided from what the row says HERE, not from a snapshot a handler
+// took earlier. Queued work is cancelled outright, because there is genuinely
+// nothing running. Live work gets a durable request recorded against the
+// attempt that is current at this instant — and stays running until a worker
+// confirms the stop, which is the only thing that can honestly produce
+// `cancelled`.
+//
+// Cancel is idempotent: asking twice records the request once and answers the
+// same way, because a user pressing a button twice is not a state change.
+func (s *Store) RequestCancel(ctx context.Context, workID, requestedBy, reason string) (CancelResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("work: begin cancel: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	it, err := getItemTx(ctx, tx, workID)
+	if err != nil {
+		return CancelResult{}, err
+	}
+	now := s.now().UTC()
+
+	if it.State.Terminal() {
+		if err := tx.Commit(); err != nil {
+			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+		}
+		return CancelResult{Outcome: CancelOutcomeAlreadyTerminal, State: it.State}, nil
+	}
+
+	// Not started: cancel it outright, conditioned on the state and generation
+	// this transaction just read. The condition is what makes it atomic — a
+	// claim that beat us here changes both, and then this UPDATE matches
+	// nothing and we fall through to treating it as live, which it now is.
+	if it.State == StateQueued || it.State == StateRetryWait {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE work_items
+			SET state = 'cancelled', state_reason = ?, updated_at = ?, terminal_at = ?
+			WHERE id = ? AND state = ? AND generation = ?`,
+			reason, tsformat.Format(now), tsformat.Format(now), it.ID, string(it.State), it.Generation)
+		if err != nil {
+			return CancelResult{}, fmt.Errorf("work: cancel queued work: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			if err := appendEventTx(ctx, tx, it.ID, string(it.State), StateCancelled, "", it.Generation, reason, now); err != nil {
+				return CancelResult{}, err
+			}
+			if err := tx.Commit(); err != nil {
+				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+			}
+			return CancelResult{Outcome: CancelOutcomeCancelled, State: StateCancelled}, nil
+		}
+		// Lost the race inside our own transaction, which under an immediate
+		// transaction should be unreachable. Re-read rather than assume, so
+		// that a future reader who relaxes the isolation finds this line.
+		if it, err = getItemTx(ctx, tx, workID); err != nil {
+			return CancelResult{}, err
+		}
+		if it.State.Terminal() {
+			if err := tx.Commit(); err != nil {
+				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+			}
+			return CancelResult{Outcome: CancelOutcomeAlreadyTerminal, State: it.State}, nil
+		}
+	}
+
+	// Live work. Record the request against the attempt that is current NOW,
+	// read inside this transaction rather than carried in from a caller's
+	// earlier snapshot — a request stamped with a superseded generation would
+	// let a worker that has already been replaced satisfy a cancel meant for
+	// its replacement.
+	var runID string
+	var generation int64
+	var alreadyRequested sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT run_id, generation, cancel_requested_at FROM work_attempts
+		WHERE work_id = ? AND generation = ? AND ended_at IS NULL`,
+		it.ID, it.Generation).Scan(&runID, &generation, &alreadyRequested)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Live state with no open attempt: the ledger disagrees with itself,
+		// and a cancel is not the place to paper over that. Park it for
+		// reconciliation rather than reporting a stop nobody performed —
+		// once, so repeated asks do not grow the history.
+		if it.State == StateNeedsReconciliation {
+			if err := tx.Commit(); err != nil {
+				return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+			}
+			return CancelResult{Outcome: CancelOutcomeRequested, State: it.State}, nil
+		}
+		if err := s.setStateTx(ctx, tx, it, StateNeedsReconciliation, "", it.Generation,
+			"cancel requested for "+string(it.State)+" work with no open attempt", now); err != nil {
+			return CancelResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+		}
+		return CancelResult{Outcome: CancelOutcomeRequested, State: StateNeedsReconciliation}, nil
+	}
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("work: read live attempt: %w", err)
+	}
+
+	// Already asked. Idempotent means the SECOND call changes nothing — not the
+	// row, and not the history either: three presses of a button are one
+	// decision, and three events would read as three.
+	if alreadyRequested.Valid {
+		if err := tx.Commit(); err != nil {
+			return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+		}
+		return CancelResult{
+			Outcome: CancelOutcomeRequested, State: it.State, RunID: runID, Generation: generation,
+		}, nil
+	}
+
+	res, err := tx.ExecContext(ctx, `
+		UPDATE work_attempts
+		SET cancel_requested_at = COALESCE(cancel_requested_at, ?),
+		    cancel_requested_by = CASE WHEN cancel_requested_at IS NULL THEN ? ELSE cancel_requested_by END,
+		    cancel_reason = CASE WHEN cancel_requested_at IS NULL THEN ? ELSE cancel_reason END
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
+		tsformat.Format(now), requestedBy, reason, runID, it.ID, generation)
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("work: record cancel request: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return CancelResult{}, fmt.Errorf("%w: recording a cancel for attempt %s affected %d rows",
+			ErrNotBound, runID, n)
+	}
+
+	// The request is part of the history, recorded as a same-state event so the
+	// timeline shows when someone asked — without claiming the work changed.
+	if err := appendEventTx(ctx, tx, it.ID, string(it.State), it.State, runID, generation,
+		"cancel requested: "+reason, now); err != nil {
+		return CancelResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CancelResult{}, fmt.Errorf("work: commit cancel: %w", err)
+	}
+	return CancelResult{
+		Outcome: CancelOutcomeRequested, State: it.State, RunID: runID, Generation: generation,
+	}, nil
+}
+
+// CancelRequested reports whether a stop has been asked of this attempt, so a
+// worker can notice mid-run and a dispatcher can chase one across a restart.
+func (s *Store) CancelRequested(ctx context.Context, runID string) (bool, error) {
+	var at sql.NullString
+	err := s.db.QueryRowContext(ctx,
+		`SELECT cancel_requested_at FROM work_attempts WHERE run_id = ?`, runID).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("work: read cancel request: %w", err)
+	}
+	return at.Valid, nil
+}
+
+// Resolve is the ADMIN path out of needs_reconciliation, and it exists because
+// the worker path cannot serve it.
+//
+// A work item lands in needs_reconciliation precisely when its attempt is over
+// and nobody knows what its runtime did. There is no live attempt to present,
+// so every check Transition makes — the attempt is open, its generation is
+// current — is unsatisfiable by construction. Letting the worker path accept a
+// missing attempt "just for this case" would reopen the hole the binding closes,
+// because that is the same permission a stale worker needs.
+//
+// So resolution is its own operation with its own preconditions: the caller is
+// a human or a reconciler who has established what actually happened, and says
+// so. It records who decided and why, because "someone marked this failed" is
+// the only evidence anyone will have later.
+func (s *Store) Resolve(ctx context.Context, workID string, to State, resolvedBy, reason string) error {
+	if resolvedBy == "" || reason == "" {
+		return fmt.Errorf("%w: resolving a reconciliation needs an actor and a reason; "+
+			"it is a judgement someone made, and the record is the only evidence of it", ErrIllegalTransition)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("work: begin resolve: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	it, err := getItemTx(ctx, tx, workID)
+	if err != nil {
+		return err
+	}
+	if it.State != StateNeedsReconciliation {
+		return fmt.Errorf("%w: Resolve is only for needs_reconciliation, %s is %s",
+			ErrIllegalTransition, it.ID, it.State)
+	}
+	if !CanTransition(it.State, to) {
+		return fmt.Errorf("%w: %s -> %s", ErrIllegalTransition, it.State, to)
+	}
+	now := s.now().UTC()
+	if err := s.setStateTx(ctx, tx, it, to, "", it.Generation,
+		fmt.Sprintf("resolved by %s: %s", resolvedBy, reason), now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

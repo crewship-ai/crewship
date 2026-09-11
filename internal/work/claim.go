@@ -69,6 +69,13 @@ type ClaimOptions struct {
 	// AgentID, when set, restricts the claim to one agent — the shape the
 	// existing per-agent pump uses when a run finishes and frees its slot.
 	AgentID string
+	// WorkID, when set, restricts the claim to one work item. This is what a
+	// wake-up hint turns into: acceptance commits and says "there is something
+	// for you", and the dispatcher tries to claim THAT item rather than
+	// re-scanning the whole queue. It is a hint, not a reservation — the item
+	// still has to pass every limit, and losing it to another dispatcher is a
+	// normal ErrNoWork.
+	WorkID string
 }
 
 // Claimed is a successful claim: the work, the attempt that now owns it, and
@@ -260,6 +267,10 @@ func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOpti
 	if opts.AgentID != "" {
 		q += ` AND w.agent_id = ?`
 		args = append(args, opts.AgentID)
+	}
+	if opts.WorkID != "" {
+		q += ` AND w.id = ?`
+		args = append(args, opts.WorkID)
 	}
 
 	// One active turn per session (I3). needs_reconciliation counts here: the
