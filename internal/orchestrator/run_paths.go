@@ -261,13 +261,18 @@ func runHomeLocation(runID string) (containerID, agentSlug string, found bool) {
 
 // RunIsAlive reports whether a runtime for runID still exists.
 //
-// An unknown run returns an ERROR rather than false, and the distinction is the
-// whole value of this method. The registry only knows runs this process
-// started, so after a restart it knows nothing — and answering "not alive"
-// there would let a dispatcher conclude that a process it cannot see is a
-// process that does not exist. That is the inference the start protocol was
-// built to prevent; a caller that gets an error parks the work for
-// reconciliation instead, which is the truthful outcome.
+// Two different "no"s have to stay apart here, and the first version of this
+// collapsed them. `tmux has-session … && echo yes || echo no` prints "no" when
+// the session is absent AND when tmux is missing, the container is gone, or the
+// exec itself failed — so an unreachable container read as a stopped process,
+// which is the licence to start a second one.
+//
+// The probe therefore reports tmux's own exit status, and anything that is not
+// a clean present/absent answer is an error. An unknown run is an error too:
+// the registry only knows runs THIS process started, so after a restart it
+// knows nothing, and answering "not alive" there would let a dispatcher
+// conclude that a process it cannot see is a process that does not exist. A
+// caller that gets an error parks the work for reconciliation, which is true.
 func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, error) {
 	containerID, agentSlug, found := runHomeLocation(runID)
 	if !found {
@@ -275,17 +280,30 @@ func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, erro
 			"cannot be answered from here", runID)
 	}
 	session := TmuxSessionName(agentSlug, runID)
-	res, err := o.container.Exec(ctx, provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "tmux has-session -t '" + session + "' 2>/dev/null && echo yes || echo no"},
-		User:        "1001:1001",
-	})
+	// PRESENT / ABSENT are distinct tokens, and anything else — including an
+	// empty read — is not an answer.
+	probe := "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
+		"elif tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; " +
+		"else echo ABSENT; fi"
+	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		return false, fmt.Errorf("probe run %s: %w", runID, err)
 	}
-	out, _ := io.ReadAll(res.Reader)
-	res.Reader.Close()
-	return strings.Contains(string(out), "yes"), nil
+	switch {
+	case strings.Contains(out, "PRESENT"):
+		return true, nil
+	case strings.Contains(out, "ABSENT"):
+		return false, nil
+	case strings.Contains(out, "NOTMUX"):
+		// The tmux path is the only runtime identity this profile can search
+		// for. Without tmux a run may exist under the direct-exec fallback and
+		// nothing here can see it, so this is a refusal rather than an absence.
+		return false, fmt.Errorf("run %s: the container has no tmux, so a direct-exec runtime cannot be "+
+			"located; this profile cannot answer for it", runID)
+	default:
+		return false, fmt.Errorf("run %s: the probe returned %q, which is neither present nor absent",
+			runID, strings.TrimSpace(out))
+	}
 }
 
 // StopRun signals the runtime for runID and reports whether it is now gone.
@@ -293,7 +311,8 @@ func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, erro
 // It targets that run's own tmux session, never the agent: before E0 the
 // session name carried only the slug, so stopping one run of an agent stopped
 // every run of it. Returning (false, nil) means "asked, still there" — not a
-// failure, and not something a caller may report as a stop.
+// failure, and not something a caller may report as a stop. As with RunIsAlive,
+// an unreadable probe is an error rather than a convenient "gone".
 func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) {
 	containerID, agentSlug, found := runHomeLocation(runID)
 	if !found {
@@ -301,16 +320,41 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 			"it does not know the location of", runID)
 	}
 	session := TmuxSessionName(agentSlug, runID)
-	res, err := o.container.Exec(ctx, provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd: []string{"sh", "-c", "tmux kill-session -t '" + session + "' 2>/dev/null; " +
-			"tmux has-session -t '" + session + "' 2>/dev/null && echo alive || echo gone"},
-		User: "1001:1001",
-	})
+	probe := "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
+		"tmux kill-session -t '" + session + "' >/dev/null 2>&1; " +
+		"if tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; else echo ABSENT; fi; fi"
+	out, err := o.probeExec(ctx, containerID, probe)
 	if err != nil {
 		return false, fmt.Errorf("stop run %s: %w", runID, err)
 	}
-	out, _ := io.ReadAll(res.Reader)
-	res.Reader.Close()
-	return strings.Contains(string(out), "gone"), nil
+	switch {
+	case strings.Contains(out, "ABSENT"):
+		return true, nil
+	case strings.Contains(out, "PRESENT"):
+		return false, nil
+	case strings.Contains(out, "NOTMUX"):
+		return false, fmt.Errorf("run %s: the container has no tmux, so its runtime cannot be signalled "+
+			"by session name", runID)
+	default:
+		return false, fmt.Errorf("run %s: the stop probe returned %q, which says nothing about whether "+
+			"the runtime is gone", runID, strings.TrimSpace(out))
+	}
+}
+
+// probeExec runs a short shell probe in a container and returns its output.
+func (o *Orchestrator) probeExec(ctx context.Context, containerID, script string) (string, error) {
+	res, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return "", err
+	}
+	defer res.Reader.Close()
+	out, err := io.ReadAll(res.Reader)
+	if err != nil {
+		return "", fmt.Errorf("read probe output: %w", err)
+	}
+	return string(out), nil
 }

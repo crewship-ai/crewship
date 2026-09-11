@@ -845,7 +845,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		// attempt lands in retry_wait instead of vanishing.
 		h.logger.Error("webhook dispatch: crew runtime did not start",
 			"agent_id", agentID, "run_id", runID, "error", err)
-		return fmt.Errorf("crew runtime did not start: %w", err)
+		return fmt.Errorf("%w: crew runtime did not start: %w", errWebhookBeforeAgent, err)
 	}
 
 	// 4. Create run record. Reuses the runID minted (and idempotency-
@@ -868,7 +868,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		}
 		h.logger.Error("webhook dispatch: run record not created; not starting the agent",
 			"agent_id", agentID, "run_id", runID, "error", err)
-		return fmt.Errorf("run record not created: %w", err)
+		return fmt.Errorf("%w: run record not created: %w", errWebhookBeforeAgent, err)
 	}
 
 	// 5. Build user message from payload. The payload fields (event/source/

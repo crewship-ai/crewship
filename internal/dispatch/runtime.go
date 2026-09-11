@@ -24,6 +24,42 @@ import (
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
+// Outcome is what a finished attempt actually means.
+//
+// The four are separate because they lead to four different actions, and the
+// old code collapsed three of them into "retry". An agent that failed after
+// making an external change is not the same as one that never started, and
+// treating them alike is how a webhook delivery gets acted on twice.
+type Outcome int
+
+const (
+	// OutcomeUnclear is the zero value on purpose. An outcome nobody
+	// classified is one nobody can vouch for, and the safe reading of that is
+	// "somebody has to look" rather than "try it again".
+	OutcomeUnclear Outcome = iota
+	// OutcomeSucceeded: the work is done.
+	OutcomeSucceeded
+	// OutcomeFailed: it failed, it will fail again, and no retry is warranted.
+	OutcomeFailed
+	// OutcomeRetryable: the failure is PROVABLY before any external effect —
+	// the container would not start, the run record could not be written, the
+	// agent never ran. Retrying repeats nothing because nothing happened.
+	OutcomeRetryable
+)
+
+func (o Outcome) String() string {
+	switch o {
+	case OutcomeSucceeded:
+		return "succeeded"
+	case OutcomeFailed:
+		return "failed"
+	case OutcomeRetryable:
+		return "retryable"
+	default:
+		return "unclear"
+	}
+}
+
 // Assignment is one claimed attempt, handed to a Runtime to execute.
 //
 // It carries the identity three systems have to agree on. The run id is the
@@ -51,6 +87,19 @@ type Runtime interface {
 	// than silence to interpret. A locator invented at start time would be
 	// written after the danger had passed.
 	Locator(a Assignment) string
+
+	// Classify says what a failure from Run means.
+	//
+	// It exists because the dispatcher cannot know, and must not guess. An
+	// agent turn can make external changes and then fail, so "it returned an
+	// error" is not evidence that nothing happened — and retrying on that
+	// basis repeats whatever did. Only the runtime knows which of its own
+	// failures happened before anything left the machine.
+	//
+	// The default for anything unrecognised is OutcomeUnclear, not
+	// OutcomeRetryable: reconciliation is the safe direction, and a retry that
+	// turns out to be unsafe is not recoverable after the fact.
+	Classify(a Assignment, err error) Outcome
 
 	// Run creates the runtime and blocks until it finishes.
 	//
@@ -129,9 +178,15 @@ type Config struct {
 	// one restarted — is only visible in the ledger.
 	CancelPollInterval time.Duration
 	// StopGrace is how long a signalled runtime has to stop before the
-	// dispatcher stops claiming it will. §4: after the grace, an unconfirmed
-	// stop is reconciliation, not a cancellation.
+	// dispatcher escalates. §4: after the grace, an unconfirmed stop is
+	// reconciliation, not a cancellation.
 	StopGrace time.Duration
+	// RecoveryInterval is how often lease recovery runs.
+	//
+	// Once at boot is not enough: a server that restarts BEFORE an old lease
+	// expires skips it on the way up, and if nothing runs again the work hangs
+	// forever. §4 wants a scan at least every few seconds.
+	RecoveryInterval time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -152,6 +207,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.StopGrace <= 0 {
 		c.StopGrace = work.CancelGrace
+	}
+	if c.RecoveryInterval <= 0 {
+		c.RecoveryInterval = work.RecoveryScanMax
 	}
 	return c
 }

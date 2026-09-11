@@ -56,6 +56,10 @@ type fakeRuntime struct {
 	// suppressStarted skips the started() callback, simulating a crash between
 	// the process existing and our recording it.
 	suppressStarted bool
+	// classifyAs is what Classify returns for a non-nil error. The zero value
+	// is OutcomeUnclear, which is the production default too: a failure nobody
+	// classified is one nobody can vouch for.
+	classifyAs Outcome
 	// refuseStop makes Stop report that the runtime is still there. A process
 	// that will not die is not a hypothetical — it is the case the contract
 	// says must become reconciliation rather than a cancellation.
@@ -104,6 +108,15 @@ func (f *fakeRuntime) Run(ctx context.Context, a Assignment, started func()) err
 		}
 	}
 	return fail
+}
+
+func (f *fakeRuntime) Classify(a Assignment, err error) Outcome {
+	if err == nil {
+		return OutcomeSucceeded
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.classifyAs
 }
 
 func (f *fakeRuntime) Stop(ctx context.Context, locator string) (bool, error) {
@@ -586,7 +599,7 @@ func contains(xs []string, want string) bool {
 // reconciliation is for.
 func TestVertical_AnUnclearOutcomeGoesToReconciliationNotRetry(t *testing.T) {
 	h := newHarness(t)
-	h.rt.failWith = fmt.Errorf("%w: the provider call may or may not have landed", ErrUnclearOutcome)
+	h.rt.failWith = fmt.Errorf("the provider call may or may not have landed")
 
 	r := h.accept("dlv-unclear")
 	_, stop := h.runDispatcher(nil)
@@ -633,4 +646,158 @@ func TestVertical_AnUndecidableAuthorizationParksRatherThanGuesses(t *testing.T)
 	if got := h.rt.starts.Load(); got != 0 {
 		t.Errorf("%d runtimes created while authorization was undecidable, want 0", got)
 	}
+}
+
+// Review follow-up 1. Recovery ran only at boot, so a server that restarted
+// BEFORE an old lease expired skipped it on the way up — and nothing looked
+// again. The work hung forever, and the symptom was silence.
+func TestVertical_RecoveryRunsOnATimerNotOnlyAtBoot(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	r := h.accept("dlv-late-lease")
+
+	// A previous process claimed this and died. Its lease is still VALID at
+	// the moment the new dispatcher starts, so the boot pass cannot help.
+	c, err := h.store.Claim(ctx, work.ClaimOptions{LeaseOwner: "dispatcher-gone"})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	// The boot pass has certainly run by now and correctly did nothing.
+	time.Sleep(100 * time.Millisecond)
+	it, _ := h.store.Get(ctx, r.WorkID)
+	if it.State != work.StateStarting {
+		t.Fatalf("state = %q, want starting — the boot pass should not touch a live lease", it.State)
+	}
+
+	// Now the lease lapses, with no restart.
+	clockPast(t, h.db, c.RunID)
+
+	// A later pass has to notice. The attempt never left `planned`, so the
+	// safe resolution is to put it back on the queue and run it.
+	h.waitForState(r.WorkID, work.StateSucceeded)
+}
+
+// Review follow-up 2. Every unrecognised error used to become a retry, which
+// reads "the run returned an error" as "nothing happened". An agent turn can
+// make an external change and then fail; repeating it repeats whatever it did.
+func TestVertical_OnlyAProvablySafeFailureIsRetried(t *testing.T) {
+	tests := []struct {
+		name      string
+		classify  Outcome
+		wantState work.State
+		wantRuns  int64
+	}{
+		{
+			name:      "a failure the runtime cannot vouch for goes to reconciliation",
+			classify:  OutcomeUnclear,
+			wantState: work.StateNeedsReconciliation,
+			wantRuns:  1,
+		},
+		{
+			name:      "a failure known to precede any external effect is retried",
+			classify:  OutcomeRetryable,
+			wantState: work.StateRetryWait,
+			wantRuns:  1,
+		},
+		{
+			name:      "a permanent failure is not retried",
+			classify:  OutcomeFailed,
+			wantState: work.StateFailed,
+			wantRuns:  1,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.rt.failWith = errors.New("the run failed")
+			h.rt.classifyAs = tc.classify
+
+			r := h.accept("dlv-classify")
+			_, stop := h.runDispatcher(nil)
+			defer stop()
+
+			h.waitForState(r.WorkID, tc.wantState)
+			if got := h.rt.starts.Load(); got != tc.wantRuns {
+				t.Errorf("%d runtimes created, want %d", got, tc.wantRuns)
+			}
+		})
+	}
+}
+
+// Review follow-up 3. Cancel signalled once, ignored whether the runtime
+// actually stopped, and returned. A runtime that ignored the signal was never
+// followed up — and because Run never returned, nothing settled at all: the
+// work sat `running` forever with a request against it nobody acted on.
+func TestVertical_ACancelledRuntimeThatWillNotStopIsAbandonedNotForgotten(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.StopGrace = 50 * time.Millisecond
+	h.rt.block = make(chan struct{})
+	defer close(h.rt.block)
+
+	r := h.accept("dlv-stubborn")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	h.waitForState(r.WorkID, work.StateRunning)
+
+	// The runtime will not die.
+	h.rt.mu.Lock()
+	h.rt.refuseStop = true
+	h.rt.mu.Unlock()
+
+	if _, err := h.store.RequestCancel(context.Background(), r.WorkID, "operator", "stop"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	// It must NOT be reported cancelled, and it must not sit running forever.
+	it := h.waitForState(r.WorkID, work.StateNeedsReconciliation)
+	if it.StateReason == "" {
+		t.Error("the parked work has no reason; an operator has nothing to act on")
+	}
+}
+
+// Review follow-up 4. Losing the lease stopped the heartbeat and left the AGENT
+// running — so the old attempt kept executing beside the newer one that had
+// taken the work. Two runtimes for one work item is the thing the fence exists
+// to prevent, and stopping only the lease renewal does not prevent it.
+func TestVertical_LosingTheLeaseStopsTheRunNotJustTheHeartbeat(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.rt.block = make(chan struct{})
+	defer close(h.rt.block)
+
+	r := h.accept("dlv-superseded")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	h.waitForState(r.WorkID, work.StateRunning)
+	var firstRun string
+	if err := h.db.QueryRow(`SELECT run_id FROM work_attempts WHERE work_id = ?`, r.WorkID).Scan(&firstRun); err != nil {
+		t.Fatal(err)
+	}
+	locator := "crew-1/tmux:agent-jamie-" + firstRun
+
+	// Another process takes the work: expire the lease and recover, then claim.
+	clockPast(t, h.db, firstRun)
+	if _, err := h.store.RecoverExpiredLeases(ctx); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+
+	// The supervisor must notice it has been superseded and STOP the runtime.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		h.rt.mu.Lock()
+		stopped := h.rt.stopped[locator]
+		h.rt.mu.Unlock()
+		if stopped {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("the superseded attempt's runtime at %s was never stopped; it would keep executing "+
+		"beside whichever attempt replaced it", locator)
 }

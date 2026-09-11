@@ -77,6 +77,12 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 
 	ticker := time.NewTicker(d.cfg.PollInterval)
 	defer ticker.Stop()
+	// Recovery on a timer, not only at boot. A server that restarts BEFORE an
+	// old lease expires skips that lease on the way up, and with a boot-only
+	// pass nothing ever looks again — the work hangs forever, and the symptom
+	// is silence rather than an error.
+	recovery := time.NewTicker(d.cfg.RecoveryInterval)
+	defer recovery.Stop()
 
 	for {
 		// Drain as much as capacity allows before waiting again.
@@ -95,6 +101,10 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			d.drain()
 			return nil
+		case <-recovery.C:
+			if err := d.recover(ctx); err != nil {
+				d.logger.Error("dispatch: periodic recovery failed", "error", err)
+			}
 		case <-ticker.C:
 		case <-d.hints:
 		}
@@ -206,6 +216,12 @@ func (d *Dispatcher) start(ctx context.Context, a Assignment) {
 }
 
 // supervise runs the attempt: heartbeat, cancel watch, and the runtime itself.
+//
+// It settles on whichever finishes first. That matters because a runtime is not
+// guaranteed to return: a process that ignores its signal leaves Run blocked
+// forever, and an earlier version of this waited for it — so a cancel nobody
+// could enforce simply never settled, and the work stayed `running` with a
+// request against it that nothing acted on.
 func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 	a := live.assignment
 	defer func() {
@@ -215,28 +231,63 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 		live.cancel()
 	}()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); d.heartbeat(ctx, a) }()
-	go func() { defer wg.Done(); d.watchCancel(ctx, live) }()
+	// superseded closes when this attempt loses its lease to a newer one.
+	superseded := make(chan struct{})
+	var supersededOnce sync.Once
+	go d.heartbeat(ctx, a, func() { supersededOnce.Do(func() { close(superseded) }) })
 
-	confirmOnce := sync.Once{}
-	runErr := d.runtime.Run(ctx, a, func() {
-		confirmOnce.Do(func() {
-			if err := d.store.StartRunning(ctx, a.Item.ID, a.RunID, a.Generation, live.locator); err != nil {
-				// The runtime exists and we could not record it. Do NOT treat
-				// that as "it never started" — that inference is the whole
-				// reason the start intent is written first.
-				d.logger.Error("dispatch: runtime started but could not be confirmed",
-					"work_id", a.Item.ID, "run_id", a.RunID, "locator", live.locator, "error", err)
-			}
+	// abandoned closes when the cancel lifecycle gives up on a runtime that
+	// will not stop. Settling then is the point: the work must not sit
+	// `running` forever because the process refused to die.
+	abandoned := make(chan struct{})
+	var abandonOnce sync.Once
+	go d.watchCancel(ctx, live, func() { abandonOnce.Do(func() { close(abandoned) }) })
+
+	runDone := make(chan error, 1)
+	go func() {
+		var confirmOnce sync.Once
+		runDone <- d.runtime.Run(ctx, a, func() {
+			confirmOnce.Do(func() {
+				if err := d.store.StartRunning(ctx, a.Item.ID, a.RunID, a.Generation, live.locator); err != nil {
+					// The runtime exists and we could not record it. Do NOT
+					// treat that as "it never started" — that inference is the
+					// whole reason the start intent is written first.
+					d.logger.Error("dispatch: runtime started but could not be confirmed",
+						"work_id", a.Item.ID, "run_id", a.RunID, "locator", live.locator, "error", err)
+				}
+			})
 		})
-	})
+	}()
 
-	live.cancel()
-	wg.Wait()
+	settleCtx := context.WithoutCancel(ctx)
+	select {
+	case runErr := <-runDone:
+		live.cancel()
+		d.settle(settleCtx, live, runErr)
 
-	d.settle(context.WithoutCancel(ctx), live, runErr)
+	case <-superseded:
+		// A newer attempt owns this work. Stop EXECUTING, not merely stop
+		// renewing a lease we no longer hold: the old agent kept running while
+		// its replacement ran too, which is two runtimes for one work item.
+		live.cancel()
+		if _, err := d.runtime.Stop(settleCtx, live.locator); err != nil {
+			d.logger.Warn("dispatch: could not stop a superseded attempt",
+				"run_id", a.RunID, "locator", live.locator, "error", err)
+		}
+		// No state is written here on purpose. This attempt no longer owns the
+		// work, and writing to it is exactly what the fence refuses.
+		<-runDone
+
+	case <-abandoned:
+		live.cancel()
+		d.park(settleCtx, a, "cancel requested and the runtime at "+live.locator+
+			" did not stop within the grace period")
+		<-runDone
+
+	case <-ctx.Done():
+		live.cancel()
+		<-runDone
+	}
 }
 
 // settle writes the attempt's outcome.
@@ -268,20 +319,26 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		return
 	}
 
-	// A failed run may be retried — but only when the failure is the run's own.
-	// An unclear EXTERNAL effect is never retried automatically: repeating an
-	// agent turn whose side effects may already have landed is exactly what
-	// reconciliation exists to prevent.
-	if errors.Is(runErr, ErrUnclearOutcome) {
+	// The runtime says what its own failure means. The dispatcher does not
+	// guess, and the default for anything unclassified is reconciliation.
+	//
+	// This used to retry every error that was not explicitly flagged, which
+	// reads "the run returned an error" as "nothing happened". An agent turn
+	// can make an external change and then fail, and repeating it repeats
+	// whatever it did — the one outcome a durable queue is supposed to prevent.
+	switch d.runtime.Classify(a, runErr) {
+	case OutcomeRetryable:
+		d.finish(ctx, a, work.StateRetryWait, runErr.Error())
+	case OutcomeFailed:
+		d.finish(ctx, a, work.StateFailed, runErr.Error())
+	case OutcomeSucceeded:
+		// A runtime that reports success alongside an error is confused, and
+		// the work is not the place to resolve that.
+		d.park(ctx, a, "the runtime classified a failure as success: "+runErr.Error())
+	default:
 		d.park(ctx, a, "the runtime's outcome is unclear: "+runErr.Error())
-		return
 	}
-	d.finish(ctx, a, work.StateRetryWait, runErr.Error())
 }
-
-// ErrUnclearOutcome marks a runtime failure whose external effects may or may
-// not have happened. It routes to reconciliation rather than to a retry.
-var ErrUnclearOutcome = errors.New("dispatch: the runtime's outcome is unclear")
 
 func (d *Dispatcher) finish(ctx context.Context, a Assignment, to work.State, reason string) {
 	if err := d.store.Transition(ctx, work.TransitionRequest{
@@ -296,10 +353,12 @@ func (d *Dispatcher) park(ctx context.Context, a Assignment, reason string) {
 	d.finish(ctx, a, work.StateNeedsReconciliation, reason)
 }
 
-// heartbeat renews the lease while the attempt runs. A refusal means this
-// attempt has been superseded, and the right response is to stop renewing a
-// lease we no longer hold rather than to keep asserting it.
-func (d *Dispatcher) heartbeat(ctx context.Context, a Assignment) {
+// heartbeat renews the lease while the attempt runs.
+//
+// A refusal means this attempt has been superseded. It calls onSuperseded so
+// the supervisor can stop the RUN — stopping the heartbeat alone would leave
+// the old agent executing beside its replacement.
+func (d *Dispatcher) heartbeat(ctx context.Context, a Assignment, onSuperseded func()) {
 	t := time.NewTicker(d.cfg.HeartbeatInterval)
 	defer t.Stop()
 	for {
@@ -309,8 +368,9 @@ func (d *Dispatcher) heartbeat(ctx context.Context, a Assignment) {
 		case <-t.C:
 			if err := d.store.Heartbeat(ctx, a.RunID, a.Generation); err != nil {
 				if errors.Is(err, work.ErrStaleGeneration) {
-					d.logger.Warn("dispatch: this attempt has been superseded; stopping its heartbeat",
+					d.logger.Warn("dispatch: this attempt has been superseded; stopping it",
 						"run_id", a.RunID)
+					onSuperseded()
 					return
 				}
 				d.logger.Warn("dispatch: heartbeat failed", "run_id", a.RunID, "error", err)
@@ -319,9 +379,14 @@ func (d *Dispatcher) heartbeat(ctx context.Context, a Assignment) {
 	}
 }
 
-// watchCancel notices a stop requested elsewhere — by another process, or
-// before this one restarted — and signals the runtime.
-func (d *Dispatcher) watchCancel(ctx context.Context, live *liveAttempt) {
+// watchCancel runs the whole cancel lifecycle: notice, signal, verify, grace,
+// escalate, and finally give up — calling onAbandoned so the supervisor settles
+// rather than waiting on a process that is not going to end.
+//
+// The previous version signalled once, ignored whether the runtime actually
+// stopped, and returned. A runtime that ignored the signal was then never
+// followed up, and because Run never returned, nothing settled at all.
+func (d *Dispatcher) watchCancel(ctx context.Context, live *liveAttempt, onAbandoned func()) {
 	t := time.NewTicker(d.cfg.CancelPollInterval)
 	defer t.Stop()
 	for {
@@ -333,15 +398,48 @@ func (d *Dispatcher) watchCancel(ctx context.Context, live *liveAttempt) {
 			if err != nil || !requested {
 				continue
 			}
-			if _, err := d.runtime.Stop(ctx, live.locator); err != nil {
-				d.logger.Warn("dispatch: could not signal the runtime to stop",
-					"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
-			}
-			// Settling decides what actually happened; this goroutine's job is
-			// only to deliver the signal once.
+			d.enforceCancel(ctx, live, onAbandoned)
 			return
 		}
 	}
+}
+
+// enforceCancel signals, verifies, waits out the grace, escalates once, and
+// verifies again. It reports abandonment only after all of that.
+func (d *Dispatcher) enforceCancel(ctx context.Context, live *liveAttempt, onAbandoned func()) {
+	a := live.assignment
+
+	stopped, err := d.runtime.Stop(ctx, live.locator)
+	if err != nil {
+		d.logger.Warn("dispatch: could not signal the runtime to stop",
+			"run_id", a.RunID, "locator", live.locator, "error", err)
+	}
+	if err == nil && stopped {
+		// Run will return on its own; settle handles the rest.
+		return
+	}
+
+	// Grace, then one escalation. §4's shape: a signal, ten seconds, then a
+	// harder stop aimed at this run's own process group.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(d.cfg.StopGrace):
+	}
+
+	stopped, err = d.runtime.Stop(ctx, live.locator)
+	if err == nil && stopped {
+		return
+	}
+
+	// One last look before giving up, because Stop reporting "still there" and
+	// the runtime actually being there are different claims.
+	if alive, aliveErr := d.runtime.Alive(ctx, live.locator); aliveErr == nil && !alive {
+		return
+	}
+	d.logger.Error("dispatch: a cancelled runtime did not stop; parking for reconciliation",
+		"run_id", a.RunID, "locator", live.locator)
+	onAbandoned()
 }
 
 // drain stops supervising without pretending the runtimes are gone.

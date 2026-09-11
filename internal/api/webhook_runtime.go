@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
@@ -52,18 +53,53 @@ func (rt *WebhookRuntime) Run(ctx context.Context, a dispatch.Assignment, starte
 		// The input is immutable and was written at acceptance. If it cannot be
 		// read, retrying will not help and the work is not the dispatcher's to
 		// guess at.
-		return fmt.Errorf("webhook run input is unreadable: %w", err)
+		return fmt.Errorf("%w: %w", errWebhookInputUnreadable, err)
 	}
 
 	// Resolved here, not carried from acceptance. This is where a revoked
 	// permission, a deleted crew or a disabled agent takes effect.
 	info, err := rt.h.resolver.ResolveAgent(ctx, in.AgentID, a.Item.WorkspaceID)
 	if err != nil {
-		return fmt.Errorf("resolve agent %s at dispatch: %w", in.AgentID, err)
+		// Nothing has been started, so this is safe to repeat — the agent may
+		// simply be being edited.
+		return fmt.Errorf("%w: resolve agent %s at dispatch: %w", errWebhookBeforeAgent, in.AgentID, err)
 	}
 
 	return rt.h.runWebhookAgent(ctx, info, in.AgentID, a.RunID, in.Payload, nil, started)
 }
+
+// errWebhookBeforeAgent marks the failures that provably happened BEFORE the
+// agent ran: the crew runtime would not start, or the run record could not be
+// written. Nothing left the machine, so a retry repeats nothing.
+var errWebhookBeforeAgent = errors.New("webhook run failed before the agent started")
+
+// Classify says what a failure from Run means.
+//
+// The default is deliberately OutcomeUnclear, and that is the whole reason this
+// method exists. A webhook agent turn can push a commit, post a comment, call a
+// third-party API — and THEN fail. "RunAgent returned an error" is not evidence
+// that nothing happened, so retrying on it repeats whatever did. Only the
+// failures we can point at and say "this was before the agent existed" are safe
+// to repeat, and they are the two listed above.
+//
+// This replaces a dispatcher default that retried everything unrecognised,
+// which read every failure as harmless.
+func (rt *WebhookRuntime) Classify(a dispatch.Assignment, err error) dispatch.Outcome {
+	switch {
+	case err == nil:
+		return dispatch.OutcomeSucceeded
+	case errors.Is(err, errWebhookBeforeAgent):
+		return dispatch.OutcomeRetryable
+	case errors.Is(err, errWebhookInputUnreadable):
+		// The input is immutable; a retry reads the same unreadable bytes.
+		return dispatch.OutcomeFailed
+	default:
+		return dispatch.OutcomeUnclear
+	}
+}
+
+// errWebhookInputUnreadable is a permanent fault in immutable data.
+var errWebhookInputUnreadable = errors.New("webhook run input is unreadable")
 
 // Stop signals the runtime for this attempt.
 //
