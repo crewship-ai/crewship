@@ -654,3 +654,16 @@ patřily. Žádná původní rutina, žádný cizí běh a žádný plán na dev
 změněn a databáze nebyla nulována. Pět testovacích plánů na izolované
 instanci bylo smazáno hned po měření. Pomocné Playwright skripty žily v
 `e2e/` jen po dobu běhu a do repozitáře se necommitovaly.
+
+Práce na opravách probíhala ve vlastních worktree
+(`.claude/worktrees/wt-2495`, `wt-2496`, `wt-2500`), aby hlavní klon zůstal
+volný pro nasazení; po sloučení se odstraní. Hlavní klon byl přepnut z větve
+`dev1/routines-legibility-20260910` na větev této přejímky — obě vycházejí
+z téhož commitu a jediný rozdíl jsou commity odsud.
+
+Poznámka k hostiteli, ne k produktu: disk crewship-dev byl během relace na
+99 %. Uvolnil jsem, co je bezpečné (`docker builder prune`, dangling images;
+431 MB). Sdílenou Go cache (50 GB) a 35 obrazů `crewship-cache:*` /
+`crewship-feat:*` jsem **nemazal** — na cache v každý okamžik staví jiné
+relace, a „orphan“ verdikt u obrazů pocházel z throwaway instance, která
+nevlastní žádnou partu, takže nic neznamená.
