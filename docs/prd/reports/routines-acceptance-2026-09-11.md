@@ -621,6 +621,20 @@ Issue [#2500](https://github.com/crewship-ai/crewship/issues/2500), oprava v
 [PR #2501](https://github.com/crewship-ai/crewship/pull/2501).
 **Stav: nesloučeno.**
 
+Živě ověřeno na binárce s opravou (`sha256:4eb6625c…`), týž scénář, skutečná
+těla:
+
+```
+POST …/run {"inputs":{},"delay_seconds":45}
+→ 202 {"pending_id":"pnd_cmtww3usu0001426ab256","status":"SCHEDULED","pinned_version":3}
+
+crewship routine save --definition v4        # publikováno, zatímco běh čeká
+
+o 45 s: run_cmtww4whc0005a29bde22  status=completed  pipeline_version=3  output={"ran":"v3"}
+```
+
+Účtenka nese připnutou verzi a běh odpálil recept, proti kterému byl přijatý.
+
 Vědomě beze změny: volající, který `pinned_version` uvede, dostane svůj;
 jednorázový start si nechává i své 409; a rutina bez archivované verze se dá
 odložit dál — poběží nepřipnutá a účtenka to řekne, místo aby o běh přišla.
