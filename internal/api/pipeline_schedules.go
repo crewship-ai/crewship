@@ -540,10 +540,24 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		catchupPolicy = body.CatchupPolicy
 	}
 
-	if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
+	// Validate only what this request WRITES. A PATCH that omits `inputs`
+	// falls back to the stored preset above, and judging that would trap an
+	// operator whose plan predates this gate: they could not disable it, nor
+	// fix its cron, without first fixing a preset the same request is not
+	// touching. A stale preset is still caught when the recipe changes
+	// (#2495) and by the executor when it fires.
+	//
+	// The pinned version comes from the request when it repins and from the
+	// stored row otherwise, so the preset is always checked against the
+	// recipe this plan would actually run.
+	pinned := body.TargetPipelineVersion
+	if pinned == nil {
+		pinned = existing.TargetPipelineVersion
+	}
+	if body.Inputs != nil && h.gateSchedulePreset(w, r, pipelineID, pinned, body.Inputs) {
 		return
 	}
-	if wakeID != "" && h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
+	if wakeID != "" && body.WakeInputs != nil && h.gateSchedulePreset(w, r, wakeID, nil, body.WakeInputs) {
 		return
 	}
 

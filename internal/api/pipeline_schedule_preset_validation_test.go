@@ -284,3 +284,78 @@ func TestPresetValidation_TriggerPresetIsGatedAtSaveTime(t *testing.T) {
 		t.Fatalf("a valid trigger preset was refused: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestPresetValidation_UpdateJudgesOnlyWhatItWrites is the trap this gate
+// must not set. A plan created before the gate existed can be carrying a
+// preset its recipe already rejects. If a PATCH re-validated the stored
+// preset it fell back to, the operator could not disable that plan, nor fix
+// its cron, without first repairing a preset the request never mentions —
+// and disabling it is the very first thing they would reach for.
+func TestPresetValidation_UpdateJudgesOnlyWhatItWrites(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	// A legacy row: written straight to the table, the way one that predates
+	// this gate exists in a real database.
+	if _, err := h.db.Exec(
+		`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,timezone,inputs_json,enabled)
+		 VALUES('legacy',?,'Legacy',?,'0 9 * * *','UTC','{"region":"antarctica"}',1)`, ws, p.ID); err != nil {
+		t.Fatalf("seed legacy plan: %v", err)
+	}
+
+	patch := func(body string) *httptest.ResponseRecorder {
+		req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("PATCH", "/pipeline-schedules/legacy", bytes.NewBufferString(body)), ws), user, "OWNER")
+		req.SetPathValue("scheduleId", "legacy")
+		rr := httptest.NewRecorder()
+		h.UpdateSchedule(rr, req)
+		return rr
+	}
+
+	if rr := patch(`{"enabled":false}`); rr.Code != http.StatusOK {
+		t.Fatalf("disabling a plan with a stale preset: %d %s — the operator must be able to switch it off",
+			rr.Code, rr.Body.String())
+	}
+	if rr := patch(`{"cron_expr":"0 10 * * *"}`); rr.Code != http.StatusOK {
+		t.Fatalf("rescheduling a plan with a stale preset: %d %s", rr.Code, rr.Body.String())
+	}
+	// But writing a NEW invalid preset is still refused.
+	if rr := patch(`{"inputs":{"region":"atlantis"}}`); rr.Code != http.StatusBadRequest {
+		t.Errorf("writing a fresh invalid preset: %d %s, want 400", rr.Code, rr.Body.String())
+	}
+	// And repairing it works.
+	if rr := patch(`{"inputs":{"region":"eu"}}`); rr.Code != http.StatusOK {
+		t.Errorf("repairing the preset: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestPresetValidation_PinnedPlanIsCheckedAgainstItsPinnedVersion — a plan
+// that pins v1 runs v1, so its preset must be judged against v1 even after
+// HEAD moves on. Checking it against HEAD would reject a preset that is
+// perfectly correct for the recipe this plan actually executes.
+func TestPresetValidation_PinnedPlanIsCheckedAgainstItsPinnedVersion(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+
+	// v2 renames the input; v1 still wants `region`.
+	now := time.Now()
+	const v2 = `{"name":"planned","inputs":[{"name":"zone","type":"string","widget":"select","options":["eu","us"],"required":true}],` +
+		`"steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`
+	if _, err := h.store.Save(t.Context(), pipeline.SaveInput{
+		WorkspaceID: ws, Slug: "planned", Name: "Planned",
+		DefinitionJSON: v2, LastTestRunAt: &now, LastTestRunPassed: true,
+	}); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+
+	one := 1
+	body, _ := json.Marshal(map[string]any{
+		"name": "Pinned", "target_pipeline_id": p.ID, "target_pipeline_version": &one,
+		"cron_expr": "0 9 * * *", "timezone": "UTC", "enabled": true,
+		"inputs": map[string]any{"region": "eu"}, // correct for v1, wrong for HEAD
+	})
+	req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/pipeline-schedules", bytes.NewReader(body)), ws), user, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("a preset correct for the pinned version was refused: %d %s", rr.Code, rr.Body.String())
+	}
+}
