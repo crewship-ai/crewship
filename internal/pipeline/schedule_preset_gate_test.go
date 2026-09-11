@@ -21,6 +21,7 @@ package pipeline
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -343,9 +344,21 @@ func TestPresetGate_TriggerCannotSmuggleABrokenPlanPast(t *testing.T) {
 	if err == nil {
 		t.Fatal("a trigger carrying a preset the new recipe rejects was accepted")
 	}
+	// Which of the two refusals fires depends on ordering, and both are
+	// actionable, so the assertion is on substance rather than on type.
+	// createTriggerTx validates the trigger's own preset against the
+	// definition this save is publishing (#2496) and gets there first, so
+	// the caller is told which INPUT is unsatisfied — better here than the
+	// plan's name, since they wrote that preset in this very request. If
+	// that check ever stops firing, the post-trigger gate (#2495) catches
+	// the same save and names the plan instead. Either way: refused, with
+	// something to act on.
 	var conflict *ScheduleDraftConflict
-	if !errors.As(err, &conflict) {
-		t.Errorf("error %v is not an actionable schedule conflict", err)
+	if !errors.As(err, &conflict) && !strings.Contains(err.Error(), "recipient") {
+		t.Errorf("error %v names neither the plan nor the unsatisfied input", err)
+	}
+	if !errors.Is(err, ErrDraftConflict) && !errors.Is(err, ErrInvalidTrigger) {
+		t.Errorf("error %v maps to neither 409 nor 422", err)
 	}
 	var def string
 	if err := s.db.QueryRowContext(t.Context(), `SELECT definition_json FROM pipelines WHERE workspace_id='ws_test' AND slug='planned'`).Scan(&def); err != nil {
