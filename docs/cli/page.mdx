@@ -922,12 +922,94 @@ Refused **locally**, before anything is sent (always exit 2): a page document
 that does not validate, a `<page>/<panel>` address with no slash, an empty or
 non-JSON `--data`, an `--owner` that is not `crew/<slug>`, a missing
 `--file`/`--panel`/`--id`, a `--to` that is not positive, an `--input` that is
-not `k=v`, a malformed or repeated `--bind`, a bundle whose `format` is not
-`crewship-page-bundle/v1`, and a `--file` whose `metadata.slug` disagrees with
+not `k=v`, a malformed or repeated `--bind`, a bundle whose `format` is neither
+`crewship-page-bundle/v1` nor `crewship-page-bundle/v2`, and a `--file` whose `metadata.slug` disagrees with
 the slug you passed to `update`.
 
 Everything else is the server's answer — including an unknown slug and an
 unknown `--level`, both of which are checked there and not here.
+
+## Custom React projects (experimental)
+
+The opt-in Pages application profile uses React, TypeScript and Vite. Projects
+are source drafts; saving/importing one does not execute or publish its code.
+The operator must configure protected source storage, a pinned build image and
+a separate-site runtime origin. The current profile accepts its fixed dependency
+set and lockfile, with custom React and CSS. It does not install arbitrary packages.
+
+```sh
+crewship page project init --dir health-app
+# Edit health-app/src/main.tsx and health-app/src/style.css.
+crewship page project pack health-app > health-source.yaml
+crewship page project set health --file health-source.yaml --revision 0
+crewship page project get health
+crewship page project history health
+crewship page project build health --revision 1
+crewship page project preview health
+```
+
+`init` prints source YAML unless `--dir` is set (or JSON with `--format json`).
+`pack` prints YAML and skips `.git`, `node_modules` and `dist`; `unpack <directory>
+--file source.yaml` extracts into a new directory. Existing directories are never
+overwritten. Symlinks, environment files and paths outside the project are refused.
+Source limits are 256 files, 512 KiB/file and 2 MiB total decoded content.
+
+`set --revision` is the **expected current draft revision**, with 0 for the first
+save. Add `--definition page.yaml` to save an authored definition in the same
+draft. `build --revision` requires the revision to build. Stale values return 409.
+Build returns a job receipt, not a ready preview; `preview` reads its current state.
+A busy compiler returns 429 without a waiting queue.
+
+```sh
+crewship page project get health --revision 1
+crewship page project restore health --revision 1 --expected-revision 3
+crewship page project history health --before 50
+```
+
+History lists at most 50 revisions per page. Restore creates a new Git checkpoint
+and source revision; it does not change the live application. Source reads and
+history require Page edit permission, not just permission to view its panels.
+
+After inspecting the source and preview, check and publish the exact candidate:
+
+```sh
+crewship page project check health --build BUILD_ID --revision 4
+crewship page project publish health --build BUILD_ID --revision 4 --expected-publication 0 --reviewed-code
+crewship page project application health
+crewship page project rollback health --publication 1 --expected-publication 2 --reviewed-code
+```
+
+Use the actual build ID, source revision and publication version returned by the
+server. `check` verifies stored source/artifact integrity, the compiler result and
+current bindings. It still requires browser and code review. `--reviewed-code`
+confirms that review; it is not a request for an automated security scan.
+Publication requires Page owner/workspace admin authority. An ordinary write grant
+does not grant permission to publish executable code for readers.
+
+`--expected-publication 0` creates the first publication. Exact retries return the
+original receipt. Rollback creates a new publication of an earlier artifact and
+Page definition, keeping the source draft unchanged. It does not undo work already
+performed by routines. Publication metadata is separate from the older panel-only
+`page versions`/`page rollback` history.
+
+```sh
+crewship page action health/health refresh --publication 2 --idempotency-key check-20260908
+crewship page project action-status health PENDING_ID
+```
+
+`page action --publication` uses the published application action endpoint. The
+version must still be current and the Page declaration must match the publication.
+The existing routine RBAC/policy still applies. Reuse the same key for an explicit
+retry; a receipt means **queued**, not completed. `action-status` returns only the
+current user's pending/run identifiers and states, never another reader's run.
+A network timeout does not mean execution stopped.
+
+`page export` automatically uses `crewship-page-bundle/v2` for a Page with source:
+one YAML contains the authored definition, sources, lockfile and small assets.
+Import accepts v1/v2 JSON or YAML, revalidates bindings and creates an inert draft.
+It does not transfer grants, credentials, run data, Git history, build artifacts
+or trusted publication status. The referenced crews/routines must exist at the
+destination. Export is not a backup of the complete project history.
 
 ## Related
 
@@ -935,3 +1017,92 @@ unknown `--level`, both of which are checked there and not here.
 - [`crewship routine`](/cli/routine) — the usual producer behind a panel.
 - [`crewship automation`](/cli/automation) — what a panel's `wake` gate compiles to.
 - [Internal IPC API](/api-reference/internal) — the sidecar trust boundary `page set` uses inside a container.
+
+## Agent chat: custom Page sources
+
+Agents use the `page_project` tool on the existing `crewship-routines` MCP
+server. The sidecar supplies the workspace, crew and acting agent from its
+configuration and per-agent token. No human CLI/API token is needed in a crew.
+The operator must configure the protected projects directory, Git and the
+optional pinned build image described in the Pages Apps build profile.
+
+1. Create the operational Page using `save_page`; use its returned slug.
+2. Call `page_project` with `operation: "init"`, `slug` and
+   `expected_revision: 0` to create the supported React/TypeScript starter.
+3. Use `operation: "read"` to inspect the current revision, file list, Page
+   definition, Studio path and exact `@crewship/pages` SDK source. Add `path`
+   to read one source file. The starter imports `src/style.css`; arbitrary
+   design can be written in TSX/CSS within the supported dependency profile.
+4. Save a batch of whole-file replacements with the revision just read:
+
+```json
+{
+  "operation": "save",
+  "slug": "health",
+  "expected_revision": 1,
+  "files": [
+    {"path": "src/style.css", "encoding": "utf8", "content": "body { font-family: system-ui; margin: 2rem; }"}
+  ]
+}
+```
+
+`delete_paths` removes existing files. `definition` optionally replaces the
+complete portable Page definition in the draft. The complete MCP request must
+fit in 1 MiB; use small batches, each against the latest returned revision.
+A conflict returns an error: read, reconcile and save again. Never initialize
+an existing project to reset it. Source writes create Git checkpoints; the
+published Page is unchanged.
+
+5. Call `build` with `expected_revision`, then poll `status` for
+   `running`, `ready`, `failed` or `interrupted`. One build runs per instance;
+   a busy worker refuses another request. Status returns diagnostics and build
+   identity without retransmitting compiled JavaScript.
+6. Call `check` with the returned `build_id` and source `expected_revision`.
+   Report the revision/build and Studio path to the user for preview and review.
+   A successful static check does not replace browser or source security review.
+
+Source initialization, saving and builds obey `page_create` autonomy policy;
+held or denied operations do not mutate a draft or start a build. Reads and
+checks require the Page's exact owning crew and a current agent in that crew.
+The onboarding setup crew must explicitly name the target `crew`, following
+`save_page` delegation rules. Revisions/builds retain the actual author and the
+target owner separately. Run attribution is not inferred from an unverified ID.
+
+There is no publish operation in this agent tool. An authorized user publishes
+the reviewed build through Studio or `crewship page project publish`.
+After a transport timeout the outcome can be unknown; inspect the current
+revision and build status before retrying. Data producers keep pushing through
+the existing panel API/`page.write` path independently of source edits.
+
+### `crewship page project publications <slug>`
+
+List immutable application publication receipts and the current publication
+counter. Pass `--before <version>` for older receipts (50 per request). Use
+`page project get <slug> --revision <source-revision>` to inspect exact source
+before a reviewed rollback.
+
+### `crewship page project unpublish <slug>`
+
+Withdraw the custom application for all viewers:
+
+```bash
+crewship page project unpublish health --expected-publication 3 --yes
+```
+
+Requires Page ownership or workspace administration. Panels, source and retained
+publication history remain available. The version counter does not reset; stale
+requests return 409. Withdrawal does not cancel routines already queued.
+
+## `crewship page project compact`
+
+Runs workspace-wide Page storage maintenance (OWNER or ADMIN required).
+Without flags, retains the configured recent history plus current draft/live/running
+roots. `--discard-history --yes` explicitly discards optional history across all
+Pages in this workspace while keeping those protected roots. This cannot recover
+space occupied entirely by protected current content.
+
+## `crewship page project fsck <slug>`
+
+Checks referenced sources, checkpoint contents, artifacts and reachable Git
+objects with Page edit permission. Returns `healthy`, object counts and failures;
+the command exits nonzero when unhealthy. It does not repair or publish anything.

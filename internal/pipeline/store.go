@@ -198,10 +198,17 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		// Read inside the tx so the "did the recipe change" question and the
+		// write that answers it cannot straddle another writer.
+		var existingDefinition string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT definition_json FROM pipelines WHERE id = ?`, existingID,
+		).Scan(&existingDefinition); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("pipeline: read existing definition: %w", err)
+		}
 		if err := s.consumeDraftTx(ctx, tx, in); err != nil {
 			return nil, nil, err
 		}
-
 		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
 		// 'disabled' must stay disabled across an edit. statusForRisk only
 		// ever yields 'active'/'proposed', so without this a plain re-save
@@ -292,6 +299,30 @@ WHERE id = ?`,
 		sched, err := s.createTriggerTx(ctx, tx, in, existingID, trigger)
 		if err != nil {
 			return nil, nil, fmt.Errorf("pipeline: save trigger (update): %w", err)
+		}
+
+		// Schedule-preset gate (#2495). Every door that changes an active
+		// recipe lands here — publish, plain save, internal/agent save,
+		// import, manifest apply — so this is where the check belongs rather
+		// than inside consumeDraftTx's publication branch.
+		//
+		// AFTER createTriggerTx on purpose. The question is "after this save,
+		// can every enabled unpinned plan still run?", and a save that
+		// carries a trigger rewrites its own plan's preset in this same
+		// transaction. Checked before the trigger, such a save would be
+		// refused for a preset it was in the middle of fixing — and since the
+		// preset cannot be fixed on its own either (it would not satisfy the
+		// recipe still published at that moment), a schema change and its
+		// plan would deadlock each other. Checked here, changing both
+		// together is the way through.
+		//
+		// Skipped when the definition is byte-identical: a rename or a
+		// description edit must not start failing over a preset that was
+		// already imperfect before this gate existed.
+		if existingDefinition != in.DefinitionJSON {
+			if err := s.checkSchedulePresetsTx(ctx, tx, existingID, in.DefinitionJSON); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -391,6 +422,22 @@ INSERT INTO pipelines (
 func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, pipelineID string, trigger *TriggerInput) (*Schedule, error) {
 	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
 		return nil, nil
+	}
+	// A trigger carries a preset, and a preset the recipe would refuse at
+	// dispatch must not be storable (#2496). Same function the run path
+	// uses, against the definition THIS save is publishing — so a recipe and
+	// the trigger created alongside it can never disagree from the moment
+	// they land. ErrInvalidTrigger keeps the existing 422 mapping on both
+	// save doors. A definition that no longer parses is left to the
+	// executor to surface rather than blamed on the trigger.
+	if dsl, perr := Parse([]byte(in.DefinitionJSON)); perr == nil {
+		// Deliberately not gated on a non-empty preset: a trigger that
+		// supplies NOTHING to a recipe with a required input is the
+		// unsatisfiable plan this check exists for, and skipping the empty
+		// case would let exactly that one through.
+		if verr := ValidateFormInputs(dsl, trigger.Inputs); verr != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidTrigger, verr.Error())
+		}
 	}
 	if trigger.Kind == TriggerKindOnce {
 		now := s.now().UTC()

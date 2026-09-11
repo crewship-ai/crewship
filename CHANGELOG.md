@@ -26,6 +26,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 - **`crewship work get -f yaml` no longer panics**, and the work commands print the same keys in YAML as in JSON. The detail payload embedded an unexported type, which yaml.v3 cannot reflect into, and the field names were being lowercased rather than read from their json tags — so a script written against one machine format silently disagreed with the other.
+- **A routine's schema can no longer change out from under a live plan through a side door.** The check that refuses a recipe an enabled, unpinned plan's stored preset can no longer satisfy ran only on Edit → Publish. `crewship routine save`, the agent save, an import and a manifest apply all walked past it and left the plan pointing at a recipe its preset no longer fits — a plan that looks healthy in the calendar and fails for the first time at its next firing. The check now runs on every door that changes an active recipe, inside the same transaction, so a refusal leaves the original recipe and the original plan untouched; the 409 names which plan to repair, on the import and agent doors too, where an entirely actionable refusal used to surface as a server error. Disabled plans, pinned plans, legacy untyped inputs and saves that do not touch the definition are unaffected (#2495).
+- **A routine plan can no longer be saved with inputs its routine would refuse.** A plan's preset was only ever checked when the *routine* later changed, so a plan could be created or edited carrying values its target already rejects — an unanswered required question, a choice outside the declared options, a word where a number belongs — sit enabled in the calendar looking healthy, and fail for the first time at its next firing, with no run to inspect because the executor refuses before one exists. Creating a plan, editing a plan, and the trigger a routine save can carry now all check the preset with the same validation the run itself applies. `false`, `0` and an empty list remain answers rather than absences, extra inputs are still allowed, and a recipe whose inputs declare no form stays exactly as permissive as before (#2496).
+
+- **Routine plans show their input presets without opening an editor.** Recurring and one-time plans share a compact summary in Schedules and Calendar, with explicit empty presets, clipped text, and credential/file previews that omit contents, including file prefixes obscured by whitespace or invisible characters. Pending starts and planned calendar events now return read-only, redacted preset previews; run history remains distinct from planned starts.
+
 - **Phones and tablets can reach the whole product.** The phone menu was built from its own copy of the navigation and had lost seven destinations — Inbox, Issues, Routines, Pages, Activity, Journal and Integrations. Both surfaces now read one definition, and the phone menu carries the Inbox unread count, which previously had no mobile home at all. The Admin Console gained the navigation sheet Settings already had, instead of a fixed 280px column that left a 390px screen 109px to render into. The Pages, Routines, Integrations and Credentials drawers now seal the page behind them rather than leaving the top bar live and the content scrolling underneath.
 - **Touch sizing follows the pointer, not the window width.** Touch targets were written to apply below 640px while the app treats anything under 768px as a phone, so large phones and small tablets ran the mobile layout with desktop-sized controls. Sizing now keys on a coarse pointer, which also gives tablets real 44px targets in the desktop layout, including the collapsed navigation rail. Create-flow inputs grow to 16px on touch, so focusing one no longer zooms the page on iOS.
 - **Layouts respect the browser's own chrome.** Viewport heights use `dvh`, so panels no longer end underneath Safari's collapsing toolbar, and the app opts into `viewport-fit=cover` — without it every safe-area inset in the stylesheet evaluated to zero, including the ones the create-flow and save footers already asked for. Dialogs cap their height and scroll, so a primary action cannot sit off-screen with the keyboard open, and popovers can no longer render wider than the screen or flush against its edge.
@@ -33,6 +38,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
 
 ### Fixed
+- **Pages in unsupported browsers** (#2472) — show panels immediately in Safari, Firefox and mobile browsers, without waiting for application metadata or requiring a manual switch.
+
+- Pages demo setup leaves time for a full compiler run and publication; invalid container resource limits no longer produce healthy snapshots.
+- **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
 - **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
 - **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
@@ -50,6 +59,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).
 
+### Documentation
+- Document experimental Pages application installation, recovery, browser support and the verified limits of the initial release.
 
 ### Changed
 - Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
@@ -74,6 +85,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
 
 ### Added
+
+- **Pages application Studio** — source editing, previews, reviewed publication history and declared routine actions. Panel-only Pages render immediately; temporary 503s preserve an open application, while withdrawal clears stale code. Desktop Chromium support and routine-definition changes are shown explicitly. Workspace appearance reaches applications without rebuilding them.
+
+- **Pages application CLI and operations starter** — initialize, pack, save, build, review/publish, roll back and withdraw custom applications; inspect Git history, verify integrity and reclaim optional workspace history. Seed and collector examples are covered by real Docker and Node checks.
 
 - **Pages application API** — workspace-scoped drafts, builds and reviewed publications, transactional action authorization, agent MCP authoring, recoverable storage quotas, integrity checks and protected backup/restore. Publication retries report the current live version.
 

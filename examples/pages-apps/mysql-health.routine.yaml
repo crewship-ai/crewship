@@ -1,0 +1,23 @@
+dsl_version: "1.0"
+name: mysql-health-check
+description: Collect a bounded health verdict and publish it with routine identity.
+steps:
+  - id: collect
+    type: script
+    script:
+      path: scripts/collect_status.py
+      interpreter: python3
+      args: [mysql, --routine-output]
+  - id: publish
+    type: crewship
+    needs: [collect]
+    action: page.write
+    args:
+      page: mysql-health
+      panel: health
+      state: "{{ steps.collect.output.producer_state }}"
+      data:
+        items:
+          - name: "{{ steps.collect.output.name }}"
+            state: "{{ steps.collect.output.state }}"
+            label: "{{ steps.collect.output.label }}"

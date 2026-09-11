@@ -50,6 +50,7 @@
  */
 
 import * as React from "react"
+import { stringify as stringifyYaml } from "yaml"
 import {
   AlertTriangle,
   Copy,
@@ -1445,16 +1446,18 @@ function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }
                 // Held only long enough for the browser to take it. Revoked
                 // straight after, because an object URL keeps the whole blob
                 // alive for the life of the document otherwise.
-                const blob = new Blob([JSON.stringify(bundle, null, 2)], {
-                  type: "application/json",
+                const sourceProject = bundle.format === "crewship-page-bundle/v2"
+                const filename = `${slug}.bundle.${sourceProject ? "yaml" : "json"}`
+                const blob = new Blob([sourceProject ? stringifyYaml(bundle) : JSON.stringify(bundle, null, 2)], {
+                  type: sourceProject ? "application/yaml" : "application/json",
                 })
                 const href = URL.createObjectURL(blob)
                 const a = document.createElement("a")
                 a.href = href
-                a.download = `${slug}.bundle.json`
+                a.download = filename
                 a.click()
                 URL.revokeObjectURL(href)
-                toast.success("Exported", { description: `${slug}.bundle.json` })
+                toast.success("Exported", { description: filename })
               } catch (err) {
                 setRefusal(err instanceof Error ? err.message : "Export failed")
               } finally {

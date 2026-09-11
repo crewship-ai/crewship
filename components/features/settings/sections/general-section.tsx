@@ -21,6 +21,7 @@ import { LANGUAGES } from "@/lib/languages"
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier, isOwner } from "@/lib/permissions/tiers"
 import { SettingsCard, SettingsRow, SettingsDangerCard } from "@/components/features/settings/shared"
+import { PagesAppearanceCard } from "./pages-appearance-card"
 import { PrivilegedCredentialsCard } from "@/components/features/settings/sections/privileged-credentials-card"
 
 interface GeneralSectionProps {
@@ -126,6 +127,7 @@ export function GeneralSection({
 
   return (
     <div className="space-y-5">
+      <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
       {/* ── Identity ── */}
       <SettingsCard
         title="Identity"

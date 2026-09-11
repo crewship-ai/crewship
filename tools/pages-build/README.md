@@ -83,13 +83,19 @@ Restart marks unfinished DB jobs `interrupted`; the old container's deadline
 still applies. Installation with Docker privileges remains an operator trust
 boundary, not a multi-tenant microVM isolation guarantee.
 
-Back up SQLite **and the complete projects directory including `artifacts/`**
-with writes paused. Current DB backup includes metadata only. Automatic file
-backup/restore and retention remain production release gates. Quotas per workspace:
-256 source snapshots / 128 MiB, Git archives / 128 MiB, 256 artifacts / 128 MiB
-and 512 build records. Each Page allows at most 512 source revisions and 512
-publications.
-There is no automatic GC yet; quota exhaustion is explicit, not silent deletion.
+Workspace backups include the referenced Page source, Git checkpoints, shallow
+boundaries and compiled artifacts when `page_projects_path` is configured.
+Restore validates their integrity before committing database pointers. A manual
+filesystem backup must still capture SQLite and the complete projects directory
+with writes paused; copying SQLite alone is incomplete.
+
+Hourly retention and `crewship page project compact` reclaim optional history
+while preserving current drafts, live publications and running builds. Under
+storage pressure, a save/build may reclaim optional history before admission.
+Per-workspace hard quotas are 256 source snapshots / 128 MiB, Git archives /
+128 MiB, 256 artifacts / 128 MiB and 512 build records. A Page permits at most
+512 source revisions/publications. Active content remains protected even when
+it prevents further writes; see the operating guide for recovery.
 
 ## Agent / editor workflow
 

@@ -1,5 +1,7 @@
 "use client"
 
+import { routinePresetSummary } from "@/lib/routine-preset-summary"
+
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
@@ -11,6 +13,7 @@ interface Pending {
   id: string
   pipeline_slug: string
   fire_at: string
+  inputs?: Record<string, unknown>
   pinned_version?: number | null
 }
 export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string; slug: string }) {
@@ -102,7 +105,7 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
           key={p.id}
           className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 p-3 text-sm"
         >
-          <div>
+          <div className="min-w-0 flex-1">
             <span className="block text-xs text-muted-foreground">
               {p.pinned_version
                 ? `Recipe v${p.pinned_version}`
@@ -118,6 +121,7 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
                 minute: "2-digit",
               })}
             </span>
+            <p className="truncate text-xs text-muted-foreground">{routinePresetSummary(p.inputs)}</p>
             <span className="text-xs text-muted-foreground">Scheduled · One-time start</span>
           </div>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => cancel(p.id)}>

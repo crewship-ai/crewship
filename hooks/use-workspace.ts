@@ -4,6 +4,7 @@ import { useCallback, useEffect, useSyncExternalStore } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
+  pages_theme?: Partial<import("@/lib/pages/theme").PageTheme> | null
   id: string
   name: string
   slug: string
@@ -74,7 +75,8 @@ function persistId(id: string | null) {
 
 function loadWorkspaces(): Promise<void> {
   if (inflight) return inflight
-  setSnapshot({ ...snapshot, loading: true })
+  // Background settings refresh must not unmount active Pages/forms.
+  if (snapshot.workspaces.length === 0) setSnapshot({ ...snapshot, loading: true })
   inflight = (async () => {
     try {
       const res = await apiFetch("/api/v1/workspaces")
@@ -179,5 +181,30 @@ export function _resetWorkspaceStoreForTests() {
   snapshot = INITIAL
   fetched = false
   inflight = null
+  settingsRefresh = null
+  settingsRefreshWanted = false
   listeners.clear()
+}
+
+/** Read only: Pages reuse the workspace list already loaded by Studio. */
+export function useWorkspacePagesTheme(workspaceId?: string) {
+  return useSyncExternalStore(subscribe,
+    () => snapshot.workspaces.find(w => w.id === workspaceId)?.pages_theme,
+    () => undefined)
+}
+let settingsRefresh: Promise<void> | null = null
+let settingsRefreshWanted = false
+export function refreshWorkspaceSettings(): Promise<void> {
+  settingsRefreshWanted = true
+  if (settingsRefresh) return settingsRefresh
+  settingsRefresh = (async () => {
+    // An older request may have started before the mutation committed.
+    if (inflight) await inflight
+    // Coalesce bursts while guaranteeing a read after the latest invalidation.
+    while (settingsRefreshWanted) {
+      settingsRefreshWanted = false
+      await loadWorkspaces()
+    }
+  })().finally(() => { settingsRefresh = null })
+  return settingsRefresh
 }

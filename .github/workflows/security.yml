@@ -124,7 +124,10 @@ jobs:
           gitleaks version
 
       - name: Run gitleaks detect
-        run: gitleaks detect --no-banner --redact --verbose
+        # Scan this checkout's full ancestry, not every remote ref fetched above.
+        # An unrelated unmerged PR can carry fixtures whose allowlist is not
+        # present here; its commits must be checked by its own workflow.
+        run: gitleaks detect --no-banner --redact --verbose --log-opts=HEAD
 
   # ── Go vulnerability scan: govulncheck ──
   #

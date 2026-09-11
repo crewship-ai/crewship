@@ -350,12 +350,40 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusConflict, "slug already exists in workspace")
 		return
 	}
+	if replyScheduleConflict(w, err) {
+		return
+	}
 	if err != nil {
 		h.logger.Error("pipeline import save", "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to import pipeline")
 		return
 	}
 	writeJSON(w, http.StatusCreated, toPipelineResponse(saved, true))
+}
+
+// replyScheduleConflict answers the schedule-preset gate (#2495) the way the
+// user save door already does: 409 plus the structured conflict, so a client
+// can open the named plan and repair its preset instead of parsing prose.
+// Every door that changes an active recipe needs it — the gate moved out of
+// the publication branch and now fires for imports and agent saves too, and
+// without this those two would report a 500 for a refusal that is entirely
+// actionable.
+func replyScheduleConflict(w http.ResponseWriter, err error) bool {
+	var conflict *pipeline.ScheduleDraftConflict
+	if !errors.As(err, &conflict) {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error": err.Error(),
+		// The way out, in the envelope rather than in `reason`, which clients
+		// parse. Renaming a required input means the recipe and the plan have
+		// to move together: neither satisfies the other on its own, so the
+		// escape is one save that carries both, or switching the plan off
+		// first.
+		"hint":              "Update this plan's inputs in the same save (send a `trigger` block), repair the plan first if the new inputs already fit, or disable the plan and re-enable it after publishing.",
+		"schedule_conflict": conflict,
+	})
+	return true
 }
 
 // ListVersions returns the version history for a pipeline.
@@ -884,9 +912,7 @@ func (h *PipelineHandler) saveWithPublication(w http.ResponseWriter, r *http.Req
 	}
 
 	saved, sched, err := h.store.SaveWithTrigger(r.Context(), in, trigger)
-	var scheduleConflict *pipeline.ScheduleDraftConflict
-	if errors.As(err, &scheduleConflict) {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "schedule_conflict": scheduleConflict})
+	if replyScheduleConflict(w, err) {
 		return
 	}
 	if errors.Is(err, pipeline.ErrDraftConflict) {
@@ -1120,6 +1146,9 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, pipeline.ErrSlugConflict) {
 		replyError(w, http.StatusConflict, "slug already exists in workspace")
+		return
+	}
+	if replyScheduleConflict(w, err) {
 		return
 	}
 	if isTriggerValidationError(err) {

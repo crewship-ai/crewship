@@ -128,6 +128,8 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  has_application?: boolean
+  publication_version?: number
   id?: string | null
   slug?: string | null
   name?: string | null
