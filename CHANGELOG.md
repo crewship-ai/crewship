@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
 
+- **A routine run whose caller goes away is recorded as cancelled, not failed.** The executor only recognised a cancellation that arrived through the Cancel button, so every other way a run's context ends early — a closed tab, a proxy timeout, a CLI deadline, a graceful shutdown — landed a `failed` row whose only stated reason was `context canceled`. Those runs minted an error fingerprint into the errors view, paged the failure notification and ran the `on_failure` hook, while the journal entry for the same instant already read `CANCELLED`. Cancellation is now classified by cause-independent evidence, and the recorded reason names the step the run stopped at (#2473).
+
 ### Fixed
 - **Pages in unsupported browsers** (#2472) — show panels immediately in Safari, Firefox and mobile browsers, without waiting for application metadata or requiring a manual switch.
 

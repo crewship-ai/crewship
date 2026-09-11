@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   routineResultLabel,
   routineRunPresentation,
+  routineStoppingPointLabel,
   routineRunExplanation,
 } from "../routine-run-presentation"
 import { slashFieldsFromRoutineInputs, routineInputsFromValues } from "../routine-inputs"
@@ -95,5 +96,27 @@ describe("one priority for runtime state and recorded outcome", () => {
     const run = { status, outcome }
     expect(routineRunPresentation(run).label).toBe(label)
     expect(routineRunExplanation(run).title).toBe(title)
+  })
+})
+
+describe("the stopping-point lead-in agrees with the verdict beside it", () => {
+  it.each([
+    ["cancelled", undefined, "Stopped at step"],
+    ["canceled", undefined, "Stopped at step"],
+    ["running", "CANCELLED", "Stopped at step"],
+    ["interrupted", undefined, "Interrupted at step"],
+    ["failed", "FAILED", "Failed step"],
+    ["completed", "SUCCEEDED", "Failed step"],
+  ])("%s / %s reads %s", (status, outcome, want) => {
+    expect(routineStoppingPointLabel({ status, outcome })).toBe(want)
+  })
+
+  it("never calls a step failed on a run the rest of the screen calls stopped", () => {
+    // The three strings a reader sees together on the run detail: the pill,
+    // the heading and the lead-in above the recorded reason.
+    const run = { status: "cancelled", outcome: "CANCELLED" }
+    expect(routineRunPresentation(run).label).toBe("Stopped")
+    expect(routineRunExplanation(run).title).toBe("Run stopped")
+    expect(routineStoppingPointLabel(run)).not.toContain("Failed")
   })
 })
