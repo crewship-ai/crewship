@@ -17,9 +17,13 @@ env:
 
 jobs:
   database-race:
-    name: Database migrations under race detector
+    name: Database race (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,13 +31,13 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Run the complete migration race suite
+      - name: Run an exhaustive partition of the migration race suite
         timeout-minutes: 95
-        run: bash scripts/ci/go-test.sh ./internal/database -race -count=1 -timeout 90m
+        run: bash scripts/ci/database-race-shard.sh "${{ matrix.shard }}" 4
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: database-race-${{ github.sha }}
+          name: database-race-${{ github.sha }}-${{ matrix.shard }}
           path: .ci-results/
           include-hidden-files: true
           retention-days: 14
