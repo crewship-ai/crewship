@@ -288,8 +288,8 @@ expect_eq "a walkthrough with no commit range does not promote the approval" \
 STALE_CLEAN="$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
   "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$OLD_SHA")")" \
   "$(rev 2026-07-30T21:20:00Z APPROVED "" "$OLD_SHA")")"
-expect_eq "a clean review of a superseded commit is still a review" \
-  "reviewed" "$(state_of "$STALE_CLEAN")"
+expect_eq "a clean review of a superseded commit does not cover current head" \
+  "absent" "$(state_of "$STALE_CLEAN")"
 expect_contains "…and is flagged stale against head" \
   "$(notes_of "$STALE_CLEAN")" "the newest push is unreviewed"
 
