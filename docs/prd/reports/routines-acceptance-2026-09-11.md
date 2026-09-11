@@ -424,6 +424,14 @@ Rozsah Release 1.0 podle §11. **PASS znamená „doložené v pojmenovaném
 rozsahu“, ne „bez vad“.** Smíšený scénář není celý PASS proto, že prošla
 jedna jeho část — sloupec Rozsah říká přesně která.
 
+Přesný součet, aby ho žádný souhrn nezakryl: **11 řádků PASS bez výhrady**
+(1, 3, 5, 7, 9, 10, 11, 13, 14 a — po sloučení #2497/#2498/#2503 — 2 a 6),
+**3 řádky PASS s vyslovenou hranicí** (8 „na měřitelné vrstvě“, 15 „v rozsahu
+§9“, 16 „jedno měření, ne benchmark“), **1 řádek PASS částečně** (12 —
+`/journal/lookup` selže tiše, stránka Journal a záložka Versions nebyly
+fault-injectované) a **1 řádek smíšený** (4 — zařazený tvar opravený v #2501,
+nesloučeno; rutiny bez archivu zůstávají nepřipnuté i po něm).
+
 Vrstvy se v protokolu nezaměňují: *server* = test nebo HTTP proti skutečnému
 handleru; *živě* = běžící crewshipd a skutečné run/decision identity;
 *browser* = přihlášený Chromium proti nasazenému buildu; *fault injection* =
@@ -592,6 +600,24 @@ Oprava je v [PR #2498](https://github.com/crewship-ai/crewship/pull/2498).
 **Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
 je tento řádek doložená oprava v review, ne uzavřená vada.
 
+**Oponentura (Codex, 11. 9. odpoledne) našla v opravě #2498 dvě díry, obě
+reprodukované červeným testem:**
+
+- **Odepnutí** (`PATCH {"target_pipeline_version":null,"inputs":{…}}`) se
+  validovalo proti *staré* připnuté verzi — handler už explicitní `null`
+  správně vyřešil, moje brána na to zase položila uložený pin — a plán, který
+  poběží HEAD, si uložil preset, který HEAD odmítá. Server vrátil 200.
+- **Přepnutí verze bez `inputs`** (`PATCH {"target_pipeline_version":2}`) se
+  nevalidovalo vůbec, protože brána běžela jen při přítomnosti `inputs`.
+  Preset pro v1 se převezl na v2 s 200.
+
+Obojí tatáž chyba ze dvou stran: posuzoval jsem preset proti receptu, na
+který plán *ukazoval*, ne na který *bude ukazovat*. Navazující oprava v
+[PR #2503](https://github.com/crewship-ai/crewship/pull/2503): brána běží při
+změně vstupů **nebo** cíle (pin, verze, rutina) a posuzuje výslednou
+kombinaci; vypnutí, přeplánování a přejmenování dál neposuzuje.
+**Stav: nesloučeno.** Do té doby je N3 opravená jen zčásti.
+
 ### N4 — Zařazený běh není připnutý, takže publikace změní, co odpálí · OPRAVA V REVIEW
 
 `POST …/run` s `delay_seconds` zaparkuje spouštěč v `pending_runs` a odpoví
@@ -634,6 +660,20 @@ o 45 s: run_cmtww4whc0005a29bde22  status=completed  pipeline_version=3  output=
 ```
 
 Účtenka nese připnutou verzi a běh odpálil recept, proti kterému byl přijatý.
+
+**Oponentura našla, že debounce pin nezachovává.** `coalesceDebounce` přepisuje
+`pinned_version` z pozdějšího spouštěče, takže dávka přes okno, do kterého
+padla publikace, skončila připnutá na recept publikovaný uprostřed — přesný
+opak toho, co PR tvrdil. Můj test to nezachytil, protože druhému požadavku
+předal tentýž zastaralý objekt receptu (v1), takže vyhledání pinu našlo zase
+v1; **sonda, která nemůže selhat, není sonda.** Po opravě sondy (rutina se
+znovu načte jako v handleru, test kontroluje, že se hash pohnul) test padal
+s `pinned_version = 2`. Oprava: `COALESCE(pinned_version, ?)` — existující
+pin zůstává, prázdný se doplní. Ověřeno red→green v #2501.
+
+Hranice, kterou merge #2501 neodstraní: rutina **bez archivované verze** se
+odloží nepřipnutá (účtenka `pinned_version: null`). Řádek 4 proto ani po
+sloučení není bezvýhradný PASS — je PASS pro verzované rutiny.
 
 Vědomě beze změny: volající, který `pinned_version` uvede, dostane svůj;
 jednorázový start si nechává i své 409; a rutina bez archivované verze se dá

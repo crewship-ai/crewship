@@ -406,14 +406,15 @@ plus samostatný seznam toho, co doložené není. Vrstvy se v ní nezaměňují
 serverový test, browser fault injection, skutečné živé ověření a lidské
 porozumění jsou rozlišené.
 
-Čtyři nálezy. N1 je sloučený; N2, N3 a N4 mají opravu v review a **nejsou
-uzavřené, dokud jejich PR nejsou v `main` se zelenou požadovanou CI**:
+Čtyři nálezy. N2 je sloučený; N3 je sloučený zčásti a jeho navazující oprava
+je v review; N1 a N4 mají opravu v review. **Nic z toho není uzavřené, dokud
+příslušný PR není v `main` se zelenou požadovanou CI**:
 
 | Nález | Co bylo špatně | Kde je oprava |
 |---|---|---|
 | N1 | Běh zrušený jinak než tlačítkem Cancel (odpojený klient, timeout proxy, deadline klienta, řádné vypnutí) se zapisoval jako `failed` s důvodem `context canceled`, razil error fingerprint, posílal failure notifikaci a pouštěl `on_failure` hook — zatímco journal tentýž okamžik označoval `CANCELLED` | [PR #2494](https://github.com/crewship-ai/crewship/pull/2494) |
-| N2 | Kontrola kompatibility presetů běžela jen na cestě draft→publish, takže přímé `routine save` (dveře CLI a agentů) rozbilo živý plán tiše | [#2495](https://github.com/crewship-ai/crewship/issues/2495) → [PR #2497](https://github.com/crewship-ai/crewship/pull/2497) — **nesloučeno** |
-| N3 | Preset plánu se neověřoval ve chvíli, kdy se plán zakládá nebo edituje, takže plán mohl vzniknout s hodnotami, které jeho rutina odmítá | [#2496](https://github.com/crewship-ai/crewship/issues/2496) → [PR #2498](https://github.com/crewship-ai/crewship/pull/2498) — **nesloučeno** |
+| N2 | Kontrola kompatibility presetů běžela jen na cestě draft→publish, takže přímé `routine save` (dveře CLI a agentů) rozbilo živý plán tiše | [#2495](https://github.com/crewship-ai/crewship/issues/2495) → [PR #2497](https://github.com/crewship-ai/crewship/pull/2497) — sloučeno `7437bd33a` |
+| N3 | Preset plánu se neověřoval ve chvíli, kdy se plán zakládá nebo edituje, takže plán mohl vzniknout s hodnotami, které jeho rutina odmítá | [#2496](https://github.com/crewship-ai/crewship/issues/2496) → [PR #2498](https://github.com/crewship-ai/crewship/pull/2498) sloučeno `adb0f4620`; oponentura našla dvě díry v úpravě plánu (odepnutí, přepnutí verze bez vstupů) → [PR #2503](https://github.com/crewship-ai/crewship/pull/2503) — **nesloučeno** |
 | N4 | Běh odložený přes `--delay` nebyl připnutý, takže publikace během jeho čekání ve frontě změnila, co odpálil — přesně případ, který §9 řádek 4 pojmenovává | [#2500](https://github.com/crewship-ai/crewship/issues/2500) → [PR #2501](https://github.com/crewship-ai/crewship/pull/2501) — **nesloučeno** |
 
 N3 byl původně zapsán jako „server nevaliduje typované vstupy běhu“. **To bylo
