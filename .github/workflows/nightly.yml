@@ -266,14 +266,30 @@ jobs:
         with:
           name: nightly-binaries-${{ needs.verified.outputs.sha }}
           path: dist
+      - name: Prevent superseded binaries from advancing self-update
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.verified.outputs.sha }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$current" = "$SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo '::notice::Main advanced; retaining verified candidates without publishing a superseded nightly.'
+          fi
       - name: Write publication identity
         env:
           SHA: ${{ needs.verified.outputs.sha }}
           DIGEST: ${{ needs.docker.outputs.digest }}
           IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
           VERSION: ${{ needs.verified.outputs.version }}
+          PUBLISH: ${{ steps.current.outputs.publish }}
         run: |
-          jq -n --arg sha "$SHA" --arg digest "$DIGEST" --arg image "$IMAGE" --arg release "$VERSION" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
+          jq -n --arg sha "$SHA" --arg digest "$DIGEST" --arg image "$IMAGE" --arg release "$VERSION" --argjson published "$PUBLISH" '{sha:$sha,digest:$digest,image:$image,release:$release,published:$published}' > dist/image-manifest.json
       - name: Publish immutable nightly release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -290,6 +306,7 @@ jobs:
           Image digest and source identity: image-manifest.json.
           ' "$SHA" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" --repo "$REPO" --prerelease --target "$SHA" --title "Nightly ${SHA:0:12}" --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
+        if: steps.current.outputs.publish == 'true'
       - name: Promote only the verified image
         env:
           GH_TOKEN: ${{ github.token }}
@@ -307,6 +324,7 @@ jobs:
           else
             echo "Main advanced; published immutable artifacts without moving :nightly."
           fi
+        if: steps.current.outputs.publish == 'true'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: nightly-image-manifest
@@ -318,3 +336,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: python3 scripts/ci/prune-nightlies.py "$REPO"
+        if: steps.current.outputs.publish == 'true'

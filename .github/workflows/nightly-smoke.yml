@@ -36,6 +36,7 @@ jobs:
       sha: ${{ steps.manifest.outputs.sha }}
       image: ${{ steps.manifest.outputs.image }}
       release: ${{ steps.manifest.outputs.release }}
+      published: ${{ steps.manifest.outputs.published }}
     steps:
       - name: Read the triggering run's publication manifest
         id: manifest
@@ -50,6 +51,12 @@ jobs:
           jq -e --arg repo "$REPO" '.name == "Nightly" and .conclusion == "success" and .head_repository.full_name == $repo and .head_branch == "main"' "$RUNNER_TEMP/run.json"
           gh run download "$RUN_ID" --repo "$REPO" --name nightly-image-manifest --dir "$RUNNER_TEMP/publication"
           manifest="$RUNNER_TEMP/publication/image-manifest.json"
+          published=$(jq -er '.published | if type == "boolean" then tostring else error("missing publication verdict") end' "$manifest")
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          if [ "$published" = false ]; then
+            echo '::notice::This run retained superseded candidates; no public release to smoke.'
+            exit 0
+          fi
           sha=$(jq -er .sha "$manifest")
           digest=$(jq -er .digest "$manifest")
           image=$(jq -er .image "$manifest")
@@ -68,9 +75,7 @@ jobs:
     # Skip when the triggering Nightly run itself failed — no point
     # exercising a binary that never published. Always run on
     # workflow_dispatch (no triggering run to inspect).
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    if: needs.resolve.outputs.published == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -387,6 +392,7 @@ jobs:
           fi
 
   docker:
+    if: needs.resolve.outputs.published == 'true'
     name: Nightly Docker smoke (published digest)
     needs: [resolve]
     runs-on: ubuntu-latest

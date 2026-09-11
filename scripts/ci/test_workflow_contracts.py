@@ -54,6 +54,12 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('COPY --from=backend /crewship-sidecar /usr/local/bin/crewship-sidecar', dockerfile)
         self.assertIn('COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh', dockerfile)
 
+    def test_superseded_nightly_skips_both_public_smoke_jobs(self):
+        smoke = self.text('nightly-smoke.yml')
+        for name in ('binary', 'docker'):
+            self.assertIn("if: needs.resolve.outputs.published == 'true'", self.job(smoke, name))
+        self.assertIn('Prevent superseded binaries from advancing self-update', self.text('nightly.yml'))
+
     def test_snapshot_rehearsal_does_not_parse_the_latest_nightly_tag(self):
         job = self.job(self.text('ci.yml'), 'release-rehearsal')
         self.assertIn('GORELEASER_CURRENT_TAG: v0.0.0-ci', job)
