@@ -831,3 +831,14 @@ internal/sidecar 144.536s and internal/dispatch 82.193s, local log
 /tmp/crewship-2-takeover-race-fixes.log. This covers the extra test fixes in the
 isolated worktree; the full Go run on 9b3ee52b is still pending and is not
 retroactively described as covering these later changes.
+
+
+R6 prerequisite: reproduced both MCP writers ignoring the runtime's required
+profile (memory.write wrote AGENT.md; append_daily wrote today's journal). Both
+now return a recoverable tool error without a local write when guaranteed memory
+is required. The regression was red before the change; the complete MCP test
+family passed after it. The complete sidecar package then passed with -race -count=1 in 132.901s
+(/tmp/crewship-2-r6-required-sidecar-full-race.log). This is a fail-closed guard,
+NOT completion of R6: authenticated run binding, shared HTTP/MCP revision
+namespace, read provenance, retry identity and the host dispatcher bridge remain
+unimplemented. The default stays off.

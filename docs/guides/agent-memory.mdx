@@ -774,17 +774,19 @@ every agent-side write, whatever the caller asked for.
 | **Accepted values** | `1`, `true`, `yes`, `on` enable it; anything else, including unset, leaves it off |
 | **Who sets it** | whatever launches the agent container, as part of the container's environment |
 | **Scope** | one agent container, for the life of that container |
-| **Read by** | the sidecar, on every `POST /memory/write` |
+| **Read by** | the sidecar, on every `POST /memory/write` and MCP `memory.write` / `memory.append_daily` call |
 
 It is set on the container from outside precisely so that nothing **inside** the
 container can clear it: a correctness rule an agent may opt out of is not a rule.
 
-**Turning it on today makes agent memory writes fail.** The guaranteed profile
-needs a per-attempt run identity, and no dispatch path supplies one to an agent
-yet, so every write that would have been recorded as degraded becomes a `503`
-instead. That is the correct failure direction for the parallel profile and the
-wrong one for the current default, which is why it ships off. Leave it unset
-until the run identity reaches the memory clients.
+**Leave it off until the agent-facing guaranteed path is fully wired.** Run
+capabilities already reach agent executions, but the memory HTTP bridge still
+expects run identity in the request body and does not bind it to that capability.
+The MCP dispatcher has no host ledger bridge: with this flag enabled, both MCP
+writers return a tool error (`memory_guaranteed_unavailable`) without writing
+locally. HTTP writes that cannot meet the guaranteed preconditions return `503`
+instead of falling back. This fail-closed behavior protects the requirement; it
+does not establish that agent-facing guaranteed memory is complete.
 
 ## Load-time injection scan
 

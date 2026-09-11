@@ -305,25 +305,23 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The dispatcher's profile is LEGACY, declared here rather than inherited
-	// from NewDispatcher's default so that it is a statement instead of an
-	// omission — and so the reason sits next to the construction rather than
-	// in the option's doc comment.
-	//
-	// memory.WithMutationLedger is what would turn this up, and it takes a
-	// *sql.DB. This process runs inside the agent container and cannot have
-	// one. Unlike POST /memory/write, which forwards its whole mutation to the
-	// host (memoryHostMutationPath, memory_write.go), the MCP tool path cannot
-	// be forwarded the same way without moving the dispatcher's own work —
-	// path resolution inside the memory root, the prompt-injection screen, the
-	// quarantine, the soft-cap guidance — to the other side of the IPC
-	// boundary, and internal/memory is the package that owns all of it.
-	//
-	// So this path stays legacy and says so: the lock, the normalisation, the
-	// declared-removal check, the cap, the scrubber and the durable write all
-	// apply; the revision, the operation-id idempotency, crash recovery and
-	// I4's run/generation verification do not. An agent that needs the
-	// guaranteed profile uses POST /memory/write, which does.
+	// The MCP dispatcher is local and has no host ledger yet. A runtime that
+	// requires guaranteed memory must therefore fail closed on BOTH writers;
+	// the requirement cannot be bypassed by choosing MCP instead of HTTP.
+	if memoryGuaranteedRequiredByRuntime() && (params.Name == "memory.write" || params.Name == "memory.append_daily") {
+		result, _ := json.Marshal(memoryMCPToolCallResult{
+			IsError: true,
+			Content: []memoryMCPToolCallContent{{Type: "text", Text: `{"error_code":"memory_guaranteed_unavailable","message":"Guaranteed memory is unavailable on this tool surface; no write was performed."}`}},
+		})
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			JSONRPC: "2.0", ID: req.ID, Result: result,
+		})
+		return
+	}
+
+	// Compatible serial deployments keep the local legacy dispatcher. R6's
+	// host bridge must preserve its path checks, injection screen, quarantine
+	// and cap guidance before this path can offer guaranteed writes.
 	dispatcher := memory.NewDispatcher(ac,
 		memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)),
 		memory.WithMutationProfile(memory.ProfileLegacy))
