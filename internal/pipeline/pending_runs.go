@@ -86,71 +86,142 @@ func NewPendingRunStore(db *sql.DB) *PendingRunStore {
 	return &PendingRunStore{db: db}
 }
 
+// CoalesceAdmit judges a trigger that is about to coalesce into an existing
+// pending row. pin is the version the row WILL carry afterwards — the row's
+// own pin, or this trigger's when the row has none. Returning an error
+// refuses the coalesce and leaves the row exactly as it was; the error is
+// returned to the caller unwrapped so it can be classified.
+//
+// The store cannot judge inputs itself (it does not know the DSL), but it is
+// the only place that knows which pin wins, so the two halves of the
+// decision meet here rather than in a caller that read the row a moment
+// earlier. Opponent round 2 on #2501: keeping the first pin and adopting the
+// last inputs are each right alone and together stored a row the pinned
+// recipe could not run.
+type CoalesceAdmit func(ctx context.Context, pin *int) error
+
+// EnqueueResult is what Enqueue actually stored — the receipt is written
+// from this, never from what the request hoped for.
+type EnqueueResult struct {
+	ID            string
+	Coalesced     bool
+	PinnedVersion *int // the pin the row carries after this call
+}
+
+// errPendingRowMoved: the row found by the lookup was claimed, cancelled or
+// re-pinned before the merge landed. Enqueue starts over.
+var errPendingRowMoved = errors.New("pending_runs: row moved during coalesce")
+
+// errNoPendingRow: nothing to coalesce into; Enqueue inserts.
+var errNoPendingRow = errors.New("pending_runs: no pending row")
+
 // Enqueue parks a deferred trigger. When DebounceKey is set and a
 // pending row already exists for (pipeline_id, debounce_key), the
 // existing row is COALESCED: its fire_at is pushed to the new FireAt
 // (capped at the original debounce_max_at), inputs/tags/metadata are
 // replaced, and the existing id is returned. Otherwise a fresh row is
-// inserted. Returns (id, coalesced, error).
+// inserted. Returns (id, coalesced, error). Callers that need to judge
+// the coalesce, or the stored pin, use EnqueueChecked.
 func (s *PendingRunStore) Enqueue(ctx context.Context, pr PendingRun) (string, bool, error) {
-	if pr.ID == "" {
-		return "", false, errors.New("pending_runs: id required")
-	}
-	if pr.DebounceKey != "" {
-		// If a pending row for this key already exists, coalesce into it.
-		var existing int
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM pending_runs WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
-			pr.PipelineID, pr.DebounceKey).Scan(&existing); err != nil {
-			return "", false, fmt.Errorf("pending_runs: debounce lookup: %w", err)
-		}
-		if existing > 0 {
-			return s.coalesceDebounce(ctx, pr)
-		}
-	}
+	res, err := s.EnqueueChecked(ctx, pr, nil)
+	return res.ID, res.Coalesced, err
+}
 
-	_, err := s.db.ExecContext(ctx, `
+// EnqueueChecked is Enqueue with an admission hook for the coalesce path
+// and a result that reports the stored state. The merge is a compare-and-
+// set: it lands only on a row that is still pending and still carries the
+// pin admit was asked about, so a concurrent claim or a rival trigger that
+// filled the pin first sends this one back to the lookup instead of
+// storing a pair nobody judged.
+func (s *PendingRunStore) EnqueueChecked(ctx context.Context, pr PendingRun, admit CoalesceAdmit) (EnqueueResult, error) {
+	if pr.ID == "" {
+		return EnqueueResult{}, errors.New("pending_runs: id required")
+	}
+	const attempts = 4
+	for i := 0; i < attempts; i++ {
+		if pr.DebounceKey != "" {
+			res, err := s.coalesceDebounce(ctx, pr, admit)
+			switch {
+			case err == nil:
+				return res, nil
+			case errors.Is(err, errNoPendingRow):
+				// fall through to the insert
+			case errors.Is(err, errPendingRowMoved):
+				continue
+			default:
+				return EnqueueResult{}, err
+			}
+		}
+
+		_, err := s.db.ExecContext(ctx, `
 INSERT INTO pending_runs (
     id, workspace_id, pipeline_id, pipeline_slug, inputs_json, tags_json, metadata_json,
     tier_override, priority, debounce_key, fire_at, expires_at, debounce_max_at,
     invoking_user_id, triggered_via, triggered_by_id, chain_depth, chain_origin, pinned_version, status, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now','subsec'), datetime('now','subsec'))`,
-		pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
-		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
-		nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
-		pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
-		nullableStr(pr.InvokingUserID),
-		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
-		nullableStr(pr.ChainOrigin), pr.PinnedVersion)
-	if err != nil {
-		// Debounce race: a concurrent trigger with the same key inserted
-		// first, so the partial-unique index rejects this one. Both
-		// requests SELECTed empty before either INSERTed — fall back to the
-		// coalesce path (the row now exists) instead of surfacing a 500.
-		if pr.DebounceKey != "" && isUniqueViolation(err) {
-			return s.coalesceDebounce(ctx, pr)
+			pr.ID, pr.WorkspaceID, pr.PipelineID, pr.PipelineSlug,
+			orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
+			nullableStr(pr.TierOverride), pr.Priority, nullableStr(pr.DebounceKey),
+			pr.FireAt.UTC().Format(time.RFC3339Nano), nullableTime(pr.ExpiresAt), nullableTime(pr.DebounceMaxAt),
+			nullableStr(pr.InvokingUserID),
+			nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.ChainDepth,
+			nullableStr(pr.ChainOrigin), pr.PinnedVersion)
+		if err != nil {
+			// Debounce race: a concurrent trigger with the same key inserted
+			// first, so the partial-unique index rejects this one. Both
+			// requests looked before either INSERTed — go round again and
+			// coalesce into the row that now exists instead of surfacing a 500.
+			if pr.DebounceKey != "" && isUniqueViolation(err) {
+				continue
+			}
+			return EnqueueResult{}, fmt.Errorf("pending_runs: insert: %w", err)
 		}
-		return "", false, fmt.Errorf("pending_runs: insert: %w", err)
+		return EnqueueResult{ID: pr.ID, PinnedVersion: pr.PinnedVersion}, nil
 	}
-	return pr.ID, false, nil
+	return EnqueueResult{}, fmt.Errorf("pending_runs: debounce row for %s/%s kept moving after %d attempts", pr.PipelineID, pr.DebounceKey, attempts)
 }
 
-// coalesceDebounce updates the existing pending row for (pipeline,
-// debounce_key) — the merge path shared by Enqueue's normal coalesce and
-// its race fallback.
-func (s *PendingRunStore) coalesceDebounce(ctx context.Context, pr PendingRun) (string, bool, error) {
+// coalesceDebounce merges pr into the pending row for (pipeline,
+// debounce_key). errNoPendingRow when there is none; errPendingRowMoved
+// when the row changed under the merge.
+func (s *PendingRunStore) coalesceDebounce(ctx context.Context, pr PendingRun, admit CoalesceAdmit) (EnqueueResult, error) {
 	var existingID string
 	var maxAt sql.NullString
-	if err := s.db.QueryRowContext(ctx, `
-SELECT id, COALESCE(debounce_max_at,'') FROM pending_runs
+	var existingPin *int
+	err := s.db.QueryRowContext(ctx, `
+SELECT id, COALESCE(debounce_max_at,''), pinned_version FROM pending_runs
 WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
-		pr.PipelineID, pr.DebounceKey).Scan(&existingID, &maxAt); err != nil {
-		return "", false, fmt.Errorf("pending_runs: coalesce lookup: %w", err)
+		pr.PipelineID, pr.DebounceKey).Scan(&existingID, &maxAt, &existingPin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EnqueueResult{}, errNoPendingRow
+	}
+	if err != nil {
+		return EnqueueResult{}, fmt.Errorf("pending_runs: coalesce lookup: %w", err)
 	}
 	fireAt := pr.FireAt
 	if maxAt.String != "" {
 		if cap, perr := time.Parse(time.RFC3339Nano, maxAt.String); perr == nil && fireAt.After(cap) {
 			fireAt = cap
+		}
+	}
+	// pinned_version stays with the FIRST trigger (#2500). A debounce window
+	// turns a burst into one logical trigger, and that trigger was accepted
+	// against whatever was published when the window opened; a later trigger
+	// in the same window must not silently move it onto a recipe that was
+	// published in between. An existing pin is kept and only an empty one is
+	// filled, so a legacy unpinned row can still acquire a pin from the
+	// first pinned trigger that coalesces into it. Found by the opponent
+	// review of PR #2501 — the first probe re-used a stale routine object and
+	// could not have failed.
+	effectivePin := existingPin
+	if effectivePin == nil {
+		effectivePin = pr.PinnedVersion
+	}
+	// The payload this merge would store is judged against the pin it would
+	// store, before anything is written.
+	if admit != nil {
+		if err := admit(ctx, effectivePin); err != nil {
+			return EnqueueResult{}, err
 		}
 	}
 	// Coalescing adopts the LATEST trigger's payload (inputs/tags/metadata),
@@ -179,34 +250,33 @@ WHERE pipeline_id = ? AND debounce_key = ? AND status = 'pending'`,
 	// budget also keeps its root. Found by the runtime harness, which produced
 	// ten status changes against a cap of nine and two distinct origins.
 	//
-	// pinned_version stays with the FIRST trigger (#2500). A debounce window
-	// turns a burst into one logical trigger, and that trigger was accepted
-	// against whatever was published when the window opened; a later trigger
-	// in the same window must not silently move it onto a recipe that was
-	// published in between. COALESCE keeps an existing pin and only fills an
-	// empty one, so a legacy unpinned row can still acquire a pin from the
-	// first pinned trigger that coalesces into it. Found by the opponent
-	// review of PR #2501 — the first probe re-used a stale routine object and
-	// could not have failed.
-	if _, err := s.db.ExecContext(ctx, `
+	// The WHERE clause is the compare-and-set: the row must still be pending
+	// (a dispatcher's claim is `status = 'fired'`) and must still carry the
+	// pin admit was asked about, or the judged pair and the stored pair would
+	// differ. Zero rows means start over.
+	res, err := s.db.ExecContext(ctx, `
 UPDATE pending_runs
 SET inputs_json = ?, tags_json = ?, metadata_json = ?, tier_override = ?,
     priority = ?, fire_at = ?, expires_at = ?, invoking_user_id = ?,
     triggered_via = ?, triggered_by_id = ?,
-    pinned_version = COALESCE(pinned_version, ?),
+    pinned_version = ?,
     chain_origin = CASE WHEN ? > COALESCE(chain_depth,0) THEN ? ELSE chain_origin END,
     chain_depth  = MAX(COALESCE(chain_depth,0), ?),
     updated_at = datetime('now','subsec')
-WHERE id = ?`,
+WHERE id = ? AND status = 'pending' AND pinned_version IS ?`,
 		orJSON(pr.InputsJSON, "{}"), orJSON(pr.TagsJSON, "[]"), orJSON(pr.MetadataJSON, "{}"),
 		nullableStr(pr.TierOverride), pr.Priority, fireAt.UTC().Format(time.RFC3339Nano),
 		nullableTime(pr.ExpiresAt), nullableStr(pr.InvokingUserID),
-		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), pr.PinnedVersion,
+		nullableStr(string(pr.TriggeredVia)), nullableStr(pr.TriggeredByID), effectivePin,
 		pr.ChainDepth, nullableStr(pr.ChainOrigin), pr.ChainDepth,
-		existingID); err != nil {
-		return "", false, fmt.Errorf("pending_runs: coalesce: %w", err)
+		existingID, existingPin)
+	if err != nil {
+		return EnqueueResult{}, fmt.Errorf("pending_runs: coalesce: %w", err)
 	}
-	return existingID, true, nil
+	if n, _ := res.RowsAffected(); n == 0 {
+		return EnqueueResult{}, errPendingRowMoved
+	}
+	return EnqueueResult{ID: existingID, Coalesced: true, PinnedVersion: effectivePin}, nil
 }
 
 // ExpireDue marks pending rows past their ttl as expired. Returns the

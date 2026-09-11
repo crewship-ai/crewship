@@ -17,6 +17,7 @@ package api
 // mention which shape of deferral the caller used.
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -161,8 +162,13 @@ func TestOneTimeStartStillPins(t *testing.T) {
 	}
 }
 
-// TestExplicitPinIsNotOverridden — a caller that names a version keeps it.
-func TestExplicitPinIsNotOverridden(t *testing.T) {
+// TestEnqueueHelperHonoursACallerPin exercises enqueueDeferredRun directly:
+// when the caller has already resolved a pin, the helper does not replace it.
+// This is NOT the public contract — the run door refuses pinned_version on a
+// delayed or debounced trigger (TestPublicRunDoorRefusesAnExplicitPinOnADeferral);
+// the helper's caller today is the one-time start, which resolved the pin
+// itself.
+func TestEnqueueHelperHonoursACallerPin(t *testing.T) {
 	h, user, ws := newPipelineHandlerForCRUDTest(t)
 	in, p := seedPinnable(t, h, user, ws, "pin-explicit")
 	in.DefinitionJSON = `{"name":"pin-explicit","description":"v2","steps":[]}`
@@ -203,5 +209,156 @@ func TestDeferredRunWithoutAnArchiveStillEnqueues(t *testing.T) {
 	h.enqueueDeferredRun(rr, r, ws, user, p, runRequestBody{FireAt: time.Now().Add(time.Hour).Format(time.RFC3339)})
 	if rr.Code != http.StatusConflict {
 		t.Errorf("one-time start without an archive: %d %s, want 409", rr.Code, rr.Body.String())
+	}
+}
+
+// presetV1ForCoalesce / presetV2ForCoalesce are one routine across an edit
+// that renames its only required input: a preset written for v1 has nothing
+// v2 accepts and vice versa. `presetValidationDef` is the v1 shape.
+const presetV2ForCoalesce = `{"name":"planned","inputs":[` +
+	`{"name":"zone","type":"string","widget":"select","options":["eu","us"],"required":true}],` +
+	`"steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`
+
+// runPlanned drives the PUBLIC run door for the "planned" routine.
+func runPlanned(t *testing.T, h *PipelineHandler, user, ws, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/run", bytes.NewBufferString(body)), user, ws, "OWNER")
+	req.SetPathValue("slug", "planned")
+	rr := httptest.NewRecorder()
+	h.Run(rr, req)
+	return rr
+}
+
+// TestCoalesceRefusesInputsThePinnedRecipeRejects — opponent round 2. The
+// first trigger opened a window on v1 with {"region":"eu"}; v2 renames the
+// input; a second trigger in the window sends {"zone":"us"}, valid for HEAD.
+// Keeping the pin (correct) and adopting the inputs (correct) would store a
+// row v1 cannot run. The pair is judged together and this request is
+// refused, leaving the first trigger's row exactly as accepted.
+func TestCoalesceRefusesInputsThePinnedRecipeRejects(t *testing.T) {
+	h, user, ws := presetRig(t)
+	h.SetRunner(newBlockingRunner())
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+
+	first := runPlanned(t, h, user, ws, `{"inputs":{"region":"eu"},"debounce_key":"same","debounce_window_seconds":3600}`)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first: %d %s", first.Code, first.Body.String())
+	}
+	now := time.Now()
+	if _, err := h.store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: ws, Slug: "planned", Name: "Planned",
+		DefinitionJSON: presetV2ForCoalesce, LastTestRunAt: &now, LastTestRunPassed: true}); err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+
+	second := runPlanned(t, h, user, ws, `{"inputs":{"zone":"us"},"debounce_key":"same","debounce_window_seconds":3600}`)
+	if second.Code != http.StatusConflict {
+		t.Fatalf("incompatible coalesce: %d %s, want 409", second.Code, second.Body.String())
+	}
+	for _, want := range []string{"version 1", "region"} {
+		if !bytes.Contains(second.Body.Bytes(), []byte(want)) {
+			t.Errorf("refusal %s does not name %q", second.Body.String(), want)
+		}
+	}
+
+	rows, err := pipeline.NewPendingRunStore(h.db).DueRuns(t.Context(), time.Now().Add(2*time.Hour), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+	row := rows[0]
+	if row.PinnedVersion == nil || *row.PinnedVersion != 1 || row.InputsJSON != `{"region":"eu"}` {
+		t.Fatalf("row changed by a refused request: pin=%v inputs=%s", row.PinnedVersion, row.InputsJSON)
+	}
+	v, err := h.store.GetVersion(t.Context(), p.ID, *row.PinnedVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsl, err := pipeline.Parse([]byte(v.DefinitionJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inputs map[string]any
+	if err := json.Unmarshal([]byte(row.InputsJSON), &inputs); err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ValidateFormInputs(dsl, inputs); err != nil {
+		t.Fatalf("stored pair is not runnable: pin=%d inputs=%s: %v", *row.PinnedVersion, row.InputsJSON, err)
+	}
+
+}
+
+// presetV2Additive is presetValidationDef plus one optional input: a request
+// written for it is valid for v1 too, because v1 does not declare the key.
+const presetV2Additive = `{"name":"planned","inputs":[` +
+	`{"name":"region","type":"string","widget":"select","options":["eu","us"],"required":true},` +
+	`{"name":"dry_run","type":"boolean","widget":"boolean","default":true},` +
+	`{"name":"verbose","type":"boolean","widget":"boolean","default":false}],` +
+	`"steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`
+
+// TestCoalesceKeepsAcceptingCompatibleInputs — the other half of the rule.
+// A payload the kept pin CAN run still coalesces: inputs and attribution
+// move to the row, the pin stays, and the receipt reports the stored pair.
+// Note the request must satisfy HEAD as well (the run door's preflight is
+// unchanged), so this is an additive edit rather than a rename.
+func TestCoalesceKeepsAcceptingCompatibleInputs(t *testing.T) {
+	h, user, ws := presetRig(t)
+	h.SetRunner(newBlockingRunner())
+	seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+
+	first := runPlanned(t, h, user, ws, `{"inputs":{"region":"eu"},"debounce_key":"same","debounce_window_seconds":3600}`)
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("first: %d %s", first.Code, first.Body.String())
+	}
+	var opened map[string]any
+	if err := json.Unmarshal(first.Body.Bytes(), &opened); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := h.store.Save(t.Context(), pipeline.SaveInput{WorkspaceID: ws, Slug: "planned", Name: "Planned",
+		DefinitionJSON: presetV2Additive, LastTestRunAt: &now, LastTestRunPassed: true}); err != nil {
+		t.Fatalf("publish v2: %v", err)
+	}
+	other := seedMemberWithCapabilities(t, h.db, ws, "OWNER", "[]", "coalesce-other")
+
+	second := runPlanned(t, h, other, ws, `{"inputs":{"region":"us","verbose":true},"debounce_key":"same","debounce_window_seconds":3600}`)
+	if second.Code != http.StatusAccepted {
+		t.Fatalf("compatible coalesce: %d %s", second.Code, second.Body.String())
+	}
+	var receipt map[string]any
+	if err := json.Unmarshal(second.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt["coalesced"] != true || receipt["pinned_version"] != float64(1) || receipt["pending_id"] != opened["pending_id"] {
+		t.Fatalf("receipt %v, want coalesced into %v on pin 1", receipt, opened["pending_id"])
+	}
+	rows, err := pipeline.NewPendingRunStore(h.db).DueRuns(t.Context(), time.Now().Add(2*time.Hour), 10)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+	row := rows[0]
+	var inputs map[string]any
+	if err := json.Unmarshal([]byte(row.InputsJSON), &inputs); err != nil {
+		t.Fatal(err)
+	}
+	if inputs["region"] != "us" || inputs["verbose"] != true || row.PinnedVersion == nil || *row.PinnedVersion != 1 || row.InvokingUserID != other {
+		t.Fatalf("stored pin=%v inputs=%s user=%s, want the second payload under its own user on pin 1", row.PinnedVersion, row.InputsJSON, row.InvokingUserID)
+	}
+}
+
+// TestPublicRunDoorRefusesAnExplicitPinOnADeferral — the contract the docs
+// must state: `pinned_version` is honoured for an immediate or one-time
+// start only. A delayed or debounced trigger pins what was published when
+// it was accepted, and naming a version is a 400, not a silent override.
+func TestPublicRunDoorRefusesAnExplicitPinOnADeferral(t *testing.T) {
+	h, user, ws := presetRig(t)
+	h.SetRunner(newBlockingRunner())
+	seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	for _, body := range []string{
+		`{"inputs":{"region":"eu"},"pinned_version":1,"delay_seconds":60}`,
+		`{"inputs":{"region":"eu"},"pinned_version":1,"debounce_key":"k"}`,
+	} {
+		rr := runPlanned(t, h, user, ws, body)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s → %d %s, want 400", body, rr.Code, rr.Body.String())
+		}
 	}
 }
