@@ -82,7 +82,7 @@ func createSchedule(t *testing.T, h *PipelineHandler, user, ws, pipelineID strin
 func countSchedules(t *testing.T, h *PipelineHandler, ws string) int {
 	t.Helper()
 	var n int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM pipeline_schedules WHERE workspace_id=? AND deleted_at IS NULL`, ws).Scan(&n); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_schedules WHERE workspace_id=? AND deleted_at IS NULL`, ws).Scan(&n); err != nil {
 		t.Fatalf("count schedules: %v", err)
 	}
 	return n
@@ -206,7 +206,7 @@ func TestPresetValidation_UpdateIsGuardedToo(t *testing.T) {
 		t.Fatalf("update status = %d, want 400/422; body = %s", up.Code, up.Body.String())
 	}
 	var stored string
-	if err := h.db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE id=?`, created.ID).Scan(&stored); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT inputs_json FROM pipeline_schedules WHERE id=?`, created.ID).Scan(&stored); err != nil {
 		t.Fatalf("read preset: %v", err)
 	}
 	if stored != `{"region":"eu"}` {
@@ -273,7 +273,7 @@ func TestPresetValidation_TriggerPresetIsGatedAtSaveTime(t *testing.T) {
 	// The whole save rolls back — the routine is not created either, which is
 	// the existing atomicity contract for a bad trigger.
 	var pipes int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM pipelines WHERE workspace_id=? AND slug='planned' AND deleted_at IS NULL`, ws).Scan(&pipes); err != nil {
+	if err := h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipelines WHERE workspace_id=? AND slug='planned' AND deleted_at IS NULL`, ws).Scan(&pipes); err != nil {
 		t.Fatalf("count pipelines: %v", err)
 	}
 	if pipes != 0 {
@@ -296,7 +296,7 @@ func TestPresetValidation_UpdateJudgesOnlyWhatItWrites(t *testing.T) {
 	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
 	// A legacy row: written straight to the table, the way one that predates
 	// this gate exists in a real database.
-	if _, err := h.db.Exec(
+	if _, err := h.db.ExecContext(t.Context(),
 		`INSERT INTO pipeline_schedules(id,workspace_id,name,target_pipeline_id,cron_expr,timezone,inputs_json,enabled)
 		 VALUES('legacy',?,'Legacy',?,'0 9 * * *','UTC','{"region":"antarctica"}',1)`, ws, p.ID); err != nil {
 		t.Fatalf("seed legacy plan: %v", err)
