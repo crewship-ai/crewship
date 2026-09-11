@@ -35,8 +35,10 @@ package backup_test
 //     ErrLockHeld contract that gates concurrent backups.
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"testing"
 	"time"
@@ -188,21 +190,55 @@ func TestBackup_TamperedPayload_VerifyReportsChecksumMismatch(t *testing.T) {
 		t.Fatalf("baseline bundle Valid=false (err=%v); test cannot distinguish tamper from a broken create", clean.Err)
 	}
 
-	// Flip a byte ~70% through the file. The manifest + RESTORE.md
-	// live near the start; 70% lands well inside the payload region
-	// so the tar headers stay intact and Verify reaches the
-	// checksum step rather than failing earlier with a tar/zstd
-	// decode error.
+	// Mutate the payload member, preserving the original manifest checksum.
+	// Flipping an arbitrary compressed byte can corrupt a zstd frame and
+	// fail before Verify reaches the payload-checksum contract (#2506).
 	data, err := os.ReadFile(res.Path)
 	if err != nil {
 		t.Fatalf("read bundle: %v", err)
 	}
-	if len(data) < 100 {
-		t.Fatalf("bundle suspiciously small (%d bytes); cannot tamper safely", len(data))
+	reader, err := backup.NewTarZstReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
 	}
-	pos := len(data) * 7 / 10
-	data[pos] ^= 0xFF
-	if err := os.WriteFile(res.Path, data, 0o600); err != nil {
+	defer reader.Close()
+	var repacked bytes.Buffer
+	writer, err := backup.NewTarZstWriter(&repacked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	mutated := false
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Name == "payload" {
+			if len(body) == 0 {
+				t.Fatal("empty payload cannot exercise tamper detection")
+			}
+			body[len(body)/2] ^= 0xFF
+			mutated = true
+		}
+		if err := writer.WriteFile(header.Name, header.Mode, header.ModTime, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !mutated {
+		t.Fatal("bundle has no payload member")
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(res.Path, repacked.Bytes(), 0o600); err != nil {
 		t.Fatalf("write tampered bundle: %v", err)
 	}
 
