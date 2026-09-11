@@ -1097,3 +1097,65 @@ func TestVertical_ADeferralIsRefusedOnceAStartWasIntended(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotBound", err)
 	}
 }
+
+// Review P1 on the deferral work: a cancel that lands WHILE the authorizer is
+// deciding must not be thrown away by the deferral that follows.
+//
+// The dispatcher checks for a cancel right after the claim; the authorizer runs
+// after that; and the cancel is recorded on the attempt the deferral is about
+// to close. So the only place the decision can be made without a race is
+// inside the deferral's own transaction — which this drives end to end: the
+// authorizer is paused on a channel, the cancel is requested through the store
+// while it is paused, and then it answers "not yet".
+func TestVertical_ACancelDuringAPausedAuthorizationSurvivesTheDeferral(t *testing.T) {
+	h := newHarness(t)
+	r := h.accept("dlv-cancel-while-held")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	_, stop := h.runDispatcher(AuthorizerFunc(func(ctx context.Context, a Assignment) (Decision, error) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return NotYet("agent is PENDING_REVIEW", 50*time.Millisecond), nil
+	}))
+	defer stop()
+
+	// The attempt is claimed and the authorizer is mid-decision.
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the authorizer was never consulted")
+	}
+
+	out, err := h.store.RequestCancel(context.Background(), r.WorkID, "operator", "stop")
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if out.Outcome != work.CancelOutcomeRequested {
+		t.Fatalf("cancel outcome = %q, want requested — the attempt is live while the authorizer thinks", out.Outcome)
+	}
+
+	// Now the authorizer says "not yet", and the deferral runs.
+	close(release)
+
+	it := h.waitForState(r.WorkID, work.StateCancelled)
+	if !strings.Contains(it.StateReason, "cancelled while held") {
+		t.Errorf("reason = %q, want it to say the cancel was honoured during the hold", it.StateReason)
+	}
+	if got := h.rt.starts.Load(); got != 0 {
+		t.Errorf("%d runtimes created for work cancelled while held, want 0", got)
+	}
+	// And it stays cancelled: a later poll must not find it claimable.
+	time.Sleep(200 * time.Millisecond)
+	again, err := h.store.Get(context.Background(), r.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.State != work.StateCancelled {
+		t.Errorf("state = %q after further polls, want cancelled", again.State)
+	}
+}

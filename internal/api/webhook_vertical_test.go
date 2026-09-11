@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -227,7 +229,7 @@ func newVerticalRig(t *testing.T) *verticalRig {
 		wsID: wsID, crewID: crewID, agentID: agentID, secret: secret,
 	}
 
-	router, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", quietLogger(),
+	router, err := NewRouter(db, verticalJWTSecret, quietLogger(),
 		WithInternalToken("vertical-internal-token"),
 		WithInternalLoopbackURL(baseURL),
 		// A non-nil orchestrator is one of the four conditions the production
@@ -378,6 +380,8 @@ func sanitizeForID(s string) string {
 	}
 	return string(out)
 }
+
+const verticalJWTSecret = "this-is-a-32-char-test-secret-pad"
 
 const verticalBody = `{"event":"deploy","source":"github","data":{"ref":"main"}}`
 
@@ -1130,4 +1134,124 @@ func TestVerticalServer_WhatIsRecheckedAtDispatchAndWhatIsNot(t *testing.T) {
 		rig.startDispatcher()
 		rig.waitForState(rec.WorkID, work.StateSucceeded)
 	})
+}
+
+// The same race, through the real cancel route.
+//
+// The agent is held (PENDING_REVIEW), so the production authorizer defers the
+// work. The authorizer is held open MID-DECISION — after the claim, before the
+// deferral — and a user cancels through POST /work-items/{id}/cancel while it
+// is: a real session, the real handler, the real store. The cancel therefore
+// lands on the live attempt, which is exactly the row the deferral is about to
+// close, and the work must still end cancelled — and must not run once the
+// hold is lifted, which is the half a lost cancel got wrong.
+//
+// The first version of this test left the ordering to timing, and passed with
+// the fix removed: the cancel had landed on a queued row. A guard that depends
+// on luck is not one.
+func TestVerticalServer_CancelOverHTTPSurvivesAHeldAgentsDeferral(t *testing.T) {
+	rig := newVerticalRig(t)
+	rec := rig.deliver(verticalBody)
+	if _, err := rig.db.Exec(`UPDATE agents SET status = 'PENDING_REVIEW' WHERE id = ?`, rig.agentID); err != nil {
+		t.Fatal(err)
+	}
+	rig.startDispatcher()
+
+	// Hold the real authorizer open. The dispatcher's first claim may already
+	// have deferred the work before the hook is set; that is fine — the
+	// eligible_at reset below makes it claim again, and that claim is caught.
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	rig.router.webhookAuthorizer.beforeDecide = func(ctx context.Context) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	if _, err := rig.db.Exec(`UPDATE work_items SET eligible_at = '2000-01-01T00:00:00.000Z' WHERE id = ?`,
+		rec.WorkID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(15 * time.Second):
+		t.Fatal("the authorizer was never held open")
+	}
+
+	// The attempt is live and the authorizer is mid-decision. Cancel over HTTP.
+	token := rig.sessionToken(t)
+	req, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("%s/api/v1/workspaces/%s/work-items/%s/cancel", rig.baseURL, rig.wsID, rec.WorkID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cancel: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel status = %d: %s", resp.StatusCode, body)
+	}
+	var cancelled struct {
+		Outcome string `json:"outcome"`
+	}
+	_ = json.Unmarshal(body, &cancelled)
+	if cancelled.Outcome != string(work.CancelOutcomeRequested) {
+		t.Fatalf("cancel outcome = %q, want requested — the attempt must have been live, or this "+
+			"test is not exercising the deferral", cancelled.Outcome)
+	}
+
+	// Now the authorizer answers "not yet" and the deferral runs against an
+	// attempt that carries a cancel.
+	close(release)
+	it := rig.waitForState(rec.WorkID, work.StateCancelled)
+	if !strings.Contains(it.StateReason, "cancelled while held") {
+		t.Errorf("reason = %q, want it to record that the cancel was honoured during the hold", it.StateReason)
+	}
+
+	// The operator approves afterwards. Cancelled is terminal; nothing may run.
+	rig.router.webhookAuthorizer.beforeDecide = nil
+	if _, err := rig.db.Exec(`UPDATE agents SET status = 'IDLE' WHERE id = ?`, rig.agentID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Second)
+	again, err := rig.store.Get(context.Background(), rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.State != work.StateCancelled {
+		t.Errorf("state = %q after approval, want cancelled — the cancel was lost across the deferral", again.State)
+	}
+	if got := rig.proc.runsStarted(); len(got) != 0 {
+		t.Errorf("%d runtimes started for cancelled work, want 0", len(got))
+	}
+}
+
+// sessionToken issues a real session for the rig's seeded OWNER, signed with the
+// same secret the rig's router validates against.
+func (rig *verticalRig) sessionToken(t *testing.T) string {
+	t.Helper()
+	var userID string
+	if err := rig.db.QueryRow(`SELECT user_id FROM workspace_members WHERE workspace_id = ? AND role = 'OWNER' LIMIT 1`,
+		rig.wsID).Scan(&userID); err != nil {
+		t.Fatalf("find the workspace owner: %v", err)
+	}
+	validator, err := auth.NewJWTValidator(verticalJWTSecret)
+	if err != nil {
+		t.Fatalf("validator: %v", err)
+	}
+	sess, err := sessions.NewDBStore(rig.db).Create(context.Background(), userID, "vertical", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	token, err := validator.IssueAccessToken(userID, sess.ID, userID, userID+"@example.com")
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	return token
 }

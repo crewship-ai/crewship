@@ -513,6 +513,26 @@ constraint error the dispatcher could only log and retry, forever. They are two
 quantities now — `work_items.attempts` is the budget, `work_attempts.attempt` is
 a monotonic identity — and both are mutation-checked.
 
+**A cancel that lands during the hold (review P1).** The dispatcher checks for
+a cancel right after the claim; the authorizer runs after that; and a cancel
+arriving in between is recorded on the attempt the deferral is about to close.
+The first version of `Defer` closed it and requeued — so the request went to the
+grave with the row, the next claim opened a fresh attempt with nothing on it,
+and a user who was told "requested" watched the work run once the hold cleared.
+The decision is now made **inside the deferral's transaction**: a cancel on a
+`planned` attempt is a confirmed cancellation (nothing was created, so there is
+nothing to ask to stop) and the work ends `cancelled` there. Any check outside
+that transaction is a second race of the same shape. Guarded at three layers,
+each mutation-checked: the store (`TestDefer_ACancelRequestedDuringTheHoldIsHonoured`),
+the dispatcher with a paused authorizer
+(`TestVertical_ACancelDuringAPausedAuthorizationSurvivesTheDeferral`), and the
+real cancel route with the production authorizer held open mid-decision
+(`TestVerticalServer_CancelOverHTTPSurvivesAHeldAgentsDeferral`). The HTTP test
+originally left the ordering to timing and passed with the fix removed —
+the cancel had landed on a queued row — so the real authorizer now has an
+unexported `beforeDecide` hook the rig can block on, and the test asserts the
+cancel outcome was `requested` (live attempt) before letting the deferral run.
+
 What bounds a deferral loop is the item's own `deadline_at`, not an attempt
 count. That is the right instrument: "how long may this wait for a human" is a
 question about patience, not about retries. Work with no deadline waits
@@ -538,6 +558,8 @@ green claim gets made that nobody observed.
 | `internal/api -run TestBackgroundWork…\|TestWebhookAcceptance…\|TestWebhookRuntime…`, 0.7 s | with the fix | pass |
 | `internal/work`, `internal/dispatch`, `internal/server`, and every other package except `cmd/crewship` | 163bd2ef | pass |
 | `cmd/crewship`, `internal/server`, `internal/work`, `internal/dispatch`, `internal/orchestrator`, `internal/sidecar`, full | after the kind-filter, I8 and CLI-YAML work, on a disk with room | pass (383 s / 54 s / 15 s / 15 s / 39 s / 83 s) |
+| `internal/api`, full, 1100 s | same tree, disk with room, `API_EXIT=0` | **20,224 pass, 0 fail, 6 skip**, zero `no space left` lines |
+| `internal/work`, `internal/dispatch`, full; `internal/api -run 'TestVerticalServer_\|TestWebhook\|TestRunRecordAbsent\|TestBackgroundWork\|TestSecWebhook'` (53 s) | after the P1 cancel-survives-deferral fix | pass. The P1 fix touches `Store.Defer` only; the full `internal/api` run above predates it and was not repeated. |
 | `internal/api`, full, 1101 s | same tree, same disk | **20,224 pass, 0 fail, 6 skip**, exit 0, zero `no space left` lines — the first full green run of this package on the branch |
 | `cmd/crewship`, full | 163bd2ef | **1 fail** — `TestEmbeddedJSONInlineIsAlsoYAMLSafe`, and it had been red since the work CLI landed. Only `-run TestDaemon\|TestAcceptance` had been run on that package, so nothing had looked. |
 

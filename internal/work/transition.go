@@ -724,6 +724,49 @@ func (s *Store) Defer(ctx context.Context, workID, runID string, generation int6
 	}
 
 	now := s.now().UTC()
+
+	// A cancel may have arrived since the dispatcher last looked — it checks
+	// right after the claim, and the authorizer runs after that. The request is
+	// recorded on THIS attempt, and closing the attempt would take it to the
+	// grave: the next claim opens a fresh row with nothing on it, and a user who
+	// was told "requested" watches the work run once the hold clears.
+	//
+	// So the cancel is decided here, inside the transaction that would have
+	// discarded it. Any check outside this transaction is a second race of the
+	// same shape. And it is a confirmed cancellation, not a request: the phase
+	// is `planned`, nothing was ever created, so there is nothing to ask to
+	// stop. (Review P1 on the deferral work.)
+	var cancelRequested sql.NullString
+	var cancelReason sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT cancel_requested_at, cancel_reason FROM work_attempts
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
+		  AND runtime_phase = 'planned'`,
+		runID, workID, generation).Scan(&cancelRequested, &cancelReason); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Either the attempt is gone, or it declared a start intent. The
+			// second is the one that matters: a runtime may exist, so this
+			// attempt is not free to give back.
+			return fmt.Errorf("%w: attempt %s of %s is not a planned attempt; a deferral may only "+
+				"return work that provably started nothing", ErrNotBound, runID, workID)
+		}
+		return fmt.Errorf("work: read deferred attempt: %w", err)
+	}
+
+	if cancelRequested.Valid {
+		why := "cancelled while held: " + cancelReason.String
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE work_attempts SET ended_at = ?, end_reason = ?
+			WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
+			tsformat.Format(now), why, runID, workID, generation); err != nil {
+			return fmt.Errorf("work: close cancelled attempt: %w", err)
+		}
+		if err := s.setStateTx(ctx, tx, it, StateCancelled, runID, generation, why, now); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+
 	res, err := tx.ExecContext(ctx, `
 		UPDATE work_attempts SET ended_at = ?, end_reason = ?
 		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
@@ -733,11 +776,10 @@ func (s *Store) Defer(ctx context.Context, workID, runID string, generation int6
 		return fmt.Errorf("work: close deferred attempt: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		// Either the attempt is gone, or it declared a start intent. The second
-		// is the one that matters: a runtime may exist, so this attempt is not
-		// free to give back.
-		return fmt.Errorf("%w: attempt %s of %s is not a planned attempt; a deferral may only "+
-			"return work that provably started nothing", ErrNotBound, runID, workID)
+		// The row was there a moment ago inside this same immediate
+		// transaction; anything else is a relaxed isolation somebody added
+		// later, and this is the line that tells them.
+		return fmt.Errorf("%w: attempt %s of %s changed under the deferral", ErrNotBound, runID, workID)
 	}
 
 	if _, err := tx.ExecContext(ctx, `

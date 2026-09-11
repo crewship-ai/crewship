@@ -1281,3 +1281,52 @@ func TestDefer_GivesTheBudgetBackWithoutReusingAnAttemptNumber(t *testing.T) {
 	}
 	_ = runIDs
 }
+
+// A cancel that lands between the claim and a deferral must survive the
+// deferral.
+//
+// The request is recorded on the attempt that is current when it arrives. A
+// deferral closes that attempt and returns the work to the queue, and the next
+// claim opens a fresh one with nothing on it — so a user who was told
+// "requested" watches the work run anyway once the hold clears. Review P1 on
+// the deferral work: the store has to decide the cancel INSIDE the deferral's
+// transaction, because any check outside it is a second race of the same shape.
+func TestDefer_ACancelRequestedDuringTheHoldIsHonoured(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	ctx := context.Background()
+
+	rec := accept(t, s, db, backgroundReq("agent-held"))
+	claimed, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d", Limits: DefaultLimits()})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// The dispatcher checked for a cancel right after the claim and found
+	// none. Now, while it is asking the authorizer, someone cancels.
+	out, err := s.RequestCancel(ctx, rec.WorkID, "operator", "changed my mind")
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if out.Outcome != CancelOutcomeRequested {
+		t.Fatalf("cancel outcome = %q, want requested (the attempt is live)", out.Outcome)
+	}
+
+	// The authorizer says "not yet" and the dispatcher defers.
+	if err := s.Defer(ctx, rec.WorkID, claimed.RunID, claimed.Generation,
+		clock.Now().Add(-time.Second), "agent is PENDING_REVIEW"); err != nil {
+		t.Fatalf("defer: %v", err)
+	}
+
+	it, err := s.Get(ctx, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.State != StateCancelled {
+		t.Fatalf("after a cancel and a deferral the work is %q, want cancelled — the deferral "+
+			"closed the attempt the request was recorded on, and the request went with it", it.State)
+	}
+	// And nothing can pick it up again.
+	if _, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d", Limits: DefaultLimits()}); !errors.Is(err, ErrNoWork) {
+		t.Fatalf("cancelled work was claimed again: %v", err)
+	}
+}

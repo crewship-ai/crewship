@@ -69,7 +69,11 @@ type Router struct {
 	// separate objects on purpose — this reference is the only thing that
 	// joins them, and it is read once at boot rather than used to dispatch.
 	webhookHandler *WebhookHandler
-	authMw         *AuthMiddleware
+	// webhookAuthorizer is the dispatcher's authorizer, kept for the same
+	// reason: it is the other half of the join, and the end-to-end tests need
+	// to hold it open mid-decision.
+	webhookAuthorizer *WebhookAuthorizer
+	authMw            *AuthMiddleware
 	// mutationRoutes records the {method, pattern, role} of every mutation
 	// route registered through authedMut / authedSelfMut. It is the walkable
 	// route table http.ServeMux refuses to expose — the enumeration test

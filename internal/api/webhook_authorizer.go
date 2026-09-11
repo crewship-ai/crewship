@@ -63,6 +63,11 @@ type WebhookAuthorizer struct {
 	// heldRetry is how long a held agent's work waits before being looked at
 	// again. Long, because it is waiting on a person.
 	heldRetry time.Duration
+	// beforeDecide, when set, runs after the agent row is read and before the
+	// decision is returned. It is nil in production and exists so a test can
+	// hold the real authorizer open mid-decision — the window in which a
+	// cancel arriving against the live attempt used to be lost.
+	beforeDecide func(ctx context.Context)
 }
 
 func NewWebhookAuthorizer(db *sql.DB) *WebhookAuthorizer {
@@ -108,6 +113,10 @@ func (a *WebhookAuthorizer) Authorize(ctx context.Context, as dispatch.Assignmen
 		return dispatch.Refuse(fmt.Sprintf(
 			"agent %s now belongs to a different workspace than the work that named it",
 			as.Item.AgentID)), nil
+	}
+
+	if a.beforeDecide != nil {
+		a.beforeDecide(ctx)
 	}
 
 	// Held, not refused. An agent created or hired by another agent is staged
