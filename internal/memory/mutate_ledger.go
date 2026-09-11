@@ -304,6 +304,11 @@ func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered
 // the NEXT write of this key fail its drift check too, instead of the file
 // quietly rejoining the contract at whatever a third party left behind.
 func recoverKeyLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath, canonicalPath, blobRoot string) (int, error) {
+	return recoverFileLocked(ctx, db, workspaceID, auditPath, &mutationFile{path: canonicalPath}, blobRoot)
+}
+
+func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath string, file *mutationFile, blobRoot string) (int, error) {
+	canonicalPath := file.path
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, operation_id, state, base_sha256, target_sha256, target_blob_ref,
 		       base_revision, new_revision, target_bytes, scope, tier
@@ -341,7 +346,7 @@ func recoverKeyLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath, c
 
 	recovered := 0
 	for _, p := range todo {
-		onDisk, rerr := readRegularNoFollow(canonicalPath)
+		onDisk, rerr := file.read()
 		if rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
 			return recovered, fmt.Errorf("recovery read %s: %w", canonicalPath, rerr)
 		}
@@ -370,7 +375,7 @@ func recoverKeyLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath, c
 				return recovered, fmt.Errorf("recovery blob for mutation %s hashes to %s, expected %s",
 					p.id, short(got), short(p.targetSHA))
 			}
-			if err := writeFileDurable(canonicalPath, blob, 0o644); err != nil {
+			if err := file.write(blob); err != nil {
 				return recovered, fmt.Errorf("recovery write %s: %w", canonicalPath, err)
 			}
 			if err := markRenamed(ctx, db, p.id); err != nil {

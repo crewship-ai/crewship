@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -327,6 +326,11 @@ type MutateRequest struct {
 	// intent and the rename can still be completed. Required when db != nil.
 	BlobRoot string
 
+	// StorageRoot confines canonical reads, locks, writes and inline recovery
+	// beneath the host storage directory. HTTP callers must set this; empty is
+	// reserved for trusted in-process/legacy callers.
+	StorageRoot string
+
 	// RecordVersion additionally inserts a memory_versions row for this
 	// write, the way Restore and the consolidator already do. Off by default
 	// because the MCP dispatcher never did.
@@ -482,12 +486,14 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 		return MutateResult{}, fmt.Errorf("%w: content: %w", ErrNotCanonical, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(req.Path), 0o775); err != nil {
-		return MutateResult{}, fmt.Errorf("mkdir parent: %w", err)
+	file, err := openMutationFile(req.StorageRoot, req.Path, true)
+	if err != nil {
+		return MutateResult{}, fmt.Errorf("open canonical parent: %w", err)
 	}
+	defer file.close()
 
 	// One lock for the whole supported write contract, not for one handler.
-	lk := NewFileLock(req.Path + ".lock")
+	lk := file.lock()
 	if err := lk.Lock(); err != nil {
 		return MutateResult{}, fmt.Errorf("acquire mutation lock: %w", err)
 	}
@@ -511,7 +517,7 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 
 	// 2. Recovery, before serving any new write for this key.
 	if db != nil {
-		recovered, err := recoverKeyLocked(ctx, db, req.WorkspaceID, req.AuditPath, req.Path, req.BlobRoot)
+		recovered, err := recoverFileLocked(ctx, db, req.WorkspaceID, req.AuditPath, file, req.BlobRoot)
 		if err != nil {
 			return res, err
 		}
@@ -550,7 +556,7 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 	}
 
 	// 4. Revision and on-disk drift.
-	rawBase, err := readRegularNoFollow(req.Path)
+	rawBase, err := file.read()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return res, fmt.Errorf("read canonical: %w", err)
 	}
@@ -606,7 +612,7 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 		res.Rejection = screenRej
 		return res, nil
 	}
-	effective, policyRej, err := applyWritePolicy(ctx, final, req.Path, req.Cfg)
+	effective, policyRej, err := applyWritePolicy(ctx, final, len(rawBase), req.Cfg)
 	if err != nil {
 		return res, err
 	}
@@ -653,7 +659,7 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 	}
 
 	// 8. fsync tempfile, atomic rename, fsync parent dir.
-	if err := writeFileDurable(req.Path, effective, 0o644); err != nil {
+	if err := file.write(effective); err != nil {
 		return res, fmt.Errorf("durable write: %w", err)
 	}
 	if req.testHook != nil {
@@ -903,15 +909,13 @@ func (r MutateRequest) screen(ctx context.Context, final []byte) (*MutateRejecti
 // only difference is where it runs: WriteFile checks before taking the lock,
 // Mutate checks under it, which is what §8 requires and what makes the cap
 // race safe.
-func applyWritePolicy(ctx context.Context, content []byte, path string, cfg WriteConfig) ([]byte, *MutateRejection, error) {
+func applyWritePolicy(ctx context.Context, content []byte, currentSize int, cfg WriteConfig) ([]byte, *MutateRejection, error) {
 	if cfg.MaxBytes > 0 && len(content) > cfg.MaxBytes {
 		detail := map[string]any{
 			"bytes_attempted": len(content),
 			"bytes_limit":     cfg.MaxBytes,
 		}
-		if st, err := os.Stat(path); err == nil {
-			detail["current_size"] = int(st.Size())
-		}
+		detail["current_size"] = currentSize
 		return nil, &MutateRejection{
 			Kind:    "cap",
 			Message: fmt.Sprintf("content is %d bytes; the cap is %d", len(content), cfg.MaxBytes),

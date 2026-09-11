@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -675,6 +676,52 @@ func TestMemoryMutationFileCap_MatchesTheAdvertisedAllowlist(t *testing.T) {
 			got, known := memoryMutationFileCap(tc.file)
 			if known != tc.known || got != tc.want {
 				t.Errorf("memoryMutationFileCap(%q) = (%d, %v), want (%d, %v)", tc.file, got, known, tc.want, tc.known)
+			}
+		})
+	}
+}
+
+func TestInternalMemoryMutation_RefusesSymlinkedParent(t *testing.T) {
+	for _, part := range []string{"daily", ".memory", "agent"} {
+		t.Run(part, func(t *testing.T) {
+			f := newMemMutFixture(t)
+			outside := t.TempDir()
+			link := f.agentFile("daily")
+			destination := filepath.Join(outside, "2026-09-11.md")
+			switch part {
+			case ".memory":
+				link = filepath.Dir(f.agentFile("AGENT.md"))
+				destination = filepath.Join(outside, "daily", "2026-09-11.md")
+			case "agent":
+				link = filepath.Dir(filepath.Dir(f.agentFile("AGENT.md")))
+				destination = filepath.Join(outside, ".memory", "daily", "2026-09-11.md")
+			}
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(destination, []byte("outside-private\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, link); err != nil {
+				t.Fatal(err)
+			}
+			status, _, raw := f.get(f.crewToken(), memMutSlug, "agent", "daily/2026-09-11.md")
+			if status < 400 || strings.Contains(raw, "outside-private") {
+				t.Errorf("read followed symlink: HTTP %d: %s", status, raw)
+			}
+			status, _, raw = f.post(f.crewToken(), memMutSlug, memMutBody(map[string]any{"file": "daily/2026-09-11.md"}))
+			if status < 400 {
+				t.Errorf("write followed symlink: HTTP %d: %s", status, raw)
+			}
+			b, err := os.ReadFile(destination)
+			if err != nil || string(b) != "outside-private\n" {
+				t.Fatalf("host file outside storage changed to %q: %v", b, err)
+			}
+			if _, err := os.Lstat(destination + ".lock"); !os.IsNotExist(err) {
+				t.Fatalf("outside lock created: %v", err)
 			}
 		})
 	}

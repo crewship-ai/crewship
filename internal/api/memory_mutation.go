@@ -355,6 +355,7 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		Scope:       target.ledgerKey,
 		Key:         req.File,
 		Path:        target.path,
+		StorageRoot: h.storagePath,
 		AuditPath:   target.auditPath,
 		Op:          op,
 		Content:     req.Content,
@@ -428,6 +429,7 @@ func (h *MemoryMutationHandler) Read(w http.ResponseWriter, r *http.Request) {
 	res, err := memory.ReadCanonical(r.Context(), h.db, memory.ReadRequest{
 		WorkspaceID: wsID,
 		Path:        target.path,
+		StorageRoot: h.storagePath,
 		AuditPath:   target.auditPath,
 	})
 	if err != nil {

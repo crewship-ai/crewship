@@ -978,3 +978,52 @@ Complete dispatch + server race run also returned CLOSE_PACKAGES_RACE_EXIT=0
 (dispatch 98.963s, server 443.874s). go vet -p 2 ./... and golangci-lint both
 returned exit 0; lint reported 0 issues. Remote CI and CodeQL on the next pushed
 commit are still pending; CodeRabbit remained throttled at this checkpoint.
+
+
+### Closing security follow-up — symlink escape reproduced after 6bc2afc6
+
+CodeQL on 6bc2afc6 passed. A separate real-HTTP probe nevertheless reproduced
+an actual host filesystem escape: a daily-directory symlink pointed outside
+configured storage, and an append created the outside file while returning
+HTTP 200, profile guaranteed, revision 1, ledger_recorded true. Evidence:
+/tmp/crewship-2-close-symlink.log, SYMLINK_PROBE_EXIT=1. Passing the lexical
+scanner is therefore not evidence of filesystem confinement.
+
+The mutation and canonical-read HTTP routes now supply StorageRoot. A common
+canonical-file handle walks from that trusted root through directory descriptors,
+refuses symlink components and checks that each opened directory is the same
+object it inspected. It pins the final parent until the operation ends. Base
+reads, the sentinel lock, atomic write and inline pending-intent recovery use
+that handle; canonical absolute paths remain ledger identities, not fallback
+I/O paths. Cap rejection uses the size of the base already read, avoiding a
+second pathname lookup. Existing root-aware lock/durable-write primitives are
+reused. Empty StorageRoot retains the trusted in-process/legacy contract;
+the standalone RecoverPending helper is still a trusted, path-based API and
+has no production callers. This change does not finish R6 or wire its sweeper.
+
+Regression coverage: real HTTP reads/writes refuse a planted daily, .memory
+or agent-directory symlink and preserve outside content without creating an
+outside lock. Deterministic memory tests replace the parent during Authorize,
+after root/lock acquisition but before recovery/base reads; both ordinary writes
+and completion of a pending intent stay in the original opened directory.
+The focused mutation/canonical suites passed (ROOT_FOCUSED_FINAL_EXIT=0).
+Full-tree, race and mutation results for this follow-up are recorded below
+only once observed. The previously green whole-tree run does not cover it.
+
+Observed security-follow-up results: complete internal/memory with -race passed
+in 134.484s (ROOT_MEMORY_RACE_EXIT=0); the FILTERED real-HTTP mutation/canonical
+API family with -race passed in 66.014s (ROOT_API_RACE_EXIT=0). go vet -p 2 ./...
+and golangci-lint returned exit 0, lint 0 issues. Windows amd64 memory test-binary
+cross-compilation passed (ROOT_WINDOWS_BUILD_EXIT=0); it was NOT executed on
+Windows. An overlay discarding StorageRoot makes BOTH parent-swap cases fail
+and ALL three real-HTTP symlink scenarios return outside content / modify the
+outside file (ROOT_MUTATION_EXIT=1). Production files remained untouched by
+that mutation. Raw evidence uses the /tmp/crewship-2-close-root-*.log prefix.
+
+The final security-follow-up COMPLETE Go run finished with ROOT_FULL_EXIT=0:
+145 packages passed, 10 without test files. Command: go test -p 4 ./...
+-count=1 -timeout 60m, GOGC=50, GOMAXPROCS=4, both TMPDIR/GOTMPDIR set to
+/dev/shm/crewship-2-close-tests. All final Go and test edits preceded this run;
+only changelog/handoff text changed afterwards. This remains RAM-backed test
+evidence, not power-loss evidence. New-head remote CI/CodeQL and an actual
+CodeRabbit review remain required; the earlier scanner pass covers 6bc2afc6.

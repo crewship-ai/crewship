@@ -44,6 +44,8 @@ type ReadRequest struct {
 	// workspace-unique key the anchor is stored under.
 	Path      string
 	AuditPath string
+	// StorageRoot has the same confinement contract as MutateRequest.StorageRoot.
+	StorageRoot string
 }
 
 // ReadResult is what §8 says a read returns.
@@ -112,7 +114,12 @@ func ReadCanonical(ctx context.Context, db *sql.DB, req ReadRequest) (ReadResult
 		return ReadResult{}, fmt.Errorf("read: audit_path required")
 	}
 
-	content, err := readRegularNoFollow(req.Path)
+	file, err := openMutationFile(req.StorageRoot, req.Path, false)
+	if err != nil {
+		return ReadResult{}, fmt.Errorf("open canonical parent: %w", err)
+	}
+	defer file.close()
+	content, err := file.read()
 	exists := true
 	if errors.Is(err, os.ErrNotExist) {
 		content, exists, err = nil, false, nil
