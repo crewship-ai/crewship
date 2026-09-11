@@ -33,7 +33,7 @@ jobs:
     # guards against (#849/#886's missing COPY, a `pnpm prisma generate` or
     # `pnpm build` break, the #1567 web/out gate) is architecture-independent,
     # so the default stays amd64; dispatch can rehearse ARM before release.
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PLATFORM: ${{ inputs.platform || 'linux/amd64' }}
     steps:
@@ -69,6 +69,9 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6.18.0
         with:
           context: .
+          pull: true
+          # Refresh OS security fixes on retries without rebuilding compiler stages.
+          no-cache-filters: runtime
           platforms: ${{ env.PLATFORM }}
           load: true
           provenance: false
@@ -79,6 +82,14 @@ jobs:
             DATE=${{ steps.metadata.outputs.date }}
           cache-from: type=gha,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
           cache-to: type=gha,mode=max,scope=${{ env.PLATFORM == 'linux/arm64' && 'pr-image-build-arm64' || 'pr-image-build' }}
+
+      - name: Scan the built image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: crewship:pr-build
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
 
       # Same probe smoke-test.yml's "Smoke Docker image" job runs post-release
       # against the published tag, minus the registry pull — the image never

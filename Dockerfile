@@ -133,7 +133,7 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     -o /crewship ./cmd/crewship
 
 # -- Runner --
-FROM alpine:3.24
+FROM alpine:3.24 AS runtime
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
@@ -142,7 +142,9 @@ LABEL org.opencontainers.image.source="https://github.com/crewship-ai/crewship" 
       org.opencontainers.image.revision=$COMMIT \
       org.opencontainers.image.created=$DATE
 
-RUN apk --no-cache add ca-certificates git docker-cli && \
+# Refresh inherited libraries too: apk add alone retains vulnerable base packages.
+RUN apk --no-cache upgrade && \
+    apk --no-cache add ca-certificates git docker-cli && \
     addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
 
 RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
