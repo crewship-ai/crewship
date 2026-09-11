@@ -291,6 +291,7 @@ jobs:
         run: |
           jq -n --arg sha "$SHA" --arg digest "$DIGEST" --arg image "$IMAGE" --arg release "$VERSION" --argjson published "$PUBLISH" '{sha:$sha,digest:$digest,image:$image,release:$release,published:$published}' > dist/image-manifest.json
       - name: Publish immutable nightly release
+        id: publication
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -305,7 +306,19 @@ jobs:
 
           Image digest and source identity: image-manifest.json.
           ' "$SHA" > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" --repo "$REPO" --prerelease --target "$SHA" --title "Nightly ${SHA:0:12}" --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
+          gh release create "$TAG" --repo "$REPO" --draft --prerelease --target "$SHA" --title "Nightly ${SHA:0:12}" --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
+          # Uploads can take minutes. Recheck after uploading, before visibility.
+          current=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$current" != "$SHA" ]; then
+            gh release delete "$TAG" --repo "$REPO" --yes
+            jq '.published = false' dist/image-manifest.json > "$RUNNER_TEMP/unpublished.json"
+            mv "$RUNNER_TEMP/unpublished.json" dist/image-manifest.json
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo '::notice::Main advanced during upload; discarded the unpublished draft.'
+            exit 0
+          fi
+          gh release edit "$TAG" --repo "$REPO" --draft=false
+          echo "published=true" >> "$GITHUB_OUTPUT"
         if: steps.current.outputs.publish == 'true'
       - name: Promote only the verified image
         env:
@@ -324,7 +337,7 @@ jobs:
           else
             echo "Main advanced; published immutable artifacts without moving :nightly."
           fi
-        if: steps.current.outputs.publish == 'true'
+        if: steps.publication.outputs.published == 'true'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: nightly-image-manifest
@@ -336,4 +349,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: python3 scripts/ci/prune-nightlies.py "$REPO"
-        if: steps.current.outputs.publish == 'true'
+        if: steps.publication.outputs.published == 'true'

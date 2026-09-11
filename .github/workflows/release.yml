@@ -31,7 +31,8 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [ "${#GITHUB_REF_NAME}" -le 128 ]
           git merge-base --is-ancestor HEAD origin/main
           python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
   release:
@@ -199,7 +200,7 @@ jobs:
           # The majmin alias (v1.2) and the `latest` rolling tag are only
           # emitted for stable releases — moving a stable-looking alias
           # onto a beta/rc image would silently downgrade everyone pinned
-          # to v1.2 the next time they pulled. CodeRabbit caught this.
+          # to v1.2 the next time they pulled. Keep stable aliases off prerelease images.
           {
             echo "list<<EOF"
             echo "${BASE}:${{ steps.meta.outputs.version }}"

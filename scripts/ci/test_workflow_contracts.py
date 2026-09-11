@@ -1,6 +1,11 @@
 """Architecture invariants supplement actionlint's syntax/type validation."""
 from pathlib import Path
 import re
+import json
+import os
+import subprocess
+import tempfile
+import textwrap
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,7 +63,57 @@ class WorkflowContracts(unittest.TestCase):
         smoke = self.text('nightly-smoke.yml')
         for name in ('binary', 'docker'):
             self.assertIn("if: needs.resolve.outputs.published == 'true'", self.job(smoke, name))
-        self.assertIn('Prevent superseded binaries from advancing self-update', self.text('nightly.yml'))
+        nightly = self.text('nightly.yml')
+        self.assertIn('Prevent superseded binaries from advancing self-update', nightly)
+        publication = self.step(nightly, 'Publish immutable nightly release')
+        promotion = self.step(nightly, 'Promote only the verified image')
+        self.assertIn("if: steps.current.outputs.publish == 'true'", publication)
+        self.assertIn("if: steps.publication.outputs.published == 'true'", promotion)
+
+    def step(self, text, name):
+        return re.search(r'^      - name: ' + re.escape(name) + r'\n(.*?)(?=^      - |\Z)', text, re.M | re.S).group(1)
+
+    def test_nightly_upload_rechecks_main_before_publication(self):
+        step = self.step(self.text('nightly.yml'), 'Publish immutable nightly release')
+        script = textwrap.dedent(re.search(r'        run: \|\n(.*?)(?=^        if:)', step, re.M | re.S).group(1))
+        for current, api_status in [('a' * 40, 0), ('b' * 40, 0), ('', 1)]:
+            with self.subTest(current=current, api_status=api_status), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / 'dist').mkdir()
+                manifest = root / 'dist/image-manifest.json'
+                manifest.write_text(json.dumps({'published': True}))
+                fake = root / 'gh'
+                fake.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
+                                'if [ "$1" = api ]; then echo "$CURRENT"; exit "$API_STATUS"; fi\n')
+                fake.chmod(0o755)
+                env = dict(os.environ, PATH=f'{root}:' + os.environ['PATH'],
+                           SHA='a' * 40, CURRENT=current, API_STATUS=str(api_status),
+                           VERSION='nightly-20260911-r123401', REPO='example/repo',
+                           RUNNER_TEMP=temp, GITHUB_OUTPUT=str(root / 'outputs'),
+                           COMMAND_LOG=str(root / 'commands'))
+                result = subprocess.run(['bash', '-c', script], cwd=root, env=env, capture_output=True, text=True)
+                commands = (root / 'commands').read_text().splitlines()
+                self.assertIn('--draft --prerelease', commands[0])
+                self.assertTrue(commands[1].startswith('api '))
+                published = current == env['SHA'] and api_status == 0
+                self.assertEqual(any(c.startswith('release edit ') for c in commands), published)
+                if api_status:
+                    self.assertNotEqual(result.returncode, 0)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(manifest.read_text())['published'], published)
+                    self.assertIn(f'published={str(published).lower()}', (root / 'outputs').read_text())
+                    self.assertEqual(any(c.startswith('release delete ') for c in commands), not published)
+
+    def test_release_rejects_invalid_image_tags_before_build(self):
+        step = self.step(self.text('release.yml'), 'Require verified main ancestry and checks')
+        validation = textwrap.dedent(step.split('        run: |\n', 1)[1].split('          git merge-base', 1)[0])
+        for tag, valid in [('v1.2.3', True), ('v1.2.3-rc.1', True),
+                           ('v1.2.3+build.1', False), ('v1.2.3-rc.1+build', False),
+                           ('v1.2.3-' + 'a' * 128, False), ('nightly', False)]:
+            with self.subTest(tag=tag):
+                result = subprocess.run(['bash', '-c', validation], env=dict(os.environ, GITHUB_REF_NAME=tag))
+                self.assertEqual(result.returncode == 0, valid)
 
     def test_snapshot_rehearsal_does_not_parse_the_latest_nightly_tag(self):
         job = self.job(self.text('ci.yml'), 'release-rehearsal')
