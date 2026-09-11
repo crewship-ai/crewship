@@ -241,6 +241,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate code owners for the tested commit
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/codeowners/errors?ref=$SHA" > "$RUNNER_TEMP/codeowners-errors.json"
+          jq '.errors' "$RUNNER_TEMP/codeowners-errors.json"
+          jq -e '.errors | type == "array" and length == 0' "$RUNNER_TEMP/codeowners-errors.json"
       - name: Validate GitHub workflow syntax and expressions
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck='' -pyflakes=''
       - name: CI gate regression tests
