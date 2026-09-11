@@ -139,6 +139,7 @@ env:
   # `playwright.nightly.config.ts`, standalone and again alongside
   # create-crew-wizard at the nightly's own `CI=1 --workers=2`.
   GATE_SPECS: >-
+    e2e/command-palette.spec.ts
     e2e/routine-reliability-editor.spec.ts
     e2e/provider-login-onboarding.spec.ts
     e2e/create-crew-wizard.spec.ts
@@ -179,7 +180,6 @@ env:
   # issue this job files is where that gets an owner.
   DRIFT_SPECS: >-
     e2e/a11y.spec.ts
-    e2e/command-palette.spec.ts
     e2e/connectors.spec.ts
     e2e/crew-image-freshness.spec.ts
     e2e/crew-journal.spec.ts
