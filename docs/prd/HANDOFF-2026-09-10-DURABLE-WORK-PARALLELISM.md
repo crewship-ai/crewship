@@ -924,3 +924,17 @@ A fresh remote CI run must still verify macOS and the other platform lanes.
 CodeRabbit's old rate-limit status is not a review of this code. No merge or
 release-readiness claim is made. R6, mailbox, non-webhook I7, real T06/T07 and
 power-loss T14 remain outstanding.
+
+
+### Latest-main integration — code commit 3cdf0d4d
+
+After the first push, GitHub still reported a conflict because main had advanced
+to 34b4d660 (routine fixes #2494 and #2503). Merged it separately; only
+CHANGELOG.md conflicted and all entries were retained. Repeated the COMPLETE Go
+run on the merged code with both temporary directories in dedicated RAM storage:
+MAIN_SYNC_FULL_EXIT=0, 145 packages passed, 10 without tests; API 189.099s,
+CLI 197.091s, database 322.832s. Raw log: /tmp/crewship-2-main-sync-full.log,
+also archived beside the earlier review evidence. Repeated go vet, frontend
+lint (0 errors, 31 warnings) and static build: all exit 0. The affected routine
+presentation test file also passed all 24 tests. No production code changes
+follow this result; this handoff-only update records it.
