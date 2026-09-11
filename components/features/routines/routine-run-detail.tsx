@@ -47,6 +47,7 @@ import {
   routineRunPresentation,
   routineResultLabel,
   routineRunExplanation,
+  routineStoppingPointLabel,
 } from "@/lib/routine-run-presentation"
 import type { RoutineDetail } from "./routines-detail-panel"
 
@@ -394,7 +395,7 @@ export function RoutineRunDetail({
           <div className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
             {run.failed_at_step && (
               <p className="font-medium text-destructive">
-                Failed step:{" "}
+                {routineStoppingPointLabel(run)}:{" "}
                 {dsl?.steps?.some((step) => step.id === run.failed_at_step)
                   ? describeStep(
                       dsl.steps.find((step) => step.id === run.failed_at_step),

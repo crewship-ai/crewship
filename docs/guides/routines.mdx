@@ -1652,11 +1652,29 @@ already rejects, sit enabled in the calendar looking healthy, and fail for the
 first time at its next firing — with no run to inspect, because the executor
 refuses before a run row exists.
 
+A pinned plan is judged against the version it names, and that version has
+to exist: pinning a plan — on create, on repin, or when retargeting it onto
+another routine — to a version the routine never archived is a `400` naming
+the version, and the plan is left as it was. A plan that already carries a
+pin to nothing (written before this check) can still be disabled,
+rescheduled or renamed, since an edit that mentions neither the pin, the
+target nor the inputs is not judged; repairing it means moving the pin onto
+a published version. If the archive cannot be read at all the edit is a
+`500`, not a pass.
+
 What is deliberately still allowed: `false`, `0` and an empty list are
 answers, not absences; inputs the recipe does not declare are passed through;
 and an input that declares no form (no `widget`, no `options`, no
 `allow_custom`) is not validated here, because it is not validated at
-execution either. A pinned plan is checked against the version it names.
+execution either.
+
+On an edit, what is judged is the plan the edit **produces**: the target
+routine, the effective pin and the effective inputs together. Changing the
+inputs, repinning to another version, unpinning onto HEAD, or retargeting the
+plan all trigger the check against the recipe the plan will actually run;
+disabling a plan, changing its cron or renaming it do not, so a plan that
+predates this check can still be switched off or rescheduled without first
+repairing a preset the edit never mentions.
 
 #### Next-fire-times preview
 
@@ -1956,6 +1974,12 @@ At boot, the server scans for runs left in `queued`/`running` from the previous 
 When persisted state is insufficient to resume safely, the run is stamped `interrupted` instead — never silently dropped, never wrongly resumed. Fallback triggers: the pipeline row is gone or no longer parses, the definition changed since the run started (content-hash mismatch — this catches in-place edits even when every step id survives, not just renamed/removed steps), unreadable persisted inputs/outputs, or a non-resumable mode (only live `run` rows resume; a `dry_run` preview row from a previous lifetime is never re-run). The reason lands in the run's `error_message`.
 
 Graceful shutdowns are different: an in-flight run cancelled by shutdown is finalized as `cancelled` (a terminal state) and is **not** resumed at next boot. Resume targets hard kills, where no terminal write could land.
+
+`cancelled` covers every way a run's context is CANCELLED, not just the Cancel button. The default synchronous `POST .../run` hands the executor the HTTP request's own context, and Go cancels that context when the client connection goes away — so a closed tab, a proxy hanging up, or a CLI whose own per-call deadline fired and closed the socket all reach the server as `context.Canceled` and land a `cancelled` row reading `run cancelled at step <id>`. That matters beyond the label: cancelled runs mint no error fingerprint, page no failure notification and run no `on_failure` hook.
+
+A DEADLINE is not a cancellation. A step that blew its own `timeout_seconds`, a run whose own context carried a deadline and exceeded it, and an approval nobody answered before its `timeout_seconds` all stay `failed`, keep their fingerprint and page as before: the work ran out of the time it was given, which is a result, not an interruption. The distinction is `context.Canceled` versus `context.DeadlineExceeded`, and the run row follows it.
+
+If you need a run to outlive the request that started it, send `Prefer: respond-async` and poll the returned `run_id`; a run parked on a `wait` step already survives, because it releases the request before it parks.
 
 Set `CREWSHIP_PIPELINE_RESUME=off` to disable resume and restore the older stamp-everything-`interrupted` behaviour — useful if a crash loop would otherwise re-burn the in-flight agent step's tokens on every restart. Default is on.
 

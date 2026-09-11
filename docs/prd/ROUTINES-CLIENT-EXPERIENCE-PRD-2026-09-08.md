@@ -374,13 +374,55 @@ Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavk
 
 - [x] Nasazení čitelnosti na dev1 a nové měření stejným postupem (§14).
 - [x] Pět přihlášených úloh z §9 interním browser walkthrough (§14); nejde o uživatelskou studii.
-- [ ] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
+- [x] Restart čekajícího rozhodnutí a rozpracovaného kontrolovaného běhu;
       běžný reload nedokazuje recovery po náhlém ukončení ani exactly-once účinky.
+      Doloženo 11. 9. dvěma `kill -9` na izolované instanci nad jedním během
+      (`run_cmtwp7vt700033e66cfc6`): obnovené rozhodnutí na témže tokenu,
+      rozpracovaný krok proveden znovu (`att=1 interrupted` → `att=2 completed`),
+      přijatá v1 přežila publikaci v2. Exactly-once se **netvrdí**: at-least-once
+      je změřeno recorderem na 1× dokončený a 2× rozpracovaný krok.
 - [x] Souběh startů, editorů a rozhodnutí nad skutečným serverem (§14).
+      11. 9. doplněno o timeout vs. opožděnou odpověď (409) a o čtyři souběhy
+      dvou opačných odpovědí (vždy jedno 200 a jedno 409).
 - [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
+      Zadání pěti úloh s odkazy přímo na dev1 je připravené v
+      [routines-human-gate-2026-09-11](reports/routines-human-gate-2026-09-11.md).
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
+
+## 12b. Technická přejímka §9 — 11. září
+
+Protokol s run IDs, přesným rozsahem každého scénáře a seznamem toho, co
+zůstává NEOVĚŘENO: [routines-acceptance-2026-09-11](reports/routines-acceptance-2026-09-11.md).
+Doplněny byly náhlý pád a obnova, nejistý externí účinek, timeout a souběh
+rozhodnutí, serverová izolace oprávnění, neprovedená větev / foreach /
+skutečné pokusy, dva editoři a DST na skutečné dispatch cestě (dosud byla
+doložena jen projekce kalendáře).
+
+Protokol obsahuje **závěrečnou tabulku všech 16 řádků §9** se stavem
+PASS / NEOVĚŘENO, přesným rozsahem každého důkazu a zbývajícími omezeními,
+plus samostatný seznam toho, co doložené není. Vrstvy se v ní nezaměňují:
+serverový test, browser fault injection, skutečné živé ověření a lidské
+porozumění jsou rozlišené.
+
+Čtyři nálezy. N2 je sloučený; N3 je sloučený zčásti a jeho navazující oprava
+je v review; N1 a N4 mají opravu v review. **Nic z toho není uzavřené, dokud
+příslušný PR není v `main` se zelenou požadovanou CI**:
+
+| Nález | Co bylo špatně | Kde je oprava |
+|---|---|---|
+| N1 | Běh zrušený jinak než tlačítkem Cancel (odpojený klient, timeout proxy, deadline klienta, řádné vypnutí) se zapisoval jako `failed` s důvodem `context canceled`, razil error fingerprint, posílal failure notifikaci a pouštěl `on_failure` hook — zatímco journal tentýž okamžik označoval `CANCELLED` | [PR #2494](https://github.com/crewship-ai/crewship/pull/2494) |
+| N2 | Kontrola kompatibility presetů běžela jen na cestě draft→publish, takže přímé `routine save` (dveře CLI a agentů) rozbilo živý plán tiše | [#2495](https://github.com/crewship-ai/crewship/issues/2495) → [PR #2497](https://github.com/crewship-ai/crewship/pull/2497) — sloučeno `7437bd33a` |
+| N3 | Preset plánu se neověřoval ve chvíli, kdy se plán zakládá nebo edituje, takže plán mohl vzniknout s hodnotami, které jeho rutina odmítá | [#2496](https://github.com/crewship-ai/crewship/issues/2496) → [PR #2498](https://github.com/crewship-ai/crewship/pull/2498) sloučeno `adb0f4620`; oponentura našla dvě díry v úpravě plánu (odepnutí, přepnutí verze bez vstupů) → [PR #2503](https://github.com/crewship-ai/crewship/pull/2503) — **nesloučeno** |
+| N4 | Běh odložený přes `--delay` nebyl připnutý, takže publikace během jeho čekání ve frontě změnila, co odpálil — přesně případ, který §9 řádek 4 pojmenovává | [#2500](https://github.com/crewship-ai/crewship/issues/2500) → [PR #2501](https://github.com/crewship-ai/crewship/pull/2501) — **nesloučeno** |
+
+N3 byl původně zapsán jako „server nevaliduje typované vstupy běhu“. **To bylo
+nesprávné a protokol tu opravu nese:** `ValidateFormInputs` existuje a je na
+cestě běhu zapojený dvakrát. Sonda prošla proto, že `hasInputForm` považuje
+vstup s deklarovaným typem, ale bez `widget`, za legacy. Tato hranice
+zůstává vědomě nezměněna — má ji většina existujících rutin a její zpřísnění
+je samostatné rozhodnutí o legacy kontraktu.
 
 ## 13. Historický podklad pro oponenturu — před živou přejímkou
 
