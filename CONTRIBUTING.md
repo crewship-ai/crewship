@@ -633,3 +633,17 @@ accepted under the same terms — by opening a PR you agree that:
 
 We do not currently require a CLA or DCO sign-off. If that changes,
 we will say so here and in the PR template.
+
+
+### Type-checking test fixtures
+
+`pnpm test:types` uses `tsconfig.tests.json`, including Vitest's jest-dom matcher
+types. It runs in the Frontend Test CI job. Existing debt is recorded in
+`scripts/test-types-baseline.json` (#2493); a passing gate means no new
+file/code/message/count diagnostics, not that the existing debt is gone.
+
+Fix new diagnostics instead of adding them to the baseline. After repairing
+recorded errors, run `node scripts/typecheck-tests.mjs --write-baseline` and
+review the diff: ordinary cleanup should remove entries or lower counts.
+Never refresh the baseline automatically in CI. Line shifts do not change a
+fingerprint, and fixing one message grants no allowance for another message.
