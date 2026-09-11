@@ -147,22 +147,55 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 	if id != d.BasePipelineID || revision != d.BaseRevision {
 		return ErrDraftConflict
 	}
-	if id == "" {
+	return nil
+}
+
+// checkSchedulePresetsTx refuses a definition an existing plan's stored
+// preset can no longer satisfy, and it runs on EVERY door that changes an
+// active recipe — Edit → Publish, `crewship routine save`, the agent/internal
+// save, an import, a manifest apply. It used to live inside
+// consumeDraftTx's publication branch, which meant a direct save walked past
+// it and left a plan pointing at a recipe its preset no longer fits: the
+// silent broken plan PRD §9 rules out (#2495).
+//
+// It runs inside the caller's transaction, after the draft consumption has
+// taken SQLite's write lock, so a refusal rolls back the recipe row, the
+// version row and the trigger together — the caller is left with the
+// original recipe and the original plan, not half of each.
+//
+// What it deliberately does not gate, because none of it is a plan that
+// breaks today:
+//
+//   - a DISABLED plan — it is not firing;
+//   - a PINNED plan (target_pipeline_version set) — it keeps running the
+//     version it names, whatever HEAD becomes;
+//   - an input with no form contract (hasInputForm) — execution does not
+//     validate those either, and the gate must match execution rather than
+//     invent a stricter rule for plans;
+//   - a save whose definition is unchanged — a rename, a description edit
+//     or a status flip must not start failing because some plan's preset was
+//     already imperfect before this gate existed.
+//
+// The returned *ScheduleDraftConflict names the schedule and the reason so a
+// caller can open that plan and repair the preset; it unwraps to
+// ErrDraftConflict, which is what the HTTP layer already maps to 409.
+func (s *Store) checkSchedulePresetsTx(ctx context.Context, tx *sql.Tx, pipelineID, definitionJSON string) error {
+	if pipelineID == "" {
 		return nil
 	}
-	dsl, err := Parse([]byte(in.DefinitionJSON))
+	dsl, err := Parse([]byte(definitionJSON))
 	if err != nil {
-		return fmt.Errorf("draft publication: parse publication definition: %w", err)
+		return fmt.Errorf("schedule preset gate: parse definition: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND target_pipeline_version IS NULL AND enabled=1 AND deleted_at IS NULL ORDER BY id`, id)
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND target_pipeline_version IS NULL AND enabled=1 AND deleted_at IS NULL ORDER BY id`, pipelineID)
 	if err != nil {
-		return fmt.Errorf("draft publication: read enabled schedules: %w", err)
+		return fmt.Errorf("schedule preset gate: read enabled schedules: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var schedule, name, raw string
 		if err := rows.Scan(&schedule, &name, &raw); err != nil {
-			return fmt.Errorf("draft publication: read schedule preset: %w", err)
+			return fmt.Errorf("schedule preset gate: read schedule preset: %w", err)
 		}
 		var supplied map[string]any
 		if err := json.Unmarshal([]byte(raw), &supplied); err != nil {
@@ -173,7 +206,7 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 			value, exists := values[spec.Name]
 			if !exists || value == nil {
 				if spec.Required {
-					return &ScheduleDraftConflict{schedule, name, fmt.Sprintf("Input %s is required by the draft", spec.Name)}
+					return &ScheduleDraftConflict{schedule, name, fmt.Sprintf("Input %s is required by the new recipe", spec.Name)}
 				}
 				continue
 			}
@@ -187,7 +220,7 @@ func (s *Store) consumeDraftTx(ctx context.Context, tx *sql.Tx, in SaveInput) er
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("draft publication: iterate schedules: %w", err)
+		return fmt.Errorf("schedule preset gate: iterate schedules: %w", err)
 	}
 	return nil
 }

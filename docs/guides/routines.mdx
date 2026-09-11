@@ -1639,6 +1639,25 @@ Every field the dialog can set is backed by the same `PATCH
 .../pipeline-schedules/{id}` endpoint `crewship routine schedules update`
 already used — nothing new server-side for this half.
 
+#### A plan's preset is checked when the plan is written
+
+Creating a plan, editing one, and the `trigger` block a routine save can
+carry all validate the preset against the recipe it would run, with the same
+rules the run itself applies: an unanswered required question, a choice
+outside the declared `options`, a value of the wrong declared type or outside
+declared bounds is a `400` (a `422` for the trigger block) naming the input,
+and nothing is stored. Before this the preset was only checked when the
+*recipe* later changed, so a plan could be born carrying values its routine
+already rejects, sit enabled in the calendar looking healthy, and fail for the
+first time at its next firing — with no run to inspect, because the executor
+refuses before a run row exists.
+
+What is deliberately still allowed: `false`, `0` and an empty list are
+answers, not absences; inputs the recipe does not declare are passed through;
+and an input that declares no form (no `widget`, no `options`, no
+`allow_custom`) is not validated here, because it is not validated at
+execution either. A pinned plan is checked against the version it names.
+
 #### Next-fire-times preview
 
 `GET .../pipeline-schedules/preview?cron_expr=&timezone=&count=` (`crewship
