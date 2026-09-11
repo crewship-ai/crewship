@@ -85,11 +85,7 @@ func (f *fakeRuntime) Locator(a Assignment) string {
 
 func (f *fakeRuntime) Run(ctx context.Context, a Assignment, started func()) error {
 	locator := f.Locator(a)
-	f.starts.Add(1)
 	f.mu.Lock()
-	f.locators = append(f.locators, locator)
-	stopCh := make(chan struct{})
-	f.stopCh[locator] = stopCh
 	block, crash, fail, suppress := f.block, f.crashAfterStart, f.failWith, f.suppressStarted
 	onStart := f.onStart
 	f.mu.Unlock()
@@ -97,6 +93,14 @@ func (f *fakeRuntime) Run(ctx context.Context, a Assignment, started func()) err
 	if onStart != nil {
 		onStart(a)
 	}
+	// Publish existence only after the creation hook has inspected the durable
+	// intent. A confirmation probe must not overtake creation in this fake.
+	f.starts.Add(1)
+	f.mu.Lock()
+	f.locators = append(f.locators, locator)
+	stopCh := make(chan struct{})
+	f.stopCh[locator] = stopCh
+	f.mu.Unlock()
 
 	if !suppress {
 		started()
@@ -145,7 +149,12 @@ func (f *fakeRuntime) Stop(ctx context.Context, locator string) (bool, error) {
 func (f *fakeRuntime) Alive(ctx context.Context, locator string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return !f.stopped[locator], nil
+	for _, existing := range f.locators {
+		if existing == locator {
+			return !f.stopped[locator], nil
+		}
+	}
+	return false, nil
 }
 
 // recordExternalStart books a runtime created by a dispatcher that then died.
@@ -857,34 +866,41 @@ func TestVertical_IntentIsDurableBeforeTheRuntimeExists(t *testing.T) {
 	h.cfg.ConfirmPollInterval = 10 * time.Millisecond
 	h.rt.block = make(chan struct{})
 	defer close(h.rt.block)
-
 	r := h.accept("dlv-order")
 
-	// Record the phase the attempt was in at the moment the runtime was
-	// created, read from the database by the fake itself.
 	phaseAtStart := make(chan string, 1)
+	release := make(chan struct{})
+	resume := sync.OnceFunc(func() { close(release) })
 	h.rt.onStart = func(a Assignment) {
 		var phase string
-		_ = h.db.QueryRow(`SELECT runtime_phase FROM work_attempts WHERE run_id = ?`, a.RunID).Scan(&phase)
-		select {
-		case phaseAtStart <- phase:
-		default:
+		if err := h.db.QueryRow(`SELECT runtime_phase FROM work_attempts WHERE run_id = ?`, a.RunID).Scan(&phase); err != nil {
+			phase = "read failed: " + err.Error()
 		}
+		phaseAtStart <- phase
+		<-release
 	}
-
 	_, stop := h.runDispatcher(nil)
-	defer stop()
-	h.waitForState(r.WorkID, work.StateRunning)
+	defer func() { resume(); stop() }()
 
 	select {
 	case phase := <-phaseAtStart:
 		if phase != "starting" {
-			t.Fatalf("at the moment the runtime was created the attempt was %q, want starting — "+
-				"the locator must be durable BEFORE anything exists to find", phase)
+			t.Fatalf("before runtime creation the attempt was %q, want starting", phase)
 		}
-	default:
-		t.Fatal("the runtime was never created")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the runtime creation hook was never reached")
 	}
+	var locator string
+	if err := h.db.QueryRow(`SELECT runtime_locator FROM work_attempts WHERE work_id = ?`, r.WorkID).Scan(&locator); err != nil {
+		t.Fatal(err)
+	}
+	// A durable locator names the future runtime; it is not evidence that the
+	// runtime exists. The provider must still answer false while creation waits.
+	if alive, err := h.rt.Alive(context.Background(), locator); err != nil || alive {
+		t.Fatalf("before creation Alive(%q) = %v, %v; want false, nil", locator, alive, err)
+	}
+	resume()
+	h.waitForState(r.WorkID, work.StateRunning)
 }
 
 // A run that finishes before the confirmation probe has polled still settles.

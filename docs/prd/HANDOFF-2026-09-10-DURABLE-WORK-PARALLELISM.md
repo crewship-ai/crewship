@@ -796,3 +796,20 @@ in 11.010s. go vet ./... passed on the merged code before the work crash-helper
 follow-up. The final full Go verification is a separate run, not inferred from
 these package results. R6, mailbox, global I7 and real T06/T07 remain unfinished;
 the parallel profile remains disabled.
+
+
+A further failure surfaced when the original full 4a31e1b9 run finally ended:
+`internal/database` hit its 40-minute package timeout while multiple migration
+tests were still progressing, and `TestVertical_IntentIsDurableBeforeTheRuntimeExists`
+failed because the fake provider reported Alive for every locator, even before
+Run created it. The complete run is therefore NOT green despite its API package
+passing (1128.741s).
+
+The fake now publishes existence after the creation hook and only reports
+locators it actually created. The ordering test pauses creation on a barrier,
+requires Alive=false for the prewritten locator, then releases creation and
+waits for confirmation. Restoring the old Alive through a Go overlay makes it
+fail deterministically before creation (2.174s). The first full post-merge run
+was stopped after this follow-up changed the test tree; the final full run was
+restarted with -count=1, -p 4, GOMAXPROCS=4 and a 60m package timeout. No completion
+result is inferred from the earlier run. Frontend lint and static build passed.
