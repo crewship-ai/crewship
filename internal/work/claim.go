@@ -69,6 +69,14 @@ type ClaimOptions struct {
 	// AgentID, when set, restricts the claim to one agent — the shape the
 	// existing per-agent pump uses when a run finishes and frees its slot.
 	AgentID string
+	// Sources, when set, restricts the claim to work from these producers.
+	//
+	// A dispatcher can only run what its Runtime knows how to run. Without this
+	// the first dispatcher to exist would claim every producer's work and then
+	// fail it, which is worse than not running it: the work is consumed, its
+	// attempt is burned, and the producer that could have handled it never sees
+	// it. A dispatcher declares what it can execute, and claims nothing else.
+	Sources []Source
 	// WorkID, when set, restricts the claim to one work item. This is what a
 	// wake-up hint turns into: acceptance commits and says "there is something
 	// for you", and the dispatcher tries to claim THAT item rather than
@@ -271,6 +279,14 @@ func (s *Store) scanCandidatesTx(ctx context.Context, tx *sql.Tx, opts ClaimOpti
 	if opts.WorkID != "" {
 		q += ` AND w.id = ?`
 		args = append(args, opts.WorkID)
+	}
+	if len(opts.Sources) > 0 {
+		placeholders := make([]string, 0, len(opts.Sources))
+		for _, src := range opts.Sources {
+			placeholders = append(placeholders, "?")
+			args = append(args, string(src))
+		}
+		q += ` AND w.source IN (` + strings.Join(placeholders, ",") + `)`
 	}
 
 	// One active turn per session (I3). needs_reconciliation counts here: the

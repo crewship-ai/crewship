@@ -130,6 +130,7 @@ func (d *Dispatcher) claimOne(ctx context.Context) (bool, error) {
 	c, err := d.store.Claim(ctx, work.ClaimOptions{
 		LeaseOwner: d.cfg.Owner,
 		Limits:     d.cfg.Limits,
+		Sources:    d.cfg.Sources,
 	})
 	if errors.Is(err, work.ErrNoWork) {
 		return false, nil
@@ -243,21 +244,36 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 	var abandonOnce sync.Once
 	go d.watchCancel(ctx, live, func() { abandonOnce.Do(func() { close(abandoned) }) })
 
-	runDone := make(chan error, 1)
-	go func() {
-		var confirmOnce sync.Once
-		runDone <- d.runtime.Run(ctx, a, func() {
-			confirmOnce.Do(func() {
-				if err := d.store.StartRunning(ctx, a.Item.ID, a.RunID, a.Generation, live.locator); err != nil {
-					// The runtime exists and we could not record it. Do NOT
-					// treat that as "it never started" — that inference is the
-					// whole reason the start intent is written first.
-					d.logger.Error("dispatch: runtime started but could not be confirmed",
-						"work_id", a.Item.ID, "run_id", a.RunID, "locator", live.locator, "error", err)
-				}
-			})
+	// Confirmation has two sources and needs only one.
+	//
+	// The stream event is a hint: it is fast, and it is what a chatty agent
+	// gives us first. It is NOT the condition, because a silent process is
+	// still a running one — an agent that starts, thinks for a minute and
+	// prints nothing would otherwise never be recorded as running, and a
+	// dispatcher that treats "no output yet" as "not started" is back to
+	// inferring absence from silence.
+	//
+	// The condition is the provider's own answer: a runtime exists at the
+	// locator. That is the contract Alive speaks, and it is true of a silent
+	// process, a fast one, and one that has already exited having produced
+	// nothing.
+	var confirmOnce sync.Once
+	confirm := func(how string) {
+		confirmOnce.Do(func() {
+			if err := d.store.StartRunning(ctx, a.Item.ID, a.RunID, a.Generation, live.locator); err != nil {
+				// The runtime exists and we could not record it. Do NOT treat
+				// that as "it never started" — that inference is the whole
+				// reason the start intent is written first.
+				d.logger.Error("dispatch: runtime started but could not be confirmed",
+					"work_id", a.Item.ID, "run_id", a.RunID, "locator", live.locator,
+					"confirmed_by", how, "error", err)
+			}
 		})
-	}()
+	}
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- d.runtime.Run(ctx, a, func() { confirm("stream") }) }()
+	go d.confirmByProbe(ctx, live, confirm)
 
 	settleCtx := context.WithoutCancel(ctx)
 	select {
@@ -287,6 +303,37 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 	case <-ctx.Done():
 		live.cancel()
 		<-runDone
+	}
+}
+
+// confirmByProbe asks the provider whether the runtime exists yet, and keeps
+// asking until it does or the attempt ends.
+//
+// An ERROR from the probe is never read as "not started". That is the same
+// inference the start intent exists to prevent, one layer up: an unreachable
+// container would otherwise look like an absent process, and the attempt would
+// sit unconfirmed while its runtime ran.
+func (d *Dispatcher) confirmByProbe(ctx context.Context, live *liveAttempt, confirm func(string)) {
+	t := time.NewTicker(d.cfg.ConfirmPollInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			alive, err := d.runtime.Alive(ctx, live.locator)
+			if err != nil {
+				// Unknown. Keep asking; the supervisor will settle without a
+				// confirmation if the run ends first, and an attempt that ran
+				// without ever being confirmable is precisely what
+				// reconciliation is for.
+				continue
+			}
+			if alive {
+				confirm("probe")
+				return
+			}
+		}
 	}
 }
 
@@ -340,12 +387,43 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 	}
 }
 
+// finish records an attempt's outcome, and refuses to lose it quietly.
+//
+// A rejected transition used to be logged and dropped. What that actually left
+// behind was an attempt still in a live state, still holding a slot, with its
+// real outcome existing nowhere — visible only 60 seconds later when the lease
+// expired and recovery parked it, and then described to an operator as an
+// abandoned run rather than as the finished one it was. The end-to-end pass hit
+// this on the most ordinary case there is: a run that ended before the
+// confirmation probe had polled.
+//
+// The missing edge is fixed where it belongs, in the state machine. This is the
+// backstop for the next one: an outcome that cannot be written lands in
+// reconciliation immediately, carrying what it was trying to say.
 func (d *Dispatcher) finish(ctx context.Context, a Assignment, to work.State, reason string) {
-	if err := d.store.Transition(ctx, work.TransitionRequest{
+	err := d.store.Transition(ctx, work.TransitionRequest{
 		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation, To: to, Reason: reason,
-	}); err != nil {
-		d.logger.Error("dispatch: could not record the outcome",
-			"work_id", a.Item.ID, "run_id", a.RunID, "to", to, "error", err)
+	})
+	if err == nil {
+		return
+	}
+	d.logger.Error("dispatch: could not record the outcome",
+		"work_id", a.Item.ID, "run_id", a.RunID, "to", to, "error", err)
+
+	// Already terminal or superseded: another writer owns this work, and
+	// writing again would be the fence doing its job in reverse.
+	if to == work.StateNeedsReconciliation ||
+		errors.Is(err, work.ErrTerminal) || errors.Is(err, work.ErrStaleGeneration) ||
+		errors.Is(err, work.ErrNotBound) {
+		return
+	}
+	if perr := d.store.Transition(ctx, work.TransitionRequest{
+		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation,
+		To:     work.StateNeedsReconciliation,
+		Reason: "the outcome " + string(to) + " could not be recorded (" + err.Error() + "); it was: " + reason,
+	}); perr != nil {
+		d.logger.Error("dispatch: the outcome could not be recorded and the work could not be parked either",
+			"work_id", a.Item.ID, "run_id", a.RunID, "to", to, "error", perr)
 	}
 }
 

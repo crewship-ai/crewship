@@ -64,7 +64,12 @@ type Router struct {
 	mux    *routeMux
 	db     *sql.DB
 	logger *slog.Logger
-	authMw *AuthMiddleware
+	// webhookHandler is kept so the server can build the dispatcher that
+	// EXECUTES what the webhook route accepts. Acceptance and execution are
+	// separate objects on purpose — this reference is the only thing that
+	// joins them, and it is read once at boot rather than used to dispatch.
+	webhookHandler *WebhookHandler
+	authMw         *AuthMiddleware
 	// mutationRoutes records the {method, pattern, role} of every mutation
 	// route registered through authedMut / authedSelfMut. It is the walkable
 	// route table http.ServeMux refuses to expose — the enumeration test

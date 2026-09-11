@@ -181,6 +181,15 @@ type Config struct {
 	// dispatcher escalates. §4: after the grace, an unconfirmed stop is
 	// reconciliation, not a cancellation.
 	StopGrace time.Duration
+	// Sources are the producers this dispatcher can execute. Required in
+	// production: a dispatcher that claims work its Runtime cannot run does not
+	// merely fail it, it CONSUMES it — the attempt is burned and the producer
+	// that could have handled it never sees the work again.
+	Sources []work.Source
+	// ConfirmPollInterval is how often the dispatcher asks the provider whether
+	// the runtime exists yet. It backs the stream-event hint, and it is what
+	// makes a SILENT process confirmable.
+	ConfirmPollInterval time.Duration
 	// RecoveryInterval is how often lease recovery runs.
 	//
 	// Once at boot is not enough: a server that restarts BEFORE an old lease
@@ -207,6 +216,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.StopGrace <= 0 {
 		c.StopGrace = work.CancelGrace
+	}
+	if c.ConfirmPollInterval <= 0 {
+		c.ConfirmPollInterval = time.Second
 	}
 	if c.RecoveryInterval <= 0 {
 		c.RecoveryInterval = work.RecoveryScanMax

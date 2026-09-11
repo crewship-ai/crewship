@@ -493,13 +493,19 @@ func TestTransition_RejectsIllegalEdgeAndTerminalWork(t *testing.T) {
 		t.Fatalf("claim: %v", err)
 	}
 
-	// With a real attempt in hand, the edge itself is what refuses:
-	// starting -> succeeded skips the running state entirely.
+	// With a real attempt in hand, the edge itself is what refuses.
+	//
+	// The example used to be starting -> succeeded. That edge exists now: a
+	// short run can finish before the confirmation probe ever polls, and
+	// refusing its outcome left the work stuck holding a slot (see
+	// TestTransition_ASuccessBeforeConfirmationIsStillRecordable). starting ->
+	// waiting is still nonsense — an attempt cannot park at a waitpoint it was
+	// never observed to reach — so it carries the assertion instead.
 	err = s.Transition(ctx, TransitionRequest{
-		WorkID: r.WorkID, RunID: c.RunID, Generation: c.Generation, To: StateSucceeded,
+		WorkID: r.WorkID, RunID: c.RunID, Generation: c.Generation, To: StateWaiting,
 	})
 	if !errors.Is(err, ErrIllegalTransition) {
-		t.Fatalf("starting->succeeded = %v, want ErrIllegalTransition", err)
+		t.Fatalf("starting->waiting = %v, want ErrIllegalTransition", err)
 	}
 	mustTransition(t, s, r.WorkID, c, StateRunning)
 	mustTransition(t, s, r.WorkID, c, StateSucceeded)
@@ -650,6 +656,8 @@ func TestStateMachine_EdgeTable(t *testing.T) {
 		{StateQueued, StateSucceeded, false},
 		{StateStarting, StateRunning, true},
 		{StateStarting, StateQueued, true},
+		// A runtime can finish before the confirmation probe ever polls.
+		{StateStarting, StateSucceeded, true},
 		{StateRunning, StateWaiting, true},
 		{StateWaiting, StateRunning, true},
 		{StateRunning, StateSucceeded, true},
@@ -1127,6 +1135,58 @@ func TestClaim_SQLFilterAndGoAdmissionAgree(t *testing.T) {
 			break
 		} else if err != nil {
 			t.Fatalf("claim: %v", err)
+		}
+	}
+}
+
+// A run that finishes before anything observed it running must still be able to
+// record that it finished.
+//
+// The confirmation probe polls, so an attempt that ends quickly — or one whose
+// first poll is slow — settles while it is still `starting`. Without the
+// starting -> succeeded edge that outcome is unwritable: the work keeps holding
+// an execution slot in a live state, its real result exists nowhere, and sixty
+// seconds later lease recovery parks it and tells an operator that a run which
+// SUCCEEDED needs reconciliation.
+//
+// Found by the end-to-end pass in internal/api, on the most ordinary case there
+// is. The unit layer had only ever settled runs it had first confirmed.
+func TestTransition_ASuccessBeforeConfirmationIsStillRecordable(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	ctx := context.Background()
+
+	rec := accept(t, s, db, backgroundReq("agent-fast"))
+	claimed, err := s.Claim(ctx, ClaimOptions{LeaseOwner: "d1", Limits: DefaultLimits()})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if err := s.MarkStarting(ctx, rec.WorkID, claimed.RunID, claimed.Generation, "agent-run:"+claimed.RunID); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
+	// No StartRunning: the probe never got a turn.
+
+	if err := s.Transition(ctx, TransitionRequest{
+		WorkID: rec.WorkID, RunID: claimed.RunID, Generation: claimed.Generation,
+		To: StateSucceeded, Reason: "completed",
+	}); err != nil {
+		t.Fatalf("a run that succeeded before confirmation could not record it: %v", err)
+	}
+
+	got, err := s.Get(ctx, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != StateSucceeded {
+		t.Errorf("state = %q, want succeeded", got.State)
+	}
+	// And the history says what actually happened: never observed running.
+	events, err := s.History(ctx, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.ToState == StateRunning {
+			t.Error("a `running` transition was synthesised for a run nothing ever observed running")
 		}
 	}
 }

@@ -26,9 +26,16 @@ handoff starts lying:
 - **End-to-end guarantee proven.** The behaviour the PRD promises has been
   observed through the whole path, with real runtimes where the PRD says real.
 
-Almost everything below is at level one or two. **Nothing is at level three**, and
-the release commitment — one Jamie holding a chat and a background run at once —
-is not met.
+Level three itself has three layers, and a claim has to name the one it was
+observed at — **mock**, **real process**, or **real CLI**. §4a has the table and
+what each can and cannot show.
+
+The webhook path is now proven end to end at the **real-process** layer: the
+production route table, a real HTTP server, real IPC back into it, the real
+dispatcher assembly, a real SIGKILL and a real orphaned OS process. Everything
+else is at level one or two. **Nothing is proven with a real CLI**, and the
+release commitment — one Jamie holding a chat and a background run at once — is
+not met.
 
 ## 1. What is demonstrated
 
@@ -162,14 +169,14 @@ way, and T14's evidence needs a separate harness by design.
 
 | | Status |
 |---|---|
-| **I1** no `202` before a durable commit | **Demonstrated at the store level** — `AcceptDeliveryTx` writes delivery and work in one transaction, and a SIGKILL'd child proves the after-commit and before-commit cases. Handler wiring is in flight |
+| **I1** no `202` before a durable commit | **Demonstrated through the real route** — `AcceptDeliveryTx` writes delivery and work in one transaction, a SIGKILL'd child proves the after-commit and before-commit cases, and a real HTTP POST at the production webhook route answers only after the commit (`TestVerticalServer_OneDeliveryTravelsTheWholePath`) |
 | **I2** one delivery → at most one work item | **Demonstrated** — duplicates, concurrent duplicates, content-key replay under a fresh id, and same-id-different-body as a conflict |
 | **I3** one active turn per session; atomic claim | **Demonstrated**, including that an unreconciled turn keeps the session |
 | **I4** state/memory/sidecar changes verify the live run | **State**: demonstrated. **Memory**: the host endpoint verifies run and generation properly (mutation-checked) — but nothing supplies a run id, so no production write is verified yet. **Sidecar**: per-run `agtv2` tokens verified against a crew-scoped key, with a run registry that refuses an ended run |
 | **I5** an old attempt cannot overwrite a newer one | **Demonstrated**, mutation-checked |
 | **I6** memory writes are not lost under concurrency | **Demonstrated for the host path** — 100 concurrent replaces from one revision yield exactly one winner, and crash recovery never overwrites a third party's content. NOT reachable from the two agent-facing paths (see below) |
-| **I7** no producer bypasses admission | **Not met.** Six pumps and three unguarded producers remain. Nobody is on it |
-| **I8** rights checked at acceptance and at dispatch | Columns exist; the dispatch-time re-check is not implemented |
+| **I7** no producer bypasses admission | **Not met, one producer down.** The agent webhook now goes through `Claim` with declared sources and serial limits; six pumps and two unguarded producers remain |
+| **I8** rights checked at acceptance and at dispatch | **Demonstrated for the webhook producer** — `WebhookAuthorizer` is mandatory in `StartWebhookDispatcher` and re-checks agent, deletion, workspace and crew at claim time; an agent deleted while the work waited is refused at dispatch, not at acceptance (`TestVerticalServer_PermissionRemovedWhileWaitingPreventsTheStart`). Not implemented for the other producers, which is part of I7 |
 
 ## 3. T01–T14
 
@@ -177,14 +184,14 @@ Nothing is PASS. Saying otherwise would be the exact error the PRD warns about.
 
 | | State |
 |---|---|
-| T01 signatures, rotation, timestamp edges | Signature half covered, including both ±5 min boundaries and rotation. HTTP status mapping and oversized/chunked bodies are in flight with the handler wiring |
-| T02 duplicates under concurrency | **Covered at the store level** — 24 concurrent duplicates collapse to one work item and one receipt. Not yet through a handler |
+| T01 signatures, rotation, timestamp edges | Signature half covered, including both ±5 min boundaries and rotation, and a real signed POST now travels the production route. HTTP status mapping and oversized/chunked bodies are in flight |
+| T02 duplicates under concurrency | **Covered at the store level** — 24 concurrent duplicates collapse to one work item and one receipt — **and through the real route**: a re-delivery yields one work item, one attempt, one runtime and one run record (`TestVerticalServer_ADuplicateDeliveryDoesNotCreateASecondRun`). The concurrent case still has no HTTP-level test |
 | T03 crash before/after commit | **Harness written and passing.** A real child SIGKILLs itself mid-acceptance; after the commit the work survives and a resend finds it, before the commit nothing survives. It does NOT cover OS crash — that is T14 |
 | T04 held write lock, checkpoint, FULL everywhere | Measured, and now enforced: the acceptance guard refuses after 452 ms with a 600 ms budget against a lock held 6 s. `FULL` on every pooled connection is asserted |
 | T05 all producers at once, mailbox | Mailbox table exists, unused. Not started — and blocked on I7 |
 | T06 real Claude, chat + background overlapping | **Not attempted.** Admission-level only, and the parallel flag stays off until it is |
 | T07 start/cleanup/cancel B during A | **Eight tests**, all passing: start B leaves A untouched, credentials are not overwritten across runs, cleanup of B leaves A's directories alone, memory stays shared and survives cleanup, cancelling B does not name A, the run-end notification is scoped and secret-safe, and a login refresh reaches every live run. On generated command strings and the provider fake — **no live container** |
-| T08 lost heartbeat, late completion, restart | **Fencing, lease loss and recovery demonstrated and mutation-checked.** The restart half now has T03's harness to build on |
+| T08 lost heartbeat, late completion, restart | **Fencing, lease loss and recovery demonstrated and mutation-checked**, and the restart half is now done at the real-process layer: a SIGKILL'd dispatcher's orphaned runtime is found by a second process and no second runtime is created (`TestChildCrash_...`) |
 | T09 external success without a receipt | Table exists, unused |
 | T10 memory CAS, append retry, cap race | **Demonstrated host-side**: 100 concurrent replaces yield one winner; 100 identical append retries yield one increment; the cap race still holds. Unreachable from the agent paths — see §5a |
 | T11 memory crash recovery | **Demonstrated** at five crash points, including that a third party's content is never overwritten |
@@ -273,27 +280,151 @@ session rediscover them.**
 
 ## 4a. Level 2 and 3: what is actually wired, and what is proven
 
-**Wired into a production path:** webhook acceptance (both surfaces), the work
+**Wired into a production path:** webhook acceptance (both surfaces), **the
+webhook dispatcher** (`Router.StartWebhookDispatcher`, started by
+`cmd/crewship/cmd_start.go` before the scheduler and stopped with it), the work
 and delivery read API and its CLI, the work UI, the metrics collectors, the
 memory host mutation endpoint, the sidecar's revocation journal and its
 run-status authority, per-run runtime identity in the orchestrator.
 
-**Implemented, tested, and called by NOTHING in production yet:** `work.Claim`,
-`MarkStarting`, `Heartbeat`, `Transition`, `RecoverExpiredLeases`,
-`RequestCancel`'s live-runtime half, `RetentionPolicy.Sweep`, the ingress
-capacity check. This is the R3 gap and it is the biggest one: acceptance commits
-work and then the old orchestrator path runs the agent without claiming it, so
-`queued` can mean "an agent is running" and a restart does not resume anything.
+**Implemented, tested, and called by NOTHING in production yet:**
+`RetentionPolicy.Sweep`, the ingress capacity check on the producers that have
+not moved onto shared admission yet (§5's six pumps), and the durable chat
+mailbox. `Claim`, `MarkStarting`, `StartRunning`, `Heartbeat`, `Transition`,
+`RecoverExpiredLeases` and `RequestCancel`'s live-runtime half are no longer on
+this list — the webhook dispatcher uses all of them on the shipped path.
 
-**Proven end to end: nothing.** No T01–T14 is a PASS.
+### The three layers a claim can rest on
 
-A note on R4 specifically, because an earlier version of this file overstated it.
-The store protocol is complete and enforced — `StartRunning` now refuses an
-attempt with no prior `MarkStarting`, so the sequence cannot be skipped. But
-**only tests call `MarkStarting` today.** The production dispatcher that would
-use it does not exist, and the crash test that matters — kill after the process
-is really created, restart, prove no second runtime — has not been written. R4 is
-"protocol ready, not wired, not proven".
+Every guarantee below names the layer it was observed at. They are not
+interchangeable and the difference is not pedantry: each one can be green while
+the next is broken, and that is exactly how this programme has failed before.
+
+| Layer | Where | What it can show | What it cannot |
+|---|---|---|---|
+| **mock** | `internal/dispatch/integration_test.go` | the loop's logic against a Runtime the test can crash, block, silence or make unstoppable at any instruction | nothing about the real assembly: acceptance, routes, the resolver and the ledger's real callers are all absent |
+| **real process** | `internal/dispatch/child_crash_test.go`, `internal/work/crash_test.go`, `internal/api/webhook_vertical_test.go` | the wiring, the real HTTP route table, real IPC back into the same server, a real SIGKILL and a real orphaned OS process that a restart has to find | nothing about a real CLI adapter: the agent process is `sleep`, or a fake `agentRunner` |
+| **real CLI** | not yet run | T06/T07 — a real Claude adapter, two live runtimes overlapping in wall clock | — |
+
+The end-to-end pass in `internal/api/webhook_vertical_test.go` substitutes
+exactly one thing: the `agentRunner` interface (start a process, stop it, is it
+there) and the container provider beneath it. Everything above that line is the
+code that ships — `api.NewRouter` registers the route, a real `http.Server`
+serves it, `chatbridge.IPCResolver` makes real HTTP calls back into the same
+process's internal API, acceptance takes the real transaction, and
+`StartWebhookDispatcher` builds the real dispatcher with the mandatory
+`WebhookAuthorizer` and `work.SerialAgentLimits()`.
+
+### Proven end to end at the real-process layer
+
+These ran, with results, on 2026-09-11. Each is a test, not a description.
+
+| Guarantee | Test |
+|---|---|
+| a valid delivery reaches a terminal state through claim → attempt → runtime, and the receipt, the attempt, the run record and the locator all carry ONE run id | `TestVerticalServer_OneDeliveryTravelsTheWholePath` |
+| a SILENT runtime is still confirmed — the confirmation is the provider's answer, not a stream event | same test (`runtime_phase = confirmed` with no event emitted) |
+| a lost or nil hint costs latency and nothing else; the poll finds the work | `TestVerticalServer_ALostHintIsReplacedByPolling` |
+| a duplicate delivery produces one work item, one attempt, one runtime and one run record, and answers with the work's CURRENT state | `TestVerticalServer_ADuplicateDeliveryDoesNotCreateASecondRun` |
+| this dispatcher claims webhook work and nothing else — another producer's item is left `queued` | `TestVerticalServer_TheDispatcherDoesNotClaimAnotherProducersWork` |
+| a server with no webhook route starts no dispatcher (`ErrNoWebhookRoute`) rather than one with no authorizer | `TestVerticalServer_NoRouteMeansNoDispatcher` |
+| cancel before any start prevents execution: no runtime, no run record | `TestVerticalServer_CancelBeforeAnyStartPreventsExecution` |
+| cancel during a run stops THAT run's runtime, named by its own locator | `TestVerticalServer_CancelDuringARunStopsThatRuntime` |
+| a stop that does not take is **not** reported as cancelled — it parks, naming the runtime | `TestVerticalServer_AStopThatDoesNotTakeIsNotCalledCancelled` (waits out the shipped 10s grace on purpose) |
+| after shutdown no work is left claiming a runtime nobody supervises; the stop function does not return until that is true | `TestVerticalServer_ShutdownLeavesNoSupervisorOutsideTheLedger` |
+| a permission removed while the work waited refuses it at dispatch, not at acceptance | `TestVerticalServer_PermissionRemovedWhileWaitingPreventsTheStart` |
+| acceptance writes the input the dispatcher reads — a contract between two halves with no compiler check | `TestVerticalServer_AcceptanceWritesTheInputTheRuntimeReads` |
+| an unclear run-record write is resolved by looking the record up by its stable id: only a confirmed absence is retryable, present or unreadable is unclear (mutation-checked) | `TestRunRecordAbsent_AnswersTheQuestionItIsAskedAboutTheRealRecord`, `TestWebhookRun_AnUnclearRunRecordWriteIsNotRetried` |
+| a dispatcher killed by SIGKILL after its runtime exists and before confirmation: a restart over the same database starts **no second runtime**, and the orphan is findable at the recorded locator | `TestChildCrash_ARestartFindsTheOrphanedRuntimeAndStartsNoSecondOne` |
+
+### R4 is closed at the real-process layer
+
+An earlier version of this file said "protocol ready, not wired, not proven",
+and then that only tests called `MarkStarting`. Both are now out of date.
+
+The production dispatcher writes the start intent before creating the runtime,
+and `TestVerticalServer_OneDeliveryTravelsTheWholePath` reads `runtime_phase`
+from the database at the instant the runtime is created — it is `starting`, with
+a locator, before anything exists to find.
+
+`TestChildCrash_ARestartFindsTheOrphanedRuntimeAndStartsNoSecondOne` is the
+crash that R4 exists for, at the real-process layer: a child process runs a real
+dispatcher, creates a real OS process, publishes its identity, and SIGKILLs
+itself before any confirmation. The runtime is reparented and survives. A second
+dispatcher then starts over the same database file with no memory of the first,
+and the work lands in `needs_reconciliation` with the orphan still resolvable at
+its locator. Mutation-checked: removing the phase test in
+`RecoverExpiredLeases` makes the restart re-run the work, and the test goes red
+with the work `running` beside a live orphan.
+
+What it still does **not** prove is durability against an OS crash or a power
+cut. SIGKILL ends a process; the kernel keeps and eventually writes its page
+cache. That is T14 and it needs a storage-fault harness.
+
+### The timeline of one delivery
+
+Printed from the ledger by `TestVerticalServer_TheTimelineOfOneDelivery` (run it
+with `-v`), so this cannot drift from the system:
+
+```
+identities
+  delivery_id  cmtwv54aq00010b73dde2   (workspace, endpoint, source delivery id) — the sender's identity
+  work_id      cmtwv54aq0002acc811a7   — stable across every retry; what the receipt named
+  run_id       cmtwv54dd0003d0815c24   — ONE attempt; the same value in work_attempts, the run record, the locator
+  session_id   webhook-<agent>-<accepted-run-id>   — one active turn
+  generation   1                       — the fencing term; every write must present it
+  locator      agent-run:cmtwv54dd0003d0815c24   — written BEFORE the runtime existed
+  attempt      1 of 5
+  source/class webhook / background    filter: accepted
+
+states
+  11:18:42.434   -          -> queued     gen=0 run=-                      accepted
+  11:18:42.528   queued     -> starting   gen=1 run=cmtwv54dd0003d0815c24  claimed
+  11:18:43.530   starting   -> running    gen=1 run=cmtwv54dd0003d0815c24  runtime confirmed
+  11:18:43.558   running    -> succeeded  gen=1 run=cmtwv54dd0003d0815c24  completed
+```
+
+The generation is 0 at acceptance and 1 from the claim onwards: the fence starts
+when an attempt does. The second attempt of the same work would be generation 2
+with a different run id and the same work id — which is the whole reason the
+three identities are separate.
+
+### Three bugs the vertical pass found that every unit layer was green on
+
+Worth recording, because they are the argument for the pass itself. All three
+were invisible to tests that covered each half separately.
+
+1. **Acceptance wrote an input the dispatcher could not read.** `input_json` was
+   an ad-hoc map of `event`/`source`/`chat_id`; `webhookRunInput` expects
+   `agent_id`/`crew_id`/`payload`. The dispatcher resolved an empty agent id.
+   Fixed by typing the write as `webhookRunInput` and storing the payload (the
+   retention sweep may drop a raw body, and work that cannot run without a row
+   retention may delete is not durable). Regression test:
+   `TestVerticalServer_AcceptanceWritesTheInputTheRuntimeReads`.
+2. **`runRecordAbsent` queried a table that no longer exists.** The
+   unclear-write rule — look the record up by its stable id, and only a
+   confirmed absence is retryable — was asking `agent_runs`, removed by
+   unified-journal phase J. Every lookup errored, so every unclear run-record
+   write said "could not be established". It now reads the `run.started`
+   journal entry traced by the run id, which is what the record actually is.
+3. **A run that finished before the confirmation probe polled could not record
+   its own success.** `starting -> succeeded` was not in the state machine, so a
+   short run sat in `starting` holding a slot until its lease expired 60 seconds
+   later, and recovery then described a SUCCESS as an abandoned run needing
+   reconciliation. With a one-second production poll interval this is the common
+   case for anything quick, not an edge. Two fixes, both mutation-checked: the
+   missing edge (`TestTransition_ASuccessBeforeConfirmationIsStillRecordable`,
+   `TestVertical_AShortRunSettlesEvenIfTheProbeNeverPolled`), and a backstop so
+   that an outcome the ledger refuses is parked immediately instead of logged and
+   dropped (`TestVertical_AnUnwritableOutcomeIsParkedRatherThanLost`).
+
+### What the parallel profile still rests on
+
+`StartWebhookDispatcher` uses `work.SerialAgentLimits()` — one run per agent, of
+either class — for **every** adapter. The parallel profile is off, and it stays
+off until T06/T07 run against a real Claude runtime. A dispatcher that quietly
+allowed two concurrent runs would be enabling that profile by omission.
+
+**Proven end to end with a real CLI: nothing.** No T01–T14 is a PASS.
 
 ## 5. The six pumps I7 has to collapse
 
@@ -373,14 +504,14 @@ replace. Both are recorded as unverified rather than presented as checked.
 
 In the order the 2026-09-11 review sets, which is also dependency order.
 
-1. **R3 — one dispatcher that actually runs the work.** It must use the whole
-   protocol: `Claim` → `MarkStarting` → create the runtime → `StartRunning` →
-   heartbeat → completion or reconciliation. And the existing direct path from
-   acceptance into `orchestrator.RunAgent` must be REMOVED in the same change,
-   not left beside it — two owners of the same work is worse than one wrong one.
-2. **Prove the crash R4 exists for.** Kill the dispatcher after the process is
-   genuinely created and before `StartRunning`; restart; assert no second
-   runtime. Until this runs, R4 is a protocol, not a guarantee.
+1. ~~**R3 — one dispatcher that actually runs the work.**~~ Done and wired:
+   `internal/dispatch` owns execution, the direct path from acceptance into
+   `orchestrator.RunAgent` is gone (guarded at source level by
+   `TestWebhookAcceptanceCannotStartAnAgent`), and the dispatcher is started by
+   the server. Proven at the real-process layer — see §4a.
+2. ~~**Prove the crash R4 exists for.**~~ Done at the real-process layer:
+   `TestChildCrash_ARestartFindsTheOrphanedRuntimeAndStartsNoSecondOne`. Still
+   not proven against an OS crash or a power cut, which is T14.
 3. **R6 — per-attempt identity through to the memory clients**, and a parallel
    profile that can never fall back to a legacy write. The run id must travel
    per attempt; a container-boot environment variable is specifically wrong,
@@ -439,6 +570,18 @@ required by it:
   reason to go deleting new coverage; the same suite measured 543 s and 613 s on
   a quieter box earlier the same day. If it does start failing in CI, the lever
   is the package's existing bulk, not this branch's tests.
+- **`scripts/docs-inventory -strict` is red on this branch and not because of
+  this work.** Four environment variables have no documentation row:
+  `CREWSHIP_MEMORY_REQUIRE_GUARANTEED`, `CREWSHIP_RUNEND_AUTH`,
+  `CREWSHIP_SIDECAR_RUN_AUTHORITY`, `CREWSHIP_SIDECAR_STATE_DIR`. All four come
+  from the sidecar and memory work already committed here, none appears in this
+  session's diff, and documenting them means describing someone else's feature —
+  so they are named here rather than guessed at. They must be documented before
+  the branch merges.
+- The vertical pass adds ~35 s to `internal/api`, most of it one test that waits
+  out the shipped 10 s cancel grace on purpose. If that package's runtime becomes
+  the problem, that test is the first candidate for a build tag — but shortening
+  the grace would make it test a value no deployment uses.
 - Published Standard Webhooks test vectors trip gitleaks. `.gitleaks.toml` has a
   narrow entry for that file, and the "these are public vectors" claim is enforced
   by a test that verifies each published signature against its secret.

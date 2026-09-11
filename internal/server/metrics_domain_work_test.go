@@ -326,8 +326,17 @@ func TestCollectWorkMetrics_ReconciliationAndLeaseLoss(t *testing.T) {
 	if withRuntimeClaim == nil {
 		t.Fatalf("the item under test was never claimed")
 	}
+	// The whole start protocol, in order. StartRunning refuses an attempt that
+	// never declared where its runtime would be — without the intent, recovery
+	// cannot tell a process that was never created from one we failed to write
+	// down, which is the distinction this very test depends on below.
+	const locator = "crew-container/run-abc"
+	if err := claimStore.MarkStarting(ctx, withRuntime, withRuntimeClaim.RunID,
+		withRuntimeClaim.Generation, locator); err != nil {
+		t.Fatalf("mark starting: %v", err)
+	}
 	if err := claimStore.StartRunning(ctx, withRuntime, withRuntimeClaim.RunID,
-		withRuntimeClaim.Generation, "crew-container/run-abc"); err != nil {
+		withRuntimeClaim.Generation, locator); err != nil {
 		t.Fatalf("start running: %v", err)
 	}
 

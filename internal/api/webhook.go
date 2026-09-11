@@ -68,13 +68,31 @@ const defaultAgentWebhookMaxConcurrent = 8
 // in-flight cap is per-agent, independent of pipeline runs.
 const agentWebhookConcurrencyKey = "agent-webhook"
 
+// agentRunner is the whole of what the webhook path needs from the thing that
+// runs agents: start one, stop one, ask whether one is still there.
+//
+// It is an interface rather than *orchestrator.Orchestrator because those three
+// calls are the boundary between this package's logic and an actual operating
+// system process — and that boundary is the one place an end-to-end test has to
+// be able to stand in. Everything above it (the route, acceptance, the ledger,
+// the dispatcher, cancel, recovery) then runs as production code in the test
+// rather than as a re-implementation of it, which is the difference between
+// proving the wiring and asserting that a mock was called.
+//
+// *orchestrator.Orchestrator satisfies it. Nothing else does in production.
+type agentRunner interface {
+	RunAgent(ctx context.Context, req orchestrator.AgentRunRequest, handler orchestrator.EventHandler) error
+	StopRun(ctx context.Context, runID string) (bool, error)
+	RunIsAlive(ctx context.Context, runID string) (bool, error)
+}
+
 // WebhookHandler receives incoming webhook events and triggers agent runs.
 type WebhookHandler struct {
 	db        *sql.DB
 	handler   *webhook.Handler
 	logger    *slog.Logger
 	resolver  chatbridge.ChatResolver
-	orch      *orchestrator.Orchestrator
+	orch      agentRunner
 	hub       *ws.Hub
 	container provider.ContainerProvider
 	logWriter *logcollector.Writer
@@ -243,7 +261,7 @@ func NewWebhookHandler(
 	db *sql.DB,
 	logger *slog.Logger,
 	resolver chatbridge.ChatResolver,
-	orch *orchestrator.Orchestrator,
+	orch agentRunner,
 	hub *ws.Hub,
 	container provider.ContainerProvider,
 	logWriter *logcollector.Writer,
@@ -670,11 +688,25 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 		FilterReason:     reason,
 	}
 	// Input the dispatch will read back. It is the immutable record of what was
-	// accepted, so a replay can be shown the input it would re-run.
-	inputJSON, _ := json.Marshal(map[string]any{
-		"event":   payload.Event,
-		"source":  payload.Source,
-		"chat_id": fmt.Sprintf("webhook-%s-%s", agentID, runID),
+	// accepted, so a replay can be shown the input it would re-run — and it is
+	// typed as [webhookRunInput] rather than an ad-hoc map because it is a
+	// CONTRACT between two halves that no longer share a process: this half
+	// writes it now, the dispatcher's runtime adapter reads it back later,
+	// possibly after a restart.
+	//
+	// It carries the delivery's own content and the ids naming what it is for.
+	// It deliberately carries nothing DERIVED about the agent — not its crew
+	// config, not its permissions, not its runtime shape — because work waits
+	// for capacity and every one of those answers is allowed to change while it
+	// waits. Those are resolved fresh at dispatch (§3's I8).
+	//
+	// The payload is stored rather than read back from the delivery row: the
+	// retention sweep may drop a raw body, and a work item that cannot be run
+	// without a row that retention is allowed to delete is not durable.
+	inputJSON, _ := json.Marshal(webhookRunInput{
+		AgentID: agentID,
+		CrewID:  info.CrewID,
+		Payload: payload,
 	})
 	req := work.AcceptRequest{
 		WorkspaceID: info.WorkspaceID,
@@ -845,6 +877,13 @@ func (h *WebhookHandler) runWebhookAgent(
 		// attempt lands in retry_wait instead of vanishing.
 		h.logger.Error("webhook dispatch: crew runtime did not start",
 			"agent_id", agentID, "run_id", runID, "error", err)
+		// Safe to repeat, and the proof is CONTROL FLOW rather than the error:
+		// RunAgent is below this line and was never reached, so no agent turn
+		// happened in this attempt and none of its external effects can have.
+		// The error itself proves nothing — a provider timeout may well have
+		// left a container half-created — but crew startup is idempotent by
+		// name, so a retry converges on one container rather than making a
+		// second.
 		return fmt.Errorf("%w: crew runtime did not start: %w", errWebhookBeforeAgent, err)
 	}
 
@@ -868,6 +907,16 @@ func (h *WebhookHandler) runWebhookAgent(
 		}
 		h.logger.Error("webhook dispatch: run record not created; not starting the agent",
 			"agent_id", agentID, "run_id", runID, "error", err)
+		// An error from CreateRun does NOT prove the row is absent: the write
+		// may have landed and the response been lost. So look, by the stable
+		// run id we already hold. Present, or unreadable, means unclear —
+		// retrying a run record that exists would be a second record for one
+		// attempt. Only a confirmed absence is safe to repeat.
+		if absent, lookupErr := h.runRecordAbsent(ctx, runID); lookupErr != nil {
+			return fmt.Errorf("run record write failed and its state could not be established: %w", err)
+		} else if !absent {
+			return fmt.Errorf("run record write reported an error but the record exists: %w", err)
+		}
 		return fmt.Errorf("%w: run record not created: %w", errWebhookBeforeAgent, err)
 	}
 

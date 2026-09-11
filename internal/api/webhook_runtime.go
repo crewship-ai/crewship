@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -140,3 +141,26 @@ func runIDFromLocator(locator string) string {
 }
 
 var _ dispatch.Runtime = (*WebhookRuntime)(nil)
+
+// runRecordAbsent reports whether no run record exists for runID.
+//
+// It is the "look it up by a stable id" half of the unclear-write rule. A
+// failed write is not proof of absence — the row may be there and the response
+// lost — and the run id is stable precisely so that question can be asked
+// rather than assumed. An unreadable answer is not an absence either, which is
+// why the error is returned instead of being folded into the bool.
+//
+// The record itself is the `run.started` journal entry the internal run-create
+// route emits, carrying trace_id == run id. There is no agent_runs table any
+// more (unified-journal phase J), and asking a table that does not exist is not
+// a lookup — it is an error dressed as one, which this method's whole point is
+// to avoid.
+func (h *WebhookHandler) runRecordAbsent(ctx context.Context, runID string) (bool, error) {
+	var n int
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM journal_entries WHERE trace_id = ? AND entry_type = ?`,
+		runID, string(journal.EntryRunStarted)).Scan(&n); err != nil {
+		return false, err
+	}
+	return n == 0, nil
+}

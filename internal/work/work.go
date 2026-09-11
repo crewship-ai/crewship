@@ -167,6 +167,19 @@ var allowed = map[State][]State{
 		// A claim that never reached a runtime returns to the queue rather than
 		// burning the work; recovery decides which, having looked at the locator.
 		StateQueued,
+		// And a runtime can finish before anything observed it running. The
+		// confirmation probe polls, so a short run — or a slow first poll — ends
+		// while the attempt is still `starting`. Without this edge that outcome
+		// is unrecordable: the work sits in `starting` holding a slot until its
+		// lease expires and recovery parks it, so a SUCCESS is reported to an
+		// operator as something that needs looking at. Found by the end-to-end
+		// pass, where the fast path is the common one.
+		//
+		// It is also the honest history. `starting -> succeeded` says the
+		// runtime was never independently observed and still reported success,
+		// which is exactly what happened; synthesising a `running` the system
+		// never saw would read as evidence it does not have.
+		StateSucceeded,
 	},
 	StateRunning: {
 		StateSucceeded, StateFailed, StateWaiting, StateRetryWait, StateCancelled,

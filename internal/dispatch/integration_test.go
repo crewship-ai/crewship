@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,6 +61,9 @@ type fakeRuntime struct {
 	// is OutcomeUnclear, which is the production default too: a failure nobody
 	// classified is one nobody can vouch for.
 	classifyAs Outcome
+	// onStart runs inside Run, at the instant the runtime is created, so a test
+	// can observe the ledger from the middle of the start rather than after it.
+	onStart func(Assignment)
 	// refuseStop makes Stop report that the runtime is still there. A process
 	// that will not die is not a hypothetical — it is the case the contract
 	// says must become reconciliation rather than a cancellation.
@@ -87,7 +91,12 @@ func (f *fakeRuntime) Run(ctx context.Context, a Assignment, started func()) err
 	stopCh := make(chan struct{})
 	f.stopCh[locator] = stopCh
 	block, crash, fail, suppress := f.block, f.crashAfterStart, f.failWith, f.suppressStarted
+	onStart := f.onStart
 	f.mu.Unlock()
+
+	if onStart != nil {
+		onStart(a)
+	}
 
 	if !suppress {
 		started()
@@ -800,4 +809,158 @@ func TestVertical_LosingTheLeaseStopsTheRunNotJustTheHeartbeat(t *testing.T) {
 	}
 	t.Fatalf("the superseded attempt's runtime at %s was never stopped; it would keep executing "+
 		"beside whichever attempt replaced it", locator)
+}
+
+// Review follow-up 9. The first stream event is a hint, not the condition.
+//
+// A silent process is a running one: an agent that starts, thinks, and prints
+// nothing would otherwise never be recorded as running — and a dispatcher that
+// reads "no output yet" as "not started" is inferring absence from silence,
+// which is the mistake the whole start protocol exists to avoid.
+func TestVertical_ASilentRuntimeIsStillConfirmedRunning(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 10 * time.Millisecond
+	// The runtime produces no stream events at all, and does not finish.
+	h.rt.suppressStarted = true
+	h.rt.block = make(chan struct{})
+	defer close(h.rt.block)
+
+	r := h.accept("dlv-silent")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	// Confirmation has to come from the provider's own answer.
+	it := h.waitForState(r.WorkID, work.StateRunning)
+	if it.State != work.StateRunning {
+		t.Fatalf("state = %q, want running", it.State)
+	}
+	var phase string
+	if err := h.db.QueryRow(
+		`SELECT runtime_phase FROM work_attempts WHERE work_id = ?`, r.WorkID).Scan(&phase); err != nil {
+		t.Fatal(err)
+	}
+	if phase != "confirmed" {
+		t.Errorf("runtime phase = %q, want confirmed", phase)
+	}
+}
+
+// And the order must hold: the intent is durable BEFORE the runtime exists,
+// and confirmation comes after. A confirmation that overtook the intent would
+// mean a locator written after the danger passed.
+func TestVertical_IntentIsDurableBeforeTheRuntimeExists(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 10 * time.Millisecond
+	h.rt.block = make(chan struct{})
+	defer close(h.rt.block)
+
+	r := h.accept("dlv-order")
+
+	// Record the phase the attempt was in at the moment the runtime was
+	// created, read from the database by the fake itself.
+	phaseAtStart := make(chan string, 1)
+	h.rt.onStart = func(a Assignment) {
+		var phase string
+		_ = h.db.QueryRow(`SELECT runtime_phase FROM work_attempts WHERE run_id = ?`, a.RunID).Scan(&phase)
+		select {
+		case phaseAtStart <- phase:
+		default:
+		}
+	}
+
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+	h.waitForState(r.WorkID, work.StateRunning)
+
+	select {
+	case phase := <-phaseAtStart:
+		if phase != "starting" {
+			t.Fatalf("at the moment the runtime was created the attempt was %q, want starting — "+
+				"the locator must be durable BEFORE anything exists to find", phase)
+		}
+	default:
+		t.Fatal("the runtime was never created")
+	}
+}
+
+// A run that finishes before the confirmation probe has polled still settles.
+//
+// The probe is a poll, so there is always a window in which a short run ends
+// while the attempt is still `starting`. This is not an edge case dressed up as
+// one: with a one-second production poll interval it is the COMMON case for
+// anything quick. The end-to-end pass found it with nothing more exotic than a
+// runtime that returned immediately.
+func TestVertical_AShortRunSettlesEvenIfTheProbeNeverPolled(t *testing.T) {
+	h := newHarness(t)
+	// Long enough that the probe cannot possibly fire first, which is what makes
+	// this test about the unconfirmed path rather than about timing luck.
+	h.cfg.ConfirmPollInterval = time.Hour
+	h.rt.suppressStarted = true
+
+	rec := h.accept("dlv-short")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	it := h.waitForState(rec.WorkID, work.StateSucceeded)
+	if it.StateReason == "" {
+		t.Error("settled with no reason recorded")
+	}
+	// And the history does not invent an observation nobody made.
+	events, err := h.store.History(context.Background(), rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range events {
+		if e.ToState == work.StateRunning {
+			t.Error("a `running` transition was synthesised for a run nothing observed running")
+		}
+	}
+}
+
+// An outcome that cannot be written must not simply vanish.
+//
+// finish used to log a rejected transition and return, which left the attempt
+// in a live state holding a slot, with its real result recorded nowhere — and
+// the only thing that eventually noticed was lease expiry, sixty seconds later,
+// which then described a finished run as an abandoned one. The backstop turns
+// an unwritable outcome into a visible one immediately, and carries what it was
+// trying to say.
+func TestVertical_AnUnwritableOutcomeIsParkedRatherThanLost(t *testing.T) {
+	h := newHarness(t)
+	rec := h.accept("dlv-unwritable")
+	d := New(h.store, h.rt, nil, h.cfg, quiet())
+
+	// A real claim, so the attempt is properly bound and the fence has nothing
+	// to object to — this must be about the EDGE being refused, not about an
+	// unbound write, which is a different failure with a different answer.
+	//
+	// The edge is forced rather than provoked: the settle path targeted
+	// `succeeded` from `starting` when this bug was live, and that edge now
+	// exists. `waiting` stands in for the next missing one. The guard is generic
+	// on purpose, because the thing it protects against is a settle target
+	// somebody adds later without adding its edge.
+	ctx := context.Background()
+	claimed, err := h.store.Claim(ctx, work.ClaimOptions{
+		LeaseOwner: "dispatcher-1", Limits: work.DefaultLimits(),
+	})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	d.finish(ctx, Assignment{
+		Item: claimed.Item, RunID: claimed.RunID, Generation: claimed.Generation,
+	}, work.StateWaiting, "completed")
+
+	got, err := h.store.Get(ctx, rec.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != work.StateNeedsReconciliation {
+		t.Fatalf("state = %q, want needs_reconciliation — an outcome the ledger refused must "+
+			"become somebody's problem, not nobody's", got.State)
+	}
+	if !strings.Contains(got.StateReason, "waiting") {
+		t.Errorf("reason = %q; it must name the outcome that could not be recorded", got.StateReason)
+	}
+	if !strings.Contains(got.StateReason, "completed") {
+		t.Errorf("reason = %q; it must carry what the outcome was trying to say", got.StateReason)
+	}
 }
