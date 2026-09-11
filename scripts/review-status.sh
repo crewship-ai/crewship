@@ -87,11 +87,13 @@ iso_to_epoch() { # <rfc3339>
 # minutes**` — so the re-trigger queue does not have to guess a backoff.
 WAIT_JQ='
   def waitMinutes:
-    ( [ scan("next (?:included )?review (?:will be )?available in:?[^0-9]{0,20}([0-9]+)[^A-Za-z]{0,4}(minute|min|hour|hr)"; "i") ]
+    ( [ scan("next (?:included )?review (?:will be )?available in:?[^0-9]{0,20}([0-9]+)[^A-Za-z]{0,4}(minute|min|hour|hr|second|sec)"; "i") ]
       | if length == 0 then null
         else ( .[0] as $m
                | ($m[0] | tonumber) as $n
-               | if ($m[1] | ascii_downcase | startswith("h")) then $n * 60 else $n end )
+               | if ($m[1] | ascii_downcase | startswith("h")) then $n * 60
+                 elif ($m[1] | ascii_downcase | startswith("s")) then ($n / 60 | ceil)
+                 else $n end )
         end );
 '
 

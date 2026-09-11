@@ -523,6 +523,10 @@ expect_eq "included review notice carries its cooldown" "29" \
   "$(wait_of '> **Next included review available in 29 minutes.**')"
 expect_eq "fair-usage reply carries its cooldown" "4" \
   "$(wait_of 'Your next included review will be available in 4 minutes.')"
+expect_eq "seconds round up to a safe whole minute" "1" \
+  "$(wait_of 'Next included review available in 30 seconds.')"
+expect_eq "partial minutes round up instead of retriggering early" "2" \
+  "$(wait_of 'Next included review available in 90 seconds.')"
 expect_eq "a body with no such line yields nothing" "" \
   "$(wait_of 'Actionable comments posted: 0')"
 
