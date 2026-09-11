@@ -842,3 +842,24 @@ family passed after it. The complete sidecar package then passed with -race -cou
 NOT completion of R6: authenticated run binding, shared HTTP/MCP revision
 namespace, read provenance, retry identity and the host dispatcher bridge remain
 unimplemented. The default stays off.
+
+
+Shutdown review found two production gaps, independently reproduced against
+SQLite. A refused Stop left the detached run context alive, relying on a future
+heartbeat to discover the ended attempt. A Stop that consumed its deadline then
+passed that expired context to the ledger, so parking failed and work stayed
+running. Drain now gives the outcome write a fresh bounded context and cancels
+local supervision after recording it. An unconfirmed external stop is still
+needs_reconciliation, never claimed as confirmed cancellation.
+
+Both regressions failed before their respective fixes. The complete dispatcher
+package with both fixes passed under -race -count=1 in 87.045s
+(/tmp/crewship-2-shutdown-final-full-race.log). A separate real HTTP vertical
+suite and a final full Go-tree run cover the assembled code; their completion
+results must be recorded before claiming either passed.
+
+The earlier disk-backed full run on 9b3ee52b completed internal/api successfully
+in 1321.309s. That predates the shutdown and MCP production fixes. Final-code
+verification uses a dedicated TMPDIR under /dev/shm and disk-backed GOTMPDIR;
+this reduces shared-disk fsync contention. It proves the test contracts under
+process failure, not OS/power-failure durability (T14 remains unproven).

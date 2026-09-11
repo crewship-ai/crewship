@@ -574,11 +574,21 @@ func (d *Dispatcher) drain() {
 	defer cancel()
 	for _, l := range live {
 		stopped, err := d.runtime.Stop(ctx, l.locator)
+		// A stop may consume its entire deadline. Persist its outcome with
+		// a fresh bounded context; using the expired stop context would leave
+		// precisely the unconfirmed runtime in starting/running at shutdown.
+		settleCtx, settleCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 		if err == nil && stopped {
-			d.finish(ctx, l.assignment, work.StateCancelled, "stopped during shutdown")
-			continue
+			d.finish(settleCtx, l.assignment, work.StateCancelled, "stopped during shutdown")
+		} else {
+			d.park(settleCtx, l.assignment,
+				"the server shut down while this runtime was live at "+l.locator+"; it was not confirmed stopped")
 		}
-		d.park(ctx, l.assignment,
-			"the server shut down while this runtime was live at "+l.locator+"; it was not confirmed stopped")
+		settleCancel()
+		// Local supervision must end even when the external stop failed. Its
+		// context deliberately outlives Run's parent, so neither returning
+		// from Run nor closing the database cancels it. The parked ledger row
+		// remains the authority for the unconfirmed external runtime.
+		l.cancel()
 	}
 }

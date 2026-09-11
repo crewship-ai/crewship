@@ -26,6 +26,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Dispatcher shutdown records reconciliation even when stopping a runtime exhausts its deadline, and cancels local supervision after recording the outcome. An unconfirmed external stop remains reconciliation.
+
 - Memory MCP writes now honor the runtime requirement for guaranteed memory. Until the host ledger bridge is available, both write tools return an error instead of silently writing through the legacy path.
 - **`crewship work get -f yaml` no longer panics**, and the work commands print the same keys in YAML as in JSON. The detail payload embedded an unexported type, which yaml.v3 cannot reflect into, and the field names were being lowercased rather than read from their json tags — so a script written against one machine format silently disagreed with the other.
 - **A routine's schema can no longer change out from under a live plan through a side door.** The check that refuses a recipe an enabled, unpinned plan's stored preset can no longer satisfy ran only on Edit → Publish. `crewship routine save`, the agent save, an import and a manifest apply all walked past it and left the plan pointing at a recipe its preset no longer fits — a plan that looks healthy in the calendar and fails for the first time at its next firing. The check now runs on every door that changes an active recipe, inside the same transaction, so a refusal leaves the original recipe and the original plan untouched; the 409 names which plan to repair, on the import and agent doors too, where an entirely actionable refusal used to surface as a server error. Disabled plans, pinned plans, legacy untyped inputs and saves that do not touch the definition are unaffected (#2495).
