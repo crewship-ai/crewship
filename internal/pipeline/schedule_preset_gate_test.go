@@ -263,3 +263,96 @@ func TestPresetGate_PublishPathKeepsItsOwnBehaviour(t *testing.T) {
 		t.Fatalf("draft document unreadable after the block: %v", err)
 	}
 }
+
+// TestPresetGate_SchemaAndPlanChangeTogether is the way out of a deadlock
+// the gate would otherwise create with #2496's write-side check.
+//
+// Changing a required input's name means the recipe and the plan must move
+// together. Neither can move first: the plan's new preset does not satisfy
+// the recipe still published, and the new recipe does not satisfy the preset
+// still stored. A save that carries a trigger writes both in one
+// transaction — so the gate runs AFTER createTriggerTx and asks the only
+// question that matters, which is whether the plan can still run once this
+// save has landed.
+func TestPresetGate_SchemaAndPlanChangeTogether(t *testing.T) {
+	s := draftStore(t)
+	ctx := context.Background()
+	in := validSaveInput("planned")
+	in.DefinitionJSON = presetGateV1
+	p, err := s.Save(ctx, in)
+	if err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	// The plan the atomic authoring path owns: one per (workspace, pipeline).
+	if _, _, err := s.SaveWithTrigger(ctx, in, &TriggerInput{
+		Kind: TriggerKindSchedule, CronExpr: "0 9 * * *", Timezone: "UTC",
+		Inputs: map[string]any{"who": "alice"},
+	}); err != nil {
+		t.Fatalf("attach plan: %v", err)
+	}
+
+	// Recipe alone: refused, because the stored preset would not satisfy it.
+	alone := validSaveInput("planned")
+	alone.DefinitionJSON = presetGateV2
+	if _, err := s.Save(ctx, alone); err == nil {
+		t.Fatal("changing the recipe alone left the plan unsatisfiable and was accepted")
+	}
+
+	// Recipe AND plan, in one save: accepted.
+	together := validSaveInput("planned")
+	together.DefinitionJSON = presetGateV2
+	if _, _, err := s.SaveWithTrigger(ctx, together, &TriggerInput{
+		Kind: TriggerKindSchedule, CronExpr: "0 9 * * *", Timezone: "UTC",
+		Inputs: map[string]any{"recipient": "alice"},
+	}); err != nil {
+		t.Fatalf("changing the recipe and its plan together: %v", err)
+	}
+
+	got, err := s.GetByID(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got.DefinitionJSON != presetGateV2 {
+		t.Errorf("recipe did not advance: %s", got.DefinitionJSON)
+	}
+	var preset string
+	if err := s.db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND deleted_at IS NULL`, p.ID).Scan(&preset); err != nil {
+		t.Fatalf("read preset: %v", err)
+	}
+	if preset != `{"recipient":"alice"}` {
+		t.Errorf("plan preset = %s, want the new one", preset)
+	}
+}
+
+// TestPresetGate_TriggerCannotSmuggleABrokenPlanPast guards the other
+// direction of that ordering: running the gate after the trigger write must
+// not let a save attach a plan the recipe rejects.
+func TestPresetGate_TriggerCannotSmuggleABrokenPlanPast(t *testing.T) {
+	s := draftStore(t)
+	ctx := context.Background()
+	in := validSaveInput("planned")
+	in.DefinitionJSON = presetGateV1
+	if _, err := s.Save(ctx, in); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	bad := validSaveInput("planned")
+	bad.DefinitionJSON = presetGateV2
+	_, _, err := s.SaveWithTrigger(ctx, bad, &TriggerInput{
+		Kind: TriggerKindSchedule, CronExpr: "0 9 * * *", Timezone: "UTC",
+		Inputs: map[string]any{"who": "alice"}, // still the OLD input name
+	})
+	if err == nil {
+		t.Fatal("a trigger carrying a preset the new recipe rejects was accepted")
+	}
+	var conflict *ScheduleDraftConflict
+	if !errors.As(err, &conflict) {
+		t.Errorf("error %v is not an actionable schedule conflict", err)
+	}
+	var def string
+	if err := s.db.QueryRow(`SELECT definition_json FROM pipelines WHERE workspace_id='ws_test' AND slug='planned'`).Scan(&def); err != nil {
+		t.Fatalf("read recipe: %v", err)
+	}
+	if def != presetGateV1 {
+		t.Errorf("the refused save still changed the recipe: %s", def)
+	}
+}

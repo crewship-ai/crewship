@@ -373,7 +373,16 @@ func replyScheduleConflict(w http.ResponseWriter, err error) bool {
 	if !errors.As(err, &conflict) {
 		return false
 	}
-	writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "schedule_conflict": conflict})
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error": err.Error(),
+		// The way out, in the envelope rather than in `reason`, which clients
+		// parse. Renaming a required input means the recipe and the plan have
+		// to move together: neither satisfies the other on its own, so the
+		// escape is one save that carries both, or switching the plan off
+		// first.
+		"hint":              "Update this plan's inputs in the same save (send a `trigger` block), repair the plan first if the new inputs already fit, or disable the plan and re-enable it after publishing.",
+		"schedule_conflict": conflict,
+	})
 	return true
 }
 

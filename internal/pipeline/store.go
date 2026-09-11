@@ -209,18 +209,6 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 		if err := s.consumeDraftTx(ctx, tx, in); err != nil {
 			return nil, nil, err
 		}
-		// Schedule-preset gate (#2495). Every door that changes an active
-		// recipe lands here — publish, plain save, internal/agent save,
-		// import, manifest apply — so this is where the check belongs
-		// rather than inside the publication branch above. Skipped when the
-		// definition is byte-identical: a rename or a description edit must
-		// not start failing over a preset that was already imperfect.
-		if existingDefinition != in.DefinitionJSON {
-			if err := s.checkSchedulePresetsTx(ctx, tx, existingID, in.DefinitionJSON); err != nil {
-				return nil, nil, err
-			}
-		}
-
 		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
 		// 'disabled' must stay disabled across an edit. statusForRisk only
 		// ever yields 'active'/'proposed', so without this a plain re-save
@@ -311,6 +299,30 @@ WHERE id = ?`,
 		sched, err := s.createTriggerTx(ctx, tx, in, existingID, trigger)
 		if err != nil {
 			return nil, nil, fmt.Errorf("pipeline: save trigger (update): %w", err)
+		}
+
+		// Schedule-preset gate (#2495). Every door that changes an active
+		// recipe lands here — publish, plain save, internal/agent save,
+		// import, manifest apply — so this is where the check belongs rather
+		// than inside consumeDraftTx's publication branch.
+		//
+		// AFTER createTriggerTx on purpose. The question is "after this save,
+		// can every enabled unpinned plan still run?", and a save that
+		// carries a trigger rewrites its own plan's preset in this same
+		// transaction. Checked before the trigger, such a save would be
+		// refused for a preset it was in the middle of fixing — and since the
+		// preset cannot be fixed on its own either (it would not satisfy the
+		// recipe still published at that moment), a schema change and its
+		// plan would deadlock each other. Checked here, changing both
+		// together is the way through.
+		//
+		// Skipped when the definition is byte-identical: a rename or a
+		// description edit must not start failing over a preset that was
+		// already imperfect before this gate existed.
+		if existingDefinition != in.DefinitionJSON {
+			if err := s.checkSchedulePresetsTx(ctx, tx, existingID, in.DefinitionJSON); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
