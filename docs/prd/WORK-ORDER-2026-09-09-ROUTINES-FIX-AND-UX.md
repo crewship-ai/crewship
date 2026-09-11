@@ -614,5 +614,7 @@ zůstávají samostatné otevřené brány v živém PRD.
       živá vrstva ho hostit nemůže, SSRF ochrana odmítá každou dosažitelnou adresu.
 - [ ] **Uživatel bez výkladu odpoví na pěti rutinách:** co ta rutina dělá, co
       má zadat, jestli něco skutečně spustí, co výsledek znamená, co udělat dál.
+      Pět konkrétních úloh a odkazy na dev1:
+      [routines-human-gate-2026-09-11](reports/routines-human-gate-2026-09-11.md).
 - [ ] Uživatel potvrdil, že Edit/Test je srozumitelný.
       **Tenhle bod nemůžeš odškrtnout sám.**

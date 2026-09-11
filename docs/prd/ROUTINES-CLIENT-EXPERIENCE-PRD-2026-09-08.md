@@ -385,6 +385,8 @@ Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavk
       11. 9. doplněno o timeout vs. opožděnou odpověď (409) a o čtyři souběhy
       dvou opačných odpovědí (vždy jedno 200 a jedno 409).
 - [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
+      Zadání pěti úloh s odkazy přímo na dev1 je připravené v
+      [routines-human-gate-2026-09-11](reports/routines-human-gate-2026-09-11.md).
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
