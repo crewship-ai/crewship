@@ -261,7 +261,7 @@ export function PagesRail({
                     A badge that means one thing on some rows and another on
                     the rest is unreadable at a glance. */}
                 {page.tally.total > 0 && (
-                  <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-muted-foreground">
+                  <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-foreground">
                     {page.tally.total}
                   </span>
                 )}

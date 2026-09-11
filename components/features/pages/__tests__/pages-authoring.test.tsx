@@ -28,6 +28,22 @@ vi.mock("@/components/features/files/file-editor", () => ({
   FileEditor: ({ code }: { code: string }) => <div data-testid="editor">{code}</div>,
 }))
 
+// The four editor sections are five other files' worth of behaviour and are
+// tested there. This suite is about the shell around them: which door opens,
+// what the address says, and that the rail never blinks.
+vi.mock("@/components/features/pages/editor/section-content", () => ({
+  EditorContentSection: () => <div data-testid="section-content">Content</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-data-actions", () => ({
+  EditorDataActionsSection: () => <div data-testid="section-data">Data & actions</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-access", () => ({
+  EditorAccessSection: () => <div data-testid="section-access">Access</div>,
+}))
+vi.mock("@/components/features/pages/editor/section-history", () => ({
+  EditorHistorySection: () => <div data-testid="section-history">History</div>,
+}))
+
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import type { WirePage } from "@/hooks/use-pages"
 
@@ -104,6 +120,10 @@ describe("the /pages shell offers the third door", () => {
   beforeEach(() => {
     cleanup()
     push.mockReset()
+    // The editor's mode and section live in the address now, so a test that
+    // left `?mode=edit` there would hand it to the next one. (resets the
+    // address between tests.)
+    window.history.replaceState(null, "", "/pages")
   })
   afterEach(() => vi.unstubAllGlobals())
 
@@ -124,7 +144,7 @@ describe("the /pages shell offers the third door", () => {
     expect((await screen.findByTestId("editor")).textContent).toContain("owner: crew/lookout")
   })
 
-  it("offers Edit only on a page, and opens it on that page's document", async () => {
+  it("offers Edit only on a page, and opens the editor on that page", async () => {
     renderLayout([FLEET])
     expect(screen.queryByRole("button", { name: /^edit$/i })).toBeNull()
 
@@ -132,17 +152,42 @@ describe("the /pages shell offers the third door", () => {
     renderLayout([FLEET], "fleet-201")
     await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
-    const buffer = (await screen.findByTestId("editor")).textContent ?? ""
-    expect(buffer).toContain("slug: fleet-201")
-    // Rendered back into the sugar a human wrote, not the integer stored.
-    expect(buffer).toContain("sla: 5m")
+
+    // Edit is one door into a routed editor now, not five buttons into five
+    // dialogs. The address carries it, so a reload lands back here.
+    expect(await screen.findByTestId("section-content")).toBeTruthy()
+    expect(window.location.search).toBe("?mode=edit")
+    expect(screen.getByRole("button", { name: /view page/i })).toBeTruthy()
+    // The list is still beside the editor — replacing it with the sections
+    // was the review's U05, and the scroll-and-filters promise is the one
+    // that breaks. The name appears twice on purpose: once in the rail, once
+    // in the editor's own header, which is what keeps "which Page am I
+    // editing" on screen at every width.
+    expect(screen.getAllByText("Flotila .201").length).toBeGreaterThanOrEqual(2)
   })
 
-  it("will not open Edit on a page carrying a panel the viewer may not see", async () => {
-    // §11b.14: the document cannot describe a sealed placeholder, so a save
-    // built from it would delete another crew's panel.
+  it("Share opens the same editor already on Access", async () => {
+    renderLayout([FLEET], "fleet-201")
+    await waitFor(() => expect(screen.getByRole("button", { name: /^share$/i })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: /^share$/i }))
+    expect(await screen.findByTestId("section-access")).toBeTruthy()
+    expect(window.location.search).toContain("section=access")
+  })
+
+  it("still opens the editor on a page carrying a panel the viewer may not see", async () => {
+    // The regression this pins: the old gate was one boolean over the whole
+    // surface, so a single sealed panel hid Edit, App preview, Source history
+    // and Publications at once — and the server would have answered three of
+    // them. What a sealed panel makes unsafe is replacing the DOCUMENT
+    // (§11b.14), which is now the only thing it closes; the refusal is
+    // rendered in Content, beside the control it applies to.
     renderLayout([SEALED], "mixed")
-    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeDisabled())
+    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled())
+    fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
+    expect(await screen.findByTestId("section-content")).toBeTruthy()
+    // Access is reachable on exactly the Page the old gate locked out of it.
+    fireEvent.click(screen.getByRole("button", { name: "Access" }))
+    expect(await screen.findByTestId("section-access")).toBeTruthy()
   })
 
   it("names the New page button in the empty rail, not only the CLI", async () => {

@@ -133,8 +133,16 @@ func TestAcceptance_PageProjectGitHistoryRestore(t *testing.T) {
 		t.Fatal("CLI restore lost source bytes")
 	}
 	if image == "" {
-		t.Log("Docker publication path requires PAGES_TEST_BUILD_IMAGE")
-		return
+		// SKIP-WAIVER: the publish-and-restart half needs a real, pinned
+		// pages-build image (a tag is refused), which only the mandatory
+		// `pages-apps` CI lane supplies via scripts/test-pages-apps.sh — and
+		// that lane fails if this subtest is skipped, so the coverage is
+		// enforced where the dependency exists. Same guard as #2472's, and on
+		// the same precedent no tracking issue: there is nothing to come back
+		// and fix. Skip, not log-and-return: a bare return left this half
+		// unexecuted while the parent reported PASS and the run reported zero
+		// skips, and this branch's own handover quoted that zero as proof.
+		t.Skip("Docker publication path requires PAGES_TEST_BUILD_IMAGE (a pinned image ID or repo@sha256, not a tag)")
 	}
 	var job struct {
 		ID string `json:"id"`

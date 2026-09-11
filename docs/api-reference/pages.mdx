@@ -220,6 +220,16 @@ data:
 }
 ```
 
+Every page object — here and in the list — also carries two booleans about its
+custom application, and they answer different questions. `has_project` is true
+when the page has application source at all, published or not. `has_application`
+is true only while a publication is actually running. A page awaiting its first
+publication has `has_project: true` and `has_application: false`; that is the
+case the [publication review](#review-a-publication-candidate) exists for, so a
+client deciding whether to offer the review reads `has_project`. A withdrawn
+application leaves `has_project` true and `has_application` false as well.
+Neither field is omitted when false.
+
 A panel owned by a crew the caller does not belong to arrives as a **sealed
 placeholder**: it keeps its id, schema and span so the page has the same shape
 for everyone, and carries no data and no provenance. This is decided server-side
@@ -1150,8 +1160,11 @@ permit SDK actions against the published application.
 
 **Request:** authenticated Page editor; optional positive `before` revision.
 **Response 200:** `{revisions, next_before}` with at most 50 entries. Each entry
-contains `revision`, `digest`, `git_commit`, `actor`, `created_at`, `restorable`.
+contains `revision`, `digest`, `git_commit`, `actor`, `actor_kind`,
+`created_at`, `restorable`.
 An agent-authored entry uses the agent ID as `actor`; it is not a user ID.
+`actor_kind` is `user`, `agent`, `crew` or `unknown` and is the only field that
+says which of those the opaque `actor` string holds.
 `next_before: 0` means no further page. Metadata is `no-store`.
 **Statuses:** `400` invalid cursor, plus common errors.
 
@@ -1186,9 +1199,128 @@ plus common errors.
 checks}` after source/artifact integrity and current reference checks.
 `browser_review` and `security_review` remain `required`; this is not an
 automatic safety certification and does not publish or invoke actions.
-**Statuses:** `400` malformed body, `409` incompatible source/build or failed
+**Statuses:** `400` malformed body, or a declared reference — owner crew,
+producer, `call` routine, gate target — that no longer exists, named in the
+sentence, `403` that same reference problem on a panel the caller may not read,
+where the sentence says only that a withheld part does not validate (or, when
+this candidate also changes it, that it changes it) and how many panels are
+withheld, `409` incompatible source/build or failed
 integrity checks, `413` oversized body, `422` invalid current bindings, plus
-common errors.
+common errors. Validation always runs over the whole candidate for everyone;
+only whether the refusal may name what failed depends on the caller, and a
+workspace administrator reads every panel and always gets the full sentence.
+
+### Review a publication candidate
+
+`GET /api/v1/pages/{slug}/project/review`
+
+**Request:** authenticated Page editor; path `slug`, optional positive
+`publication` query parameter, no body.
+**Response 200:** `{issued_at, candidate, baseline, routines, capabilities,
+blockers, initial_publication}`, where `baseline` is
+`{publication_version, published, definition_digest, definition,
+excluded_panels, source_revision, git_commit, source_available,
+source_unavailable_reason, withheld_changed, definition_diverged}` and
+`candidate` is
+`{revision, git_commit, source_digest, created_at, actor, build, definition}`.
+`candidate` is the current draft revision with
+its actor and the build of exactly that revision, and is `null` when there is
+no draft, or when the draft is identical to a publication that is still
+running. A withdrawn publication is not running, so an identical draft is
+still a candidate: republishing it is how a withdrawal is undone.
+
+Pass `publication=<version>` to ask what publishing that retained version
+would be fenced on instead. `candidate` then describes that publication's
+archived source — its source revision, checkpoint, digest, the publisher it
+recorded and when — with the build it recorded, and `routines` is computed
+from its archived Page definition. `candidate.actor` and `candidate.created_at`
+mean the source revision's author and save time in draft mode, and the
+publication's publisher and publication time in this one. That is exactly the key set a
+`rollback_version` publication must send as `expected_routine_digests`; the
+draft's routines are a different document's routines, and no client can
+recompute the current digest of each one. `baseline` is identical in both
+modes, because restoring a version replaces the same live definition. A
+version that is not retained is reported as `no_candidate` and one that is
+already running as `candidate_matches_live`; both keep the rest of the
+snapshot, and a retained candidate stays populated so the refusal can name
+which version it is about. `baseline.definition_digest` is the
+sha256 of the live Page definition and is the value a publication is fenced on.
+`baseline.definition` is that same live Page document, read from the same
+stored row in the same request, and `candidate.definition` is the document
+this candidate would make live — the draft's, or in `?publication=N` mode the
+archived one that version recorded. Both come out of this one response, so the
+two sides of the comparison and the digest the publication attests to describe
+one instant rather than three reads of three endpoints. Compare these two
+documents and not a separately fetched Page or project, or a reviewer can
+approve a comparison the fence does not cover.
+Panels this caller may not read are removed from both — panel visibility is
+its owning crew's, and an edit grant is never a read grant — and the removal
+is deliberately symmetric: a panel taken out of one document and left in the
+other would be reported as added or removed by the publication, which is false
+about a panel that is merely not this reader's to see.
+`baseline.excluded_panels` is how many panels were withheld from the
+comparison, counting a panel withheld from both documents once, so a partial
+comparison can say so.
+Full authoring reads require visibility of every declared panel. The review
+screen reads `/project/source` and `/project/history/{revision}/source`, which
+omit the definition; the authorized comparison comes from this snapshot.
+Application source remains shared Page code, not automatically redacted text.
+`baseline.withheld_changed` is whether any of those withheld panels actually
+differs between the live definition and the candidate — added, removed,
+modified, or re-pointed between a crew this caller may see and one they may
+not. A count is a warning; this is the answer that settles what the consent
+underneath the review can honestly cover. False means the comparison on screen
+covers everything that moves and publishing stays available. True adds the
+`withheld_change` blocker and the publication is refused, and nothing about
+what changed is disclosed either way: the flag, and the count beside it, are
+the whole of it. `routines` follows the same rule — a routine is listed only
+when a panel that survived withholding declares it, so the response does not
+name what it has just withheld — and `routines[].in_candidate` is therefore
+exactly the fence the publication rebuilds for this caller. A routine only a
+withheld panel calls is not fenced by a publisher who cannot read that panel:
+the fence asks a human to attest that a value has not moved since they
+reviewed it, and they never reviewed that one. A workspace administrator
+reads every panel, so their list and their fence are unchanged.
+`definition_digest` is unaffected by any of this, because the fence compares
+the full stored document. Either document is `null` only when the stored bytes
+cannot be read as a Page document, and there is then no basis for a comparison
+at all; when there is no candidate, `candidate` itself is `null`.
+`baseline.definition_diverged` says the live Page definition and the
+definition the live publication shipped with have drifted apart — somebody
+changed panels outside the application flow. It is a statement, not a refusal.
+The comparison on this snapshot is derived from the current live definition
+and the candidate, so it is complete regardless of what the publication once
+shipped, and publishing the candidate is what ends the divergence; refusing on
+it would block the only action that does. It is true in the withdrawn state
+too, where `published` is `false` and nothing is running, so a note about it
+must say "the live publication", never "the running application". Do not
+confuse it with the `definition_moved` blocker code, which is reserved for the
+publish fence tripping — a base that moved between the render and the click,
+where refreshing genuinely is the cure.
+`baseline.source_available:false` means the retained source for the live
+publication cannot be read back — a missing comparison, never "no changes" —
+and `source_unavailable_reason` says why in a sentence.
+`routines` is a union: the candidate's own `call` routines and the ones the
+live publication recorded, so a routine being dropped stays visible.
+`routines[].in_candidate` marks the rows that belong in a publication's
+`expected_routine_digests` — the candidate declares them, so the server
+rebuilds and compares exactly those. Sending a row without the flag is a key
+the server does not have and is refused as a `routines` conflict naming a
+routine nobody moved. `routines[].state` is `unchanged`, `changed` or
+`unknown`; `unknown` covers a publication that recorded no digest for a
+routine and a routine that no longer resolves, and is never rendered as
+agreement. `blockers[].code` is one of
+`no_candidate`, `candidate_matches_live`, `build_missing`, `build_failed`,
+`build_stale`, `baseline_unavailable`, `routine_unresolved`,
+`definition_moved`, `withheld_change`, `not_permitted` and
+`storage_unavailable`. `definition_moved` is reserved for the publish fence;
+the review does not emit it.
+`routine_unresolved` is emitted for every `in_candidate` routine with no
+current digest: publishing such a candidate is refused, so the review says so
+rather than reporting the routine as merely `unknown` beside a ready build. Missing build storage or a missing runtime origin is a
+blocker, not a 503: a reviewer who cannot publish can still read the snapshot.
+**Statuses:** `400` non-positive or malformed `publication`, plus common
+errors. Responses are `no-store`.
 
 ### Publish or roll back an application
 
@@ -1196,18 +1328,76 @@ common errors.
 
 **Authentication:** Page owner or workspace administrator; edit grant alone
 is insufficient. **Request:** `{build_id, expected_revision,
-expected_publication, reviewed_code:true}`. Use publication `0` for the first
+expected_publication, reviewed_code:true, expected_definition_digest,
+expected_routine_digests}`. Use publication `0` for the first
 publication. For rollback, send `{rollback_version, expected_publication,
-reviewed_code:true}` and omit `build_id` and `expected_revision`.
+reviewed_code:true}` with both fence fields, and omit `build_id` and
+`expected_revision`.
+
+`acknowledged_unavailable_baseline` is optional and defaults to false. When
+the live publication's retained source cannot be read back — the same
+condition the review reports as `baseline_unavailable` — the publication is
+refused with `409` and `conflict: "baseline"` unless it is `true`. It states
+that nobody compared this candidate with what is running. It proves nothing
+about the candidate itself, whose source, checkpoint, artifact and bindings
+are verified either way, and the answer is recorded in the publication's
+`checks` as `baseline_source` (`verified`, `unavailable_acknowledged`, or
+`initial_publication`) so a receipt says which publications shipped without a
+diff basis. An initial publication has no prior source and is never refused
+for this reason. The server refuses by default rather than blocking outright
+because retention and compaction legitimately discard old checkpoints, and a
+workspace whose history was reclaimed must still be able to publish a sound
+candidate — by saying so, not by having it assumed.
+
+`reviewed_code: true` attests that the whole change was reviewed, and the
+server refuses an attestation the caller cannot make. Publishing requires Page
+ownership or workspace administration; seeing a panel requires membership of
+that panel's owning crew or the same administration. A Page owner who is not
+an administrator therefore may publish a Page carrying panels they cannot
+read. Nothing there leaks and nothing bypasses authorization — the operation
+was always theirs — but the claim about what was reviewed was not true of the
+part that was hidden. So when a panel this caller may not read differs between
+the live definition and the candidate, the publication is refused with `403`
+and a sentence that says such a part exists and how many panels are withheld,
+and nothing about what it is. The rollback path is included: restoring a
+retained version replaces the live definition too, and the comparison is
+against that version's archived declaration. Read
+`baseline.withheld_changed` on the review snapshot to know in advance. This is
+not a state conflict, so the body carries no `conflict` kind and refetching
+changes nothing, and unlike `acknowledged_unavailable_baseline` there is no
+flag that waives it: that one says nobody made a comparison, this one would
+say the publisher may not see what they are signing for. A workspace
+administrator reads every panel, so it never applies to one.
+
+`expected_definition_digest` and `expected_routine_digests` are required on
+both paths and are the values the reviewer was shown — read them from the
+review snapshot above. The digest is 64 lowercase hex characters; the map is
+keyed by routine slug and is `{}` when the candidate declares no `call`
+actions. Both are compared inside the publishing transaction, before any
+write, so a Page definition or a routine script that moved between review and
+publication refuses the publication instead of shipping it. An exact retry
+short-circuits to its original receipt before the comparison runs: the receipt
+records what already happened, and the fence guards what is about to.
 **Response 200:** immutable receipt `{version, build_id, source_revision,
 source_digest, git_commit, artifact_digest, created_at}`. The live pointer and
 Page declaration change atomically. An exact retry returns its original
 receipt without rewinding a newer live publication. Rollback creates a new
 publication from the old artifact and declaration; it preserves the draft and
 does not undo completed routine effects.
-**Statuses:** `400` invalid or conflicting fields/missing review confirmation,
-`409` changed draft, publication or declaration, `413` oversized body,
-`422` invalid bindings, `507` publication quota, plus common errors.
+**Statuses:** `400` invalid or conflicting fields, missing review confirmation
+or a malformed fence — and a declared reference that no longer exists (owner
+crew, producer, `call` routine, gate target), which the authoring gate refuses
+ahead of the fence and therefore without a `conflict` kind, even when it was
+deleted concurrently, `403` publishing is not this caller's to do, a panel
+they may not read differs between the live definition and the candidate, or a
+panel they may not read fails that reference validation — the refusal then
+says only that a withheld part changes or does not validate, and how many
+panels are withheld, never which reference or which panel, `409`
+changed draft, publication or declaration, `413`
+oversized body, `422` invalid bindings, `507` publication quota, plus common
+errors. A `409` body carries `conflict` — `definition`, `routines`,
+`publication`, `draft` or `baseline` — naming which base moved or is missing, and a `routines` conflict
+also lists the routines that moved.
 
 ### Read the live application
 
@@ -1309,3 +1499,48 @@ An unhealthy result is still HTTP 200: callers must inspect `healthy`.
 This checks source, checkpoint contents, referenced artifacts and reachable Git
 objects without changing them. **Statuses:** 403 no edit access; 404 unavailable
 Page; 503 storage disabled or maintenance busy; 500 database/read failure.
+
+
+### Whole-document authoring and source review
+
+A Page write grant does not grant visibility of another crew's panels.
+`GET /pages/{slug}/project`, `GET /pages/{slug}/project/history/{revision}`,
+and Page export return 403 unless the caller can read every panel in the
+returned definition. Agent project reads apply the same rule. These endpoints
+never return a truncated document that could delete hidden panels on save.
+
+`PUT /pages/{slug}/project` (including source restore) requires visibility of
+all panels in the live definition, existing draft, and proposed definition.
+A rejected save leaves the draft revision unchanged.
+
+For reviewing application source, use `GET /pages/{slug}/project/source` and
+`GET /pages/{slug}/project/history/{revision}/source`. Both retain the Page
+edit-permission gate and return `revision`, `digest`, `git_commit`, and `project`,
+with no `definition`. The review snapshot supplies the authorized panel
+comparison. Application source is shared Page code; these reads do not redact
+panel names or other text an author has written into source files.
+
+
+### Read candidate source evidence
+
+`GET /api/v1/pages/{slug}/project/source`
+
+**Request:** path `slug`, workspace context; no body. Requires Page edit permission.
+**Response 200:** `{revision, digest, git_commit, project}` with exact source
+files and no `definition`. Panel comparisons belong to the review snapshot.
+**Statuses:** `401` unauthenticated, `403` no edit authority, `404` Page or draft
+missing, `500` storage/integrity error, `503` project storage unavailable.
+The response is `no-store`.
+
+### Read archived source evidence
+
+`GET /api/v1/pages/{slug}/project/history/{revision}/source`
+
+**Request:** path `slug` and positive `revision`, workspace context; no body.
+Requires Page edit permission.
+**Response 200:** `{revision, digest, git_commit, project}` verified against the
+archived source digest, without the archived panel definition.
+**Statuses:** `400` invalid revision, `401` unauthenticated, `403` no edit
+authority, `404` Page or revision missing, `409` unsupported legacy revision,
+`500` archive/integrity error, `503` project storage unavailable.
+The response is `no-store`.

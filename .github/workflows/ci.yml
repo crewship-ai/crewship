@@ -815,6 +815,9 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      - name: Verify control contrast and reduced motion
+        timeout-minutes: 3
+        run: pnpm exec tsx scripts/check-control-accessibility.tsx
       - name: Verify bounded credential reveal UI
         timeout-minutes: 3
         run: pnpm exec playwright test --config=playwright.reveal.config.ts --output=reveal-test-results
@@ -1129,6 +1132,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
+
+      - name: Type-check tests (no new diagnostics)
+        run: |
+          node --test scripts/typecheck-tests-node-test.mjs
+          pnpm test:types
 
       # Coverage, not a bare test run: vitest exits non-zero when the
       # thresholds in vitest.config.ts are not met, which is what makes

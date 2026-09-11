@@ -79578,6 +79578,10 @@
                       "has_application": {
                         "type": "boolean"
                       },
+                      "has_project": {
+                        "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                        "type": "boolean"
+                      },
                       "id": {
                         "type": "string"
                       },
@@ -79865,6 +79869,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80036,6 +80044,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -80601,6 +80613,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -80772,6 +80788,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -81292,6 +81312,10 @@
                     "has_application": {
                       "type": "boolean"
                     },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                      "type": "boolean"
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -81696,6 +81720,10 @@
                       "type": "string"
                     },
                     "has_application": {
+                      "type": "boolean"
+                    },
+                    "has_project": {
+                      "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
                     },
                     "id": {
@@ -85362,7 +85390,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Integrity, compiler and current binding checks. Browser and security review still required.",
+                  "description": "Integrity, compiler and current binding checks. Browser and security review still required. A declared reference that no longer exists is a 400 naming it; on a panel the caller may not read it is a 403 saying only that a withheld part does not validate.",
                   "properties": {
                     "artifact_digest": {
                       "pattern": "^[0-9a-f]{64}$",
@@ -85807,6 +85835,15 @@
                           "actor": {
                             "type": "string"
                           },
+                          "actor_kind": {
+                            "enum": [
+                              "user",
+                              "agent",
+                              "crew",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -86029,6 +86066,266 @@
                     "digest",
                     "git_commit",
                     "definition",
+                    "project"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/history/{revision}/source": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_history_revision_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "git_commit",
                     "project"
                   ],
                   "type": "object"
@@ -86674,7 +86971,16 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "acknowledged_unavailable_baseline": {
+                    "description": "Publish even though the live publication's retained source cannot be read back. Without it that case is refused with 409 and conflict:\"baseline\". It states that nobody compared the candidate with what is running; it proves nothing about the candidate, whose own integrity is verified either way, and it is recorded in the publication's checks as baseline_source. An initial publication has no prior source and never needs it.",
+                    "type": "boolean"
+                  },
                   "build_id": {
+                    "type": "string"
+                  },
+                  "expected_definition_digest": {
+                    "description": "sha256 of the Page definition the publisher reviewed; a 409 with conflict:\"definition\" means it moved.",
+                    "pattern": "^[0-9a-f]{64}$",
                     "type": "string"
                   },
                   "expected_publication": {
@@ -86685,7 +86991,16 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "expected_routine_digests": {
+                    "additionalProperties": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "description": "Reviewed routine definition digests keyed by routine slug; {} when the candidate declares no call actions. A 409 with conflict:\"routines\" names the ones that moved.",
+                    "type": "object"
+                  },
                   "reviewed_code": {
+                    "description": "Attests that the whole change was reviewed. Refused with 403 when a panel the caller may not read differs between the live definition and the candidate — including on a rollback, which replaces the live definition too. That is not a state conflict and carries no conflict kind: refetching cannot change it, and no flag waives it. Read baseline.withheld_changed on the review snapshot before publishing.",
                     "enum": [
                       true
                     ],
@@ -86698,7 +87013,9 @@
                 },
                 "required": [
                   "expected_publication",
-                  "reviewed_code"
+                  "reviewed_code",
+                  "expected_definition_digest",
+                  "expected_routine_digests"
                 ],
                 "type": "object"
               }
@@ -87204,6 +87521,665 @@
               }
             },
             "description": "Insufficient Storage"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/review": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_review",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "publication",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "baseline": {
+                      "properties": {
+                        "definition": {
+                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison. Full project and revision reads require visibility of every declared panel; source-review endpoints omit the definition.",
+                          "nullable": true,
+                          "type": "object"
+                        },
+                        "definition_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        },
+                        "definition_diverged": {
+                          "description": "The live Page definition and the definition the live publication shipped with have drifted apart — somebody changed panels outside the application flow. Advisory: show it, do not refuse on it. The comparison on this snapshot is derived from the CURRENT live definition and the candidate, so it is complete regardless, and publishing the candidate is what ends the divergence. Not the definition_moved blocker, which is reserved for the publish fence tripping — a base that moved between the render and the click, where refreshing is the cure. False when there is no live publication to have diverged from, and true in the withdrawn state too, where published is false and nothing is running.",
+                          "type": "boolean"
+                        },
+                        "excluded_panels": {
+                          "description": "How many panels were withheld from this comparison, counting a panel withheld from both documents once, so the screen can say its comparison is partial. Zero when neither document rendered. definition_digest is unaffected: it is always the digest of the full stored document.",
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "git_commit": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "publication_version": {
+                          "minimum": 0,
+                          "type": "integer"
+                        },
+                        "published": {
+                          "type": "boolean"
+                        },
+                        "source_available": {
+                          "type": "boolean"
+                        },
+                        "source_revision": {
+                          "minimum": 1,
+                          "nullable": true,
+                          "type": "integer"
+                        },
+                        "source_unavailable_reason": {
+                          "description": "A sentence shown where the comparison would have been. Unavailable is never the same as unchanged.",
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "withheld_changed": {
+                          "description": "At least one withheld panel differs between the live definition and the candidate: added, removed, modified, or re-pointed between a crew this caller may see and one they may not. False means the comparison on screen covers everything that moves. True adds the withheld_change blocker and the publication is refused with 403 on every path, including rollback: reviewed_code=true attests that the whole change was reviewed, and a publisher who cannot read part of it cannot make that claim. Ownership is permission to perform the operation and is not evidence about what was read; a workspace administrator sees every panel, so this is never true for one. No flag waives it. Nothing about what changed is disclosed.",
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "publication_version",
+                        "published",
+                        "definition_digest",
+                        "definition",
+                        "excluded_panels",
+                        "withheld_changed",
+                        "definition_diverged",
+                        "source_revision",
+                        "git_commit",
+                        "source_available",
+                        "source_unavailable_reason"
+                      ],
+                      "type": "object"
+                    },
+                    "blockers": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "definition_moved is reserved for the publish fence tripping; a standing divergence between the live definition and the published one is baseline.definition_diverged and is advisory.",
+                            "enum": [
+                              "no_candidate",
+                              "candidate_matches_live",
+                              "build_missing",
+                              "build_failed",
+                              "build_stale",
+                              "baseline_unavailable",
+                              "routine_unresolved",
+                              "definition_moved",
+                              "withheld_change",
+                              "not_permitted",
+                              "storage_unavailable"
+                            ],
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "candidate": {
+                      "description": "The current draft, or — with ?publication=N — retained publication N as a rollback candidate.",
+                      "nullable": true,
+                      "properties": {
+                        "actor": {
+                          "description": "Who the candidate is attributed to: in draft mode the AUTHOR of the source revision, in ?publication=N mode the PUBLISHER that publication recorded. An erased publisher is kind \"unknown\".",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "user",
+                                "agent",
+                                "crew",
+                                "unknown"
+                              ],
+                              "type": "string"
+                            },
+                            "label": {
+                              "description": "Resolved at read time from the current directory; absent when the id no longer resolves.",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        "build": {
+                          "nullable": true,
+                          "properties": {
+                            "artifact_digest": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "running",
+                                "ready",
+                                "failed",
+                                "interrupted"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "state",
+                            "artifact_digest"
+                          ],
+                          "type": "object"
+                        },
+                        "created_at": {
+                          "description": "In draft mode, when the source revision was saved. In ?publication=N mode, when that publication was made. Empty — never null, never invented — when the draft has no matching revision row and the server therefore cannot say; no format is declared because an empty string is not a date-time.",
+                          "type": "string"
+                        },
+                        "definition": {
+                          "description": "The Page document this candidate would make live — the draft's, or in ?publication=N mode the archived one that version recorded — read in the same request as baseline.definition and filtered by the same panel rule, so both sides of the comparison come from one instant and one decision. Null only when the stored document cannot be read as a Page document; when there is no candidate this whole object is null.",
+                          "nullable": true,
+                          "type": "object"
+                        },
+                        "git_commit": {
+                          "pattern": "^([0-9a-f]{40})?$",
+                          "type": "string"
+                        },
+                        "revision": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "source_digest": {
+                          "pattern": "^[0-9a-f]{64}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "revision",
+                        "git_commit",
+                        "source_digest",
+                        "created_at",
+                        "actor",
+                        "build",
+                        "definition"
+                      ],
+                      "type": "object"
+                    },
+                    "capabilities": {
+                      "properties": {
+                        "may_edit_spec": {
+                          "type": "boolean"
+                        },
+                        "may_publish": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "may_edit_spec",
+                        "may_publish"
+                      ],
+                      "type": "object"
+                    },
+                    "initial_publication": {
+                      "type": "boolean"
+                    },
+                    "issued_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "routines": {
+                      "items": {
+                        "properties": {
+                          "current_digest": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "in_candidate": {
+                            "description": "This routine is declared by the candidate, so it belongs in expected_routine_digests. Routines are listed only when a panel that survived withholding declares one, so this flag is exactly the fence the publication rebuilds for this caller; a routine only a withheld panel calls is neither listed nor fenced, because its reviewer never read it. A workspace administrator sees and fences every routine. The list is a union and also carries routines only the live publication called; fencing on one of those is refused as a routines conflict naming a routine nobody moved.",
+                            "type": "boolean"
+                          },
+                          "published_digest": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "routine": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "enum": [
+                              "unchanged",
+                              "changed",
+                              "unknown"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "routine",
+                          "published_digest",
+                          "current_digest",
+                          "state",
+                          "in_candidate"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "issued_at",
+                    "candidate",
+                    "baseline",
+                    "routines",
+                    "capabilities",
+                    "blockers",
+                    "initial_publication"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/project/source": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_project_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "git_commit": {
+                      "pattern": "^([0-9a-f]{40})?$",
+                      "type": "string"
+                    },
+                    "project": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "files": {
+                          "description": "Requires package.json, pnpm-lock.yaml and index.html; 2 MiB total decoded source.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "content": {
+                                "description": "Exact UTF-8 text or canonical base64. At most 512 KiB decoded per file.",
+                                "type": "string"
+                              },
+                              "encoding": {
+                                "enum": [
+                                  "utf8",
+                                  "base64"
+                                ],
+                                "type": "string"
+                              },
+                              "path": {
+                                "description": "Portable relative path; no traversal, duplicates, case collisions or reserved files.",
+                                "maxLength": 240,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "encoding",
+                              "content"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 256,
+                          "minItems": 3,
+                          "type": "array"
+                        },
+                        "format": {
+                          "enum": [
+                            "crewship-page-source/v1"
+                          ],
+                          "type": "string"
+                        },
+                        "runtime": {
+                          "enum": [
+                            "react-vite-typescript/v1"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "format",
+                        "runtime",
+                        "files"
+                      ],
+                      "type": "object"
+                    },
+                    "revision": {
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "digest",
+                    "git_commit",
+                    "project"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -88030,6 +89006,10 @@
                           "type": "string"
                         },
                         "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_project": {
+                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
                         },
                         "id": {

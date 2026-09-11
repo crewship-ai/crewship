@@ -153,7 +153,41 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 	if _, err = request("POST", "/project/check", map[string]any{"build_id": b.ID, "expected_revision": draft.Revision}, nil); err != nil {
 		return err
 	}
-	_, err = request("POST", "/project/publish", map[string]any{"build_id": b.ID, "expected_revision": draft.Revision, "expected_publication": 0, "reviewed_code": true}, nil)
+	// Publication is fenced on the definition and routine digests the review
+	// snapshot reports right now. The seed is the same reviewer as anybody
+	// else: it attests to values it read, not to values it assumed.
+	var snapshot struct {
+		Baseline struct {
+			DefinitionDigest string `json:"definition_digest"`
+		} `json:"baseline"`
+		Routines []struct {
+			Routine       string  `json:"routine"`
+			CurrentDigest *string `json:"current_digest"`
+		} `json:"routines"`
+	}
+	if _, err = request("GET", "/project/review", nil, &snapshot); err != nil {
+		return err
+	}
+	current := map[string]string{}
+	for _, row := range snapshot.Routines {
+		if row.CurrentDigest != nil {
+			current[row.Routine] = *row.CurrentDigest
+		}
+	}
+	fenced := map[string]string{}
+	for _, panel := range definition.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind != pages.ActionCall || action.Routine == "" {
+				continue
+			}
+			digest, ok := current[action.Routine]
+			if !ok {
+				return fmt.Errorf("demo Page %s calls routine %q, which has no current definition", page.Slug, action.Routine)
+			}
+			fenced[action.Routine] = digest
+		}
+	}
+	_, err = request("POST", "/project/publish", map[string]any{"build_id": b.ID, "expected_revision": draft.Revision, "expected_publication": 0, "reviewed_code": true, "expected_definition_digest": snapshot.Baseline.DefinitionDigest, "expected_routine_digests": fenced}, nil)
 	if err == nil {
 		fmt.Fprintf(os.Stderr, "  + app %s: built, checked and published\n", page.Slug)
 	}

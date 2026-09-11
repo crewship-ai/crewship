@@ -244,6 +244,17 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	// HasProject and HasApplication answer DIFFERENT questions, and the editor
+	// needs both. HasApplication is "an application is published and running";
+	// HasProject is "this Page has application source at all", published or
+	// not. A first publication is precisely the case where the second is true
+	// and the first is false, and it is the case the review screen exists for
+	// — keying the editor off HasApplication alone hides the review from every
+	// Page whose application has never shipped.
+	//
+	// Neither carries omitempty: a client must not have to treat an absent
+	// field as a third state.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -289,6 +300,8 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	// See pageWire.HasProject: source that exists versus source that is live.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -340,6 +353,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasProject         bool
 	HasApplication     bool
 	PublicationVersion int64
 	ID                 string
@@ -416,7 +430,9 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
-		       p.created_at, p.updated_at, COALESCE(l.published,0), COALESCE(l.version,0)
+		       p.created_at, p.updated_at,
+		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
+		       COALESCE(l.published,0), COALESCE(l.version,0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		WHERE p.workspace_id = ?
 		ORDER BY p.updated_at DESC, p.slug ASC`, wsID)
@@ -430,7 +446,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion); err != nil {
+			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
 			replyInternalError(w, h.logger, "scan page", err)
 			return
 		}
@@ -476,7 +492,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		row := pageListWire{
-			HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+			HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 			ID:          rec.ID,
 			Slug:        rec.Slug,
 			Name:        rec.Name,
@@ -1009,11 +1025,12 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
 		       created_at, updated_at,
+ EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -1307,7 +1324,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,
@@ -1536,6 +1553,50 @@ type resolvedPanel struct {
 	Ref         string
 }
 
+// pageReferenceError is a declared reference on one panel that does not
+// resolve — an owner crew, a producer, a `call` routine, a gate target — or a
+// declaration on that panel that will not parse.
+//
+// Typed rather than formatted, because the sentence names the panel and the
+// reference, and whether a caller may READ that sentence is a question the
+// resolver cannot answer: on the authoring paths the caller wrote the document
+// and sees all of it, but on the publish and check paths the caller may be a
+// Page owner who is not entitled to one of its panels, and the panel this
+// error is about may be exactly that one. Carrying the panel and its owner as
+// fields lets the caller decide with canSeePanel; formatting them into a
+// string decided for it.
+type pageReferenceError struct {
+	// PanelID and Owner identify the panel the reference belongs to; Owner is
+	// the declared "crew/<slug>", which is the panel's ACL.
+	PanelID string
+	Owner   string
+	// Message is the full sentence, for a caller entitled to it.
+	Message string
+}
+
+func (e *pageReferenceError) Error() string { return e.Message }
+
+func newPageReferenceError(p *pages.PanelSpec, format string, args ...any) error {
+	return &pageReferenceError{PanelID: p.ID, Owner: p.Owner, Message: fmt.Sprintf(format, args...)}
+}
+
+// replyResolution writes the reply for a resolver's error the way the
+// authoring paths always have: a reference problem is a 400 carrying its
+// sentence, a shape problem goes through writeSpecError, and anything else is
+// a storage failure.
+func (h *PageHandler) replyResolution(w http.ResponseWriter, what string, err error) {
+	var ref *pageReferenceError
+	var ve *pages.ValidationError
+	switch {
+	case errors.As(err, &ref):
+		replyError(w, http.StatusBadRequest, ref.Message)
+	case errors.As(err, &ve):
+		writeSpecError(w, err)
+	default:
+		replyInternalError(w, h.logger, what, err)
+	}
+}
+
 // resolveReferences is the second half of the authoring gate: every declared
 // owner and producer must EXIST. Cheap, synchronous, no render run.
 //
@@ -1543,71 +1604,79 @@ type resolvedPanel struct {
 // table of scripts, and inventing one would be the datasource a page is not
 // allowed to have. Their authority is checked at push time instead
 // (pages_data.go).
+//
+// This is the authoring-path shape: it writes the reply. The candidate paths
+// call resolvePanelReferences directly, because whether the sentence may be
+// shown to that caller is their decision.
 func (h *PageHandler) resolveReferences(w http.ResponseWriter, r *http.Request, wsID string, doc *pages.Document) (map[string]resolvedPanel, bool) {
+	out, err := h.resolvePanelReferences(r.Context(), wsID, doc)
+	if err != nil {
+		h.replyResolution(w, "resolve panel references", err)
+		return nil, false
+	}
+	return out, true
+}
+
+// resolvePanelReferences is resolveReferences without the reply. A reference
+// that does not resolve comes back as *pageReferenceError; only a real query
+// failure is anything else.
+func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, doc *pages.Document) (map[string]resolvedPanel, error) {
 	out := make(map[string]resolvedPanel, len(doc.Spec.Panels))
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
 		crewSlug, err := p.OwnerCrewSlug()
 		if err != nil {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", p.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(p, "panel %q: %v", p.ID, err)
 		}
 		var crewID string
-		err = h.db.QueryRowContext(r.Context(),
+		err = h.db.QueryRowContext(ctx,
 			`SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, crewSlug).Scan(&crewID)
 		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf(
+			return nil, newPageReferenceError(p,
 				"panel %q is owned by crew/%s, which does not exist in this workspace — "+
-					"the owner is the panel's ACL, so it cannot be a name nobody answers to", p.ID, crewSlug))
-			return nil, false
+					"the owner is the panel's ACL, so it cannot be a name nobody answers to", p.ID, crewSlug)
 		}
 		if err != nil {
-			replyInternalError(w, h.logger, "resolve panel owner crew", err)
-			return nil, false
+			return nil, fmt.Errorf("resolve panel owner crew: %w", err)
 		}
 
 		kind, ref, err := p.ProducerParts()
 		if err != nil {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", p.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(p, "panel %q: %v", p.ID, err)
 		}
 		switch kind {
 		case pages.ProducerRoutine:
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
-					"panel %q names routine/%s as its producer, and no such routine exists here", p.ID, ref))
-				return nil, false
+				return nil, newPageReferenceError(p,
+					"panel %q names routine/%s as its producer, and no such routine exists here", p.ID, ref)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve panel producer routine", err)
-				return nil, false
+				return nil, fmt.Errorf("resolve panel producer routine: %w", err)
 			}
 		case pages.ProducerAgent:
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
-					"panel %q names agent/%s as its producer, and no such agent exists here", p.ID, ref))
-				return nil, false
+				return nil, newPageReferenceError(p,
+					"panel %q names agent/%s as its producer, and no such agent exists here", p.ID, ref)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve panel producer agent", err)
-				return nil, false
+				return nil, fmt.Errorf("resolve panel producer agent: %w", err)
 			}
 		}
 		out[p.ID] = resolvedPanel{OwnerCrewID: crewID, Kind: string(kind), Ref: ref}
 	}
 	// The same gate applied to the routines a `call` action names — see
-	// resolveActionRoutines in pages_actions.go for why a button that resolves
-	// only at click time is the worse half of this failure.
-	if !h.resolveActionRoutines(w, r, wsID, doc) {
-		return nil, false
+	// resolveActionRoutinesIn in pages_actions.go for why a button that
+	// resolves only at click time is the worse half of this failure.
+	if err := h.resolveActionRoutinesIn(ctx, wsID, doc); err != nil {
+		return nil, err
 	}
-	return out, true
+	return out, nil
 }
 
 // ── Writing panels ─────────────────────────────────────────────────────────

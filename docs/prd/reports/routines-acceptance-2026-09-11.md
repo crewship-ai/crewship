@@ -2,7 +2,7 @@
 
 Navazuje na [audit z 10. září](r7-preset-visibility-2026-09-10.md) a na
 §9/§11/§12 PRD [ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08](../ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md).
-Doplňuje scénáře, které dřívější důkazy neuzavřely, a zaznamenává tři
+Doplňuje scénáře, které dřívější důkazy neuzavřely, a zaznamenává čtyři
 prokázané vady. **Lidská přejímka (§11, pět úloh bez výkladu) není součástí
 tohoto protokolu a žádný agent ji nesmí odškrtnout.**
 
@@ -14,7 +14,7 @@ tohoto protokolu a žádný agent ji nesmí odškrtnout.**
 | Větev změn | `fix/routines-cancel-classification-20260911` |
 | Izolovaná instance | vlastní proces na `127.0.0.1:8099`, vlastní `CREWSHIP_DATA_DIR`, vlastní SQLite, vlastní IPC socket; binárka `sha256:16b2cdc9…` zkopírovaná z `/tmp/crewship-1-dev` |
 | Řízená externí služba | lokální HTTP recorder na `127.0.0.1:8101`, zapisuje účinek **před** volbou odpovědi |
-| Živé ověření po nasazení | dev1 (`localhost:8081`, `crewship-dev1.unifylab.cz`), binárka `sha256:14fae285…` |
+| Původní živé ověření N1 | dev1, binárka `sha256:14fae285…`; nahrazené konečnou kombinací P8 |
 
 Dev2, dev3 a stage nebyly použity. Databáze dev1 nebyla nulována, žádná cizí
 rutina nebyla smazána, žádný cizí stash nebyl aplikován. Surové důkazy
@@ -418,19 +418,79 @@ Pozn.: formulace důvodu se opravou mění z „is required by the draft“ na
 draftu. Citace „by the draft“ v oddílu P6 pochází z průchodu na binárce před
 touto opravou.
 
+### P8 — Konečná kombinace na dev1 (Codex, 17:13–17:16 UTC)
+
+Opravy N1–N4 jsou v `main`: #2494 `57fa31552`, #2497 `7437bd33a`,
+#2498 `adb0f4620` a navazující #2503 `34b4d6602`, #2501 `f7a43cd22`.
+Nasazení přes `systemctl reload crewship-ws@1` z čistého checkoutu:
+
+- commit `f7a43cd22b68f9e17d1b624c26c2fb44d255869d`, `dirty=false`;
+- běžící proces PID `2836015`, SHA-256 binárky
+  `5963e0fa11ebec7ee8716be29aebeecdf3913a606c013b58e6c3eabd55c05979`;
+- `/proc/PID/exe`, soubor binárky, API `/system/version`, frontend marker
+  i commit checkoutu souhlasí; vložený Next.js export ověřen;
+- veřejný browser: `https://crewship-dev1.unifylab.cz`, vlastní testovací
+  workspace `cmtx1r5bh0273f3c24619`, bez agentních nákladů.
+
+| Kontrola | Konečný důkaz |
+|---|---|
+| Delay přes publikaci | `run_cmtx7urhd000b1044229d`, dokončeno 17:14:34Z, `pipeline_version=1`, výstup `{"ran":"v1"}` |
+| Debounce přes publikaci | `run_cmtx7woxj000c3618b713`, dokončeno 17:16:04Z, `pipeline_version=1`, stejný v1 výstup, poslední kompatibilní vstupy |
+| Původní a nová verze se skutečně liší | archiv v1 hash `09ca04424ab9f09b423d8915edbc07c54a95d036785898df6e447a9ee02aaa41`, aktuální v2 `7500e683a49183aa7a5d03dc84a23bb752fadf68cdb883cdba6bcc5a304ab28b` |
+| Nekompatibilní koalescence | 409; původní pending ID, pin 1, vstupy `region:eu` a čas beze změny |
+| Účtenka a debounce limit | přijatá kompatibilní koalescence zachovala pin 1; čas `17:16:02.654233405Z` odpovídá uloženému řádku a původnímu limitu 180 s |
+| Validace cíle plánu | odepnutí se starými vstupy, repin bez vstupů i neexistující v999 → 400 bez změny řádku; vypnutí → 200; repin s novými platnými vstupy → 200 |
+| Schéma a preset v jednom uložení | save samotné v2 → 409, hash původní rutiny zachován; v2 + upravený trigger preset → 201 |
+| Versions, archiv a Journal | browser 500 → viditelná chyba; Retry → 200 a obsah; po načtení v1 zůstává vybraná v1 |
+| Skutečně chybějící archiv | v999 → 404, viditelná chyba a Retry, žádný historický obsah nahrazený HEAD |
+| Odpojení klienta | `run_cmtx7wrlh000f92098b00` → `cancelled`, důvod `run cancelled at step hold`; výstup prepare zachován, finish neproveden; browser „Run stopped“ / „Stopped at step“ |
+
+Normalizace důvodu platí na úrovni běhu. Původní diagnostika kroku
+`context canceled` zůstává viditelná; netvrdíme, že se vymazala ze všech
+vrstev UI. Browser scénáře neměly žádnou `pageerror`.
+
+**Korekce důkazu:** zděděný browser skript používal `/routines/<slug>`,
+což zobrazovalo dashboard, a pouze zaznamenával booleany. Konečné skripty
+používají skutečnou cestu `/routines?slug=…`, vyžadují viditelný obsah,
+HTTP výsledek a zachování výběru. Snímek chybějícího archivu byl zopakován
+po ustálení načtení seznamu verzí, aby zachycoval chybu, nikoli mezilehlé
+„Loading version…“ při změně HEAD v komponentě.
+
+**Testy a review:** všechny spuštěné CI kontroly konečných hlav oprav
+prošly; přeskočené/neutral kontroly se za provedené testy nepočítají.
+Kombinované cílené API/pipeline testy a `go vet ./...` prošly; frontend
+`pnpm lint` a `pnpm build` prošly. #2503 má skutečné CodeRabbit review
+hlavy `df0cb613a`. #2501 CodeRabbit opakovaně odmítl kvůli limitu;
+Codex provedl kontrolu a doložil red→green regrese podle výslovného
+fallbacku v CONTRIBUTING.md. **Není to nezávislé review** a v PR je to
+zapsáno, včetně žádosti o opakování.
+
+První úplná lokální sada dokončila všechny balíčky, ale selhal test záloh
+`TestBackup_TamperedPayload_VerifyReportsChecksumMismatch`. Stejné selhání
+bylo reprodukováno na nezměněném main. [#2506](https://github.com/crewship-ai/crewship/issues/2506)
+opravuje testovací sondu: mění payload a zachovává platný komprimovaný obal
+s původním manifestovým checksumem. Cílený balíček prošel (129,768 s);
+mutace, která poškození vypne, test prokazatelně shodí. Původní selhání se
+nepřepisuje na zelené. Opakovaná úplná sada a konečný stav opravy se
+zaznamenají při uzavření navazujícího PR.
+
+Důkazy jsou v soukromém adresáři
+`/srv/crewship/backups/crewship_1/routines-takeover-20260911/`:
+`deployment-proof.json`, `live-report.json`, `archive-final-proof.json`,
+`cancel-report.json`, `archive-missing-final.png`, `cancelled-combined.png`
+a logy testů. Přihlašovací údaje a browser storage se do repozitáře nepřenášejí.
+
 ## Závěrečná tabulka §9 — všech 16 řádků
 
 Rozsah Release 1.0 podle §11. **PASS znamená „doložené v pojmenovaném
 rozsahu“, ne „bez vad“.** Smíšený scénář není celý PASS proto, že prošla
 jedna jeho část — sloupec Rozsah říká přesně která.
 
-Přesný součet, aby ho žádný souhrn nezakryl: **11 řádků PASS bez výhrady**
-(1, 3, 5, 7, 9, 10, 11, 13, 14 a — po sloučení #2497/#2498/#2503 — 2 a 6),
-**3 řádky PASS s vyslovenou hranicí** (8 „na měřitelné vrstvě“, 15 „v rozsahu
-§9“, 16 „jedno měření, ne benchmark“), **1 řádek PASS částečně** (12 —
-`/journal/lookup` selže tiše, stránka Journal a záložka Versions nebyly
-fault-injectované) a **1 řádek smíšený** (4 — zařazený tvar opravený v #2501,
-nesloučeno; rutiny bez archivu zůstávají nepřipnuté i po něm).
+Po závěrečném ověření kombinace: **13 řádků PASS** a **3 řádky PASS
+s výslovnou kvalifikací** (8 měřitelná testová vrstva, 15 rozsah §9,
+16 jediné měření, nikoli benchmark). Každý řádek dál nese vlastní hranice;
+nejde o 16 bezvýhradných záruk. Původní smíšený řádek 4 a částečný řádek 12
+uzavírá doplnění P8 uvedenými identitami běhů a browser důkazy.
 
 Vrstvy se v protokolu nezaměňují: *server* = test nebo HTTP proti skutečnému
 handleru; *živě* = běžící crewshipd a skutečné run/decision identity;
@@ -438,17 +498,15 @@ handleru; *živě* = běžící crewshipd a skutečné run/decision identity;
 vynucená chyba v prohlížeči, která dokazuje reakci UI a nikdy ne serverovou
 autorizaci; *lidské porozumění* = §11, neodškrtnuto.
 
-Verdikty v tabulce **nestojí na nesloučených opravách N2 a N3**. Řádek 6 je
-doložen publikační cestou, která bránu měla už před nimi; řádek 2 vrstvami,
-které existovaly předtím. Co ty dvě opravy přidávají, je uzavření nálezů, ne
-změna některého PASS.
+N1–N4 jsou sloučené. Původní důkazy zůstávají uvedené jako historie;
+aktuální nasazenou kombinaci a nové důkazy zaznamenává P8.
 
 | # | Scénář §9 | Stav | Rozsah důkazu | Zbývající omezení |
 |---|---|---|---|---|
 | 1 | Recept bez vstupů, jednoduchý úspěch | PASS | §14 (10. 9.), interní browser walkthrough pěti úloh | Není uživatelská studie; §11 lidská brána otevřená |
 | 2 | Typované vstupy, defaulty, neplatné hodnoty | PASS | Server: `ValidateFormInputs` v handleru i v exekutoru, `TestPresetValidation_RunPathAlreadyRejects`. UI: jediná sdílená `InputsForm` pro ruční start i plán. Živě: `run_cmtvp6yn4001555f2552a` (§14) | **Vstup s `type` bez `widget` se netypuje nikde** — jedno sdílené pravidlo (`hasInputForm`), většina existujících rutin má tento tvar. Viz N3 |
 | 3 | Dvojklik / opakovaný request | PASS | Živě: dva požadavky se stejným idempotency klíčem → jediný `run_cmtvp9dkr001eaf494dda` (§14) | Není to přejímka všech gest v UI |
-| 4 | Edit během běhu, publish během čekání ve frontě | **PASS pro běžící a čekající, FAIL pro zařazený** | Živě 11. 9.: v2 publikována uprostřed běhu `run_cmtwp7vt700033e66cfc6`, běh doběhl na v1 (`afa10a995ec7`), v1 znění účinku, krok `v2only` neproveden. **Ale** `--delay` běh (`pnd_cmtwvbad3000108716b4d`, 202 SCHEDULED, `pinned_version:null`) po publikaci v2 odpálil **v2** — `run_cmtwvcb6c00052baa2423`, `pipeline_version 2`, výstup `{"ran":"v2"}` | Nález **N4**, oprava v [PR #2501](https://github.com/crewship-ai/crewship/pull/2501), **nesloučeno**. Doslovné znění §9 („publish během čekání ve frontě“) tento tvar pojmenovává, takže řádek není celý PASS, dokud oprava nepřistane |
+| 4 | Edit během běhu, publish během čekání ve frontě | PASS | P1 dokládá zachování v1 při běhu a obnově. P8 dokládá skutečný delay i koalescovaný debounce: po publikaci v2 oba dokončeny na v1, účtenka i uložený pin souhlasí | Nové ruční odklady bez archivu vracejí 409; staré již uložené nepřipnuté řádky a politika opakovaných plánů se zpětně nemění. Původní selhání a opravy viz N4 |
 | 5 | Dva editoři | PASS | Server: 200/409 nad stejnou revizí. **Browser 11. 9.: dva skutečné kontexty**, B dostal „Save failed — routine draft changed…“ a **podržel si svůj text** | — |
 | 6 | Změna schématu s existujícími plány | PASS | Živě 11. 9. celý průchod Edit → Test → Publish: 409 `schedule_conflict` (`psched_cmtwt3yna0001cd0e0145`, „Input recipient is required by the draft“), draft zachován, živý recept nezměněn → oprava presetu → publish 201. Testy na obou vrstvách | Brána platí pro **povolené a nepřipnuté** plány; vypnuté a připnuté jsou vyňaté záměrně |
 | 7 | Větev neprovedena, foreach, více pokusů | PASS | Živě `run_cmtwqaand001db3acdea1`: skipped s důvodem „Condition was false“; foreach položky `/fan/items/N/each att=1`; skutečné pokusy `/flaky att=1..3` — rozlišené cestou, ne počtem | — |
@@ -456,18 +514,18 @@ změna některého PASS.
 | 9 | Restart u waitpointu a rozpracovaného kroku | PASS | Živě: dva `kill -9` nad `run_cmtwp7vt700033e66cfc6`; obnovené rozhodnutí na témže tokenu; `hold att=1 interrupted → att=2 completed`. Počitatelné at-least-once (1× vs 2×) v `…_ResumeReappliesTheInFlightStep` | **Exactly-once se netvrdí.** Počitatelný důkaz dvojího účinku je testový, ne živý — viz řádek 8 |
 | 10 | Dvě rozhodnutí / timeout / Issue takeover | PASS | Živě: timeout → 409 na opožděnou odpověď, stav nezměněn; čtyři souběhy, vždy jedno 200 a jedno 409, výsledek následoval verdikt. Server: `inbox_takeover_late_answer_test.go` — takeover→opožděná odpověď a odpověď→opožděný takeover, obojí 409 bez vedlejších účinků | Takeover × opožděná odpověď je doložen na serverové vrstvě, ne živým průchodem UI |
 | 11 | Výsledek existuje, chybí completion signal | PASS | Živě `run_cmtwt2dfj000560dd6f13`: `status=completed`, `outcome=FAILED`, `error="no outcome reported"`, výstup přítomen. **Browser:** pilulka „Result failed“, nadpis „A result was recorded, but completion was not confirmed“, RESULTS dál zobrazen | Vyrobeno `call_pipeline` krokem (token-zero); s agentem nevyzkoušeno |
-| 12 | Načtení outputs/journalu selže, archiv chybí | PASS částečně | **Browser fault injection:** run 500 → „Could not load this run. Try again“; executions 500 → „Recorded step executions could not be loaded… Try again“ a netvrdí nula kroků; artifacts 500 → „Results could not be loaded. Retry“. **Server:** 404 pro neexistující běh i verzi, žádný fallback na současný recept (v1 a v2 se prokazatelně liší) | `/journal/lookup` selže **beze stopy v UI** (dekorace odkazu, ne výsledková plocha). Stránka Journal a záložka Versions nebyly fault-injectované |
+| 12 | Načtení outputs/journalu selže, archiv chybí | PASS | Původní browser 500 pro run/executions/artifacts a Retry. P8 doplňuje Versions list 500, archive detail 500 a Journal 500 → viditelná chyba, Retry 200 a návrat obsahu; vybraná verze zachována. Skutečný archiv 999 → 404, žádný obsah HEAD | `/journal/lookup` je nezměněná best-effort dekorace odkazu, nikoli výsledková plocha; jeho výpadek zůstává tichý |
 | 13 | Jednorázový start + recurrence + DST | PASS | Projekce (API + browser, 10.–11. 9.) **a nově skutečná dispatch cesta**: `schedules_dst_dispatch_test.go` — 25. 10. 2026 dvě odpálení (00:30Z, 01:30Z), 28. 3. 2027 žádné a due bar postoupí; hodinový kontrolní vzorek | Řízené hodiny v testu; hostitelský čas se nikdy neměnil |
 | 14 | Neoprávněný uživatel, cizí soubor | PASS | Živě, úplná matice se **skutečným druhým uživatelem**: 401 anonym, 403 čtení i všechny mutace, 404 při záměně workspace id, 403/400 na stažení souboru a path traversal; waitpoint zůstal pending pro vlastníka | Serverová vrstva; browser by ji nenahradil |
 | 15 | Klávesnice, úzký displej, reduced motion | PASS v rozsahu §9 | Browser: 390 px bez horizontálního přetečení (`scrollWidth == 390`), `/` fokusuje hledání (desktop), Escape čistí a nechá fokus v poli, Tab dosáhne akčních prvků s viditelným fokusem, reduced-motion → nula běžících animací | **Není to certifikace přístupnosti.** `/` na 390 px nefokusuje — vstup není vykreslen ve sbalené liště |
-| 16 | 100 kroků, 1 000 pokusů, dlouhý journal | PASS | 10. 9.: 100 kroků, 1 100 exekucí, 11 stran. 11. 9. **dlouhý journal**: 245 journal záznamů a 166 exekucí pro jeden běh; API stránkuje kurzorem; browser vykreslí 12 ze 121 kroků a **řekne** „Only the first recorded executions were loaded… Load more executions“; první zobrazení 770 ms | 770 ms je jedno měření, ne benchmark. „1 000 pokusů“ je doloženo jako 1 100 foreach exekucí, ne jako 1 000 retry pokusů |
+| 16 | 100 kroků, 1 000 pokusů, dlouhý journal | PASS — jedno měření | 10. 9.: 100 kroků, 1 100 exekucí, 11 stran. 11. 9. **dlouhý journal**: 245 journal záznamů a 166 exekucí pro jeden běh; API stránkuje kurzorem; browser vykreslí 12 ze 121 kroků a **řekne** „Only the first recorded executions were loaded… Load more executions“; první zobrazení 770 ms | 770 ms je jedno měření, ne benchmark. „1 000 pokusů“ je doloženo jako 1 100 foreach exekucí, ne jako 1 000 retry pokusů |
 
 ### Co zůstává NEOVĚŘENO
 
 | Položka | Proč |
 |---|---|
 | Issue takeover × opožděná odpověď **živým průchodem UI** | Serverová vrstva doložena testy |
-| Selhání načtení journalu na stránce Journal a archivu na záložce Versions | Run detail tyto zdroje nevolá; ověřeno, které volá |
+
 | `/journal/lookup` selže tiše | Pozorováno, nezměřen dopad; dekorace odkazu |
 | Úplný accessibility audit | Mimo rozsah §9 |
 | Retry pokusy v řádu tisíců | Doloženy 3 skutečné pokusy a 1 100 foreach exekucí |
@@ -521,7 +579,7 @@ odváže a je nyní zdokumentován v průvodci. Živě ověřeno:
 `run_cmtwprucs0010063ab752` s `Prefer: respond-async` přežil odchod klienta
 a doběhl. `crewship routine run` async cestu nepoužívá.
 
-### N2 — Kontrola presetů se obchází přes `routine save` · OPRAVA V REVIEW
+### N2 — Kontrola presetů se obchází přes `routine save` · OPRAVENO A SLOUČENO
 
 Brána kompatibility plánů žije v `consumeDraftTx`, tedy výhradně na cestě
 draft → publish, a jen pro **povolené** a **nepřipnuté** plány. Přímé
@@ -546,10 +604,9 @@ importní a agentní dveře — tam by dosud i plně akční odmítnutí skonči
 500. Issue [#2495](https://github.com/crewship-ai/crewship/issues/2495),
 oprava v [PR #2497](https://github.com/crewship-ai/crewship/pull/2497).
 
-**Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
-je tento řádek doložená oprava v review, ne uzavřená vada.
+**Stav: sloučeno** jako `7437bd33a` (#2497); konečná kombinace ověřena v P8.
 
-### N3 — Plán lze uložit s presetem, který jeho rutina odmítá · OPRAVA V REVIEW
+### N3 — Plán lze uložit s presetem, který jeho rutina odmítá · OPRAVENO A SLOUČENO
 
 **Oprava původní formulace.** Toto zjištění jsem nejdřív zapsal jako „server
 nevaliduje typované vstupy běhu“. To je nesprávné. `pipeline.ValidateFormInputs`
@@ -597,8 +654,7 @@ Zpřísnění je samostatné rozhodnutí o legacy kontraktu, ne něco, co by mě
 propašovat oprava validace presetů.
 
 Oprava je v [PR #2498](https://github.com/crewship-ai/crewship/pull/2498).
-**Stav: nesloučeno.** Dokud ten PR není v `main` se zelenou požadovanou CI,
-je tento řádek doložená oprava v review, ne uzavřená vada.
+**Stav: sloučeno** jako `adb0f4620` (#2498); navazující díry uzavírá #2503.
 
 **Oponentura (Codex, 11. 9. odpoledne) našla v opravě #2498 dvě díry, obě
 reprodukované červeným testem:**
@@ -616,9 +672,12 @@ který plán *ukazoval*, ne na který *bude ukazovat*. Navazující oprava v
 [PR #2503](https://github.com/crewship-ai/crewship/pull/2503): brána běží při
 změně vstupů **nebo** cíle (pin, verze, rutina) a posuzuje výslednou
 kombinaci; vypnutí, přeplánování a přejmenování dál neposuzuje.
-**Stav: nesloučeno.** Do té doby je N3 opravená jen zčásti.
+**Stav: sloučeno** jako `34b4d6602` (#2503). Doplněna také kontrola
+existence cílového archivu (400) a odmítnutí při chybě úložiště (500).
+Živé 400 při odepnutí, přepnutí bez vstupů a verzi 999, nezměněný řádek,
+povolené vypnutí a platné přepnutí ověřuje P8.
 
-### N4 — Zařazený běh není připnutý, takže publikace změní, co odpálí · OPRAVA V REVIEW
+### N4 — Zařazený běh není připnutý, takže publikace změní, co odpálí · OPRAVENO A SLOUČENO
 
 `POST …/run` s `delay_seconds` zaparkuje spouštěč v `pending_runs` a odpoví
 `202 SCHEDULED` s handlem — běh je přijatý. Nebyl ale připnutý, takže
@@ -645,7 +704,7 @@ přežil publikaci v2 i dva `kill -9` a doběhl na v1.
 
 Issue [#2500](https://github.com/crewship-ai/crewship/issues/2500), oprava v
 [PR #2501](https://github.com/crewship-ai/crewship/pull/2501).
-**Stav: nesloučeno.**
+**Stav: sloučeno** jako `f7a43cd22` (#2501); konečná kombinace ověřena v P8.
 
 Živě ověřeno na binárce s opravou (`sha256:4eb6625c…`), týž scénář, skutečná
 těla:
@@ -671,15 +730,19 @@ znovu načte jako v handleru, test kontroluje, že se hash pohnul) test padal
 s `pinned_version = 2`. Oprava: `COALESCE(pinned_version, ?)` — existující
 pin zůstává, prázdný se doplní. Ověřeno red→green v #2501.
 
-Hranice, kterou merge #2501 neodstraní: rutina **bez archivované verze** se
-odloží nepřipnutá (účtenka `pinned_version: null`). Řádek 4 proto ani po
-sloučení není bezvýhradný PASS — je PASS pro verzované rutiny.
+**Oprava dřívějšího tvrzení:** původní návrh dovoloval odklad bez archivu.
+Konečná oprava #2501 jej odmítá s 409 a požadavkem nejprve publikovat.
+Existující legacy řádky zůstávají beze změny. Explicitní pin s delay/debounce
+ve veřejném API zůstává odmítnutý; jednorázový start zachovává svůj kontrakt.
 
-Vědomě beze změny: volající, který `pinned_version` uvede, dostane svůj;
-jednorázový start si nechává i své 409; a rutina bez archivované verze se dá
-odložit dál — poběží nepřipnutá a účtenka to řekne, místo aby o běh přišla.
-Plány a webhooky zůstávají opačně: plán je stálý pokyn, odložený běh je jedno
-spuštění, které už člověk udělal.
+Další oponentura opravila kompatibilitu posledních vstupů s prvním pinem:
+nekompatibilní koalescence vrací 409 bez mutace. Compare-and-set brání zápisu
+do již převzatého řádku nebo pod jiným pinem. Účtenka vrací skutečně uložený
+pin i čas omezený původním debounce limitem. Dispatcher atomicky přebírá
+aktuální splatný řádek, takže nepoužije zastaralé vstupy/uživatele ani
+neobejde posunutý čas. Regrese s přesností pod sekundu opravila porovnávání
+časů v SQL na sdílený formát s pevnou šířkou. Tyto případy mají skutečné
+red→green testy; chyba kompilace kvůli paměti se za červenou aserci nepočítá.
 
 ## Úklid
 
@@ -707,3 +770,15 @@ Poznámka k hostiteli, ne k produktu: disk crewship-dev byl během relace na
 `crewship-feat:*` jsem **nemazal** — na cache v každý okamžik staví jiné
 relace, a „orphan“ verdikt u obrazů pocházel z throwaway instance, která
 nevlastní žádnou partu, takže nic neznamená.
+
+### Závěrečný úklid Codex
+
+Po P8 byly přes API odstraněny dvě vlastní testovací naplánování a šest
+vlastních rutin ve workspace `cmtx1r5bh0273f3c24619`; seznam rutin je prázdný.
+Účet a prázdný testovací workspace zůstávají, přístupové údaje jsou v soukromé
+záloze. Důkaz: `cleanup-owned.json`. Cizí workspace nebyly měněny.
+Předchozí úklid odstranil 24 čistých sloučených worktrees napříč klony;
+nesloučené a aktivní práce byly zachovány. Závěrečné odstranění vlastních
+worktrees a uvolnění claimů se zaznamená do příslušných issue po uzavření PR.
+Uživatelské WIP z hlavního klonu je zachováno ve vlastním stashi a nezávislé
+záloze; neaplikuje se žádný cizí stash.

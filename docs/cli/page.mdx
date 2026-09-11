@@ -973,11 +973,24 @@ history require Page edit permission, not just permission to view its panels.
 After inspecting the source and preview, check and publish the exact candidate:
 
 ```sh
+crewship page project review health
 crewship page project check health --build BUILD_ID --revision 4
 crewship page project publish health --build BUILD_ID --revision 4 --expected-publication 0 --reviewed-code
 crewship page project application health
 crewship page project rollback health --publication 1 --expected-publication 2 --reviewed-code
 ```
+
+`review --publication <version>` asks the same question about a retained
+version instead of the draft: the candidate becomes that publication's
+archived source and its routines become the ones its archived definition
+declares, which is what a rollback is fenced on. Without the flag, `review`
+prints the snapshot a publication is fenced against: the candidate
+draft revision and its build, the live publication and its retained source, the
+routine definitions each `call` action would run, and machine-readable
+`blockers` explaining why publishing is refused. A baseline it cannot read back
+reports `source_available: false` with a reason — that is a missing comparison,
+not agreement — and a routine with no recorded digest is `unknown`, never
+`unchanged`.
 
 Use the actual build ID, source revision and publication version returned by the
 server. `check` verifies stored source/artifact integrity, the compiler result and
@@ -985,6 +998,47 @@ current bindings. It still requires browser and code review. `--reviewed-code`
 confirms that review; it is not a request for an automated security scan.
 Publication requires Page owner/workspace admin authority. An ordinary write grant
 does not grant permission to publish executable code for readers.
+
+`publish` and `rollback` also send the two fence values.
+`--expected-definition-digest` is the sha256 of the Page definition that was
+reviewed, and `--expected-routine-digest routine=sha256` (repeatable) is the
+routine definition behind each `call` action. Pass either flag and that half
+is sent verbatim.
+
+Omit them and the CLI reads `project review` itself immediately before
+publishing — `rollback` asks it for the retained version it is restoring —
+uses the digests it returns, and prints each one to stderr as it sends the
+request. That saves copying hex by hand, and it leaves a record of what the
+publication was fenced on. It is **not** a review step: the command does not
+pause, and nobody sees those digests before they are sent. To review first,
+run `crewship page project review <slug>`, read it, and pass the values back
+with the flags. If the live definition or a routine script moves between the
+snapshot and the write, the server refuses with 409 and names which one.
+
+`review` also answers whether the comparison it just printed is the whole
+change. Panels belonging to crews you are not in are withheld from it, and
+`excluded_panels` says how many; `withheld_changed` says whether any of them
+actually differs between the live definition and the candidate. When it does,
+`publish` and `rollback` are refused with 403 and `blockers` carries
+`withheld_change`. `--reviewed-code` attests that the whole change was
+reviewed, and that attestation cannot be made by a publisher who cannot read
+all of it — the rollback path included, since restoring a version replaces the
+live definition too. Publishing the Page is still yours to do; this particular
+claim is not yours to make, so there is no flag that waives it, unlike the
+baseline acknowledgement below. Ask a workspace administrator, or a member of
+the crew that owns the withheld part, to publish instead. The CLI prints the
+refusal ahead of the request, and says how many panels are withheld and
+nothing about what they are.
+
+`--acknowledge-unavailable-baseline` is separate from the digests and is never
+filled in for you. When the live publication's retained source cannot be read
+back — history compacted, a checkpoint lost — there is nothing to compare the
+candidate against, and the server refuses the publication with 409 until
+somebody says so explicitly. The CLI prints what is missing and what
+acknowledging it would mean, and then stops; passing the flag records that
+nobody made that comparison. It proves nothing about the candidate, which is
+verified in full either way, and the publication's `checks` keep the answer as
+`baseline_source`.
 
 `--expected-publication 0` creates the first publication. Exact retries return the
 original receipt. Rollback creates a new publication of an earlier artifact and
