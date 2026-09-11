@@ -87316,9 +87316,19 @@
                   "properties": {
                     "baseline": {
                       "properties": {
+                        "definition": {
+                          "description": "The live Page document, read from the same stored row and in the same request as definition_digest, so the comparison a reviewer reads and the value the publication is fenced on describe one instant. Panels this caller may not read are removed — panel visibility is its owning crew's, and an edit grant is not a read grant — and the same panels are removed from candidate.definition, so a withheld panel is absent from the comparison instead of appearing as one side adding it. Null only when the stored document cannot be read as a Page document; there is then no basis for a comparison.",
+                          "nullable": true,
+                          "type": "object"
+                        },
                         "definition_digest": {
                           "pattern": "^[0-9a-f]{64}$",
                           "type": "string"
+                        },
+                        "excluded_panels": {
+                          "description": "How many panels were withheld from this comparison, counting a panel withheld from both documents once, so the screen can say its comparison is partial. Zero when neither document rendered. definition_digest is unaffected: it is always the digest of the full stored document.",
+                          "minimum": 0,
+                          "type": "integer"
                         },
                         "git_commit": {
                           "nullable": true,
@@ -87349,6 +87359,8 @@
                         "publication_version",
                         "published",
                         "definition_digest",
+                        "definition",
+                        "excluded_panels",
                         "source_revision",
                         "git_commit",
                         "source_available",
@@ -87449,6 +87461,11 @@
                           "description": "In draft mode, when the source revision was saved. In ?publication=N mode, when that publication was made. Empty — never null, never invented — when the draft has no matching revision row and the server therefore cannot say; no format is declared because an empty string is not a date-time.",
                           "type": "string"
                         },
+                        "definition": {
+                          "description": "The Page document this candidate would make live — the draft's, or in ?publication=N mode the archived one that version recorded — read in the same request as baseline.definition and filtered by the same panel rule, so both sides of the comparison come from one instant and one decision. Null only when the stored document cannot be read as a Page document; when there is no candidate this whole object is null.",
+                          "nullable": true,
+                          "type": "object"
+                        },
                         "git_commit": {
                           "pattern": "^([0-9a-f]{40})?$",
                           "type": "string"
@@ -87468,7 +87485,8 @@
                         "source_digest",
                         "created_at",
                         "actor",
-                        "build"
+                        "build",
+                        "definition"
                       ],
                       "type": "object"
                     },

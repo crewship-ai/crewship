@@ -353,6 +353,21 @@ export interface ReviewCandidateWire {
    * than as an epoch.
    */
   readonly created_at: string
+  /**
+   * The document this candidate would make live, authorized for this viewer.
+   *
+   * It comes from the same handler and the same read as `baseline.definition`
+   * and is filtered by the same rule, which is the whole point: the screen
+   * compares two documents that came out of one authorized read at one
+   * instant, so what it renders and what the fence checks cannot drift.
+   * Reading the candidate from its own query — as this screen used to — is
+   * the same cross-endpoint gap that let a person approve a comparison the
+   * screen never showed them.
+   *
+   * Null only when the stored bytes do not parse as a Page document. That is
+   * no basis for a comparison: say so, and do not offer consent.
+   */
+  readonly definition: unknown | null
   readonly actor: ReviewActorWire
   /**
    * The build of exactly this revision, when one exists.
@@ -381,8 +396,31 @@ export interface ReviewBaselineWire {
   /** Current live publication number; 0 when nothing has ever been published. */
   readonly publication_version: number
   readonly published: boolean
-  /** sha256 of the Page's live `spec_json` — the definition fence value. */
+  /**
+   * sha256 of the Page's live `spec_json` — the definition fence value, over
+   * the **full** stored bytes, whatever this viewer may see of them.
+   */
   readonly definition_digest: string
+  /**
+   * The live Page document, authorized for this viewer, from the same read as
+   * the digest above. The screen's comparison is derived from this and never
+   * from the Page detail query.
+   *
+   * Null only when the stored bytes do not parse as a Page document.
+   */
+  readonly definition: unknown | null
+  /**
+   * Panels withheld from this comparison because the viewer may not read
+   * them, counted once across both documents.
+   *
+   * They are **removed** from both sides rather than stubbed, so no phantom
+   * addition or removal can appear. The cost is that a change confined to a
+   * withheld panel is invisible here — including a panel being re-pointed
+   * between a crew the viewer can see and one they cannot. The screen has to
+   * say the comparison is partial; silent and partial beats loud and wrong,
+   * but only if it admits which one it is.
+   */
+  readonly excluded_panels: number
   readonly source_revision: number | null
   readonly git_commit: string | null
   /**

@@ -36,6 +36,9 @@ const snapshot: ReviewSnapshotWire = {
     git_commit: "c7",
     source_digest: "sha256:cand",
     created_at: "2026-09-10T12:03:00Z",
+    // Both documents ride on the snapshot, from one authorized read with the
+    // digest below; the screen compares these two and nothing else.
+    definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [{ id: "services", sla: "90.5s" }] } },
     actor: { kind: "agent", id: "ag_demo" },
     build: { id: "build-7", state: "ready", artifact_digest: "sha256:art" },
   },
@@ -43,6 +46,8 @@ const snapshot: ReviewSnapshotWire = {
     publication_version: 3,
     published: true,
     definition_digest: "sha256:live-def",
+    definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [{ id: "services", sla: "5m" }] } },
+    excluded_panels: 0,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,

@@ -6,19 +6,32 @@ import { NO_PAGE_CAPABILITIES, type DefinitionDiff, type PublishConflictWire, ty
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
 
 /**
- * The three adversarial probes from the 2026-09-11 counter-review (R1, R2),
- * adopted verbatim as acceptance criteria. All three failed against
- * `93246b89`; they are kept here so the two holes stay closed.
+ * The adversarial probes from the 2026-09-11 counter-review (R1, R2), kept as
+ * acceptance criteria. All three failed against `93246b89`.
  *
- * One thing about this fixture is load-bearing and easy to undo by accident:
- * its `baseline` carries NO `definition`. That is the state R1.5 is about — a
- * snapshot that arrived without the authorized live document — and the screen
- * must refuse to offer consent at all in it. When `baseline.definition` lands
- * in `editor-contract.ts` as a required field, make it `null` here. Filling it
- * in with a document turns these into a different test: with the document and
- * the digest both present and corresponding, re-consenting after a moved
- * baseline is honest, and the last assertion of the third probe would then be
- * asserting the wrong thing.
+ * The two candidate-source probes are the counter-review's own, unchanged.
+ * The third is not, and the reason is recorded here because a test that
+ * passes for the wrong reason is what this whole review was about.
+ *
+ * The original scenario: the review query holds a NEW `definition_digest`
+ * while the Page detail query still holds the OLD document. Consent resets on
+ * the digest, the person re-ticks while reading the stale comparison, and the
+ * request attests to a digest for a document the screen never showed. It
+ * could not be detected from inside the screen, because nothing required the
+ * two endpoints to agree.
+ *
+ * That scenario is now structurally impossible rather than merely guarded:
+ * both compared documents and the digest come from one authorized read on one
+ * snapshot (`ReviewBaselineWire.definition`, `ReviewCandidateWire.definition`),
+ * so a moved baseline moves the document and the digest together, the list
+ * re-derives, and re-consenting after it is honest. Re-running the original
+ * assertion would now be asserting the wrong thing — so the probe asserts the
+ * invariant the fix establishes instead: what is rendered and what is
+ * attested to always come off the same snapshot, and a document that cannot
+ * be read is never rendered as a comparison.
+ *
+ * Do not "restore" the old shape by taking either operand from a second
+ * endpoint. That is the bug.
  */
 
 /**
@@ -34,18 +47,18 @@ const state = vi.hoisted(() => ({
   sourceDiff: null as unknown as SourceDiff,
   preview: null as unknown as Record<string, unknown>,
   frameProps: [] as Array<Record<string, unknown>>,
-  hidden: [] as string[],
+  /** Every operand the screen handed the comparator, newest last. */
+  comparedWith: [] as unknown[],
 }))
 
-vi.mock("@/hooks/use-page-review", () => ({
-  usePageReview: () => state.review,
-  liveDefinitionFromPage: (page: unknown) => page,
-  candidateDefinitionForComparison: (definition: unknown) => definition,
-  hiddenPanelIds: () => state.hidden,
-  publishConflictOf: () => null,
-}))
+vi.mock("@/hooks/use-page-review", () => ({ usePageReview: () => state.review }))
 vi.mock("@/hooks/use-page-preview", () => ({ usePagePreview: () => state.preview }))
-vi.mock("@/lib/pages/definition-diff", () => ({ compareDefinitions: () => state.definitionDiff }))
+vi.mock("@/lib/pages/definition-diff", () => ({
+  compareDefinitions: (live: unknown, candidate: unknown) => {
+    state.comparedWith.push(live, candidate)
+    return state.definitionDiff
+  },
+}))
 vi.mock("@/lib/pages/source-diff", () => ({ compareSources: () => state.sourceDiff }))
 vi.mock("@/components/features/pages/page-preview", () => ({
   PagePreviewFrame: (props: Record<string, unknown>) => {
@@ -56,6 +69,11 @@ vi.mock("@/components/features/pages/page-preview", () => ({
 
 import { EditorApplicationReview } from "@/components/features/pages/editor/application-review"
 
+/** The live document the digest below was taken from, in the same read. */
+const liveDefinition = { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [{ id: "services", sla: "5m" }] } }
+/** The document this candidate would make live, from that same read. */
+const candidateDefinition = { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [{ id: "services", sla: "90.5s" }] } }
+
 const baseSnapshot: ReviewSnapshotWire = {
   issued_at: "2026-09-10T12:03:00Z",
   candidate: {
@@ -63,6 +81,7 @@ const baseSnapshot: ReviewSnapshotWire = {
     git_commit: "c7",
     source_digest: "sha256:cand",
     created_at: "2026-09-10T12:03:00Z",
+    definition: candidateDefinition,
     actor: { kind: "agent", id: "ag_demo" },
     build: { id: "build-7", state: "ready", artifact_digest: "sha256:art" },
   },
@@ -70,6 +89,8 @@ const baseSnapshot: ReviewSnapshotWire = {
     publication_version: 3,
     published: true,
     definition_digest: "sha256:live-def",
+    definition: liveDefinition,
+    excluded_panels: 0,
     source_revision: 4,
     git_commit: "c4",
     source_available: true,
@@ -138,7 +159,7 @@ const props: EditorSectionProps = {
 beforeEach(() => {
   vi.clearAllMocks()
   state.frameProps = []
-  state.hidden = []
+  state.comparedWith = []
   state.definitionDiff = {
     changes: [
       { kind: "action-added", tone: "add", actionId: "restart", summary: "Add action restart → routine ops-restart" },
@@ -182,15 +203,62 @@ describe("independent review adversarial probes", () => {
   fireEvent.click(consentBox())
   expect(publishButton().disabled).toBe(true)
  })
- it("must not re-consent while fresh review snapshot has an unmatched older live detail", () => {
+ /**
+  * The replacement for the original probe, and the reason is in the file
+  * header. What it pins is the property that made the original scenario
+  * impossible: one snapshot, one read, both operands and the fenced digest.
+  */
+ it("renders the comparison from the same snapshot the fenced digest comes from, before and after a baseline moves", () => {
   const {rerender}=render(<EditorApplicationReview {...props} />)
+  // What is rendered is what the snapshot carries — not the Page detail
+  // (`props.page`), and not the draft query's own definition, which is a
+  // different document on purpose.
+  expect(state.comparedWith).toEqual([liveDefinition, candidateDefinition])
+  expect(state.comparedWith).not.toContain(props.page)
   fireEvent.click(consentBox())
+  expect(publishButton().disabled).toBe(false)
+
+  // A baseline move is one event on one row: the document and the digest the
+  // fence sends move together. There is no state in which only one of them
+  // has moved, which is what the original probe had to construct by hand.
   const moved=clone(baseSnapshot)
   moved.baseline.definition_digest="b".repeat(64)
+  moved.baseline.definition={...liveDefinition, spec:{panels:[{id:"services", sla:"5m"},{id:"memory", sla:"1m"}]}}
+  state.comparedWith=[]
   setReview(moved)
   rerender(<EditorApplicationReview {...props} />)
+
+  // Consent ends, visibly, and the list is re-derived from the NEW document
+  // rather than from the one that was on screen when it was given.
   expect(consentBox().checked).toBe(false)
+  expect(screen.getByText(/A base you were comparing against moved/)).toBeTruthy()
+  expect(state.comparedWith).toEqual([moved.baseline.definition, candidateDefinition])
+
+  // Re-consenting is now honest: the digest that would be sent came out of
+  // the same read as the document just rendered.
   fireEvent.click(consentBox())
+  expect(publishButton().disabled).toBe(false)
+ })
+
+ it("must not offer consent over a definition it could not read", () => {
+  // The other half of R1: a document that is not there is not a comparison,
+  // and the screen must not present it as one or accept consent for it.
+  const unreadable=clone(baseSnapshot)
+  unreadable.baseline.definition=null
+  setReview(unreadable)
+  const {rerender}=render(<EditorApplicationReview {...props} />)
+  expect(screen.getByText("The live Page definition could not be read")).toBeTruthy()
+  fireEvent.click(consentBox())
+  expect(consentBox().checked).toBe(false)
+  expect(publishButton().disabled).toBe(true)
+
+  const noCandidateDoc=clone(baseSnapshot)
+  noCandidateDoc.candidate!.definition=null
+  setReview(noCandidateDoc)
+  rerender(<EditorApplicationReview {...props} />)
+  expect(screen.getByText("This candidate’s definition could not be read")).toBeTruthy()
+  fireEvent.click(consentBox())
+  expect(consentBox().checked).toBe(false)
   expect(publishButton().disabled).toBe(true)
  })
 })

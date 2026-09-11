@@ -50,17 +50,22 @@ Everything below was run; nothing is inferred from a passing neighbour.
 
 | Check | Result |
 |---|---|
-| Vitest, Pages + `lib/pages` + the review hook | **821 passed / 53 files**, 0 failed, 0 skipped |
-| `go test ./internal/api/ -run 'PageProject…'` | 15 top-level + 20 subtests pass |
+| Vitest — Pages, `lib/pages`, the review hook and the navigation guard | **854 passed / 56 files**, 0 failed, 0 skipped |
+| `go test ./internal/api/` — whole package | ok, 1088 s |
 | `go test ./cmd/crewship/` (whole package, real build image) | pass, 0 skipped — includes `TestSeedPageAppLifecycle/publish` and `TestAcceptance_PageProjectGitHistoryRestore/restart` |
 | `go vet`, `go build ./...`, `gofmt` | clean |
 | `golangci-lint run` on the changed packages | 0 issues |
 | `tsc --noEmit`, `eslint` | clean |
 | `make docs-inventory:strict` | 655 operations, 898 CLI commands, every gate clean |
 | `go run ./scripts/docs-surface-check` | clean |
-| Live pass on a throwaway server, binary `051802b0` | 21 screens at 360 / 768 / 1440 CSS px: **0 px horizontal document overflow, 0 JavaScript errors** |
+| Live pass on a throwaway server, binary `051802b0` | 21 screens at 360 / 768 / 1440 CSS px: **0 px horizontal document overflow, 0 JavaScript errors**. Taken before the counter-review fixes; the screens they change have not been re-photographed. |
+| CI on `93246b89` | **31 green, 0 failed, 6 skipped**. The 31 includes the CodeRabbit status, so it is not 31 completed test jobs — `Go Race` needed one re-run after an unrelated `internal/consolidate` flake (branch touches nothing there; main green; local `-race` ×3 green on branch and main; rerun green). |
 
-Three fences were **mutation-checked** rather than trusted: breaking
+Numbers move as the branch does; the figures above are the head named at the
+top of this file and nowhere else. Earlier counts quoted in the PR body and in
+chat (816 / 821 / 822) were accurate when written and are superseded.
+
+Fences were **mutation-checked** rather than trusted: breaking
 `expected_publication`, `expected_revision` and the `git_commit` match failed
 exactly three tests; breaking five of the retained-publish fences failed exactly
 five. The comparator's guard against an agent authoring its own change summary
@@ -167,3 +172,44 @@ The trap itself is in `docs/prd/` only as this note; the operational lesson —
 a throwaway needs its own profile, bootstrapped over HTTP and addressed with
 `--profile` on every call, and `crewship whoami` read before believing any
 output — belongs with the CLI docs rather than here.
+
+## 8. The counter-review of 2026-09-11
+
+[`pages-settings-editor-counter-review-2026-09-11.md`](pages-settings-editor-counter-review-2026-09-11.md)
+found three gaps in the approval path itself. All three were reproduced against
+the shipped code before being fixed — its three probes are in the suite now, as
+`components/features/pages/editor/__tests__/counter-review-probes.test.tsx`, and
+they were confirmed to fail on the pristine `93246b89`.
+
+- **R1 — a new digest could be approved over an old comparison.** The change
+  list came from the Page detail query while the fence attested to the review
+  endpoint's digest. When another author moved the live definition the two
+  disagreed for as long as the detail lagged, consent reset, and the reader
+  ticked it again while still looking at the old comparison. Resetting was
+  never going to be enough. The review endpoint now carries **both**
+  documents — live and candidate — authorized for the viewer and read in one
+  handler from one read, and the screen derives its comparison from them.
+  Correspondence holds by construction; there is no second query to disagree
+  with. The wire-to-document mapping that existed only to bridge the two is
+  deleted, and the fractional-SLA false alarm went with it.
+- **R2 — consent worked before the sources arrived and after they failed.**
+  One predicate now says whether every piece of evidence the decision rests on
+  has arrived; until it does, consent is not offered and Publish is disabled,
+  each naming what is missing. A failed read is an error with a retry, not an
+  endless "Reading…", and a standing consent is cleared rather than merely
+  disabled.
+- **R3 — every link out of the editor bypassed the unsaved-work guard.** Only
+  the workspace switcher consulted it; the global sidebar is plain `next/link`.
+  The question is asked in the guard registry now, so it covers links this
+  module has never heard of, and claims none of the clicks that mean "take me
+  out of here" — a new tab, a download, another origin, a modified click.
+
+A consequence worth stating, because it is a real loss and not a bug: withheld
+panels are removed from **both** documents rather than stubbed, so no phantom
+addition can appear — but a change confined to a withheld panel is invisible
+here, including a panel re-pointed between a crew the reader may see and one
+they may not. The screen says the comparison is partial and says which.
+
+Still open from that review: nothing in R1–R3. Its two process points are
+addressed — the numbers above are one head and one scope, and §5 no longer
+describes the baseline check as client-side.

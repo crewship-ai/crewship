@@ -1210,7 +1210,12 @@ common errors.
 **Request:** authenticated Page editor; path `slug`, optional positive
 `publication` query parameter, no body.
 **Response 200:** `{issued_at, candidate, baseline, routines, capabilities,
-blockers, initial_publication}`. `candidate` is the current draft revision with
+blockers, initial_publication}`, where `baseline` is
+`{publication_version, published, definition_digest, definition,
+excluded_panels, source_revision, git_commit, source_available,
+source_unavailable_reason}` and `candidate` is
+`{revision, git_commit, source_digest, created_at, actor, build, definition}`.
+`candidate` is the current draft revision with
 its actor and the build of exactly that revision, and is `null` when there is
 no draft, or when the draft is identical to a publication that is still
 running. A withdrawn publication is not running, so an identical draft is
@@ -1232,6 +1237,26 @@ already running as `candidate_matches_live`; both keep the rest of the
 snapshot, and a retained candidate stays populated so the refusal can name
 which version it is about. `baseline.definition_digest` is the
 sha256 of the live Page definition and is the value a publication is fenced on.
+`baseline.definition` is that same live Page document, read from the same
+stored row in the same request, and `candidate.definition` is the document
+this candidate would make live — the draft's, or in `?publication=N` mode the
+archived one that version recorded. Both come out of this one response, so the
+two sides of the comparison and the digest the publication attests to describe
+one instant rather than three reads of three endpoints. Compare these two
+documents and not a separately fetched Page or project, or a reviewer can
+approve a comparison the fence does not cover.
+Panels this caller may not read are removed from both — panel visibility is
+its owning crew's, and an edit grant is never a read grant — and the removal
+is deliberately symmetric: a panel taken out of one document and left in the
+other would be reported as added or removed by the publication, which is false
+about a panel that is merely not this reader's to see.
+`baseline.excluded_panels` is how many panels were withheld from the
+comparison, counting a panel withheld from both documents once, so a partial
+comparison can say so.
+`definition_digest` is unaffected by any of this, because the fence compares
+the full stored document. Either document is `null` only when the stored bytes
+cannot be read as a Page document, and there is then no basis for a comparison
+at all; when there is no candidate, `candidate` itself is `null`.
 `baseline.source_available:false` means the retained source for the live
 publication cannot be read back — a missing comparison, never "no changes" —
 and `source_unavailable_reason` says why in a sentence.

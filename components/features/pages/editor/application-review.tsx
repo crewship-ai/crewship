@@ -102,41 +102,32 @@ function conflictSentence(conflict: PublishConflictWire): string {
 }
 
 /**
- * The live definition the review was issued against, and how much of it this
- * viewer may not see.
+ * Both documents this screen compares, and how much of them it is not shown.
  *
- * The server reads both in the same statement, off the same row, as
- * `definition_digest` — which is the whole point. The document rendered here
- * and the digest the publish fence sends then come out of ONE authorized read
- * at ONE instant, so consenting to the comparison on screen is consenting to
- * the value the request attests to. Deriving the comparison from the Page
- * detail query instead is the hole R1 of the 2026-09-11 counter-review
- * reproduced: two endpoints, two cache entries, and a request that can carry a
- * digest for a document the screen never showed. No amount of re-clearing the
- * checkbox fixes that, because the two sides are never required to correspond.
+ * The server reads the live definition, the candidate's definition and
+ * `definition_digest` in one statement, and filters both documents by one
+ * rule — so what is rendered here and what the publish fence attests to
+ * cannot drift, and a panel the viewer may not read is missing from both
+ * sides rather than appearing as added on one of them. Taking either operand
+ * from its own endpoint is the gap R1 of the 2026-09-11 counter-review
+ * reproduced: two cache entries, free to disagree, and a request carrying a
+ * digest for a document the screen never showed. Re-clearing the checkbox
+ * does not fix that; one read does.
  *
- * Written as an intersection because `editor-contract.ts` belongs to the
- * stream landing these wire types; when they arrive there this alias is a
- * no-op and goes away.
- */
-type ReviewBaseline = ReviewSnapshotWire["baseline"] & {
-  /** The live Page document, authorized for this viewer. */
-  readonly definition?: unknown
-  /** How many panels were withheld from `definition` because this viewer may not read them. */
-  readonly excluded_panels?: number
-}
-
-/**
- * The live definition the snapshot carries, or `undefined` when it did not
- * arrive. Absent and null are the same fact to this screen — there is no
- * document to compare against — and neither may be rendered as "no changes".
+ * `null` means the stored bytes did not parse as a Page document. That is no
+ * basis for a comparison either, so it is the same fact to this screen as a
+ * document that never arrived: `undefined`.
  */
 function liveDefinitionOf(snapshot: ReviewSnapshotWire | undefined): unknown {
-  return (snapshot?.baseline as ReviewBaseline | undefined)?.definition ?? undefined
+  return snapshot?.baseline.definition ?? undefined
+}
+
+function candidateDefinitionOf(snapshot: ReviewSnapshotWire | undefined): unknown {
+  return snapshot?.candidate?.definition ?? undefined
 }
 
 function excludedPanelsOf(snapshot: ReviewSnapshotWire | undefined): number {
-  const count = (snapshot?.baseline as ReviewBaseline | undefined)?.excluded_panels
+  const count = snapshot?.baseline.excluded_panels
   return typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
 }
 
@@ -166,9 +157,9 @@ export interface ReviewEvidence {
  * it is false precisely when the data is absent.
  *
  * Correspondence is not checked here because it is not checkable here: it
- * holds by construction, because the definition compared on screen and the
- * digest the fence sends both come from `baseline` of this one snapshot.
- * What is checked is that each piece is present at all.
+ * holds by construction, because both compared documents and the digest the
+ * fence sends come out of one read, carried on this one snapshot. What is
+ * checked is that each piece is present at all.
  *
  * `baselineSource` is null for the one legitimate absence: an initial
  * publication, where there is no previous source, and the case where the
@@ -187,16 +178,15 @@ export function reviewEvidence(input: {
     missing.push("The review of this candidate has not been read yet.")
   }
   if (!input.liveDefinitionArrived) {
-    missing.push(
-      "The live Page definition this candidate is compared against did not arrive with the review, so the definition changes above are not a comparison with anything.",
-    )
+    missing.push("The live Page definition this candidate is compared against is not in this review: its stored definition could not be read as a Page document.")
+  }
+  if (!input.candidateDefinitionArrived) {
+    missing.push("This candidate's own definition is not in this review: its stored definition could not be read as a Page document.")
   }
   if (input.candidateSource.error !== null) {
     missing.push(`The candidate's source could not be read: ${input.candidateSource.error}`)
   } else if (!input.candidateSource.arrived) {
     missing.push("The candidate's source has not finished loading.")
-  } else if (!input.candidateDefinitionArrived) {
-    missing.push("The candidate's draft arrived without a definition, so there is nothing to compare with the live Page.")
   }
   if (input.baselineSource !== null) {
     if (input.baselineSource.error !== null) {
@@ -264,8 +254,9 @@ export function EditorApplicationReview(props: EditorSectionProps) {
     return () => onDirtyChange(false)
   }, [onDirtyChange])
 
-  // The live definition comes off the snapshot, never off the Page detail
-  // query: `ReviewBaseline` above says why, and it is the whole of R1's fix.
+  // Both compared documents come off the snapshot, never off the Page detail
+  // query or the draft query: `liveDefinitionOf` above says why, and it is
+  // the whole of R1's fix.
   const liveDefinition = useMemo(() => liveDefinitionOf(snapshot), [snapshot])
   const basis = useMemo(() => consentBasisOf(snapshot), [snapshot])
   const basisRef = useRef<ConsentBasis | null>(null)
@@ -333,17 +324,20 @@ export function EditorApplicationReview(props: EditorSectionProps) {
 
   const blocked = blockers.length > 0
 
-  // Panels this viewer may not read were withheld from the live definition by
-  // the server, which also says how many. Counting them here off the Page
-  // detail would be a second source for a fact the compared document already
-  // carries — and the two could disagree about the very document on screen.
+  // Panels this viewer may not read are withheld by the server from BOTH
+  // documents and counted once. Counting them here off the Page detail would
+  // be a second source for a fact about the very documents on screen — and
+  // the two are free to disagree.
   const excludedPanels = excludedPanelsOf(snapshot)
+  // Both operands off the one snapshot. `definitionDiff === null` therefore
+  // means exactly one thing — a document that could not be read — which is
+  // why the render below can name which, with no "still loading" state to
+  // sit in for ever.
+  const candidateDefinition = useMemo(() => candidateDefinitionOf(snapshot), [snapshot])
   const definitionDiff = useMemo(() => {
-    if (liveDefinition === undefined) return null
-    const candidateDefinition = review.candidate.data?.definition
-    if (candidateDefinition === undefined) return null
+    if (liveDefinition === undefined || candidateDefinition === undefined) return null
     return compareDefinitions(liveDefinition, candidateDefinition)
-  }, [review.candidate.data, liveDefinition])
+  }, [liveDefinition, candidateDefinition])
 
   const initial = snapshot?.initial_publication === true
   const comparisonUnavailable = review.baselineUnavailable
@@ -372,7 +366,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       reviewEvidence({
         snapshotArrived: snapshot !== undefined,
         liveDefinitionArrived: liveDefinitionOf(snapshot) !== undefined,
-        candidateDefinitionArrived: review.candidate.data?.definition !== undefined,
+        candidateDefinitionArrived: candidateDefinitionOf(snapshot) !== undefined,
         candidateSource: { arrived: review.candidate.data?.project != null, error: candidateSourceError },
         // The two legitimate absences, and only these: an initial publication
         // has no previous source, and a retained source that cannot be read is
@@ -548,29 +542,26 @@ export function EditorApplicationReview(props: EditorSectionProps) {
       {/* 2 — Definition changes, derived. */}
       <div className="rounded-md border p-4">
         <h3 className="text-base font-semibold">Definition changes</h3>
-        {candidateSourceError !== null ? (
+        {/* Both documents come off the snapshot, so a null diff is never
+            "still loading": it is one of exactly two documents that could not
+            be read, and the screen names which one. */}
+        {definitionDiff === null ? (
           <div role="alert" className="mt-2 text-sm">
-            <strong>The candidate&apos;s definition could not be read</strong>
-            <p className="mt-1">{candidateSourceError}</p>
-            <p className="mt-1">Nothing is compared here, because there is nothing truthful to compare. This is not a statement that the definition is unchanged.</p>
-            <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
-              Try again
-            </Button>
-          </div>
-        ) : liveDefinition === undefined ? (
-          <div role="alert" className="mt-2 text-sm">
-            <strong>The live definition did not arrive with this review</strong>
+            <strong>
+              {liveDefinition === undefined
+                ? "The live Page definition could not be read"
+                : "This candidate’s definition could not be read"}
+            </strong>
             <p className="mt-1">
-              The review carries the live Page definition the candidate is compared against, alongside the digest the publication is checked with. This one did not, so there
-              is nothing to compare the candidate with — and comparing it against the Page read elsewhere would mean approving a digest for a document this screen never
-              showed you.
+              {liveDefinition === undefined
+                ? "The review carries the live Page definition this candidate is compared against, alongside the digest the publication is checked with. The stored definition could not be read as a Page document, so there is nothing to compare against — and comparing against the Page read elsewhere would mean approving a digest for a document this screen never showed you."
+                : "The review carries the document this candidate would make live. Its stored definition could not be read as a Page document, so there is nothing to compare with the live Page."}
             </p>
+            <p className="mt-1">This is not a statement that the definition is unchanged.</p>
             <Button variant="outline" className="mt-2 min-h-11" onClick={review.refresh}>
               Try again
             </Button>
           </div>
-        ) : definitionDiff === null ? (
-          <p className="mt-2 text-sm text-muted-foreground">Reading the candidate&apos;s definition…</p>
         ) : definitionDiff.identical && !definitionDiff.baselineMissing && definitionDiff.unmodelled.length === 0 ? (
           <p className="mt-2 text-sm">This candidate declares the same panels, producers and actions as the live Page.</p>
         ) : (
@@ -601,11 +592,17 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           </p>
         )}
         {excludedPanels > 0 && (
-          <p role="note" className="mt-2 text-sm">
-            {excludedPanels} panel{excludedPanels === 1 ? "" : "s"} on this Page {excludedPanels === 1 ? "is" : "are"} not visible to you, so the server withheld{" "}
-            {excludedPanels === 1 ? "it" : "them"} from the definition this comparison was made against. This review does not cover {excludedPanels === 1 ? "it" : "them"}, and
-            a panel the candidate declares that you may not read appears above as added.
-          </p>
+          <div role="note" className="mt-2 rounded-md border border-dashed p-3 text-sm">
+            <strong>
+              This comparison is partial: {excludedPanels} panel{excludedPanels === 1 ? "" : "s"} on this Page {excludedPanels === 1 ? "is" : "are"} not visible to you.
+            </strong>
+            <p className="mt-1">
+              {excludedPanels === 1 ? "It was" : "They were"} withheld from both documents compared above, so nothing about {excludedPanels === 1 ? "it" : "them"} is
+              reported here: a change confined to a withheld panel does not appear in the list, and neither does a panel re-pointed between a crew you may read and one you
+              may not — such a panel leaves both sides at once and its new owner is invisible from here. This review does not cover{" "}
+              {excludedPanels === 1 ? "that panel" : "those panels"}.
+            </p>
+          </div>
         )}
         {definitionDiff !== null && definitionDiff.unmodelled.length > 0 && (
           <div role="note" className="mt-3 rounded-md border border-dashed p-3 text-sm">

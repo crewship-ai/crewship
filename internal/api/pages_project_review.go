@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -63,6 +64,30 @@ type reviewCandidateWire struct {
 	CreatedAt    string           `json:"created_at"`
 	Actor        reviewActorWire  `json:"actor"`
 	Build        *reviewBuildWire `json:"build"`
+
+	// Definition is the Page document this candidate would make live — the
+	// draft's, or in `?publication=N` mode the archived one that version
+	// recorded — authorized for this viewer by exactly the rule that
+	// authorizes Baseline.Definition, in the same request.
+	//
+	// It is here for the same reason the baseline's is. The candidate
+	// document was being read from `GET .../project`, a different endpoint on
+	// a different cache entry, so the two halves of the comparison a human
+	// reads could come from two moments just as the baseline and its digest
+	// could. Two documents out of one handler is the only arrangement that
+	// cannot drift.
+	//
+	// And withholding has to happen on BOTH sides or it lies: a panel taken
+	// out of the baseline alone, with the candidate's copy of it left whole,
+	// renders as a panel this candidate ADDS — on the one screen that must
+	// not make a false claim about what is being published. So the panels
+	// removed are the UNION of what each document had to keep back, and
+	// Baseline.ExcludedPanels counts them.
+	//
+	// `null` under the same condition as the baseline's: the stored bytes
+	// cannot be read as a Page document. When there is no candidate at all
+	// this whole object is null and the question does not arise.
+	Definition json.RawMessage `json:"definition"`
 }
 
 type reviewBaselineWire struct {
@@ -74,6 +99,42 @@ type reviewBaselineWire struct {
 	SourceAvailable    bool    `json:"source_available"`
 	// A sentence, not a code: it is shown where the diff would have been.
 	SourceUnavailableReason *string `json:"source_unavailable_reason"`
+
+	// Definition is the live Page document ITSELF, read from the same
+	// `pages.spec_json` row, in the same request, as DefinitionDigest above.
+	//
+	// It is here because the screen and the fence were reading two different
+	// endpoints. The change list a human reads was derived from the Page
+	// detail query and the fence value was taken from this one: two caches,
+	// two moments. Another author saving the live definition moved this
+	// endpoint's digest while the detail query still held the old document,
+	// so a person could read a comparison against definition A and send a
+	// request attesting to digest B — and the server accepts it, because B is
+	// genuinely current. No server-side check can catch that; it is a
+	// client-side correspondence failure, and the only cure is to stop having
+	// two reads. One authorized read now produces both values.
+	//
+	// It is NOT what the fence compares, and it is not necessarily the whole
+	// document: panels this viewer may not read are removed from it (and
+	// from Candidate.Definition, by the same rule in the same request).
+	// DefinitionDigest stays the digest of the full stored bytes, withheld
+	// panels included, because the fence must keep comparing what the server
+	// stores.
+	//
+	// `null` only when the stored document cannot be read as a Page document
+	// (see pageAuthorizedDefinition); a client that gets null has no basis for
+	// a comparison and must not offer consent on one.
+	Definition json.RawMessage `json:"definition"`
+
+	// ExcludedPanels is how many panels were withheld from THE COMPARISON —
+	// from Definition, from Candidate.Definition, or from both — so the
+	// screen can say the comparison it is showing is partial.
+	//
+	// One number, and a panel withheld from both sides counts once, because
+	// it is one panel the reader cannot see. It lives on the baseline rather
+	// than on each document because the reader is looking at one comparison,
+	// not two lists. Zero when neither document rendered.
+	ExcludedPanels int `json:"excluded_panels"`
 }
 
 type reviewRoutineWire struct {
@@ -136,6 +197,218 @@ const (
 func pageDefinitionDigest(spec string) string {
 	sum := sha256.Sum256([]byte(spec))
 	return hex.EncodeToString(sum[:])
+}
+
+// pageDeclaredPanel is the only part of a panel this file reads: who owns it
+// (the ACL) and what it is called (how the two documents line up).
+type pageDeclaredPanel struct {
+	ID    string `json:"id"`
+	Owner string `json:"owner"`
+}
+
+// pageDefinitionAuthorizer applies §7.1 rule 2 — "a panel's visibility IS its
+// owning crew's visibility" — to a panel as DECLARED, rather than to a
+// `page_panels` row.
+//
+// It has to be the declaration, because the candidate document is not a row in
+// anything: it is the document that would become the live Page. A candidate
+// that adds a panel owned by a crew the viewer is in has no row to consult,
+// and a candidate that re-points a panel at another crew is asking for a
+// verdict the OLD row would answer backwards. So the owner reference in the
+// document being rendered decides, for both documents, and one rule cannot
+// drift from itself.
+//
+// The verdict itself is still canSeePanel's — the same function the Page
+// detail route seals with, carve-outs included — fed the crew the declaration
+// names. For the live document the two inputs are the same fact: reconcile
+// writes `page_panels.owner_crew_id` from exactly this field.
+type pageDefinitionAuthorizer struct {
+	h      *PageHandler
+	viewer *pageViewer
+	crews  map[string]string // crew slug → crew id, live crews only
+}
+
+// visible answers for one `owner: "crew/<slug>"` reference. Anything it cannot
+// resolve to a live crew is denied, so an owner the document does not state,
+// states in another shape, or points at a deleted crew withholds the panel.
+func (a pageDefinitionAuthorizer) visible(ownerRef string) bool {
+	slug := strings.TrimPrefix(ownerRef, "crew/")
+	if slug == ownerRef {
+		slug = ""
+	}
+	return a.h.canSeePanel(a.viewer, &panelRecord{OwnerCrewID: a.crews[slug]})
+}
+
+// reviewDefinitionAuthorizer resolves the caller's standing and the crew
+// directory once per request, for both documents on the snapshot.
+//
+// `mayEditSpec` — which is all projectPage proved — does not imply the caller
+// may see every panel, and handing back raw `spec_json` because the route
+// already proved it would disclose the schema, producer, SLA, actions and
+// gates of panels belonging to crews this caller is not in. That is a worse
+// bug than the correspondence failure these fields exist to close.
+func (h *PageHandler) reviewDefinitionAuthorizer(ctx context.Context, ws string) (pageDefinitionAuthorizer, error) {
+	auth := pageDefinitionAuthorizer{h: h, viewer: h.reviewViewer(ctx, ws), crews: map[string]string{}}
+	rows, err := h.db.QueryContext(ctx, `SELECT slug,id FROM crews WHERE workspace_id=? AND deleted_at IS NULL`, ws)
+	if err != nil {
+		return auth, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var slug, id string
+		if err := rows.Scan(&slug, &id); err != nil {
+			return auth, err
+		}
+		auth.crews[slug] = id
+	}
+	return auth, rows.Err()
+}
+
+// reviewViewer is the standing canSeePanel is applied with on this route, and
+// it never returns nil: a nil viewer means "unscoped, serve everything" to
+// canSeePanel, which is the one answer this endpoint must never give.
+//
+// Two principals reach the project routes (projectPage). A human is their
+// workspace role plus their crews, read the same way every other page route
+// reads it. A project agent has no user row and no workspace role; its whole
+// standing is the owner crew the internal token was minted against, so that is
+// the only crew it may see panels of.
+func (h *PageHandler) reviewViewer(ctx context.Context, ws string) *pageViewer {
+	if actor := projectAgentFrom(ctx); actor != nil {
+		crews := map[string]bool{}
+		if actor.OwnerCrewID != "" {
+			crews[actor.OwnerCrewID] = true
+		}
+		return &pageViewer{Crews: crews}
+	}
+	user := UserFromContext(ctx)
+	if user == nil {
+		return &pageViewer{Crews: map[string]bool{}}
+	}
+	viewer, err := h.loadViewer(ctx, ws, user.ID)
+	if err != nil || viewer == nil {
+		// A standing that could not be read is no standing. Reading the
+		// document is not worth guessing an ACL for.
+		return &pageViewer{Crews: map[string]bool{}}
+	}
+	return viewer
+}
+
+// pageDefinitionPanels reaches the panel array inside a stored Page document
+// without modelling the document.
+//
+// Raw JSON rather than a round trip through pages.Document on purpose: the
+// review screen's job is to show EVERY change, including fields no Go struct
+// models, and a typed round trip would silently drop them from one side of
+// the comparison and then report the other side as having added them.
+//
+// `ok` is false when the bytes are not a document this can walk safely, which
+// is the only thing that makes a definition null on the wire. A document with
+// no `spec` or no `panels` key is perfectly walkable and simply has no panels.
+func pageDefinitionPanels(spec string) (doc, specObject map[string]json.RawMessage, panels []json.RawMessage, ok bool) {
+	if err := json.Unmarshal([]byte(spec), &doc); err != nil {
+		return nil, nil, nil, false
+	}
+	rawSpec, has := doc["spec"]
+	if !has {
+		return doc, nil, nil, true
+	}
+	if err := json.Unmarshal(rawSpec, &specObject); err != nil {
+		return nil, nil, nil, false
+	}
+	rawPanels, has := specObject["panels"]
+	if !has {
+		return doc, specObject, nil, true
+	}
+	if err := json.Unmarshal(rawPanels, &panels); err != nil {
+		return nil, nil, nil, false
+	}
+	return doc, specObject, panels, true
+}
+
+// pageWithheldPanelIDs names the panels in one document this viewer may not
+// read, and counts separately the withheld panels that carry no id.
+//
+// An unnamed panel cannot be matched against the other document, so it is
+// withheld on principle and counted where it is found rather than pretending
+// to be the same panel as some unnamed panel over there.
+func pageWithheldPanelIDs(spec string, visible func(ownerRef string) bool) (ids []string, unnamed int) {
+	_, _, panels, ok := pageDefinitionPanels(spec)
+	if !ok {
+		return nil, 0
+	}
+	for _, panel := range panels {
+		var declared pageDeclaredPanel
+		// A panel that will not parse is withheld rather than served: there
+		// is no owner to check it against, so there is no evidence this
+		// viewer may read it.
+		if err := json.Unmarshal(panel, &declared); err == nil && declared.ID != "" && visible(declared.Owner) {
+			continue
+		}
+		if declared.ID == "" {
+			unnamed++
+			continue
+		}
+		ids = append(ids, declared.ID)
+	}
+	return ids, unnamed
+}
+
+// pageAuthorizedDefinition removes from a document every panel this viewer may
+// not read, and every panel whose id is in `drop`.
+//
+// `drop` is what makes the withholding SYMMETRIC, and symmetry is the whole
+// point. The baseline and the candidate are compared panel by panel and
+// matched by id, so a panel removed from one side and left whole on the other
+// renders as an addition or a removal — a false claim about a panel that is
+// simply not this reader's to see. The caller passes the union of what both
+// documents withheld, and the two sides then agree on which panels are not
+// part of the comparison at all. `baseline.excluded_panels` is how many that
+// is, so the screen can say the comparison is partial rather than complete.
+//
+// Removed rather than sealed to a stub: a stub still has to be filtered out by
+// whoever compares the documents, and a client re-deriving a decision the
+// server already made is the shape of bug this whole change is undoing.
+//
+// Returns nil — `definition: null` on the wire — when the bytes are not a Page
+// document. Every branch that cannot identify a panel removes it, so the
+// failure direction is always "withhold", never "disclose".
+func pageAuthorizedDefinition(spec string, visible func(ownerRef string) bool, drop map[string]bool) json.RawMessage {
+	doc, specObject, panels, ok := pageDefinitionPanels(spec)
+	if !ok {
+		return nil
+	}
+	kept := make([]json.RawMessage, 0, len(panels))
+	for _, panel := range panels {
+		var declared pageDeclaredPanel
+		if err := json.Unmarshal(panel, &declared); err != nil || declared.ID == "" {
+			continue
+		}
+		if !visible(declared.Owner) || drop[declared.ID] {
+			continue
+		}
+		kept = append(kept, panel)
+	}
+	// Nothing withheld: hand back the stored bytes untouched, so the document
+	// the reviewer reads is literally the one the digest was taken over.
+	if len(kept) == len(panels) {
+		return json.RawMessage(spec)
+	}
+	repacked, err := json.Marshal(kept)
+	if err != nil {
+		return nil
+	}
+	specObject["panels"] = repacked
+	rewrittenSpec, err := json.Marshal(specObject)
+	if err != nil {
+		return nil
+	}
+	doc["spec"] = rewrittenSpec
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // ReviewProject serves the snapshot a human reviews and then publishes against.
@@ -203,6 +476,17 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot.Baseline.DefinitionDigest = pageDefinitionDigest(liveSpec)
+	// The same bytes, rendered for this viewer. Reading them here rather than
+	// leaving the screen to fetch the document from the Page detail route is
+	// the whole point: the digest above and the document below describe one
+	// instant of one row. The candidate's document goes through the same
+	// authorizer further down, so the two sides of the comparison are one
+	// decision at one moment as well.
+	authorizer, err := h.reviewDefinitionAuthorizer(ctx, ws)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page definition authorization", err)
+		return
+	}
 
 	var publications int
 	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM page_project_publications WHERE page_id=?`, rec.ID).Scan(&publications); err != nil {
@@ -270,6 +554,27 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	// the live definition still supplies rows so drift stays visible.
 	if snapshot.Candidate == nil {
 		candidateSpec, contextSpec = "", liveSpec
+	}
+	// Both documents the reviewer compares, out of one handler, one instant
+	// and one rule. The withheld set is the UNION of what each side had to
+	// keep back, applied to both, so a panel this reader may not see is
+	// absent from the comparison rather than showing up as the candidate
+	// adding or removing it.
+	drop := map[string]bool{}
+	baselineIDs, baselineUnnamed := pageWithheldPanelIDs(liveSpec, authorizer.visible)
+	candidateIDs, candidateUnnamed := []string(nil), 0
+	if snapshot.Candidate != nil {
+		candidateIDs, candidateUnnamed = pageWithheldPanelIDs(candidateSpec, authorizer.visible)
+	}
+	for _, ids := range [][]string{baselineIDs, candidateIDs} {
+		for _, id := range ids {
+			drop[id] = true
+		}
+	}
+	snapshot.Baseline.Definition = pageAuthorizedDefinition(liveSpec, authorizer.visible, drop)
+	snapshot.Baseline.ExcludedPanels = len(drop) + baselineUnnamed + candidateUnnamed
+	if snapshot.Candidate != nil {
+		snapshot.Candidate.Definition = pageAuthorizedDefinition(candidateSpec, authorizer.visible, drop)
 	}
 	routines, err := h.reviewRoutines(ctx, ws, candidateSpec, contextSpec, comparisonChecks)
 	if err != nil {

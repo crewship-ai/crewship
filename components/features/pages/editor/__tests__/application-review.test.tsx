@@ -40,13 +40,14 @@ vi.mock("@/components/features/pages/page-preview", () => ({
 import { EditorApplicationReview } from "@/components/features/pages/editor/application-review"
 
 /**
- * The live definition the review snapshot carries.
+ * The two documents the review snapshot carries.
  *
- * It is a `pages.Document`, read by the server in the same statement as
- * `definition_digest` — so what this screen renders and what the publish fence
- * attests to are one authorized read. The Page detail (`props.page`) is NOT
- * this: it is a second endpoint on a second cache entry, and every test below
- * that moves one without the other exists because those two could disagree.
+ * Both are `pages.Document`s read by the server in the same statement as
+ * `definition_digest`, filtered by one authorization rule — so what this
+ * screen renders and what the publish fence attests to are one read. Neither
+ * the Page detail (`props.page`) nor the draft's own `GET .../project` is
+ * this: those are separate endpoints on separate cache entries, and the tests
+ * below that move one without the other exist because they could disagree.
  */
 const liveDefinition = {
   apiVersion: "crewship/v1",
@@ -55,22 +56,25 @@ const liveDefinition = {
   spec: { panels: [{ id: "services", schema: "status.v1", owner: "crew/ops", producer: "routine/nightly", sla: "5m" }] },
 }
 
-/**
- * `baseline.definition` and `baseline.excluded_panels` land in
- * `editor-contract.ts` with the review endpoint that sends them; until they
- * do, the fixture states the shape the screen is written against.
- */
-type SnapshotFixture = Omit<ReviewSnapshotWire, "baseline"> & {
-  baseline: ReviewSnapshotWire["baseline"] & { definition?: unknown; excluded_panels?: number }
+const candidateDefinition = {
+  apiVersion: "crewship/v1",
+  kind: "Page",
+  metadata: { name: "Operations Lab", slug: "operations-lab", description: "Container fleet" },
+  spec: {
+    panels: [
+      { id: "services", schema: "status.v1", owner: "crew/ops", producer: "routine/nightly", sla: "90.5s", actions: [{ id: "restart", kind: "call", routine: "ops-restart" }] },
+    ],
+  },
 }
 
-const baseSnapshot: SnapshotFixture = {
+const baseSnapshot: ReviewSnapshotWire = {
   issued_at: "2026-09-10T12:03:00Z",
   candidate: {
     revision: 7,
     git_commit: "c7",
     source_digest: "sha256:cand",
     created_at: "2026-09-10T12:03:00Z",
+    definition: candidateDefinition,
     actor: { kind: "agent", id: "ag_demo" },
     build: { id: "build-7", state: "ready", artifact_digest: "sha256:art" },
   },
@@ -118,7 +122,7 @@ function clone<T>(value: T): DeepMutable<T> {
   return JSON.parse(JSON.stringify(value)) as DeepMutable<T>
 }
 
-function setReview(snapshot: SnapshotFixture, overrides: Record<string, unknown> = {}) {
+function setReview(snapshot: ReviewSnapshotWire, overrides: Record<string, unknown> = {}) {
   state.review = {
     snapshot: { data: snapshot, isError: false, error: null },
     candidate: { data: { git_commit: "c7", revision: 7, digest: "sha256:cand", definition: { kind: "Page" }, project: { files: [] } } },
@@ -421,11 +425,13 @@ describe("EditorApplicationReview", () => {
     snapshot.baseline.excluded_panels = 2
     setReview(snapshot)
     render(<EditorApplicationReview {...props} />)
-    expect(screen.getByText(/2 panels on this Page are not visible to you, so the server withheld them/)).toBeTruthy()
-    expect(screen.getByText(/This review does not cover them/)).toBeTruthy()
-    // The exclusion is one-sided: the candidate is not filtered, so a withheld
-    // panel it declares reads as added. Saying so is the honest version.
-    expect(screen.getByText(/appears above as added/)).toBeTruthy()
+    expect(screen.getByText(/This comparison is partial: 2 panels on this Page are not visible to you\./)).toBeTruthy()
+    // Withheld from BOTH documents, so nothing about them can be reported —
+    // including the case that is invisible rather than merely absent.
+    expect(screen.getByText(/withheld from both documents compared above/)).toBeTruthy()
+    expect(screen.getByText(/a change confined to a withheld panel does not appear in the list/)).toBeTruthy()
+    expect(screen.getByText(/re-pointed between a crew you may read and one you may not/)).toBeTruthy()
+    expect(screen.getByText(/This review does not cover those panels/)).toBeTruthy()
   })
 
   it("says nothing about withheld panels when the server withheld none", () => {
@@ -499,8 +505,10 @@ describe("EditorApplicationReview", () => {
     const { container } = render(<EditorApplicationReview {...props} />)
 
     expect(screen.queryByText(/Reading the source of both sides/)).toBeNull()
-    expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
     expect(screen.getByText("The candidate's source could not be read")).toBeTruthy()
+    // The definition comparison is unaffected: it never came from that query.
+    expect(screen.queryByText("This candidate’s definition could not be read")).toBeNull()
+    expect(screen.getByText(/Remove panel memory from the live Page definition/)).toBeTruthy()
     expect(screen.getAllByText("The draft's source could not be read: 503.").length).toBeGreaterThan(0)
     expect(screen.getByText("The candidate's source could not be read: The draft's source could not be read: 503.")).toBeTruthy()
     // A retry exists, and it is the control that can actually clear the state.
@@ -592,14 +600,47 @@ describe("EditorApplicationReview", () => {
     expect(publishButton().disabled).toBe(true)
   })
 
-  it("compares the candidate with the definition the snapshot carries, not with the Page detail", () => {
-    // R1. The digest the publish fence sends and the document this list is
-    // derived from must come out of one authorized read, or the consent can
-    // attest to a definition the screen never showed.
+  it("compares the two documents the snapshot carries, not the Page detail and not the draft query", () => {
+    // R1, both operands. The digest the publish fence sends and the two
+    // documents this list is derived from must come out of one authorized
+    // read, or the consent can attest to a comparison the screen never
+    // showed. `state.review.candidate.data.definition` is deliberately a
+    // different document ({kind: "Page"}): if either operand were still
+    // taken from that query, these assertions would catch it.
     render(<EditorApplicationReview {...props} />)
     expect(state.comparedWith[0]).toEqual(liveDefinition)
+    expect(state.comparedWith[1]).toEqual(candidateDefinition)
     expect(state.comparedWith[0]).not.toEqual(props.page)
-    expect(state.comparedWith[1]).toEqual({ kind: "Page" })
+    expect(state.comparedWith[1]).not.toEqual({ kind: "Page" })
+  })
+
+  it("does not recompute the comparison when the draft query's definition moves: it is not the basis", () => {
+    const { rerender } = render(<EditorApplicationReview {...props} />)
+    state.comparedWith = []
+
+    // The draft endpoint's cache entry moved and the snapshot has not. The
+    // candidate's SOURCE still comes from there, so the query is not gone —
+    // which is exactly why its definition drifting must change nothing.
+    setReview(clone(baseSnapshot), {
+      candidate: { data: { git_commit: "c7", revision: 7, digest: "sha256:cand", definition: { kind: "Page", moved: true }, project: { files: [] } } },
+    })
+    rerender(<EditorApplicationReview {...props} />)
+
+    expect(state.comparedWith.some(value => JSON.stringify(value).includes("moved"))).toBe(false)
+    expect(state.comparedWith[1]).toEqual(candidateDefinition)
+  })
+
+  it("offers no consent when the candidate's stored definition could not be read as a document", () => {
+    const snapshot = clone(baseSnapshot)
+    snapshot.candidate!.definition = null
+    setReview(snapshot)
+    render(<EditorApplicationReview {...props} />)
+
+    expect(screen.getByText("This candidate’s definition could not be read")).toBeTruthy()
+    expect(screen.getByText("This candidate's own definition is not in this review: its stored definition could not be read as a Page document.")).toBeTruthy()
+    expect(screen.getByText(/This is not a statement that the definition is unchanged/)).toBeTruthy()
+    expect(consentBox().disabled).toBe(true)
+    expect(publishButton().disabled).toBe(true)
   })
 
   it("does not recompute or re-consent on a Page detail that moved: the detail is not the basis", () => {
@@ -620,13 +661,14 @@ describe("EditorApplicationReview", () => {
 
   it("offers no consent at all when the snapshot arrives without the definition it was issued against", () => {
     const snapshot = clone(baseSnapshot)
-    delete snapshot.baseline.definition
+    snapshot.baseline.definition = null
     setReview(snapshot)
     render(<EditorApplicationReview {...props} />)
 
-    expect(screen.getByText(/The live definition did not arrive with this review/)).toBeTruthy()
-    expect(screen.getByText(/did not arrive with the review, so the definition changes above are not a comparison with anything/)).toBeTruthy()
-    // Not "Reading…", and not a comparison against the Page read elsewhere.
+    expect(screen.getByText("The live Page definition could not be read")).toBeTruthy()
+    expect(screen.getByText("The live Page definition this candidate is compared against is not in this review: its stored definition could not be read as a Page document.")).toBeTruthy()
+    // Not a "still loading" state it can never leave, and not a comparison
+    // against the Page read elsewhere.
     expect(screen.queryByText(/Reading the candidate's definition/)).toBeNull()
     expect(consentBox().disabled).toBe(true)
     fireEvent.click(consentBox())
@@ -640,7 +682,7 @@ describe("EditorApplicationReview", () => {
     expect(consentBox().checked).toBe(true)
 
     const without = clone(baseSnapshot)
-    delete without.baseline.definition
+    without.baseline.definition = null
     setReview(without)
     rerender(<EditorApplicationReview {...props} />)
 
