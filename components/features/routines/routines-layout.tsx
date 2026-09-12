@@ -17,12 +17,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
-import { isRoutineTestFixture } from "@/lib/routine-filters"
-import { cn } from "@/lib/utils"
-import { useIsMobile } from "@/hooks/use-mobile"
-import type { RoutineFilters } from "./routines-filter-sidebar"
-import { RoutinesExplorer } from "./routines-explorer"
+import { isRoutineTestFixture, type RoutineFilterState as RoutineFilters } from "@/lib/routine-filters"
 import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
@@ -42,15 +37,6 @@ const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const { pipelines: loadedPipelines, loading, error, refresh } = usePipelines(workspaceId)
   const pipelines = useRoutinePurposes(workspaceId, loadedPipelines)
-  const isMobile = useIsMobile()
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  // On a phone the sidebar is 280px of a 390px screen — it does not
-  // sit BESIDE the content, it replaces it. Collapse it when the
-  // viewport narrows, and let it open as an overlay instead of a
-  // column, so the overview keeps the full width it was designed for.
-  useEffect(() => {
-    if (isMobile) setLeftCollapsed(true)
-  }, [isMobile])
   const [search, setSearch] = useState("")
   const [filters, setFilters] = useState<RoutineFilters>({
     status: "all",
@@ -146,9 +132,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
-    // Picking a routine on a phone means "show me that", and the
-    // overlay covering it would be the opposite.
-    if (isMobile) setLeftCollapsed(true)
   }
 
   // Selected routine — looked up from the loaded pipeline list so the
@@ -195,52 +178,11 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         }
       />
 
-      {/* ---- Body: 3-column layout ---- */}
+      {/* ---- Body ---- */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Left filter panel — same chrome as the /issues sidebar
-         * (bg-card, not bg-card/30) so the two surfaces feel like
-         * pieces of one app rather than two near-misses. Width unified
-         * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
-        {/* Overlay on a phone, column everywhere else. The collapsed
-            rail stays in flow at both sizes so the expand button never
-            moves. */}
-        {isMobile && !leftCollapsed && (
-          <button
-            type="button"
-            aria-label="Close routine list"
-            onClick={() => setLeftCollapsed(true)}
-            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
-          />
-        )}
-        <aside
-          className={cn(
-            "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
-            leftCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
-          )}
-        >
-          {leftCollapsed ? (
-            <div className="flex h-full flex-col items-center pt-1.5">
-              <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
-            </div>
-          ) : (
-            /* Explorer-style sidebar built on the shared sidebar-kit —
-               SidebarToolbar (search + Filter + collapse), a collapsible
-               STATUS bucket section, and the ROUTINES list. The collapse
-               toggle lives inside the toolbar (next to search), not as a
-               floating button. */
-            <RoutinesExplorer
-              routines={visiblePipelines}
-              search={search}
-              onSearchChange={setSearch}
-              selectedSlug={selectedSlug}
-              onSelectRoutine={handleSelect}
-              filters={filters}
-              onChange={setFilters}
-              onToggleCollapse={() => setLeftCollapsed(true)}
-            />
-          )}
-        </aside>
+        {/* One list, one panel (#2519). The explorer sidebar that repeated
+            every routine beside the list is gone; search and the status
+            filters live above the rows in RoutinesWorkspace. */}
 
         {/* Overview, definition or historical run beside the explorer. */}
         <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
@@ -310,15 +252,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
               >
                 <RoutinesWorkspace
                   search={search}
+                  onSearchChange={setSearch}
                   filters={filters}
                   workspaceId={workspaceId}
                   routines={visiblePipelines}
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
-                  onFilter={(status) =>
-                    setFilters((f) => ({ ...f, status: status as RoutineFilters["status"] }))
-                  }
+                  onFilter={(status) => setFilters((f) => ({ ...f, status }))}
                 />
               </motion.div>
             )}

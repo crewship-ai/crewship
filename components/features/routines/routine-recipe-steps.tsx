@@ -345,7 +345,10 @@ export function RoutineRecipeSteps({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: reduced ? 0 : 0.16 }}
-              className="min-w-0 space-y-5 rounded-2xl border border-hairline bg-card p-5"
+              // Sticky beside a long step list: the panel is what you are
+              // editing, and on a full-page editor (#2519) the list can be
+              // taller than the viewport.
+              className="min-w-0 space-y-5 rounded-2xl border border-hairline bg-card p-5 md:sticky md:top-2 md:self-start"
               aria-label="Selected step"
             >
               <div className="flex items-start justify-between gap-2">

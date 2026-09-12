@@ -110,6 +110,14 @@ import {
  * generated at runtime: Tailwind's scanner reads source text, so a composed
  * class name is never emitted. Verbose, and the only version that works.
  *
+ * ── A surface that has outgrown the modal ────────────────────────────────
+ *
+ * `presentation="page"` mounts the same header/body/footer in a plain
+ * `<section>` filling its parent instead of a Dialog — no overlay, no focus
+ * trap, no Esc, no size class. The routine editor is the first user (#2519):
+ * a two-column step editor does not fit an 800px card. The discard guard
+ * and ⌘↵ come along unchanged; the title becomes the page's `<h1>`.
+ *
  * Pair it with `sub-bar.tsx`: SubBarPrimary/SubBarSecondary are the door,
  * CreateSurface is the room. Neither should be re-implemented per page.
  */
@@ -147,6 +155,15 @@ const SIZE_CLASS: Record<CreateSurfaceSize, string> = {
  * header for previews) is how the twelve surfaces got here in the first place.
  */
 const InDialog = React.createContext(true)
+
+/**
+ * Which element the header's title renders as.
+ *
+ * `h2` inside a dialog and inside a preview frame — both sit on a page that
+ * already has its own `h1`. A surface mounted as the PAGE (`presentation=
+ * "page"`) is that page's main content, so its title is the `h1`.
+ */
+const HeadingTag = React.createContext<"h1" | "h2">("h2")
 
 /**
  * Wraps a dismissal so the guard sees it.
@@ -218,6 +235,20 @@ export interface CreateSurfaceProps {
   ariaLabel?: string
   /** Restore the opener when the caller does not use a Radix DialogTrigger. */
   restoreOpenerFocus?: boolean
+  /**
+   * How the surface is mounted.
+   *
+   * `"dialog"` (the default) is the Radix modal described above: overlay,
+   * focus trap, Esc, scroll lock. `"page"` renders the SAME header, body and
+   * footer chrome in a plain `<section>` that fills its parent — for a
+   * surface that has outgrown a modal and lives in a route's content area
+   * (the routine editor, #2519). No overlay, no focus trap, no Esc; ⌘↵ still
+   * submits, the discard guard still covers the header × and the footer
+   * Cancel (both reach `onOpenChange(false)`), and `size` does not apply —
+   * the parent decides the width. The header's title becomes the page's
+   * `<h1>`; the layout, not the surface, owns the breadcrumb.
+   */
+  presentation?: "dialog" | "page"
   className?: string
   children: React.ReactNode
 }
@@ -231,6 +262,7 @@ export function CreateSurface({
   onSubmit,
   ariaLabel,
   restoreOpenerFocus = false,
+  presentation = "dialog",
   className,
   children,
 }: CreateSurfaceProps) {
@@ -275,56 +307,20 @@ export function CreateSurface({
     [onSubmit],
   )
 
-  return (
-    <>
-    <Dialog open={open} onOpenChange={requestOpenChange}>
-      <DialogContent
-        ref={contentRef}
-        aria-label={ariaLabel}
-        // Radix's own opt-out for the missing-description warning. The header
-        // renders a description when it has one and nothing when it does not;
-        // echoing the title into an sr-only node to silence the warning is what
-        // made screen readers say "New project. New project.".
-        aria-describedby={undefined}
-        showCloseButton={false}
-        onKeyDown={handleKeyDown}
-        tabIndex={-1}
-        // Focus goes to the first real field, not to the close button, so the
-        // surface opens ready to type — but if the caller has no field to
-        // focus, focus must still land INSIDE the surface, or ⌘↵ never reaches
-        // the handler above and the shell's headline promise is silently false
-        // until the user clicks. A field's own autoFocus runs after this and
-        // wins, so this is a floor, not an override.
-        onOpenAutoFocus={(e) => {
-          e.preventDefault()
-          openerRef.current = document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null
-          contentRef.current?.focus({ preventScroll: true })
-        }}
-        onCloseAutoFocus={(e) => {
-          if (restoreOpenerFocus && openerRef.current?.isConnected) {
-            e.preventDefault()
-            openerRef.current.focus({ preventScroll: true })
-          }
-        }}
-        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
-      >
-        <SheetGrabber />
-        <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
-      </DialogContent>
-    </Dialog>
+  /* An AlertDialog, not a second CreateSurface: this is a decision with two
+     answers and no form, which is what AlertDialog is for. Keeping the
+     distinction is half of why there were three modal shells.
 
-    {/* An AlertDialog, not a second CreateSurface: this is a decision with two
-        answers and no form, which is what AlertDialog is for. Keeping the
-        distinction is half of why there were three modal shells.
+     It wears the surface's chrome all the same. Left on the primitive's
+     defaults it was a bg-background card with p-6, a 512px width and a
+     blue confirm — a different dialog language arriving on top of the one
+     the user is looking at, at the moment they are deciding whether to
+     lose work. Same card, same hairline header and footer, same paddings,
+     and the destructive answer is red because it destroys something.
 
-        It wears the surface's chrome all the same. Left on the primitive's
-        defaults it was a bg-background card with p-6, a 512px width and a
-        blue confirm — a different dialog language arriving on top of the one
-        the user is looking at, at the moment they are deciding whether to
-        lose work. Same card, same hairline header and footer, same paddings,
-        and the destructive answer is red because it destroys something. */}
+     Shared by both presentations: a page loses unsaved input exactly the
+     way a dialog does. */
+  const discardGuard = (
     <AlertDialog open={confirmingDiscard} onOpenChange={setConfirmingDiscard}>
       {/* The width override carries the primitive's own `data-[size=default]`
           variant. Without it the two rules tie on specificity and source order
@@ -368,6 +364,75 @@ export function CreateSurface({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+
+  if (presentation === "page") {
+    // Same open/closed contract as the dialog: closed renders nothing, so a
+    // caller can keep one `open` flag for both presentations.
+    if (!open) return null
+    return (
+      <>
+        <section
+          aria-label={ariaLabel}
+          data-slot="create-surface-page"
+          // Focusable so ⌘↵ has somewhere to land when no field has focus,
+          // but not auto-focused: a page does not steal focus on mount.
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          className={cn(SHELL_BASE, "h-full min-h-0 w-full outline-none", className)}
+        >
+          <InDialog.Provider value={false}>
+            <HeadingTag.Provider value="h1">
+              <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
+            </HeadingTag.Provider>
+          </InDialog.Provider>
+        </section>
+        {discardGuard}
+      </>
+    )
+  }
+
+  return (
+    <>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
+      <DialogContent
+        ref={contentRef}
+        aria-label={ariaLabel}
+        // Radix's own opt-out for the missing-description warning. The header
+        // renders a description when it has one and nothing when it does not;
+        // echoing the title into an sr-only node to silence the warning is what
+        // made screen readers say "New project. New project.".
+        aria-describedby={undefined}
+        showCloseButton={false}
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
+        // Focus goes to the first real field, not to the close button, so the
+        // surface opens ready to type — but if the caller has no field to
+        // focus, focus must still land INSIDE the surface, or ⌘↵ never reaches
+        // the handler above and the shell's headline promise is silently false
+        // until the user clicks. A field's own autoFocus runs after this and
+        // wins, so this is a floor, not an override.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          openerRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
+          contentRef.current?.focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          if (restoreOpenerFocus && openerRef.current?.isConnected) {
+            e.preventDefault()
+            openerRef.current.focus({ preventScroll: true })
+          }
+        }}
+        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
+      >
+        <SheetGrabber />
+        <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
+      </DialogContent>
+    </Dialog>
+
+    {discardGuard}
     </>
   )
 }
@@ -478,6 +543,7 @@ export function CreateSurfaceHeader({
 }: CreateSurfaceHeaderProps) {
   const inDialog = React.useContext(InDialog)
   const guard = React.useContext(CloseGuard)
+  const Heading = React.useContext(HeadingTag)
   const Title = inDialog ? DialogTitle : React.Fragment
   const titleProps = inDialog ? { asChild: true as const } : {}
 
@@ -503,7 +569,7 @@ export function CreateSurfaceHeader({
         {/* One title element spanning the whole path. Two headings side by side
             would make the accessible name "IssuesNew issue". */}
         <Title {...titleProps}>
-          <h2 className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
+          <Heading className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
             {context != null && (
               <>
                 <span
@@ -534,7 +600,7 @@ export function CreateSurfaceHeader({
               </>
             )}
             <span className="truncate text-foreground">{title}</span>
-          </h2>
+          </Heading>
         </Title>
 
         <div className="flex-1" />
@@ -753,7 +819,8 @@ export function CreateSurfaceSection({
   accent,
   className,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"section">, "title"> & {
   title?: React.ReactNode
   hint?: React.ReactNode
   concept?: string
@@ -763,7 +830,7 @@ export function CreateSurfaceSection({
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("flex flex-col gap-2.5", className)}>
+    <section className={cn("flex flex-col gap-2.5", className)} {...props}>
       {title != null && (
         <div className="flex items-center gap-1.5">
           {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}

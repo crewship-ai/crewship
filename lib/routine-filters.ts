@@ -23,6 +23,8 @@ export interface RoutineFilterState {
   invocations: "all" | "popular" | "fresh"
   authorAgentId: string | null
   showEphemeral: boolean
+  /** Release-verification fixtures (`test-*` slugs) are hidden unless asked for. */
+  showTestRoutines?: boolean
 }
 
 /** The routine fields the filter reads — a narrow view, not the row. */

@@ -42,9 +42,9 @@ import {
   AlertCircle,
   History,
 } from "lucide-react"
-import { DetailCard, Pill, StatStrip } from "@/components/ui/detail"
+import { DetailCard, Pill } from "@/components/ui/detail"
 import { RoutineIdentityHeader } from "./routine-identity-header"
-import { RoutineNavigation, routineViewHref } from "./routine-navigation"
+import { routineViewHref } from "./routine-navigation"
 import {
   routineRunPresentation,
   routineResultLabel,
@@ -112,13 +112,13 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   const [stopping, setStopping] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
-  const [showAttempts, setShowAttempts] = useState(false)
-  const [showActivity, setShowActivity] = useState(false)
+  // One disclosure holds every piece of evidence a finished run leaves behind;
+  // both lazy lists inside it mount on the first open.
+  const [showTechnical, setShowTechnical] = useState(false)
   useEffect(() => {
     setSelectedStep(null)
     setConfirmStop(false)
-    setShowAttempts(false)
-    setShowActivity(false)
+    setShowTechnical(false)
   }, [runId])
   const tokens = useMemo(
     () =>
@@ -255,6 +255,9 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   const presentation = routineRunPresentation(run)
   const currentStep = dsl?.steps?.find((s) => s.id === run.current_step_id)
   const active = ["queued", "running", "waiting", "paused"].includes(run.status)
+  // A run that ended badly on its own merits (failed, interrupted, result
+  // failed); a stopped run is not offered a fix because nothing broke.
+  const failed = !active && presentation.tone === "destructive"
   const explanation = routineRunExplanation(
     run,
     active ? (approval.waitpoint ? "approval" : currentStep?.wait?.kind) : undefined,
@@ -363,13 +366,31 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         }
       >
         <Pill tone={presentation.tone}>{presentation.label}</Pill>
-        {run.pipeline_version != null && (
-          <span className="text-xs text-muted-foreground">
-            Viewing run of recipe v{run.pipeline_version}
-          </span>
-        )}
+        {/* The facts of this run as one sentence: what used to be a four-cell
+          stat strip below a second row of tabs. */}
+        <span className="text-xs text-muted-foreground" data-testid="run-facts">
+          started <span className="font-mono">{formatRoutineTime(run.started_at)}</span>
+          {" · "}
+          {triggerLabel}
+          {!active && run.duration_ms != null && (
+            <>
+              {" · "}took{" "}
+              <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
+            </>
+          )}
+          {" · "}
+          {run.pipeline_version != null ? (
+            <Link
+              className="text-primary hover:underline"
+              href={`${routineViewHref(run.pipeline_slug, "versions")}&version=${run.pipeline_version}`}
+            >
+              recipe v{run.pipeline_version} ↗
+            </Link>
+          ) : (
+            "recipe version unavailable"
+          )}
+        </span>
       </RoutineIdentityHeader>
-      <RoutineNavigation slug={run.pipeline_slug} view="run" runId={runId} />
 
       {/* The verdict, then the facts. Both used to sit inside a card called Run
         summary, above a second row of tabs — three levels of chrome before the
@@ -383,12 +404,9 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-medium">{explanation.title}</h2>
-            <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer hover:text-foreground">
-                What this means
-              </summary>
-              <p className="mt-2 max-w-[85ch] leading-relaxed">{explanation.detail}</p>
-            </details>
+            <p className="mt-1 max-w-[85ch] text-xs leading-relaxed text-muted-foreground">
+              {explanation.detail}
+            </p>
           </div>
           <Link
             className="inline-flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline"
@@ -420,6 +438,31 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
               </p>
             )}
           </div>
+        )}
+        {failed && (
+          <p className="text-xs text-muted-foreground" data-testid="run-next-step">
+            What you can do: fix the step in{" "}
+            <Link
+              className="text-primary hover:underline"
+              href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, view: "edit" })}`}
+            >
+              Edit recipe
+            </Link>
+            , then{" "}
+            {roleAtLeast(role, "MEMBER") ? (
+              <button
+                type="button"
+                className="text-primary hover:underline disabled:opacity-60"
+                disabled={starting}
+                onClick={() => void prepareAgain()}
+              >
+                run again
+              </button>
+            ) : (
+              "run again"
+            )}
+            .
+          </p>
         )}
         {run.issue_identifier && (
           <Link
@@ -453,31 +496,6 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           <button onClick={approval.refresh}>Retry</button>
         </p>
       )}
-
-      <StatStrip
-        items={[
-          {
-            label: "Started",
-            value: formatRoutineTime(run.started_at),
-          },
-          { label: "Duration", value: formatDurationMs(run.duration_ms) },
-          { label: "Started by", value: triggerLabel },
-          {
-            label: "Recipe",
-            value:
-              run.pipeline_version != null ? (
-                <Link
-                  className="text-primary"
-                  href={`${routineViewHref(run.pipeline_slug, "versions")}&version=${run.pipeline_version}`}
-                >
-                  Executed v{run.pipeline_version} ↗
-                </Link>
-              ) : (
-                "Version unavailable"
-              ),
-          },
-        ]}
-      />
 
       <Dialog open={confirmStop} onOpenChange={setConfirmStop}>
         <DialogContent>
@@ -596,10 +614,11 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
 
       <RoutineSavedInputs key={`inputs-${runId}`} values={run.inputs} definition={dsl} />
 
-      {/* Live work is what the reader came for while a run is going; the event
-        log of a finished run is evidence, and evidence belongs behind a
-        disclosure rather than filling the page under the readable result. */}
-      {active ? (
+      {/* Live work is what the reader came for while a run is going, so it stays
+        on the page; the event log, the attempt list and the identifiers of a
+        finished run are evidence, and evidence lives behind ONE disclosure
+        rather than three, under the readable result. */}
+      {active && (
         <DetailCard title="Activity" icon={Activity} subtitle="live" bare>
           <RunActivityTimeline
             workspaceId={workspaceId}
@@ -611,57 +630,60 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             showControls
           />
         </DetailCard>
-      ) : (
-        <details
-          onToggle={(e) => setShowActivity(e.currentTarget.open)}
-          className="overflow-hidden rounded-xl border border-border/60 bg-card"
-        >
-          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
-            <Activity className="h-4 w-4" />
-            Activity · recorded events from this run
-          </summary>
-          <div className="border-t border-hairline">
-            {showActivity && (
-              <RunActivityTimeline
+      )}
+      <details
+        data-testid="run-technical-details"
+        onToggle={(e) => setShowTechnical(e.currentTarget.open)}
+        className="overflow-hidden rounded-xl border border-border/60 bg-card text-xs"
+      >
+        <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-muted-foreground">
+          <History className="h-4 w-4" />
+          Technical details · activity, attempts, recorded executions
+        </summary>
+        <div className="space-y-4 border-t border-hairline px-4 py-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-muted-foreground">
+            <dt>Run</dt>
+            <dd className="break-all font-mono">{run.id}</dd>
+            <dt>Recipe hash</dt>
+            <dd className="break-all font-mono">{run.definition_hash || "unavailable"}</dd>
+            <dt>Cost</dt>
+            <dd className="font-mono">${run.cost_usd.toFixed(4)}</dd>
+            <dt>Mode</dt>
+            <dd>{run.mode}</dd>
+          </dl>
+          {!active && (
+            <section data-testid="run-activity-section">
+              <h3 className="mb-2 flex items-center gap-2 text-muted-foreground">
+                <Activity className="h-4 w-4" />
+                Activity · recorded events from this run
+              </h3>
+              {showTechnical && (
+                <RunActivityTimeline
+                  workspaceId={workspaceId}
+                  params={{ run_id: runId }}
+                  title="Run activity"
+                  card={false}
+                  hideWhenEmpty={false}
+                  showControls
+                />
+              )}
+            </section>
+          )}
+          <section data-testid="run-executions-section">
+            <h3 className="mb-2 flex items-center gap-2 text-muted-foreground">
+              <History className="h-4 w-4" />
+              All recorded executions and attempts
+            </h3>
+            {showTechnical && (
+              <RoutineExecutionHistory
+                key={`executions-${runId}`}
                 workspaceId={workspaceId}
-                params={{ run_id: runId }}
-                title="Run activity"
-                card={false}
-                hideWhenEmpty={false}
-                showControls
+                runId={runId}
+                active={active}
               />
             )}
-          </div>
-        </details>
-      )}
-
-      <details
-        onToggle={(e) => setShowAttempts(e.currentTarget.open)}
-        className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs"
-      >
-        <summary className="flex cursor-pointer items-center gap-2 text-muted-foreground">
-          <History className="h-4 w-4" />
-          All recorded executions and attempts
-        </summary>
-        <div className="mt-4">
-          {showAttempts && (
-            <RoutineExecutionHistory
-              key={`executions-${runId}`}
-              workspaceId={workspaceId}
-              runId={runId}
-              active={active}
-            />
-          )}
+          </section>
         </div>
-      </details>
-      <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Technical details</summary>
-        <dl className="mt-2 space-y-1">
-          <div>Run: {run.id}</div>
-          <div>Recipe hash: {run.definition_hash || "unavailable"}</div>
-          <div>Cost: ${run.cost_usd.toFixed(4)}</div>
-          <div>Mode: {run.mode}</div>
-        </dl>
       </details>
     </div>
   )
