@@ -29,11 +29,14 @@ Compared to other layers in Crewship:
 
 ### The routines page
 
-The main **Routines** list shows each recipe's name, purpose and step count.
-Search and status filters apply to both this list and the sidebar. **Health**,
-**Calendar** and **Recent runs** are separate views. Missing descriptions are
-summarized from actual step actions; an unreadable recipe is shown as unavailable.
-On a phone, the sidebar opens over the main view and closes after selection.
+The main **Routines** list is the one list: each row carries the recipe's name,
+purpose, step count, how it runs (manual or its plan), how its last run went and
+when. A run waiting for a decision sits above the list as a banner. Search and
+the result filters (All / Need me / Running / Failed / Never run) sit above the
+rows; **Show hidden** reveals temporary routines and release-verification
+fixtures. **Calendar** and **Recent runs** are the other views. Missing
+descriptions are summarized from actual step actions; an unreadable recipe is
+shown as unavailable.
 
 Selecting a routine uses `?slug=` in the URL. Reload and browser history preserve
 that selection. A selected run adds `&run=` and keeps its recorded recipe version.
@@ -42,10 +45,10 @@ that selection. A selected run adds `&run=` and keeps its recorded recipe versio
 
 | View | What it answers |
 | --- | --- |
-| **Recipe** | What the routine does: purpose, inputs, results, readable steps, access and scheduled starts. List and Map show the same steps. **Edit** opens the authoring surface. |
+| **Overview** | Three answers first: *What it does* (readable steps, List or Map), *Last time* (the last run and its verdict) and *Before you run* (the questions asked, declared results, what a run can reach, and how it runs). Status chrome, metadata and access fold into **Technical details**. **Edit** opens the recipe as a page at `?view=edit`; nothing there is live until Publish is confirmed. |
 | **History** | Recorded runs, their verdicts and how they started. Each opens its run detail. Composition depth is under Technical details. |
 | **Versions** | Published recipes and an explicit comparison of chosen versions. Comparison starts real work and can change connected systems or incur costs. |
-| **Schedule** | Scheduled starts and their saved inputs, shared with Calendar. |
+| **Plan** | Repeating plans, one-time starts, webhooks and the automations that can start this routine, with their saved inputs, shared with Calendar. |
 
 Steps use an explicit name when provided, otherwise a description of their action.
 Stable IDs remain secondary technical identifiers. Empty schedules and results
@@ -1631,7 +1634,7 @@ edit dialog exposes:
 **If it overlaps** (`concurrency_key` / `max_concurrent`) is shown read-only
 here too, but for a different reason: those fields live on the routine's
 DSL, shared by every schedule/webhook/manual run of it, not on any one
-schedule — so the dialog links to the routine's own Editor tab instead of
+schedule — so the dialog links to the routine's recipe editor (Edit) instead of
 offering a control that would silently change every trigger's behaviour at
 once.
 
@@ -2097,7 +2100,7 @@ These chats raise **no** "agent replied" inbox item, by design: nobody asked the
 While at least one routine run is in flight, the dashboard surfaces it from anywhere in the app:
 
 - **Header chip** — a pulsing "N routines running" pill appears in the toolbar next to the Online / Crews pills (hidden when nothing is active). If any run is parked on a human approval it turns amber and appends "· M awaiting approval". Clicking opens a popover with the six newest active runs — routine name, short run id, elapsed time, cost so far, current step — each with **Open trace ↗** (deep-link to `/activity?run=<id>`), **Cancel** (same manage-tier RBAC as the Runs tab), and a **Review →** shortcut into the routine for parked runs. With more than six active runs a "View all N running →" footer jumps to the Activity rail pre-filtered to the active bucket (`/activity?status=active`).
-- **`/routines` sidebar** — a routine with an active run gets a pulsing blue dot and a sub-line showing the current step and elapsed time (`▶ ask-casey · 0:12`); a parked run shows the amber `⏸ awaiting approval` variant.
+- **`/routines` list** — a routine with an active run shows a live *Running* pill, and a parked run *Waiting for you* with its own banner above the list.
 - **`/routines` list table** — the status cell swaps the historical "last run" pill for a live **Running** (or amber **Awaiting approval**) pill with current step · elapsed · cost, and live routines bubble to the top of the table regardless of the chosen column sort.
 
 All three surfaces share one workspace-scoped subscription (`GET /api/v1/workspaces/{ws}/pipeline-runs?status=active` + the `pipeline.run.*`/`pipeline.step.started` events, 3s poll while anything is active). `status=active` bundles `running`, `queued`, `paused` **and `waiting`** — the status a run parks in while a [HITL waitpoint](#hitl-waitpoints) awaits a decision.

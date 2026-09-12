@@ -62,15 +62,26 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // as an alias and rewritten on the first pick.
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
   const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
+  // The detail's own view (`?view=edit` opens the page editor). It belongs to
+  // one routine: leaving or switching routines must not carry it along, or
+  // the next routine opened would land in the editor uninvited.
+  const [detailView, setDetailView] = useUrlSelection("view")
+  const editing = detailView === "edit" || detailView === "settings"
+  const leaveRoutine = () => {
+    setDetailView(null, { replace: true })
+    setSelectedRun(null, { replace: true })
+    setSelectedSlug(null)
+  }
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [linkedDraft, setLinkedDraft] = useUrlSelection("draft")
   const [linkedDraftId, setLinkedDraftId] = useUrlSelection("draft_id")
   const [linkedWorkspace, setLinkedWorkspace] = useUrlSelection("workspace")
 
-  // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
-  // search input, `Esc` clears every filter, `c` opens the create
-  // dialog. Skips when typing in inputs/textarea/contentEditable.
+  // Keyboard shortcuts (mirrors /issues): `/` focuses the list's search
+  // input (a no-op on the other views, which have no search), `Esc` clears
+  // every filter, `c` opens the create dialog. Skips when typing in
+  // inputs/textarea/contentEditable.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
@@ -131,6 +142,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
+    setDetailView(null, { replace: true })
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
   }
 
@@ -209,33 +221,38 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     toolbar. Keeps global affordances (List/Schedules/
                     Insights tabs, Import, New routine) where they
                     belong. */}
-                <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSlug(null)}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Back to routines
-                  </button>
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                  <span
-                    className="truncate text-xs font-medium text-foreground/85"
-                    title={selectedRoutine?.name || selectedSlug}
-                  >
-                    {selectedRoutine?.name || selectedSlug}
-                  </span>
-                  {selectedRoutine?.slug && (
-                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
-                      {selectedRoutine.slug}
+                {/* While the page editor is open, its own header × and footer
+                    Cancel are the way out — both ask before discarding. A
+                    second, unguarded Back here would throw edits away. */}
+                {!editing && (
+                  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={leaveRoutine}
+                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      Back to routines
+                    </button>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                    <span
+                      className="truncate text-xs font-medium text-foreground/85"
+                      title={selectedRoutine?.name || selectedSlug}
+                    >
+                      {selectedRoutine?.name || selectedSlug}
                     </span>
-                  )}
-                </div>
+                    {selectedRoutine?.slug && (
+                      <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
+                        {selectedRoutine.slug}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 overflow-hidden">
                   <RoutinesDetailPanel
                     workspaceId={workspaceId}
                     slug={selectedSlug}
-                    onClose={() => setSelectedSlug(null)}
+                    onClose={leaveRoutine}
                     onChanged={refresh}
                     onRunStarted={setSelectedRun}
                   />
@@ -260,6 +277,10 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                   error={error}
                   onSelect={handleSelect}
                   onFilter={(status) => setFilters((f) => ({ ...f, status }))}
+                  showHidden={!!filters.showEphemeral && !!filters.showTestRoutines}
+                  onToggleHidden={(show) =>
+                    setFilters((f) => ({ ...f, showEphemeral: show, showTestRoutines: show }))
+                  }
                 />
               </motion.div>
             )}

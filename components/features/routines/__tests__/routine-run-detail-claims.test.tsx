@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutineRunDetail } from "../routine-run-detail"
 
@@ -231,6 +231,17 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
 })
 
 describe("routine run detail — one page, one order (#2519)", () => {
+  it("leads with a way back to the routine and the list, even when deep-linked", () => {
+    h.run = baseRun({ pipeline_slug: "daily-triage", pipeline_name: "Daily triage" })
+    render(<RoutineRunDetail workspaceId="ws1" runId="run-1" />)
+    const crumbs = screen.getByRole("navigation", { name: "Run location" })
+    expect(within(crumbs).getByRole("link", { name: "Routines" })).toHaveAttribute("href", "/routines")
+    expect(within(crumbs).getByRole("link", { name: "Daily triage" })).toHaveAttribute(
+      "href",
+      "/routines?slug=daily-triage",
+    )
+  })
+
   it("reads the run without a second row of tabs, and keeps the facts as one line", () => {
     h.run = baseRun({ pipeline_version: 3 })
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
