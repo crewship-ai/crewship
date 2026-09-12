@@ -136,7 +136,7 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
   test("editing a schedule's cron shows a live preview and the saved cron sticks", async ({ page }) => {
     await page.goto(`/routines?slug=${SLUG}`)
 
-    await page.getByRole("button", { name: "Schedule", exact: true }).click()
+    await page.getByRole("button", { name: "Plan", exact: true }).click()
 
     const editButton = page.getByRole("button", { name: /Edit schedule e2e reliability schedule/i })
     await expect(editButton).toBeVisible({ timeout: TIMEOUT })

@@ -86,6 +86,14 @@ interface Props {
   open: boolean
   onClose: () => void
   onCreated: (slug: string) => void
+  /**
+   * `"page"` mounts the editor as the routines content area instead of a
+   * modal (#2519): the layout owns the breadcrumb, the header reads
+   * "Edit recipe", and the shell's size classes do not apply. Everything
+   * else — the save-token flow, the publish confirmation, the discard
+   * guard — is the same code.
+   */
+  presentation?: "dialog" | "page"
 }
 
 type Mode = "entry" | "describe" | "fork" | "advanced"
@@ -230,8 +238,10 @@ export function RoutineCreateDialog({
   routine,
   initialDraft,
   savedDraftLink,
+  presentation = "dialog",
 }: Props) {
   const router = useRouter()
+  const page = presentation === "page"
   const [mode, setMode] = useState<Mode>("entry")
 
   // ── Shared meta ────────────────────────────────────────────────────
@@ -1124,7 +1134,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
         ? "Start from an existing routine"
         : mode === "advanced"
           ? routine
-            ? "Edit your routine"
+            ? page
+              ? "Edit recipe"
+              : "Edit your routine"
             : "Build your routine"
           : "New routine"
   const headerSub =
@@ -1133,7 +1145,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       : mode === "fork"
         ? "fork one of your own routines"
         : mode === "advanced"
-          ? "Set up the recipe, save a draft, then publish when ready."
+          ? page
+            ? "Nothing here is live until you publish and confirm."
+            : "Set up the recipe, save a draft, then publish when ready."
           : // The entry screen had no subtitle, so three tiles appeared with
             // nothing saying they are three routes to the same place. People
             // read a picker as "which kind am I making", and the answer is that
@@ -1190,18 +1204,21 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
         if (!next) onClose()
       }}
       size="lg"
+      presentation={presentation}
       dirty={dirty}
       discardLabel="this routine"
       onSubmit={handleKeyboardSubmit}
       className={
-        mode === "advanced"
+        mode === "advanced" && !page
           ? "sm:h-[min(85vh,760px)] sm:max-h-[90vh] sm:max-w-[800px]"
           : undefined
       }
     >
       <CreateSurfaceHeader
         concept="routines"
-        context="Routines"
+        // As a page, the layout's breadcrumb already says "Routines › name";
+        // repeating it inside the surface would be two crumbs in one view.
+        context={page ? undefined : "Routines"}
         title={headerTitle}
         description={headerSub}
         onBack={routine || mode === "entry" ? undefined : () => setMode("entry")}
@@ -1564,7 +1581,16 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     Based on {forkSource}. Publishing creates a separate routine.
                   </p>
                 )}
-                <CreateSurfaceSection title="Identity" concept="routines">
+                {/* The document reads top to bottom in the order a person asks
+                    about a routine: what it is, what it is for, what it asks
+                    before a run, what it does — then, folded, who runs it and
+                    the technical facts (#2519). `data-doc-section` names each
+                    block so the order is testable without reaching for copy. */}
+                <CreateSurfaceSection
+                  title="Identity"
+                  concept="routines"
+                  data-doc-section="identity"
+                >
                   <div className="flex items-center gap-3">
                     <CrewIconPopover
                       modal
@@ -1583,7 +1609,14 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                       placeholder="Routine name"
                     />
                   </div>
-                  <CreateSurfaceField label="Description" htmlFor="routine-description">
+                </CreateSurfaceSection>
+
+                <CreateSurfaceSection
+                  title="Purpose"
+                  hint="shown in the list"
+                  data-doc-section="description"
+                >
+                  <CreateSurfaceField label="What this routine does" htmlFor="routine-description">
                     <CreateSurfaceDescriptionInput
                       id="routine-description"
                       value={description || String(parsedDSL?.description ?? "")}
@@ -1609,201 +1642,53 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                       className="min-h-20 resize-y"
                     />
                   </CreateSurfaceField>
-
-                  <CreateSurfaceField label="Team" htmlFor="routine-author-crew">
-                    <CrewPicker
-                      id="routine-author-crew"
-                      ariaLabel="Select author crew"
-                      crews={crews}
-                      value={authorCrewId}
-                      onChange={setAuthorCrewId}
-                      placeholder="— choose at runtime —"
-                      clearLabel="— choose at runtime —"
-                    />
-                  </CreateSurfaceField>
                 </CreateSurfaceSection>
 
-                {definitionRows(parsedDSL?.steps).some((s) => s.type === "agent_run") && (
-                  <section className="space-y-3 border-t border-hairline pt-4">
-                    <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Agents
-                    </h3>
-                    {definitionRows(parsedDSL?.steps).map((step, index) =>
-                      step.type === "agent_run" ? (
-                        <div key={index} className="space-y-2">
-                          <label id={`agent-step-label-${index}`} className="text-sm">
-                            {String(step.name || step.id)}
-                          </label>
-                          <Select
-                            value={String(step.agent_slug || "")}
-                            onValueChange={(agent_slug) => {
-                              if (!parsedDSL) return
-                              const steps = definitionRows(parsedDSL.steps).map((s, i) =>
-                                i === index ? { ...s, agent_slug } : s,
-                              )
-                              replaceBuffer(
-                                dslFormat === "yaml"
-                                  ? toYaml({ ...parsedDSL, steps })
-                                  : JSON.stringify({ ...parsedDSL, steps }, null, 2),
-                                { baseline: false },
-                              )
-                            }}
-                            disabled={!authorCrewId}
-                          >
-                            <SelectTrigger
-                              aria-labelledby={`agent-step-label-${index}`}
-                              className="h-11 w-full rounded-xl bg-muted/30"
-                            >
-                              <SelectValue placeholder="Choose an agent" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {!agents.some(
-                                (a) =>
-                                  a.crew_id === authorCrewId &&
-                                  a.slug === step.agent_slug,
-                              ) && step.agent_slug ? (
-                                <SelectItem value={String(step.agent_slug)} disabled>
-                                  {String(step.agent_slug)} · choose an agent from this
-                                  crew
-                                </SelectItem>
-                              ) : null}
-                              {agents
-                                .filter((a) => a.crew_id === authorCrewId)
-                                .map((a) => (
-                                  <SelectItem key={a.id} value={a.slug}>
-                                    <span className="inline-flex items-center gap-2">
-                                      <AgentAvatar
-                                        seed={a.avatar_seed || a.name}
-                                        style={
-                                          a.avatar_style || describeCrew?.avatar_style
-                                        }
-                                        avatarUrl={a.avatar_url}
-                                        className="h-6 w-6"
-                                        alt=""
-                                      />
-                                      <span>{a.name}</span>
-                                      <span className="text-xs text-muted-foreground">
-                                        {a.role_title || a.agent_role.toLowerCase()}
-                                      </span>
-                                    </span>
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ) : null,
-                    )}
-                    {!authorCrewId && (
-                      <p className="text-xs text-muted-foreground">
-                        Choose a crew above to see its agents.
-                      </p>
-                    )}
-                  </section>
-                )}
-                <details className="group border-t border-hairline">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
-                    <span className="text-sm font-medium">Inputs</span>
-                    <span className="text-xs text-muted-foreground">
-                      {definitionRows(parsedDSL?.inputs).length
-                        ? `${definitionRows(parsedDSL?.inputs).length} questions`
-                        : "No questions"}{" "}
-                      · Edit
-                    </span>
-                  </summary>
-                  <div className="pb-3">
-                    {" "}
-                    {parsedDSL &&
-                    (parsedDSL.inputs == null ||
-                      (Array.isArray(parsedDSL.inputs) &&
-                        parsedDSL.inputs.every(
-                          (i) =>
-                            i != null &&
-                            typeof i === "object" &&
-                            typeof i.name === "string",
-                        ))) ? (
-                      <RoutineInputFormBuilder
-                        inputs={
-                          definitionRows(
-                            parsedDSL.inputs,
-                          ) as unknown as RoutineInputSpec[]
-                        }
-                        onChange={(inputs) =>
-                          replaceBuffer(
-                            dslFormat === "yaml"
-                              ? toYaml({ ...parsedDSL, inputs })
-                              : JSON.stringify({ ...parsedDSL, inputs }, null, 2),
-                            { baseline: false },
-                          )
-                        }
-                      />
-                    ) : (
-                      <p className="text-sm text-destructive">
-                        Fix the input declarations in Code to edit the start form.
-                      </p>
-                    )}
-                  </div>
-                </details>
-                <details className="border-t border-hairline">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
-                    <span className="text-sm font-medium">Results</span>
-                    <span className="text-xs text-muted-foreground">
-                      {definitionRows(parsedDSL?.outputs).length} declared · View
-                    </span>
-                  </summary>
-                  <div className="space-y-3 pb-3">
-                    {definitionRows(parsedDSL?.outputs).map((output, i) => (
-                      <div key={i}>
-                        <p className="text-sm">
-                          {String(output.label || output.name || "Result")}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {String(
-                            output.description ||
-                              "No description supplied by the author.",
-                          )}
-                        </p>
-                      </div>
-                    ))}
-                    {!definitionRows(parsedDSL?.outputs).length && (
-                      <p className="text-sm text-muted-foreground">
-                        No outputs declared yet.
-                      </p>
-                    )}
-                    <button
-                      type="button"
-                      className="text-sm text-primary"
-                      onClick={() => setSection("Code")}
-                    >
-                      Edit expected results in Code →
-                    </button>
-                  </div>
-                </details>
-                <details className="border-t border-hairline pt-3">
-                  <summary className="cursor-pointer text-xs text-muted-foreground">
-                    Technical identity
-                  </summary>
-                  <div className="mt-4">
-                    {" "}
-                    <CreateSurfaceField
-                      label="Routine identifier"
-                      htmlFor="routine-slug"
-                      hint={
-                        routine
-                          ? "Permanent identifier. Editing saves a new version of this routine."
-                          : "Unique name used in links and code. Edit it in Code."
+                <CreateSurfaceSection
+                  title="Inputs"
+                  hint={
+                    definitionRows(parsedDSL?.inputs).length
+                      ? `${definitionRows(parsedDSL?.inputs).length} ${definitionRows(parsedDSL?.inputs).length === 1 ? "question" : "questions"} before a run`
+                      : "no questions — a run starts immediately"
+                  }
+                  data-doc-section="inputs"
+                >
+                  {parsedDSL &&
+                  (parsedDSL.inputs == null ||
+                    (Array.isArray(parsedDSL.inputs) &&
+                      parsedDSL.inputs.every(
+                        (i) =>
+                          i != null &&
+                          typeof i === "object" &&
+                          typeof i.name === "string",
+                      ))) ? (
+                    <RoutineInputFormBuilder
+                      inputs={
+                        definitionRows(
+                          parsedDSL.inputs,
+                        ) as unknown as RoutineInputSpec[]
                       }
-                    >
-                      <Input
-                        id="routine-slug"
-                        value={slug}
-                        readOnly
-                        className={CREATE_SURFACE_INPUT}
-                      />
-                    </CreateSurfaceField>
-                  </div>
-                </details>
+                      onChange={(inputs) =>
+                        replaceBuffer(
+                          dslFormat === "yaml"
+                            ? toYaml({ ...parsedDSL, inputs })
+                            : JSON.stringify({ ...parsedDSL, inputs }, null, 2),
+                          { baseline: false },
+                        )
+                      }
+                    />
+                  ) : (
+                    <p className="text-sm text-destructive">
+                      Fix the input declarations in Code to edit the start form.
+                    </p>
+                  )}
+                </CreateSurfaceSection>
+
                 {!routine && (
-                  <details className="border-t border-hairline pt-3">
+                  <details
+                    className="border-t border-hairline pt-3"
+                    data-doc-section="template"
+                  >
                     <summary className="cursor-pointer text-sm">
                       Choose a starter template
                     </summary>
@@ -1819,88 +1704,253 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     </div>
                   </details>
                 )}
-              </div>
-              {parsedDSL ? (
-                <RoutineRecipeSteps
-                  definition={parsedDSL}
-                  testPanel={{
-                    workspaceId,
-                    definition: parsedDSL,
-                    busy: busy !== "none",
-                    result: testResult,
-                    onValidate: handleTestRun,
-                    onOpenCode: () => setSection("Code"),
-                    parseError,
-                  }}
-                  slug={slug}
-                  name={name || slug}
-                  onChange={(next) =>
-                    replaceBuffer(
-                      dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2),
-                      { baseline: false },
-                    )
-                  }
-                  onOpenCode={() => setSection("Code")}
-                />
-              ) : (
-                <p className="text-sm text-destructive">
-                  Fix the recipe in Code to see its steps.
-                </p>
-              )}
-              {reviewingExisting && (
-                <p className="text-sm text-muted-foreground">
-                  Plans, webhooks and budgets are managed outside this draft, in the
-                  routine’s Plan tab.
-                </p>
-              )}
-              {!reviewingExisting && (
-                <div className="space-y-5">
-                  {" "}
-                  <RoutineTriggerFields
-                    workspaceId={workspaceId}
-                    value={trigger}
-                    onChange={setTrigger}
-                  />
-                  {(trigger.kind === "schedule" || trigger.kind === "once") &&
-                    scheduledFields.length > 0 && (
+
+                <CreateSurfaceSection title="Recipe steps" data-doc-section="steps">
+                  {parsedDSL ? (
+                    <RoutineRecipeSteps
+                      definition={parsedDSL}
+                      testPanel={{
+                        workspaceId,
+                        definition: parsedDSL,
+                        busy: busy !== "none",
+                        result: testResult,
+                        onValidate: handleTestRun,
+                        onOpenCode: () => setSection("Code"),
+                        parseError,
+                      }}
+                      slug={slug}
+                      name={name || slug}
+                      onChange={(next) =>
+                        replaceBuffer(
+                          dslFormat === "yaml" ? toYaml(next) : JSON.stringify(next, null, 2),
+                          { baseline: false },
+                        )
+                      }
+                      onOpenCode={() => setSection("Code")}
+                    />
+                  ) : (
+                    <p className="text-sm text-destructive">
+                      Fix the recipe in Code to see its steps.
+                    </p>
+                  )}
+                </CreateSurfaceSection>
+
+                {!reviewingExisting && (
+                  <div className="space-y-5" data-doc-section="start">
+                    <RoutineTriggerFields
+                      workspaceId={workspaceId}
+                      value={trigger}
+                      onChange={setTrigger}
+                    />
+                    {(trigger.kind === "schedule" || trigger.kind === "once") &&
+                      scheduledFields.length > 0 && (
+                        <section className="space-y-3">
+                          <h3 className="text-sm font-medium">Inputs for scheduled runs</h3>
+                          {scheduledFields.map((field) => (
+                            <FormField
+                              key={field.name}
+                              field={field}
+                              value={scheduledValues[field.name] ?? field.default ?? ""}
+                              onChange={(e) =>
+                                setScheduledValues((values) => ({
+                                  ...values,
+                                  [field.name]: e.target.value,
+                                }))
+                              }
+                              idPrefix="scheduled-input-"
+                            />
+                          ))}
+                        </section>
+                      )}
+                    <p className="text-sm text-muted-foreground">
+                      Publishing activates the selected schedule. Save draft leaves
+                      automatic starts unchanged.
+                    </p>
+                  </div>
+                )}
+
+                {/* Rarely touched, so folded: who runs it, what it declares as
+                    results, and the identifier it is known by. One disclosure,
+                    not three — three folds in a row read as three screens. */}
+                <details className="group border-t border-hairline" data-doc-section="team">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-3">
+                    <span className="text-sm font-medium">
+                      Team, results and technical identity
+                    </span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {describeCrew?.name || (authorCrewId ? "Team set" : "No team")} ·{" "}
+                      {definitionRows(parsedDSL?.outputs).length} results · {slug}
+                    </span>
+                  </summary>
+                  <div className="space-y-5 pb-3">
+                    <CreateSurfaceField label="Team" htmlFor="routine-author-crew">
+                      <CrewPicker
+                        id="routine-author-crew"
+                        ariaLabel="Select author crew"
+                        crews={crews}
+                        value={authorCrewId}
+                        onChange={setAuthorCrewId}
+                        placeholder="— choose at runtime —"
+                        clearLabel="— choose at runtime —"
+                      />
+                    </CreateSurfaceField>
+
+                    {definitionRows(parsedDSL?.steps).some((s) => s.type === "agent_run") && (
                       <section className="space-y-3">
-                        <h3 className="text-sm font-medium">Inputs for scheduled runs</h3>
-                        {scheduledFields.map((field) => (
-                          <FormField
-                            key={field.name}
-                            field={field}
-                            value={scheduledValues[field.name] ?? field.default ?? ""}
-                            onChange={(e) =>
-                              setScheduledValues((values) => ({
-                                ...values,
-                                [field.name]: e.target.value,
-                              }))
-                            }
-                            idPrefix="scheduled-input-"
-                          />
-                        ))}
+                        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Agents
+                        </h4>
+                        {definitionRows(parsedDSL?.steps).map((step, index) =>
+                          step.type === "agent_run" ? (
+                            <div key={index} className="space-y-2">
+                              <label id={`agent-step-label-${index}`} className="text-sm">
+                                {String(step.name || step.id)}
+                              </label>
+                              <Select
+                                value={String(step.agent_slug || "")}
+                                onValueChange={(agent_slug) => {
+                                  if (!parsedDSL) return
+                                  const steps = definitionRows(parsedDSL.steps).map((s, i) =>
+                                    i === index ? { ...s, agent_slug } : s,
+                                  )
+                                  replaceBuffer(
+                                    dslFormat === "yaml"
+                                      ? toYaml({ ...parsedDSL, steps })
+                                      : JSON.stringify({ ...parsedDSL, steps }, null, 2),
+                                    { baseline: false },
+                                  )
+                                }}
+                                disabled={!authorCrewId}
+                              >
+                                <SelectTrigger
+                                  aria-labelledby={`agent-step-label-${index}`}
+                                  className="h-11 w-full rounded-xl bg-muted/30"
+                                >
+                                  <SelectValue placeholder="Choose an agent" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {!agents.some(
+                                    (a) =>
+                                      a.crew_id === authorCrewId &&
+                                      a.slug === step.agent_slug,
+                                  ) && step.agent_slug ? (
+                                    <SelectItem value={String(step.agent_slug)} disabled>
+                                      {String(step.agent_slug)} · choose an agent from this
+                                      crew
+                                    </SelectItem>
+                                  ) : null}
+                                  {agents
+                                    .filter((a) => a.crew_id === authorCrewId)
+                                    .map((a) => (
+                                      <SelectItem key={a.id} value={a.slug}>
+                                        <span className="inline-flex items-center gap-2">
+                                          <AgentAvatar
+                                            seed={a.avatar_seed || a.name}
+                                            style={
+                                              a.avatar_style || describeCrew?.avatar_style
+                                            }
+                                            avatarUrl={a.avatar_url}
+                                            className="h-6 w-6"
+                                            alt=""
+                                          />
+                                          <span>{a.name}</span>
+                                          <span className="text-xs text-muted-foreground">
+                                            {a.role_title || a.agent_role.toLowerCase()}
+                                          </span>
+                                        </span>
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null,
+                        )}
+                        {!authorCrewId && (
+                          <p className="text-xs text-muted-foreground">
+                            Choose a team above to see its agents.
+                          </p>
+                        )}
                       </section>
                     )}
-                  <p className="text-sm text-muted-foreground">
-                    Publishing activates the selected schedule. Save draft leaves
-                    automatic starts unchanged.
-                  </p>
-                </div>
-              )}
-              <details className="mt-5 border-t border-border pt-4">
-                <summary className="cursor-pointer text-sm font-medium">
-                  Publication changes
-                </summary>
-                <div className="mt-3">
-                  <RoutinePublicationReview
-                    draft={parsedDSL}
-                    published={publishedRecipe?.definition}
-                    existing={!!draftRef.current?.base_pipeline_id || !!routine}
-                    name={name || slug}
-                    validated={!!testResult?.passed}
-                  />
-                </div>
-              </details>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium">Results</h4>
+                      {definitionRows(parsedDSL?.outputs).map((output, i) => (
+                        <div key={i}>
+                          <p className="text-sm">
+                            {String(output.label || output.name || "Result")}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {String(
+                              output.description ||
+                                "No description supplied by the author.",
+                            )}
+                          </p>
+                        </div>
+                      ))}
+                      {!definitionRows(parsedDSL?.outputs).length && (
+                        <p className="text-sm text-muted-foreground">
+                          No outputs declared yet.
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        className="text-sm text-primary"
+                        onClick={() => setSection("Code")}
+                      >
+                        Edit expected results in Code →
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium">Technical identity</h4>
+                      <CreateSurfaceField
+                        label="Routine identifier"
+                        htmlFor="routine-slug"
+                        hint={
+                          routine
+                            ? "Permanent identifier. Editing saves a new version of this routine."
+                            : "Unique name used in links and code. Edit it in Code."
+                        }
+                      >
+                        <Input
+                          id="routine-slug"
+                          value={slug}
+                          readOnly
+                          className={CREATE_SURFACE_INPUT}
+                        />
+                      </CreateSurfaceField>
+                    </div>
+                  </div>
+                </details>
+
+                {reviewingExisting && (
+                  <details className="border-t border-hairline" data-doc-section="access">
+                    <summary className="cursor-pointer py-3 text-sm font-medium">
+                      Access, budget and technical details
+                    </summary>
+                    <p className="pb-3 text-sm text-muted-foreground">
+                      Plans, webhooks and budgets are managed outside this draft, in the
+                      routine’s Plan tab.
+                    </p>
+                  </details>
+                )}
+
+                <details className="border-t border-border pt-4" data-doc-section="publication">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Publication changes
+                  </summary>
+                  <div className="mt-3">
+                    <RoutinePublicationReview
+                      draft={parsedDSL}
+                      published={publishedRecipe?.definition}
+                      existing={!!draftRef.current?.base_pipeline_id || !!routine}
+                      name={name || slug}
+                      validated={!!testResult?.passed}
+                    />
+                  </div>
+                </details>
+              </div>
             </div>
             <div
               className={cn(

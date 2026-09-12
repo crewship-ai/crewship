@@ -21,7 +21,7 @@
 
 import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import type { Automation } from "@/lib/automations"
 import type { RoutineDetail } from "../routines-detail-panel"
@@ -153,9 +153,9 @@ beforeEach(() => {
   h.schedules = []
 })
 
-/** Opens the Automations pane of the Triggers card. */
+/** Automations live in Plan, next to schedules and webhooks (#2519). */
 function openAutomations() {
-  fireEvent.click(screen.getByRole("button", { name: /^automations$/i }))
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }))
 }
 
 describe("automations bound to a routine", () => {
@@ -329,19 +329,51 @@ describe("routine access and starting points", () => {
       },
     ]
     renderCard()
-    expect(screen.queryByText("Schedule · 0")).not.toBeInTheDocument()
+    // "Before you run" names the plan instead of a zero.
+    expect(screen.getByText(/Runs:/).parentElement).toHaveTextContent(/09:00/)
+    expect(screen.getByText(/Runs:/).parentElement).not.toHaveTextContent("Manual")
   })
 
-  it("distinguishes timed starts from webhook starts and opens their management", () => {
+  it("says Manual when nothing starts it on its own, and hands off to Plan", () => {
     renderCard()
-    expect(screen.getByText("Schedule · 0")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Edit schedule", exact: true }))
-    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
-    fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))
-    expect(screen.getByText(/Open Manage webhooks/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Manage webhooks", exact: true }))
-    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
+    const runs = screen.getByText(/Runs:/).parentElement!
+    expect(runs).toHaveTextContent("Manual")
+    fireEvent.click(within(runs).getByRole("button", { name: "change plan" }))
+    expect(screen.getByRole("button", { name: "Plan", pressed: true })).toBeInTheDocument()
+  })
+
+  it("lists the questions before a run and the effects, without revealing defaults", () => {
+    renderCard(
+      routine({
+        definition: {
+          inputs: [
+            {
+              name: "max_stale_hours",
+              type: "number",
+              required: true,
+              default: 24,
+              description: "How old a page may be",
+            },
+            { name: "token", type: "string", default: "private-value" },
+          ],
+          outputs: [{ name: "change_report", type: "string" }],
+          steps: [{ id: "probe", type: "script" }],
+        },
+      } as Partial<RoutineDetail>),
+    )
+    expect(screen.getByText("Max stale hours")).toBeInTheDocument()
+    expect(screen.getByText(/number · required · has a default/)).toBeInTheDocument()
+    expect(screen.getByText("How old a page may be")).toBeInTheDocument()
+    expect(screen.getByText(/Produces:/).parentElement).toHaveTextContent("Change report")
+    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
+    expect(screen.getByTestId("routine-effects-line")).toHaveTextContent(
+      /Scripts, tools, notifications or called routines can perform actions/,
+    )
+    // The status chrome that used to sit in the header now lives in one
+    // disclosure below the three answers.
+    const technical = screen.getByTestId("routine-technical")
+    expect(technical).not.toHaveAttribute("open")
+    expect(technical).toHaveTextContent("manual / event")
   })
   it("links credential requirements to accounts without inventing an assigned credential", () => {
     renderCard(
