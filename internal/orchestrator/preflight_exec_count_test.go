@@ -504,7 +504,7 @@ func TestPreparePreflightDirs_SecretsLockSpansTheFlush(t *testing.T) {
 		t.Run(adapter, func(t *testing.T) {
 			o, c, req := preflightFixture(t)
 			req.CLIAdapter = adapter
-			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
+			lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug, req.RunID)
 
 			var checked, heldDuringCredentialFlush bool
 			c.stdout = func(cfg provider.ExecConfig, stdin string) string {

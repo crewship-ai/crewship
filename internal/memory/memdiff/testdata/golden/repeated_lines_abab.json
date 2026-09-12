@@ -1,0 +1,56 @@
+{
+  "name": "repeated_lines_abab",
+  "why": "§8: 'Opakované řádky určuje jejich pozice v původní revizi.' base a,b,a,b,a -\u003e target a,b,a has THREE shortest scripts: delete lines {2,3}, {3,4} or {4,5}. The deterministic answer is {4,5}. Myers' greedy phase extends the diagonal as far as it can before spending an edit, so it matches base lines 1,2,3 against the entire target first and the frontier is already at (3,3); the only way on to (5,3) is two delete moves, which merge into a single span. The rule to remember: the EARLIEST occurrences in the base are kept.",
+  "base": "a\nb\na\nb\na\n",
+  "target": "a\nb\na\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 3,
+      "lines": [
+        "a\n",
+        "b\n",
+        "a\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 4,
+      "line_count": 2,
+      "lines": [
+        "b\n",
+        "a\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 4,
+      "line_count": 2,
+      "old_sha256": "aea8a04c2f293417e499bf5de2def8ebb1ed40264d128a67180ea56fbe4600ff"
+    }
+  ],
+  "applied": "a\nb\na\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 4,
+          "line_count": 2,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

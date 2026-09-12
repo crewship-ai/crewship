@@ -332,18 +332,40 @@ func KillSignalCmd(signal string, pid int) []string {
 }
 
 // TmuxKillSessionCmd builds `tmux kill-session -t <session>` — Tier 2 hard
-// termination's primary signal (#2365, work package B7b): every agent run
-// owns a tmux session named orchestrator.TmuxSessionName(agentSlug) inside
-// its crew container (internal/orchestrator/orchestrator_exec_env.go's
+// termination's primary signal (#2365, work package B7b): every agent RUN
+// owns a tmux session named orchestrator.TmuxSessionName(agentSlug, runID)
+// inside its crew container (internal/orchestrator/orchestrator_exec_env.go's
 // setupTmuxExec), a name that is meaningful in the SAME pid namespace the
 // signal is delivered in — unlike a pid from ExecPID (see its doc), which
-// is not. Ending the session ends exactly that agent's own process tree;
+// is not. Ending the session ends exactly that RUN's own process tree;
 // tmux's session table is per-container, so a sibling agent's differently-
 // named session in the same crew container is never touched. Run as a
 // brand-new Exec into that same container, never a container-level
 // operation.
+//
+// The run id in that name is what makes this safe under E0's parallel
+// profile: the session used to be "agent-<slug>", so a hard stop aimed at one
+// run of an agent would have ended whichever run of it happened to be up.
+// Callers holding only a slug must resolve it to a specific run first — see
+// TmuxListSessionsCmd.
 func TmuxKillSessionCmd(session string) []string {
 	return []string{"tmux", "kill-session", "-t", session}
+}
+
+// TmuxListSessionsCmd builds `tmux list-sessions -F '#{session_name}'` — one
+// name per line, the way a caller holding only an agent slug finds which RUNS
+// of that agent are live inside a container.
+//
+// Needed because E0 made the session name run-scoped: "agent-<slug>-<runID>".
+// A slug alone no longer names a session, so attach (internal/terminal) and
+// Tier 2 hard stop (internal/api) both have to enumerate and then decide.
+// Feed the output to orchestrator.RunIDsFromSessionNames, which does the
+// prefix match and rejects anything whose tail is not a well-formed run id.
+//
+// Exits non-zero with "no server running on ..." when tmux has never started
+// in the container — a normal state (no agent has run yet), not an error.
+func TmuxListSessionsCmd() []string {
+	return []string{"tmux", "list-sessions", "-F", "#{session_name}"}
 }
 
 // TmuxListPanePIDsCmd builds `tmux list-panes -t <session> -F '#{pane_pid}'`

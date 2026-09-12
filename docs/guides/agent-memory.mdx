@@ -756,6 +756,38 @@ Agents in one crew cannot access another crew's shared memory. Container bind mo
 | Daily log size | 30 KB per file | Maximum single `daily/*.md` file (lowered from 100 KB so one day can't eat ~20% of a 200k context window) |
 | Crew memory reindex | Every 60 seconds | Automatic periodic reindex by Lead sidecar |
 
+## Requiring the guaranteed write profile
+
+A memory write goes through one of two profiles. `legacy` performs the write and
+reports honestly that it was not revision-checked (`revision_checked: false`,
+`degraded: true`). `guaranteed` refuses a write it cannot check — a missing
+caller-supplied operation id, no expected revision, undeclared removals, or no
+durable ledger behind it — rather than performing it and labelling it as
+verified.
+
+`CREWSHIP_MEMORY_REQUIRE_GUARANTEED` makes the guaranteed profile mandatory for
+every agent-side write, whatever the caller asked for.
+
+| | |
+|---|---|
+| **Default** | unset, meaning **off** — the caller chooses its profile |
+| **Accepted values** | `1`, `true`, `yes`, `on` enable it; anything else, including unset, leaves it off |
+| **Who sets it** | whatever launches the agent container, as part of the container's environment |
+| **Scope** | one agent container, for the life of that container |
+| **Read by** | the sidecar, on every `POST /memory/write` and MCP `memory.write` / `memory.append_daily` call |
+
+It is set on the container from outside precisely so that nothing **inside** the
+container can clear it: a correctness rule an agent may opt out of is not a rule.
+
+**Leave it off until the agent-facing guaranteed path is fully wired.** Run
+capabilities already reach agent executions, but the memory HTTP bridge still
+expects run identity in the request body and does not bind it to that capability.
+The MCP dispatcher has no host ledger bridge: with this flag enabled, both MCP
+writers return a tool error (`memory_guaranteed_unavailable`) without writing
+locally. HTTP writes that cannot meet the guaranteed preconditions return `503`
+instead of falling back. This fail-closed behavior protects the requirement; it
+does not establish that agent-facing guaranteed memory is complete.
+
 ## Load-time injection scan
 
 Memory files are authored by prior agent runs, so a file on disk can carry an

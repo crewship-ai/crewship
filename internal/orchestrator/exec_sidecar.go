@@ -216,6 +216,80 @@ func agentAuthToken(master, workspaceID, agentID string, logger *slog.Logger) st
 	return internaltoken.DeriveAgentToken(master, workspaceID, agentID)
 }
 
+// agentRunKey returns the crew-scoped key a sidecar validates per-run agent
+// tokens with (E0). Fails closed exactly like sidecarIPCToken and
+// agentAuthToken: an empty master or workspace yields "", and the sidecar then
+// simply has no v2 path and falls back to its boot roster.
+func agentRunKey(master, workspaceID, crewID string, logger *slog.Logger) string {
+	if master == "" {
+		return ""
+	}
+	if workspaceID == "" {
+		logger.Error("agent run key: empty workspace_id — refusing to issue")
+		return ""
+	}
+	return internaltoken.DeriveAgentRunKey(master, workspaceID, crewID)
+}
+
+// agentRunAuthToken returns the per-RUN bearer token for one attempt (E0).
+//
+// This is what CREWSHIP_AGENT_TOKEN carries now. agentAuthToken's v1 value was
+// a pure function of (master, workspace, agent), so two concurrent runs of one
+// agent presented byte-identical credentials: the sidecar could not attribute a
+// memory write or an escalation to the run that made it, and a finished run's
+// token stayed valid forever because there was nothing in it to expire.
+//
+// Fails closed on any empty input, including the run id — a run token that is
+// not bound to a run is a v1 token wearing a v2 prefix.
+func agentRunAuthToken(runKey, workspaceID, agentID, runID string, logger *slog.Logger) string {
+	if runKey == "" {
+		return ""
+	}
+	if workspaceID == "" || agentID == "" || runID == "" {
+		logger.Error("per-run token: empty workspace_id, agent_id or run_id — refusing to issue",
+			"workspace_id", workspaceID, "agent_id", agentID, "run_id", runID)
+		return ""
+	}
+	return internaltoken.DeriveAgentRunToken(runKey, workspaceID, agentID, runID)
+}
+
+// sidecarRunEndScript builds the shell that tells the crew's sidecar this run
+// has finished, after which its token stops authenticating
+// (internal/sidecar/run_end.go).
+//
+// It is a curl to 127.0.0.1:9119 because there is no other direction available:
+// the sidecar listens INSIDE the crew container and crewshipd runs outside it,
+// so every crewshipd→container interaction in this package is already an exec,
+// and this is one too.
+//
+// The token rides a heredoc on fd 3 rather than a -H argument, for exactly the
+// reason the agent preamble gives agents for the same call: a command line is
+// world-readable through /proc/<pid>/cmdline, and this container is shared with
+// every other agent in the crew — putting a run's bearer token in argv would
+// hand it to them. The script itself is delivered on the exec's STDIN, so it
+// never appears in argv either.
+//
+// Best-effort by construction: `|| true` keeps a missing curl, a stopped
+// sidecar or a non-2xx from failing the exec. A lost notification leaves the
+// run "unknown" to the registry, which is ACCEPTED — see run_registry.go for
+// why that default is right — so the failure mode is the pre-E0 behaviour, not
+// a broken run.
+func sidecarRunEndScript(runToken string) string {
+	if runToken == "" {
+		return ""
+	}
+	// The heredoc delimiter deliberately does NOT start with CREWSHIP_. The
+	// configuration inventory (scripts/docs-inventory) finds environment
+	// variables by scanning source text for that prefix, so a delimiter wearing
+	// it is reported as an undocumented setting that does not exist — and the
+	// only way to make that gate green is to write documentation for a thing
+	// nobody can set.
+	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/end " +
+		"-K /dev/fd/3 3<<'RUNEND_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
+		"header = \"Authorization: Bearer " + runToken + "\"\n" +
+		"RUNEND_AUTH_HEREDOC\n"
+}
+
 // PreRunInstallPackages installs system packages as root before the agent starts.
 // The agent runs as UID 1001 (non-root) and cannot install apt packages itself.
 // This function runs `apt-get install` as root (UID 0), then the agent exec
@@ -914,6 +988,17 @@ type SidecarIPCConfig struct {
 	// matches an inbound Authorization: Bearer token against this + each crew
 	// member's AuthToken to resolve the ACTING agent's identity.
 	AgentToken string `json:"agent_token,omitempty"`
+
+	// AgentRunKey is the crew-scoped key the sidecar validates per-RUN tokens
+	// with (E0). See sidecar.IPCConfig.AgentRunKey for why it exists and why
+	// it is not the master.
+	AgentRunKey string `json:"agent_run_key,omitempty"`
+
+	// RunID / RunChatID describe the run that STARTED this sidecar, so its own
+	// per-run context is known from boot without a control message. Every
+	// later run registers itself the first time it presents its token.
+	RunID     string `json:"run_id,omitempty"`
+	RunChatID string `json:"run_chat_id,omitempty"`
 }
 
 // SidecarRouteAuth lets the sidecar validate any agent's derived LLM route

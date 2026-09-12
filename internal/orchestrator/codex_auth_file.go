@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -20,8 +21,48 @@ func DeliverCodexLogin(ctx context.Context, container provider.ContainerProvider
 	return DeliverProviderLogin(ctx, container, containerID, agentSlug, "CODEX_CLI", login, logger)
 }
 
+// DeliverProviderLogin re-renders a refreshed provider login into EVERY LIVE
+// RUN of agentSlug in this container.
+//
+// Before E0 there was one HOME per agent and so one file to update. There is
+// now one per run, and this fans out across them — because the whole point of
+// the refresher is to reach a run that is ALREADY EXECUTING and whose CLI would
+// otherwise keep presenting the token that was just rotated out from under it.
+// Writing a single copy to the agent's shared directory would put it where
+// nothing reads: a long Codex or Gemini run would carry on with the stale token
+// until its OAuth failed mid-run, and the failure would look like a provider
+// problem rather than a delivery one.
+//
+// No live run is a normal answer and a clean no-op, not an error. A run that
+// has not started yet renders its own login file at preflight (syncLoginFile,
+// next to writeCredentialFiles) from the current credential, so there is
+// genuinely nothing to do — which is also what the one caller already assumes
+// ("the next run start writes the file", provider_login_refresh.go).
+//
+// Errors are joined rather than short-circuited: with two runs live, a failure
+// to reach one must not silently skip the other.
 func DeliverProviderLogin(ctx context.Context, container provider.ContainerProvider, containerID, agentSlug, adapter string, login Credential, logger *slog.Logger) error {
-	return syncLoginFile(ctx, container, containerID, AgentRunRequest{AgentSlug: agentSlug, CLIAdapter: adapter, Credentials: []Credential{login}}, logger)
+	runIDs := liveRunIDsForAgent(containerID, agentSlug)
+	if len(runIDs) == 0 {
+		if logger != nil {
+			logger.Debug("provider login re-render: no live run for this agent, nothing to update",
+				"agent_slug", agentSlug, "container_id", containerID, "adapter", adapter)
+		}
+		return nil
+	}
+	var errs []error
+	for _, runID := range runIDs {
+		req := AgentRunRequest{
+			AgentSlug:   agentSlug,
+			RunID:       runID,
+			CLIAdapter:  adapter,
+			Credentials: []Credential{login},
+		}
+		if err := syncLoginFile(ctx, container, containerID, req, logger); err != nil {
+			errs = append(errs, fmt.Errorf("run %s: %w", runID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func codexFileFor(login Credential) (codexauth.File, error) {

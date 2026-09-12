@@ -129,7 +129,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
           <EmptyState
             icon={Webhook}
             title="No webhooks yet"
-            description="Create a webhook endpoint that triggers this routine on HTTP POST. Optionally protect it with an HMAC signing secret."
+            description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
             action={
               <Button
                 size="sm"
@@ -249,17 +249,27 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
               />
             </div>
             <div>
-              <FieldLabel>Signing secret (optional)</FieldLabel>
+              {/* Not optional, and it never was in the only sense that
+                  matters: internal/api/pipeline_webhooks.go mints a 32-byte
+                  secret server-side when the caller supplies none. The field
+                  used to say "optional" / "leave empty to skip HMAC
+                  verification", which described the LEGACY behaviour — an
+                  empty secret made pipeline.Webhook.Verify return nil and any
+                  unsigned POST to the public URL passed. That hole is closed;
+                  leaving this blank chooses who generates the secret, not
+                  whether there is one. */}
+              <FieldLabel>Signing secret</FieldLabel>
               <Input
                 type="password"
                 value={signingSecret}
                 onChange={(e) => setSigningSecret(e.target.value)}
-                placeholder="leave empty to skip HMAC verification"
+                placeholder="leave empty and one is generated for you"
                 className="mt-1.5 h-9 font-mono text-sm"
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
-                When set, sender must include{" "}
-                <span className="font-mono">X-Crewship-Signature: sha256=&lt;hmac&gt;</span> header.
+                Signing cannot be turned off. Senders must include{" "}
+                <span className="font-mono">X-Crewship-Signature: sha256=&lt;hmac&gt;</span>, and a
+                generated secret is shown once when the webhook is created.
               </p>
             </div>
             <div>

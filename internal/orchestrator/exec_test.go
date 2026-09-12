@@ -369,22 +369,29 @@ func TestBuildEnvVarsAgentHome(t *testing.T) {
 	req := AgentRunRequest{
 		AgentID:   "a1",
 		AgentSlug: "viktor",
+		RunID:     "run-1",
 		CrewID:    "crew-1",
 		ChatID:    "chat-1",
 	}
 	env := BuildEnvVars(req, nil)
 
+	// E0: HOME is per RUN. /crew/agents/<slug> is still the agent's durable
+	// directory (and still where .memory lives) — it is just not HOME any more.
 	found := false
 	for _, e := range env {
-		if e == "HOME=/crew/agents/viktor" {
+		if e == "HOME=/crew/runs/viktor/"+req.RunID {
 			found = true
 		}
 		if e == "HOME=/home/agent" {
 			t.Fatal("HOME must NOT be /home/agent anymore")
 		}
+		if e == "HOME=/crew/agents/viktor" {
+			t.Fatal("HOME must NOT be the agent's shared directory: two runs of viktor " +
+				"would share one .claude.json, one .mcp.json and one CLI login file")
+		}
 	}
 	if !found {
-		t.Fatal("expected HOME=/crew/agents/viktor")
+		t.Fatalf("expected HOME=/crew/runs/viktor/%s, got env %v", req.RunID, env)
 	}
 
 	// Also check CREWSHIP_CREW_SHARED
@@ -403,6 +410,7 @@ func TestBuildEnvVarsSidecarAgentHome(t *testing.T) {
 	req := AgentRunRequest{
 		AgentID:   "a1",
 		AgentSlug: "eva",
+		RunID:     "run-1",
 		CrewID:    "crew-1",
 		ChatID:    "chat-1",
 		Credentials: []Credential{
@@ -413,7 +421,7 @@ func TestBuildEnvVarsSidecarAgentHome(t *testing.T) {
 
 	found := false
 	for _, e := range env {
-		if e == "HOME=/crew/agents/eva" {
+		if e == "HOME=/crew/runs/eva/run-1" {
 			found = true
 		}
 		if e == "HOME=/home/agent" {
@@ -421,7 +429,7 @@ func TestBuildEnvVarsSidecarAgentHome(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("expected HOME=/crew/agents/eva in sidecar env")
+		t.Fatal("expected HOME=/crew/runs/eva/<runID> in sidecar env")
 	}
 
 	// CREWSHIP_CREW_SHARED in sidecar mode too
@@ -439,11 +447,11 @@ func TestBuildEnvVarsSidecarAgentHome(t *testing.T) {
 func TestConcurrentAgentHomeSeparation(t *testing.T) {
 	// Two agents in the same crew must have different HOME dirs
 	reqViktor := AgentRunRequest{
-		AgentID: "a1", AgentSlug: "viktor",
+		AgentID: "a1", AgentSlug: "viktor", RunID: "run-v",
 		CrewID: "crew-1", ChatID: "chat-1",
 	}
 	reqEva := AgentRunRequest{
-		AgentID: "a2", AgentSlug: "eva",
+		AgentID: "a2", AgentSlug: "eva", RunID: "run-e",
 		CrewID: "crew-1", ChatID: "chat-2",
 	}
 
@@ -465,11 +473,27 @@ func TestConcurrentAgentHomeSeparation(t *testing.T) {
 	if homeViktor == homeEva {
 		t.Fatalf("agents must have different HOME dirs, both got %q", homeViktor)
 	}
-	if homeViktor != "/crew/agents/viktor" {
-		t.Errorf("expected /crew/agents/viktor, got %q", homeViktor)
+	if homeViktor != "/crew/runs/viktor/"+reqViktor.RunID {
+		t.Errorf("expected /crew/runs/viktor/%s, got %q", reqViktor.RunID, homeViktor)
 	}
-	if homeEva != "/crew/agents/eva" {
-		t.Errorf("expected /crew/agents/eva, got %q", homeEva)
+	if homeEva != "/crew/runs/eva/"+reqEva.RunID {
+		t.Errorf("expected /crew/runs/eva/%s, got %q", reqEva.RunID, homeEva)
+	}
+
+	// E0: and two RUNS OF ONE AGENT must be separated too, which is the case
+	// this test could not previously express. Before the split both of these
+	// were /crew/agents/viktor, so the second run's .claude.json, .mcp.json,
+	// MCP OAuth token files and CLI login file overwrote the first's.
+	runA := reqViktor
+	runA.RunID = "run-a"
+	runB := reqViktor
+	runB.RunID = "run-b"
+	homeA, homeB := getHome(BuildEnvVars(runA, nil)), getHome(BuildEnvVars(runB, nil))
+	if homeA == homeB {
+		t.Fatalf("two runs of one agent must have different HOME dirs, both got %q", homeA)
+	}
+	if homeA != "/crew/runs/viktor/run-a" || homeB != "/crew/runs/viktor/run-b" {
+		t.Errorf("run-scoped HOMEs = %q and %q, want /crew/runs/viktor/run-a and .../run-b", homeA, homeB)
 	}
 }
 
@@ -551,8 +575,20 @@ func TestSystemPreambleContainsFilesystem(t *testing.T) {
 	if !strings.Contains(crewshipSystemPreamble, "/crew/shared") {
 		t.Error("preamble should mention /crew/shared")
 	}
-	if !strings.Contains(crewshipSystemPreamble, "/crew/agents/") {
-		t.Error("preamble should mention per-agent HOME at /crew/agents/")
+	// E0: HOME is per-run and its literal path contains a run id the model
+	// cannot know, so the preamble names the ENV VAR instead of a literal.
+	// What it must still teach is the distinction that matters: HOME is
+	// this run's and is deleted with it, ~/.memory is the agent's and is not.
+	if !strings.Contains(crewshipSystemPreamble, "HOME") {
+		t.Error("preamble should tell the agent where HOME is")
+	}
+	if !strings.Contains(crewshipSystemPreamble, "~/.memory/") {
+		t.Error("preamble should point the agent at ~/.memory/ — with a per-run HOME it is " +
+			"the only place anything it writes survives the run")
+	}
+	if !strings.Contains(crewshipSystemPreamble, "$CREWSHIP_SECRETS_DIR") {
+		t.Error("preamble should name $CREWSHIP_SECRETS_DIR: the secrets path is per-run now, " +
+			"so a literal /secrets/<slug>/ path in the prompt is wrong")
 	}
 }
 

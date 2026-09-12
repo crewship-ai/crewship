@@ -66,10 +66,37 @@ func normalizeNPMPackage(arg string) string {
 	return arg
 }
 
-// TmuxSessionName returns the tmux session name for a given agent slug.
+// TmuxSessionPrefix returns the prefix every tmux session of one agent shares:
+// "agent-<slug>-". Two concurrent runs of the same agent share this and differ
+// only in the run id that follows it, so a caller holding just a slug can list
+// that agent's live sessions (`tmux list-sessions -F '#{session_name}'`, then
+// filter on this prefix) and see how many runs are actually up.
+//
+// The trailing "-" is load-bearing: without it "agent-eva" would also prefix
+// "agent-eva2-<run>", and a hard stop or an attach aimed at one agent could
+// name another agent's session.
+func TmuxSessionPrefix(agentSlug string) string {
+	return "agent-" + agentSlug + "-"
+}
 
-func TmuxSessionName(agentSlug string) string {
-	return "agent-" + agentSlug
+// TmuxSessionName returns the tmux session name for ONE RUN of an agent:
+// "agent-<slug>-<runID>".
+//
+// It was "agent-<slug>" before E0, which made the session — and every /tmp
+// file setupTmuxExec derives from it — a mutable key shared by every run of
+// that agent. Starting run B then killed run A outright (setupTmuxExec's
+// unconditional opening `tmux kill-session`), and before that it overwrote A's
+// args and env files, so A's own wrapper could exec B's argv with B's
+// credentials. See docs/prd/WEBHOOKS-AGENT-PARALLELISM-MEMORY-1-0-2026-09-10.md
+// §4: "Opětovné použití agent slug jako mutable runtime klíče je chyba."
+//
+// runID must satisfy ValidRunID (run_identity.go) — the result is single-quoted
+// into `sh -c` scripts and interpolated into /tmp paths. Callers inside a run
+// get that for free: ensureRunID checks it before anything derives a name.
+// An EMPTY runID yields the obviously-wrong "agent-<slug>-", which still cannot
+// collide with any real run's session; it is not a supported input.
+func TmuxSessionName(agentSlug, runID string) string {
+	return TmuxSessionPrefix(agentSlug) + runID
 }
 
 // tmuxCacheLookup returns the cached tmux-present value for containerID and
@@ -113,11 +140,27 @@ func (o *Orchestrator) InvalidateTmuxCache(containerID string) {
 	delete(o.tmuxCache, containerID)
 }
 
-// setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
-// It writes command args, env vars, and a script to files in the container
-// (avoiding shell quoting issues), then returns a wrapper command that starts
-// tmux and streams output via FIFO. Falls back gracefully if setup fails.
-func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug string, env []string) ([]string, error) {
+// setupTmuxExec prepares a tmux-wrapped execution environment for one RUN of
+// an agent. It writes command args, env vars, and a script to files in the
+// container (avoiding shell quoting issues), then returns a wrapper command
+// that starts tmux and streams output via FIFO. Falls back gracefully if setup
+// fails.
+//
+// EVERY name it derives — session, args, env, script, FIFO, exit file and the
+// tmux wait-for channel — is scoped by (agentSlug, runID), not by agentSlug
+// alone. That is the E0 fix: before it, two runs of one agent shared all seven,
+// so B's setup overwrote A's argv and A's exported credentials, A's wrapper
+// read B's exit code, and B's opening `tmux kill-session` ended A's session
+// outright. The kill-session is still here and still unconditional — it just
+// names this run's own session now, which no other run can be using.
+func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug, runID string, env []string) ([]string, error) {
+	// Fail closed rather than build a path out of an unchecked id. In a real
+	// run ensureRunID has already vetted this, so reaching here means a caller
+	// built an ExecConfig outside RunAgent — the one case where a bad id would
+	// otherwise reach a shell.
+	if !ValidRunID(runID) {
+		return nil, fmt.Errorf("invalid run id for tmux session: %q", runID)
+	}
 	// Pre-check: fail fast if tmux is not installed in the container. Custom
 	// base images (debian:bookworm-slim, ubuntu:24.04) don't ship with tmux.
 	// Without this check, the outer wrapper runs anyway and produces noisy
@@ -156,7 +199,9 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 		}
 	}
 
-	session := TmuxSessionName(agentSlug)
+	// One run-scoped stem for all six file names and the wait-for channel, so
+	// none of them can drift back to being slug-keyed one at a time.
+	session := TmuxSessionName(agentSlug, runID)
 	argsFile := fmt.Sprintf("/tmp/%s.args", session)
 	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
 	fifo := fmt.Sprintf("/tmp/%s.fifo", session)
@@ -202,10 +247,36 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	}
 	envEncoded := base64.StdEncoding.EncodeToString([]byte(envScript.String()))
 
-	// Inner script (sources env, runs command via xargs).
-	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\n"+
-		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
-		envFile, argsFile, fifo, exitFile, fifo, doneSignal)
+	// Inner script: source env, DELETE the env file, then run the command via
+	// xargs and delete the args file once xargs has consumed it.
+	//
+	// The env file holds this run's credentials (`export ANTHROPIC_API_KEY=…`),
+	// so the delete is on the line immediately after the source, with nothing
+	// between them — every command in that gap is a window in which an
+	// abandoned run leaves credentials on disk.
+	//
+	// Why the file exists at all, rather than ExecConfig.Env: a crew container
+	// may already be running a tmux SERVER started by a neighbouring agent,
+	// and a session started on an existing server does not inherit the
+	// client's environment. Dropping the file would therefore risk a run
+	// picking up a neighbour's environment — the exact bleed this whole change
+	// exists to stop.
+	//
+	// Why the delete has to be explicit NOW, when it never was before: with
+	// slug-keyed names the residue was invisible, because the next run of the
+	// same agent overwrote the abandoned file — "cleaning up" by handing one
+	// run's credentials to the next. Run-scoped names removed that accident
+	// along with the bug, so nothing reclaims the file implicitly any more.
+	//
+	// And why here rather than only in the wrapper's exit path: the wrapper's
+	// trailing `rm -f` does not run when the exec is killed (a hard stop, a
+	// container stop, an OOM). This line runs before the agent's first
+	// instruction, so the credentials are already gone by the time anything
+	// can kill it. The wrapper's own cleanup stays as a belt-and-braces pass —
+	// `rm -f` on an already-unlinked file is a no-op that exits 0.
+	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\nrm -f '%s'\n"+
+		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\nrm -f '%s'\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
+		envFile, envFile, argsFile, fifo, argsFile, exitFile, fifo, doneSignal)
 	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
 
 	// Single batched write: decode all three files and chmod the script in one

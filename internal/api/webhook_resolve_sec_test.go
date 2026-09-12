@@ -118,10 +118,17 @@ func TestSecWebhook2RunIDIsCUIDNotUnixNano(t *testing.T) {
 
 	_ = h.trigger(context.Background(), "crew-1", "agent-1", body)
 
-	if len(resolver.createdRunIDs) != 1 {
-		t.Fatalf("CreateRun called %d times, want 1", len(resolver.createdRunIDs))
+	// Acceptance no longer creates a run record; the dispatcher does. The
+	// identifier this test is about — is it a CUID, or the legacy UnixNano
+	// form — is now the work id acceptance mints, and the run id is derived
+	// from the same generator.
+	if len(resolver.createdRunIDs) != 0 {
+		t.Fatalf("acceptance created %d run records, want 0 — only the dispatcher creates runs", len(resolver.createdRunIDs))
 	}
-	runID := resolver.createdRunIDs[0]
+	var runID string
+	if err := h.db.QueryRow(`SELECT id FROM work_items LIMIT 1`).Scan(&runID); err != nil {
+		t.Fatalf("read the accepted work: %v", err)
+	}
 	if matched, _ := regexp.MatchString(`^run-wh-\d+$`, runID); matched {
 		t.Errorf("run id %q is the legacy run-wh-<digits> UnixNano form; want a CUID", runID)
 	}
@@ -148,10 +155,21 @@ func TestSecWebhook2DuplicateIdempotencyKeyNoDoubleDispatch(t *testing.T) {
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 
-	if got := container.ensureCount.Load(); got != 1 {
-		t.Errorf("EnsureCrewRuntime called %d times, want 1 (duplicate Idempotency-Key must short-circuit)", got)
+	// Acceptance touches no container at all now — for the first delivery or
+	// its duplicate. That is a stronger statement than "exactly once", and it
+	// is the one R3 restored: a provider's response deadline does not wait for
+	// a cold start.
+	if got := container.ensureCount.Load(); got != 0 {
+		t.Errorf("EnsureCrewRuntime called %d times during acceptance, want 0", got)
 	}
-	if len(resolver.createdRunIDs) != 1 {
-		t.Errorf("CreateRun called %d times, want 1 (no double dispatch on duplicate key)", len(resolver.createdRunIDs))
+	// The duplicate must not produce a second piece of work. Acceptance starts
+	// no runtime either way now, so work items are what the short-circuit is
+	// actually visible in.
+	var workItems int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&workItems); err != nil {
+		t.Fatal(err)
+	}
+	if workItems != 1 {
+		t.Errorf("a duplicate Idempotency-Key produced %d work items, want 1", workItems)
 	}
 }

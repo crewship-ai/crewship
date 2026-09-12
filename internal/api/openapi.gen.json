@@ -12612,6 +12612,653 @@
         },
         "type": "array"
       },
+      "WebhookDelivery": {
+        "properties": {
+          "body_bytes": {
+            "type": "integer"
+          },
+          "body_sha256": {
+            "type": "string"
+          },
+          "dedup_expires_at": {
+            "description": "Until when a re-delivery of this id returns the original receipt instead of creating new work.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "endpoint_id": {
+            "type": "string"
+          },
+          "endpoint_kind": {
+            "enum": [
+              "agent",
+              "routine",
+              "page"
+            ],
+            "type": "string"
+          },
+          "event_action": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "filter_decision": {
+            "description": "An ignored delivery is audited rather than dropped, so a ping or a filtered event stays recoverable.",
+            "enum": [
+              "accepted",
+              "ignored"
+            ],
+            "type": "string"
+          },
+          "filter_reason": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "profile": {
+            "description": "The signature profile that verified this delivery — recorded, never inferred from the presence of a header.",
+            "type": "string"
+          },
+          "raw_body_available": {
+            "description": "Whether the payload is still held. False means a replay of the work this produced is unavailable.",
+            "type": "boolean"
+          },
+          "raw_body_expires_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "received_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "signing_key_id": {
+            "type": "string"
+          },
+          "source_delivery_id": {
+            "description": "The sender's own identifier. Identity is (workspace, endpoint, source delivery id) and never the signature.",
+            "type": "string"
+          },
+          "target_revision": {
+            "type": "string"
+          },
+          "work_id": {
+            "nullable": true,
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "endpoint_id",
+          "endpoint_kind",
+          "profile",
+          "source_delivery_id",
+          "event_type",
+          "event_action",
+          "signing_key_id",
+          "body_sha256",
+          "body_bytes",
+          "filter_decision",
+          "filter_reason",
+          "target_revision",
+          "work_id",
+          "received_at",
+          "dedup_expires_at",
+          "raw_body_available",
+          "raw_body_expires_at"
+        ],
+        "type": "object"
+      },
+      "WebhookDeliveryPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "WorkAttempt": {
+        "properties": {
+          "attempt": {
+            "type": "integer"
+          },
+          "cost_usd": {
+            "type": "number"
+          },
+          "end_reason": {
+            "type": "string"
+          },
+          "ended_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "exit_evidence": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "heartbeat_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lease_owner": {
+            "description": "Which dispatcher holds this attempt. A transition carrying a stale generation is refused regardless.",
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "runtime_locator": {
+            "description": "Where the runtime is. Recovery consults it before deciding a process is gone; an expired lease alone does not authorize a second one.",
+            "type": "string"
+          },
+          "start_reason": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "attempt",
+          "generation",
+          "lease_owner",
+          "lease_expires_at",
+          "heartbeat_at",
+          "runtime_locator",
+          "started_at",
+          "start_reason",
+          "ended_at",
+          "end_reason",
+          "exit_evidence",
+          "cost_usd"
+        ],
+        "type": "object"
+      },
+      "WorkCancelRequest": {
+        "additionalProperties": false,
+        "description": "No body. Cancel is an idempotent request keyed by the work item in the path.",
+        "properties": {},
+        "type": "object"
+      },
+      "WorkCancelResponse": {
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "description": "cancelled: queued or retrying work stopped atomically. requested: the work holds a runtime, the request is recorded and the signal follows; `cancelled` only after a confirmed stop. already_terminal: it finished first.",
+            "enum": [
+              "cancelled",
+              "requested",
+              "already_terminal"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "description": "The item's REAL state after the call. A cancel that lost the race to a completion reports the finished state rather than claiming a cancel it did not perform.",
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "waiting",
+              "retry_wait",
+              "succeeded",
+              "failed",
+              "expired",
+              "cancelled",
+              "needs_reconciliation"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "outcome",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "WorkEvent": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "from_state": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer"
+          },
+          "to_state": {
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "waiting",
+              "retry_wait",
+              "succeeded",
+              "failed",
+              "expired",
+              "cancelled",
+              "needs_reconciliation"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "from_state",
+          "to_state",
+          "run_id",
+          "generation",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "WorkItem": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer"
+          },
+          "authorized_by_user_id": {
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "chat",
+              "background"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "domain_id": {
+            "type": "string"
+          },
+          "domain_kind": {
+            "type": "string"
+          },
+          "eligible_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_sha256": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "replay_of": {
+            "nullable": true,
+            "type": "string"
+          },
+          "replay_reason": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "webhook",
+              "chat",
+              "assignment",
+              "schedule",
+              "pipeline_step",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "waiting",
+              "retry_wait",
+              "succeeded",
+              "failed",
+              "expired",
+              "cancelled",
+              "needs_reconciliation"
+            ],
+            "type": "string"
+          },
+          "state_reason": {
+            "type": "string"
+          },
+          "target_revision": {
+            "type": "string"
+          },
+          "terminal_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "source",
+          "source_ref",
+          "domain_kind",
+          "domain_id",
+          "agent_id",
+          "crew_id",
+          "session_id",
+          "class",
+          "authorized_by_user_id",
+          "input_sha256",
+          "target_revision",
+          "state",
+          "state_reason",
+          "generation",
+          "attempt_count",
+          "priority",
+          "eligible_at",
+          "deadline_at",
+          "replay_of",
+          "replay_reason",
+          "created_at",
+          "updated_at",
+          "terminal_at"
+        ],
+        "type": "object"
+      },
+      "WorkItemDetail": {
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/WorkAttempt"
+            },
+            "type": "array"
+          },
+          "authorized_by_user_id": {
+            "type": "string"
+          },
+          "class": {
+            "enum": [
+              "chat",
+              "background"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "crew_id": {
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "domain_id": {
+            "type": "string"
+          },
+          "domain_kind": {
+            "type": "string"
+          },
+          "eligible_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/WorkEvent"
+            },
+            "type": "array"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_sha256": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "replay_of": {
+            "nullable": true,
+            "type": "string"
+          },
+          "replay_reason": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "webhook",
+              "chat",
+              "assignment",
+              "schedule",
+              "pipeline_step",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "waiting",
+              "retry_wait",
+              "succeeded",
+              "failed",
+              "expired",
+              "cancelled",
+              "needs_reconciliation"
+            ],
+            "type": "string"
+          },
+          "state_reason": {
+            "type": "string"
+          },
+          "target_revision": {
+            "type": "string"
+          },
+          "terminal_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "source",
+          "source_ref",
+          "domain_kind",
+          "domain_id",
+          "agent_id",
+          "crew_id",
+          "session_id",
+          "class",
+          "authorized_by_user_id",
+          "input_sha256",
+          "target_revision",
+          "state",
+          "state_reason",
+          "generation",
+          "attempt_count",
+          "priority",
+          "eligible_at",
+          "deadline_at",
+          "replay_of",
+          "replay_reason",
+          "created_at",
+          "updated_at",
+          "terminal_at",
+          "attempts",
+          "events"
+        ],
+        "type": "object"
+      },
+      "WorkItemPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkItem"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "next_cursor": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "type": "object"
+      },
+      "WorkReplayRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Why this is being replayed. Recorded on the new work item.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "target_revision": {
+            "description": "Replay against a different target revision. Omitted inherits the original's — §4 requires a different revision to be explicit.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "WorkResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "runtime_stopped": {
+            "description": "Operator attests runtime has stopped; this endpoint does not stop it.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "state",
+          "runtime_stopped",
+          "reason"
+        ],
+        "type": "object"
+      },
       "WorkflowBatchRunRequest": {
         "properties": {
           "items": {
@@ -116823,6 +117470,980 @@
               }
             },
             "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/webhook-deliveries": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_webhook-deliveries",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "decision",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_delivery_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_webhook-deliveries_deliveryId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deliveryId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDelivery"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/work-items": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_work-items",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "class",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItemPage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_work-items_workItemId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workItemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItemDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel": {
+      "post": {
+        "operationId": "post_api_v1_workspaces_workspaceId_work-items_workItemId_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workItemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkCancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkCancelResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay": {
+      "post": {
+        "operationId": "post_api_v1_workspaces_workspaceId_work-items_workItemId_replay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workItemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkReplayRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItem"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve": {
+      "post": {
+        "operationId": "post_api_v1_workspaces_workspaceId_work-items_workItemId_resolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workItemId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkItem"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           }
         },
         "security": [

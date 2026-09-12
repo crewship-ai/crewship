@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -288,45 +289,84 @@ func Restore(
 	if err != nil {
 		return nil, err
 	}
-	// Atomic replace of the canonical file. We bypass the WriteConfig
-	// scrubber / cap on restore — the content already passed those
-	// checks the first time it was written. Operators restoring stale
-	// content know what they're doing.
-	if err := atomicRestoreWrite(canonicalPath, content); err != nil {
+	// The restore goes through the §8 mutation contract like every other
+	// supported write. Before this, it went through NOTHING: no lock, on the
+	// stated grounds that "the caller is the only writer to canonicalPath at
+	// this point in the lifecycle". That was never true — the agent whose
+	// memory is being restored is running in a container with the same file
+	// bind-mounted, and its own writes do not pause for an operator's REST
+	// call. A restore racing an agent append produced whichever of the two
+	// renamed last, with no evidence that the other happened.
+	//
+	// What is deliberately preserved:
+	//
+	//   - The scrubber and the cap are still bypassed. This content already
+	//     passed them the first time it was written, and an operator
+	//     restoring stale content knows what they are doing.
+	//   - The drift check is overridden. A restore is the remedy FOR drift;
+	//     refusing it because someone hand-edited the file would refuse it in
+	//     exactly the case an operator reaches for it. It is recorded as an
+	//     override rather than performed silently.
+	//   - The declared-removal check does not apply: a restore reverts, and
+	//     reverting removes lines on purpose. Removals stays nil, so the
+	//     ledger records this mutation as unverified, which it is.
+	//   - RecordVersion still runs, with the same parent lineage.
+	//
+	// Every error from here on keeps the "restore write" prefix the API and
+	// CLI surfaces already match on, and wraps with %w so the §8 sentinels
+	// still answer errors.Is.
+	opID, err := NewOperationID()
+	if err != nil {
 		return nil, fmt.Errorf("restore write: %w", err)
 	}
-	// Fail fast if parent lookup fails — proceeding would record a
-	// restore row with broken lineage metadata (empty parent_sha)
-	// which downstream audit reviewers cannot distinguish from a
-	// legitimate first-version write.
-	parent, err := LatestVersionSha(ctx, db, workspaceID, auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("lookup latest version sha for parent: %w", err)
-	}
-	return RecordVersion(ctx, db, VersionRecord{
-		WorkspaceID: workspaceID,
-		Path:        auditPath,
-		Tier:        tier,
-		Content:     content,
-		WrittenBy:   restoredBy,
-		ParentSha:   parent,
-		BlobRoot:    blobRoot,
+	res, err := Mutate(ctx, db, MutateRequest{
+		// An operator restoring a named past version is an explicitly
+		// authorized human action against a whole file, not an agent write
+		// racing other agent writes. It has a ledger handle, but no meaningful
+		// run generation to verify and no client-declared removals to check, so
+		// it declares legacy rather than claiming a guarantee it is not making.
+		Profile:       ProfileLegacy,
+		OperationID:   opID,
+		WorkspaceID:   workspaceID,
+		ActorType:     "user",
+		ActorID:       restoredBy,
+		Source:        "memory.restore",
+		Scope:         scopeFromAuditPath(auditPath),
+		Tier:          tier,
+		Path:          canonicalPath,
+		AuditPath:     auditPath,
+		Op:            OpReplace,
+		Content:       string(content),
+		Import:        true,
+		OverrideDrift: true,
+		BlobRoot:      blobRoot,
+		RecordVersion: true,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("restore write: %w", err)
+	}
+	if res.Rejection != nil {
+		// Unreachable with the zero WriteConfig above (no cap, no scrubber,
+		// no verifier, no screen), but a rejection is not an error and
+		// returning nil, nil would look like success to every caller.
+		return nil, fmt.Errorf("restore write: rejected by %s policy: %s",
+			res.Rejection.Kind, res.Rejection.Message)
+	}
+	return res.Version, nil
 }
 
-// atomicRestoreWrite is the small fs-only sibling of WriteFile used
-// by Restore. We do NOT take a flock because the caller is the only
-// writer to canonicalPath at this point in the lifecycle (operator
-// command, not a background goroutine), and reusing WriteFile would
-// pull in scrubber+cap policy that defeats the "restore historical
-// content" intent. Durability (fsync + atomic rename + parent-dir
-// fsync) is delegated to writeFileDurable so a crash mid-restore
-// can't leave canonicalPath truncated or half-written.
-func atomicRestoreWrite(canonicalPath string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
-		return err
+// scopeFromAuditPath recovers the ownership discriminator from the scoped audit
+// path memory_versions already stores ("agent:alice/AGENT.md" -> "agent:alice").
+// A path without one — the pre-scoping shape some rows still carry — yields the
+// empty string, which is what the column defaults to anyway.
+func scopeFromAuditPath(auditPath string) string {
+	if i := strings.IndexByte(auditPath, '/'); i > 0 {
+		head := auditPath[:i]
+		if strings.HasPrefix(head, "agent:") || strings.HasPrefix(head, "crew:") {
+			return head
+		}
 	}
-	return writeFileDurable(canonicalPath, content, 0o644)
+	return ""
 }
 
 // ErrVersionNotFound is returned by ReadVersion when (workspaceID,

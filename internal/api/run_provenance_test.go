@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -269,12 +268,14 @@ func runProvenanceWebhook(t *testing.T, stream string) (status string, meta map[
 		orchestrator.New(prov, newInbandAsgState(), newTestLogger()), nil, prov,
 		logcollector.NewWriter(t.TempDir(), newTestLogger()))
 
-	if err := h.trigger(context.Background(), "crew-wh", "agent-wh",
-		webhook.WebhookPayload{Event: "deploy", Source: "gh"}); err != nil {
-		t.Fatalf("trigger: %v", err)
-	}
-	if !waitForBackgroundWork(60 * time.Second) {
-		t.Fatal("webhook dispatch goroutine did not finish")
+	// The run is driven directly now, because accepting a delivery no longer
+	// starts one: the dispatcher owns that, and this test is about what a
+	// finished run RECORDS rather than about who launches it. It is also
+	// synchronous now, so there is no background goroutine to wait for.
+	if err := h.runWebhookAgent(context.Background(), resolver.resolveReturnInfo,
+		"agent-wh", "run-prov", webhook.WebhookPayload{Event: "deploy", Source: "gh"},
+		nil, nil); err != nil && resolver.status == "" {
+		t.Fatalf("run: %v", err)
 	}
 	resolver.mu.Lock()
 	defer resolver.mu.Unlock()

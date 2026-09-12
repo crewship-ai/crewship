@@ -42,12 +42,29 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.
 type AgentRunRequest struct {
-	AgentID     string
-	AgentSlug   string
-	AgentRole   string // AGENT, LEAD
-	CrewID      string
-	CrewSlug    string
-	ChatID      string
+	AgentID   string
+	AgentSlug string
+	AgentRole string // AGENT, LEAD
+	CrewID    string
+	CrewSlug  string
+	ChatID    string
+	// RunID names THIS ATTEMPT, and is the runtime identity every per-run
+	// path is derived from: the tmux session, the args / env / script / FIFO
+	// / exit files under /tmp, the wait-for channel, the scratch dir, and the
+	// key RunState is persisted under. Same namespace as the journal's
+	// trace_id — see internal/work/work.go and run_identity.go.
+	//
+	// ChatID is NOT a substitute and never was: the agent webhook used one
+	// constant chat id per agent while permitting 8 concurrent runs of it,
+	// and the peer-query / assignment paths reuse the CALLER's chat id, so
+	// two live runs routinely shared one. Deriving runtime paths from the
+	// agent slug (what the code did before E0) is worse still — every run of
+	// that agent collided, and starting B killed A's tmux session outright.
+	//
+	// Every dispatch site passes the id it already minted for the journal.
+	// Empty is filled in by ensureRunID (NewRunID) with a log line; it is
+	// never silently derived from the slug.
+	RunID       string
 	MissionID   string // mission this run belongs to; threaded into every journal emit so Cartographer checkpoints can anchor on per-mission journal cursors.
 	WorkspaceID string
 	ContainerID string

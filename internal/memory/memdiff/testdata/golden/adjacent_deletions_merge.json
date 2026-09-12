@@ -1,0 +1,63 @@
+{
+  "name": "adjacent_deletions_merge",
+  "why": "§8: 'sloučit sousední deletions'. Three consecutive deleted lines are ONE op and ONE removal hashed over all three lines together.",
+  "base": "a\nb\nc\nd\ne\n",
+  "target": "a\ne\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "a\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 2,
+      "line_count": 3,
+      "lines": [
+        "b\n",
+        "c\n",
+        "d\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 5,
+      "line_count": 1,
+      "lines": [
+        "e\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 2,
+      "line_count": 3,
+      "old_sha256": "b8c70a0f0510d71a511e8f41477969879f926c77ed4b341b5500238ed1e1348c"
+    }
+  ],
+  "applied": "a\ne\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 2,
+          "line_count": 3,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

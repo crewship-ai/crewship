@@ -435,10 +435,23 @@ func TestWebhookRequireTimestamp_OffAllowsBodyOnly(t *testing.T) {
 	}
 }
 
-// A policy lookup error fails toward availability: the base HMAC auth still
-// runs and a valid body-only signature is accepted (never a hard 400 on a
-// transient DB blip).
-func TestWebhookRequireTimestamp_LookupErrorFailsOpen(t *testing.T) {
+// A policy lookup error fails CLOSED: 503, and nothing dispatched.
+//
+// This test is the deliberate inversion of TestWebhookRequireTimestamp_
+// LookupErrorFailsOpen, which pinned the opposite contract. Failing open meant
+// a lookup that could not answer silently downgraded "this agent requires a
+// timestamped signature" to "a body-only HMAC will do" — an indefinitely
+// replayable shape — so anyone able to make the lookup fail could also pick
+// which scheme the agent enforced. §5 of the webhook contract says a lookup
+// error is not a disabled policy ("Chyba lookupu není vypnutá policy"), and an
+// unavailable database is its 503 row.
+//
+// The cost of the inversion is real and is the reason it needs saying out loud:
+// while the agents table cannot be read, every delivery to an agent with a
+// require-timestamp lookup wired is refused with a retryable 503 rather than
+// being run. That is the trade §5 asks for — a sender retries a 503, and no
+// sender can retry its way out of having been silently downgraded.
+func TestWebhookRequireTimestamp_LookupErrorFailsClosed(t *testing.T) {
 	const secret = "shared-secret-xyz"
 	fired := false
 	h := requireTSHandler(secret, false, fmt.Errorf("db down"), &fired)
@@ -447,10 +460,13 @@ func TestWebhookRequireTimestamp_LookupErrorFailsOpen(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, bodyOnlySigRequest(t, body, ComputeHMAC(body, secret)))
 
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("policy lookup error should not reject a valid webhook: status=%d, want 202", w.Code)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("policy lookup error must refuse the delivery: status=%d, want 503", w.Code)
 	}
-	if !fired {
-		t.Error("valid webhook should dispatch despite a policy lookup error")
+	if got := w.Header().Get("Retry-After"); got != IngressRetryAfterSeconds {
+		t.Errorf("Retry-After = %q, want %q", got, IngressRetryAfterSeconds)
+	}
+	if fired {
+		t.Error("no dispatch may happen when the policy could not be read")
 	}
 }

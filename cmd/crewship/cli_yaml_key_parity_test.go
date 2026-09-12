@@ -125,6 +125,13 @@ func yamlParityTypes() []any {
 		// cmd_provider_check.go
 		CheckTarget{},
 		providerCheckResult{},
+		// cmd_work.go — the durable work ledger's read surface. workItemDetail
+		// embeds WorkItemRow, so its json and yaml key sets can only agree
+		// while that embed is inline in both.
+		WorkItemRow{},
+		workItemDetail{},
+		workAttemptRow{},
+		workEventRow{},
 		// internal/cli/errors.go — the failure-side counterpart of every
 		// struct above. Not a cmd/crewship type, but it is emitted by every
 		// command in every machine format, which makes it the one this list

@@ -88,6 +88,15 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// read site) keeps a future third consumer safe by construction.
 	req.AllowPrivateEndpoints = effectiveAllowPrivateEndpoints(req.AllowPrivateEndpoints)
 
+	// E0 run identity. Normalised HERE, once, ahead of everything that derives
+	// a runtime name from it — the RunState key, the tmux session and its six
+	// /tmp files, the scratch dir. Doing it at the read sites instead would
+	// leave the next one to remember, which is the defect this whole change is
+	// undoing for the agent slug.
+	if err := o.ensureRunID(&req); err != nil {
+		return fmt.Errorf("run agent: %w", err)
+	}
+
 	// Open the outermost OTel span for this agent invocation. Every
 	// downstream LLM call, tool execution, and sub-agent fan-out becomes
 	// a child of this span via context propagation. We capture the
@@ -340,8 +349,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		defer o.RetainCrewContainer(req.CrewID, req.ContainerID)()
 	}
 
+	// E0: keyed by RunID, not ChatID. ChatID is not per-run on three dispatch
+	// paths — the agent webhook used one constant chat id per agent while
+	// allowing 8 concurrent runs of it, and the peer-query and assignment
+	// paths reuse the CALLER's chat id — so two live runs of one agent shared
+	// this row and each terminal status overwrote the other's. RunState keeps
+	// ChatID as its own field, so nothing is lost by the change.
 	runState := RunState{
-		ID:          req.ChatID,
+		ID:          req.RunID,
 		AgentID:     req.AgentID,
 		ChatID:      req.ChatID,
 		Status:      "running",
@@ -398,19 +413,75 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	keeperEnabled := o.keeperEnabled
 	o.mu.RUnlock()
 
+	// The token this run will present, minted HERE so the run-end notification
+	// registered below can use it. ensureSidecar mints the identical value for
+	// the agent's env — same inputs, same derivation — but it runs later, and a
+	// defer cannot reach a value that does not exist yet.
+	o.mu.RLock()
+	runEndToken := agentRunAuthToken(
+		agentRunKey(o.ipcToken, req.WorkspaceID, req.CrewID, o.logger),
+		req.WorkspaceID, req.AgentID, req.RunID, o.logger)
+	o.mu.RUnlock()
+
 	fileCreds := hasFileMountedCreds(req.Credentials, keeperEnabled)
 	agentExecStillRunning := false
 	if fileCreds {
-		o.retainAgentSecrets(req.ContainerID, req.AgentSlug)
+		o.retainAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
 		defer func() {
 			if agentExecStillRunning {
 				return
 			}
-			if o.releaseAgentSecrets(req.ContainerID, req.AgentSlug) {
-				o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug)
+			if o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
+				o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
 			}
 		}()
 	}
+
+	// E0: this run's HOME is created fresh in the preflight and removed here.
+	// Being EPHEMERAL is the point, not a side effect — it is what makes the
+	// per-run split safe to have. A per-run HOME that survived would turn one
+	// leaked directory per run into permanent growth on the /crew volume, and
+	// would keep this run's CLI login file (rendered with a real access token)
+	// on disk indefinitely. The shared .memory inside it is a SYMLINK, so this
+	// removes the link, never the agent's memory — the test pins that.
+	//
+	// Gated on agentExecStillRunning for the same reason the secrets cleanup
+	// is: under the detached-tmux path the CLI outlives RunAgent and is still
+	// reading its own $HOME. Skipping the cleanup fails safe (the directory
+	// survives until the container stops); removing it under a live CLI would
+	// not.
+	//
+	// No refcount, unlike secrets: a run id names one attempt, so this
+	// directory has exactly one owner by construction.
+	//
+	// The retain is what lets a refreshed provider login reach this run while
+	// it is executing (DeliverProviderLogin fans out across live run homes);
+	// without it the refresher would have no address for a per-run HOME.
+	retainRunHome(req.ContainerID, req.AgentSlug, req.RunID)
+	defer func() {
+		if agentExecStillRunning {
+			// The CLI outlived this call and is still working — the normal
+			// detached-tmux path, not an anomaly. Its HOME still exists, its
+			// token still authenticates (no run-end notification goes out on
+			// this path either), so the registry entry STAYS: a run that can
+			// still act must still be reachable by a credential refresh, or
+			// its OAuth goes stale mid-flight and the failure looks like a
+			// provider outage.
+			//
+			// The entry then leaks for the life of the process. That is the
+			// same trade the secrets hold makes one block up ("keeps its hold
+			// forever; that fails safe"), for the same reason and with the
+			// same shape — bounded by agents × containers, not by run count,
+			// because only runs that detach reach it.
+			return
+		}
+		// Release and cleanup move together on purpose. Releasing without
+		// ending — the shape this had first — left a run whose token still
+		// worked but that no refresh could reach: authenticating with a
+		// credential nothing was allowed to update.
+		releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
+		o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+	}()
 
 	env, workDir, err := o.preparePreflightDirs(ctx, req, env, fileCreds, keeperEnabled, runState.ID)
 	if err != nil {
@@ -657,9 +728,21 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			o.dispatchToolCallObservers(req, event)
 			// Loop guard: extract (tool_name, input) from the event metadata
 			// and abort the exec if the same call repeats past the threshold.
-			// Cancelling execCtx closes the stream reader and kills the CLI
-			// process; the post-stream check below turns that into a distinct
-			// loop_detected failure instead of a generic non-zero exit.
+			//
+			// What cancel() actually does: it ends OUR side. The stream reader
+			// closes, streamOutput returns, and the post-stream check below
+			// turns that into a distinct loop_detected failure instead of a
+			// generic non-zero exit. It does NOT kill the CLI process — this
+			// comment used to claim it did. The agent runs inside a DETACHED
+			// tmux session (setupTmuxExec: `tmux new-session -d`), so the
+			// process it started has no parent left to signal it; the very next
+			// block's `agentExecStillRunning = true` path (see the `if running`
+			// branch after ExecInspect) exists precisely because the exec
+			// routinely outlives this call. Ending the run's process tree for
+			// real needs the session name — provider.TmuxKillSessionCmd against
+			// TmuxSessionName(slug, runID) — which is what Tier 2 hard stop
+			// does (internal/api/issue_handler_hard_stop.go); the loop guard
+			// deliberately does not, it only stops paying for the output.
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
 				name, _ := m["tool_name"].(string)
 				if guard.observe(name, m["input"]) {
@@ -1095,6 +1178,12 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 	if sidecarEnabled {
 		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
 		internalAPIToken := sidecarIPCToken(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		// E0: the crew-scoped key the sidecar validates per-RUN tokens with,
+		// and this run's own token derived from it. The key goes to the
+		// sidecar (UID 1002); only the derived token enters the agent's
+		// environment (UID 1001), exactly like the LLM route key/token pair.
+		runKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		runToken := agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
 		routeKey := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
 		llmRouteToken := internaltoken.DeriveLLMRouteToken(routeKey, req.AgentID)
 		configFingerprint := sidecarConfigFingerprint(ipcToken, req.Credentials)
@@ -1109,7 +1198,17 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// the token instead of a spoofable `from`/slug. Fail-closed empty when
 		// internal auth is unconfigured; the sidecar then falls back to the
 		// #796 membership-validated behaviour.
-		if agentTok != "" {
+		// E0: prefer the per-RUN token. It resolves to the same agent, and
+		// additionally to THIS attempt — which is what lets the sidecar
+		// attribute a memory write or an escalation to the run that made it,
+		// and lets a finished run's credential stop working. The v1 token is
+		// still the fallback for a container whose sidecar predates the run
+		// key (a mid-upgrade crew), where a v2 token would verify against
+		// nothing and the run would lose its sidecar entirely.
+		switch {
+		case runToken != "":
+			env = append(env, "CREWSHIP_AGENT_TOKEN="+runToken)
+		case agentTok != "":
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
 		}
 		if llmRouteToken != "" {
@@ -1180,6 +1279,12 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				// excludes self, so the boot agent's identity would otherwise be
 				// missing from the sidecar's token→identity roster.
 				AgentToken: agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger),
+				// E0: the validation key, plus the boot run's own context so
+				// the sidecar knows one run from the moment it starts without
+				// needing a control message for it.
+				AgentRunKey: runKey,
+				RunID:       req.RunID,
+				RunChatID:   req.ChatID,
 			}
 		}
 		var routeAuth *SidecarRouteAuth
@@ -1313,7 +1418,18 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		// already holds for this agent, and every route that consumes it
 		// resolves the caller's own tier/attribution. Empty when internal auth
 		// is unconfigured, exactly as in the sidecar branch above.
-		if agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger); agentTok != "" {
+		//
+		// E0: per-RUN, for the same reasons as the sidecar branch. This path
+		// matters MORE, not less: SkipSidecar is how delegated sub-agents run,
+		// so it is the path that most reliably produces two concurrent runs
+		// inside one container.
+		subRunKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.logger)
+		subRunTok := agentRunAuthToken(subRunKey, req.WorkspaceID, req.AgentID, req.RunID, o.logger)
+		agentTok := agentAuthToken(ipcToken, req.WorkspaceID, req.AgentID, o.logger)
+		switch {
+		case subRunTok != "":
+			env = append(env, "CREWSHIP_AGENT_TOKEN="+subRunTok)
+		case agentTok != "":
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
 		}
 	}
@@ -1338,14 +1454,46 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 // fail-loud paths (agent dirs, credential files, MCP config) are checked
 // against the flush result rather than against a per-step exec error.
 func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunRequest, env []string, fileCreds bool, keeperEnabled bool, runID string) ([]string, string, error) {
-	scratchDir := path.Join("/workspace", req.AgentSlug)
+	// E0: scratch is per-RUN, not per-agent. Verified before changing it that
+	// this path has no reader anywhere: `scratchDir` is referenced exactly
+	// twice in the tree (here and the mkdir below), no other Go code, CLI
+	// command, API handler or frontend route names /workspace/<slug>, and the
+	// backup/restore paths deal with the /workspace volume as a whole. So
+	// deepening it costs nothing.
+	//
+	// It also buys nothing yet, and that is worth saying plainly: the system
+	// prompt (exec.go's FILESYSTEM block) advertises scratch as "/workspace/",
+	// unscoped, so agents write to the volume root and never into this
+	// directory at all. Naming the run dir to the model is a prompt change
+	// with real behavioural blast radius (it is the same block that teaches
+	// HOME, output and secrets), so it is left for the E0 design decision that
+	// owns HOME and /output rather than smuggled in here.
+	scratchDir := path.Join("/workspace", req.AgentSlug, req.RunID)
+	// outputDir is the agent's SHARED output tree and stays exactly where it
+	// was: four read surfaces parse /output/<slug>/... and chat attachments
+	// are written into it by the server for the agent to read back.
 	outputDir := path.Join("/output", req.AgentSlug)
-	workDir := outputDir // CWD = output dir so files are immediately visible to user
+	// runOutputDir is this run's subdirectory of that tree, and it is the CWD.
+	// Making it the working directory (rather than merely an available
+	// destination) is what gives the file watcher a run id to attribute a
+	// write to — an agent that writes a relative path lands in its own run's
+	// directory without having to be told to. The shared tree above is still
+	// its parent, so nothing that lists /output/<slug> recursively loses
+	// sight of the file. See run_paths.go.
+	runOutputDir := agentRunOutputDir(req.AgentSlug, req.RunID)
+	workDir := runOutputDir
 
-	crewAgentDir := path.Join("/crew", "agents", req.AgentSlug)
+	// The agent's DURABLE directory. No longer HOME (E0 — see run_paths.go):
+	// HOME is per run now, and this is what stays. .memory lives here, shared
+	// across every run of this agent on purpose, and every out-of-package
+	// reader of it (the backup collector, the memory index, the credential
+	// reconciler) keeps naming exactly this path.
+	crewAgentDir := agentSharedDir(req.AgentSlug)
 	crewSharedDir := "/crew/shared"
 
-	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
+	// This run's own credential directory. Its HOME is created by
+	// runHomeSetupScript below, which derives the path itself.
+	secretsAgentDir := agentSecretsDir(req.AgentSlug, req.RunID)
 	secretsSharedDir := "/secrets/shared"
 
 	// The merged preflight script. Every write from here on is queued on it;
@@ -1353,9 +1501,19 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// needs earlier writes to have landed first).
 	batch := newPreflightBatch(o.container, req.ContainerID, "1001:1001", o.logger)
 
-	// Create scratch, output, per-agent crew, and secrets directories
+	// Create scratch, output, per-agent crew, and secrets directories.
+	// outputDir is the agent's shared tree AND runOutputDir is this run's
+	// subdirectory of it: both, because the shared one is what the Files panel
+	// and chat attachments address, and the per-run one is where this run's
+	// own artifacts go.
 	batch.add(preflightStepAgentDirs, "", shellJoin("mkdir", "-p",
-		scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir))
+		scratchDir, outputDir, runOutputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir))
+
+	// This run's HOME, with the agent's shared .memory symlinked into it.
+	// Queued right after the dirs above because everything that follows —
+	// the Claude config, the MCP config and its OAuth token files, the CLI
+	// system-prompt files, the login file — writes inside it.
+	batch.add(preflightStepRunHome, "", runHomeSetupScript(req.AgentSlug, req.RunID))
 
 	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
 	manifestCfg := provider.ExecConfig{
@@ -1417,7 +1575,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// the deferred release covers the fail-loud returns in between.
 	unlockSecrets := func() {}
 	if fileCreds {
-		lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug)
+		lk := o.agentSecretsLock(req.ContainerID, req.AgentSlug, req.RunID)
 		lk.Lock()
 		var once sync.Once
 		unlockSecrets = func() { once.Do(lk.Unlock) }
@@ -1452,7 +1610,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
-	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, o.logger); err != nil {
+	if err := setupClaudeConfig(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
@@ -1477,7 +1635,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// Inject OAuth token files for MCP servers that need them.
 	// When Crewship holds access+refresh tokens from OAuth flow, write them
 	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
-	if err := injectMCPOAuthTokens(ctx, batch, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
+	if err := injectMCPOAuthTokens(ctx, batch, req.ContainerID, req.AgentSlug, req.RunID, req.MCPServers, req.Credentials, o.logger); err != nil {
 		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
 	}
 
@@ -1590,7 +1748,7 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 				req.CLIAdapter, n, maxArgStrLen)
 		}
 		var tmuxErr error
-		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+		execCmd, tmuxErr = o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, req.RunID, env)
 		if tmuxErr != nil {
 			if _, seen := o.tmuxWarned.LoadOrStore(req.ContainerID, true); seen {
 				o.logger.Debug("tmux setup failed, falling back to direct exec", "error", tmuxErr)

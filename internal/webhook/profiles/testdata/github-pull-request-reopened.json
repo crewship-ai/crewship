@@ -1,0 +1,33 @@
+{
+  "action": "reopened",
+  "number": 2517,
+  "pull_request": {
+    "id": 1633120711,
+    "node_id": "PR_kwDOKAgWh85hZ0OH",
+    "number": 2517,
+    "state": "open",
+    "title": "feat(webhook): verify github and standard-webhooks signatures",
+    "user": { "login": "octocat", "id": 583231, "type": "User" },
+    "head": {
+      "label": "crewship-ai:feat/durable-work-parallelism",
+      "ref": "feat/durable-work-parallelism",
+      "sha": "9f3c1a7d2b8e4c6a0d5f7b1e3a9c2d4f6b8e0a12"
+    },
+    "base": {
+      "label": "crewship-ai:main",
+      "ref": "main",
+      "sha": "1a2b3c4d5e6f70819293a4b5c6d7e8f901234567"
+    },
+    "merged": false,
+    "draft": false
+  },
+  "repository": {
+    "id": 671250311,
+    "name": "crewship",
+    "full_name": "crewship-ai/crewship",
+    "private": false,
+    "default_branch": "main"
+  },
+  "installation": { "id": 42318877, "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDIzMTg4Nzc=" },
+  "sender": { "login": "octocat", "id": 583231, "type": "User" }
+}
