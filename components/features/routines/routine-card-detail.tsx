@@ -602,6 +602,7 @@ function BeforeYouRunCard({
 }) {
   const dsl = isRecord(definition) ? definition : {}
   const inputs = routineInputSpecs(dsl)
+  const outputs = Array.isArray(dsl.outputs) ? dsl.outputs.filter(isRecord) : []
   const effects = routineEffects(dsl)
   const plan = schedules.find((s) => s.enabled)
   const parts: string[] = []
@@ -628,6 +629,9 @@ function BeforeYouRunCard({
                     {input.type || "text"}
                     {input.required ? " · required" : ""}
                     {input.default !== undefined ? " · has a default" : ""}
+                    {input.description && (
+                      <span className="block text-muted-foreground-soft">{input.description}</span>
+                    )}
                   </dd>
                 </React.Fragment>
               ))}
@@ -635,6 +639,16 @@ function BeforeYouRunCard({
           </div>
         ) : (
           <p className="text-muted-foreground">Nothing to fill in. Run starts immediately.</p>
+        )}
+        {outputs.length > 0 && (
+          <p className="text-muted-foreground">
+            <span className="font-medium text-foreground">Produces:</span>{" "}
+            {outputs
+              .map((o) =>
+                typeof o.label === "string" ? o.label : readableName(o.name || "Result"),
+              )
+              .join(", ")}
+          </p>
         )}
         <p className="text-muted-foreground" data-testid="routine-effects-line">
           {effectLine}
