@@ -515,3 +515,122 @@ describe("what the migrations asked for", () => {
     expect(cls).not.toContain("sm:px-5")
   })
 })
+
+// =============================================================================
+// presentation="page" — the same room without the door (#2519).
+//
+// The routine editor outgrew an 800px card: a two-column step editor needs the
+// content area. What must NOT change on the way out of the modal is the part
+// the modal was enforcing: one header, one footer outside the scrollport, ⌘↵,
+// and the discard guard on every exit.
+// =============================================================================
+
+describe("CreateSurface as a page", () => {
+  beforeEach(() => cleanup())
+
+  function Page(props: {
+    dirty?: boolean
+    open?: boolean
+    onOpenChange?: (o: boolean) => void
+    onSubmit?: () => void
+  }) {
+    const onOpenChange = props.onOpenChange ?? vi.fn()
+    return (
+      <CreateSurface
+        open={props.open ?? true}
+        presentation="page"
+        size="lg"
+        dirty={props.dirty}
+        discardLabel="this routine"
+        onOpenChange={onOpenChange}
+        onSubmit={props.onSubmit}
+      >
+        <CreateSurfaceHeader
+          concept="routines"
+          title="Edit recipe"
+          description="Nothing here is live until you publish and confirm."
+          onClose={() => onOpenChange(false)}
+        />
+        <CreateSurfaceBody>
+          <input aria-label="Name" />
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter
+          onCancel={() => onOpenChange(false)}
+          primaryLabel="Publish"
+          onPrimary={vi.fn()}
+        />
+      </CreateSurface>
+    )
+  }
+
+  it("renders no dialog, no overlay and no size class — a section that fills its parent", () => {
+    const { container } = render(<Page />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).toBeNull()
+
+    const section = container.querySelector('[data-slot="create-surface-page"]')!
+    expect(section.tagName).toBe("SECTION")
+    expect(section.className).toContain("h-full")
+    expect(section.className).toContain("min-h-0")
+    expect(section.className).toContain("flex-col")
+    // `size` is the dialog's business; the parent decides a page's width.
+    expect(section.className).not.toMatch(/max-w-\[/)
+  })
+
+  it("makes the title the page's h1 and keeps the description as plain text", () => {
+    render(<Page />)
+    const h1 = screen.getByRole("heading", { level: 1 })
+    expect(h1.textContent?.trim()).toBe("Edit recipe")
+    expect(screen.getByText("Nothing here is live until you publish and confirm.").tagName).toBe("P")
+    // Radix's title/description primitives would throw outside a Dialog root;
+    // the header has to pick the plain elements on its own.
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument()
+  })
+
+  it("routes the footer Cancel through the discard guard when dirty", () => {
+    const onOpenChange = vi.fn()
+    render(<Page dirty onOpenChange={onOpenChange} />)
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(/discard this routine/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("guards the header × the same way", () => {
+    const onOpenChange = vi.fn()
+    render(<Page dirty onOpenChange={onOpenChange} />)
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /keep editing/i }))
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it("closes straight away when clean", () => {
+    const onOpenChange = vi.fn()
+    render(<Page dirty={false} onOpenChange={onOpenChange} />)
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("submits on ⌘↵ but ignores Esc — a page is not dismissed", () => {
+    const onSubmit = vi.fn()
+    const onOpenChange = vi.fn()
+    render(<Page onSubmit={onSubmit} onOpenChange={onOpenChange} />)
+    const field = screen.getByLabelText("Name")
+    fireEvent.keyDown(field, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(field, { key: "Enter", ctrlKey: true })
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+
+    fireEvent.keyDown(field, { key: "Escape" })
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it("renders nothing when closed, like the dialog", () => {
+    const { container } = render(<Page open={false} />)
+    expect(container.querySelector('[data-slot="create-surface-page"]')).toBeNull()
+  })
+})
