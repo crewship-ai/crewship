@@ -17,7 +17,7 @@ reopened because the prior claim that authoring paths were covered was too broad
 | F4: history absent before first publish | Render application history for a draft as well as an existing publication. Test exposes source restore before initial publication. |
 | F5: baseline conflict discarded | Both client conflict decoders preserve `baseline`, tested for current and retained publication. |
 | F6: source-only CLI absent | `page project get --source-only`, with optional `--revision`, reaches both source endpoints. CLI transport tests verify both URLs. |
-| F7: diagnostic swaps / raised baseline | Add code-site anchors (statement + named test/function context); CI compares proposed baseline against target SHA. The initial anchor migration cannot grow the old file/code/message counts. Six Node tests and a real baseline-inflation rejection exercise the guard. |
+| F7: diagnostic swaps / raised baseline | Add code-site anchors (statement + named declaration/test context); CI compares proposed baseline against target SHA. The initial anchor migration cannot grow the old file/code/message counts. Six Node tests and a real baseline-inflation rejection exercise the guard. |
 
 ## Scope and evidence
 
@@ -51,3 +51,12 @@ the checking workflow.
 These are separate from the reproduced F1–F7 corrections. The prior merge is
 not retrospectively called safe on every authoring path merely because its CI
 was green; the post-merge regressions demonstrate the coverage gap.
+
+The first full local Go run exposed two old public-link tests relying on blind
+whole-document PATCH. The refused publication test now expects 403 and separately
+seeds legacy attestation data to retain its public-link defense coverage. The
+rename test now sends metadata only, matching the actual editor contract. These
+and the security/CAS regressions pass together (5.481 s). Self-review also found
+an anchor collision across named arrow helpers/classes; the anchor now includes
+enclosing named declarations, with red/green assertions for both cases. The
+regenerated baseline still contains 200 diagnostics and passes against main.

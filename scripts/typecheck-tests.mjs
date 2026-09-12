@@ -37,7 +37,10 @@ export function diagnosticAnchor(diagnostic) {
     if (ts.isCallExpression(parent) && parent.arguments.length && ts.isStringLiteralLike(parent.arguments[0])) {
       context.push(parent.expression.getText(file), parent.arguments[0].text)
     }
-    if (ts.isFunctionDeclaration(parent) && parent.name) context.push(parent.name.text)
+    // Include named arrow-function bindings, methods, classes and properties,
+    // not just function declarations: identical inner statements in different
+    // named helpers must not share an allowance.
+    if (parent.name && typeof parent.name.getText === "function") context.push(parent.kind, parent.name.getText(file))
   }
   return createHash("sha256").update(JSON.stringify([statement ?? node.getText(file), context])).digest("hex")
 }
