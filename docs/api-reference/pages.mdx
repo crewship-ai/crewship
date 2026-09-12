@@ -281,8 +281,9 @@ its payload history goes with it.
 | 200 | Updated. A new structural version is recorded. |
 | 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
 | 401 | No session or token. |
-| 403 | Not the owner, not an admin, and holding no `write` grant. |
+| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. |
 | 404 | No such page. |
+| 409 | The live definition changed before the update; reload before saving. |
 
 ---
 
@@ -693,10 +694,11 @@ five minutes later.
 | Status | Condition |
 |---|---|
 | 200 | Rolled back. |
-| 400 | `to` missing, or naming a version that is not in the retained history. |
+| 400 | `to` missing, invalid request, or a stored definition that no longer validates. |
 | 401 | No session or token. |
-| 403 | Not the owner, not an admin, and holding no `write` grant. |
-| 404 | No such page. |
+| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. |
+| 404 | No such page or retained version. |
+| 409 | The live definition changed before rollback; reload before restoring. |
 
 ---
 

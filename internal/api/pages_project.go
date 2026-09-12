@@ -161,7 +161,7 @@ func (h *PageHandler) PutProject(w http.ResponseWriter, r *http.Request) {
 	}
 	// Authorize the existing document before accepting a replacement: an
 	// omitted hidden panel must never turn into an authorized deletion.
-	live, readable := h.currentDocument(w, rec)
+	live, readable := h.currentDocument(r.Context(), w, rec)
 	if !readable || !h.requireProjectDefinitions(w, r, live) {
 		return
 	}
@@ -172,7 +172,7 @@ func (h *PageHandler) PutProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rev == 0 && req.Definition == nil {
-		doc, ok := h.currentDocument(w, rec)
+		doc, ok := h.currentDocument(r.Context(), w, rec)
 		if !ok {
 			return
 		}

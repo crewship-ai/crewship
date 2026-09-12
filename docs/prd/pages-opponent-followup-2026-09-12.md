@@ -2,7 +2,7 @@
 
 Follow-up to the independent review of merge `917143e2` / PR #2492. Base of
 this correction: `a0a5b3cb`. The review summary and the opponent's scratch probe
-were available; the linked Claude artifact could not be fetched. #2502 was
+were available; the linked [review artifact](https://claude.ai/code/artifact/8a040cec-d7ab-4f28-9692-1ddea4888fce) could not be fetched. #2502 was
 reopened because the prior claim that authoring paths were covered was too broad.
 
 ## Findings and corrections
@@ -60,3 +60,10 @@ and the security/CAS regressions pass together (5.481 s). Self-review also found
 an anchor collision across named arrow helpers/classes; the anchor now includes
 enclosing named declarations, with red/green assertions for both cases. The
 regenerated baseline still contains 200 diagnostics and passes against main.
+
+CodeRabbit's first substantive review identified the same missing function-like
+scope anchoring, plus missing status-table rows and missing request context on
+the extracted spec reader. Those are corrected; the reader now honors canceled
+contexts, covered by a regression test. The review artifact URL is retained for
+provenance. Expanded targeted project/security/public-link/cancellation tests
+passed (36.297 s), and strict documentation inventory passed again.

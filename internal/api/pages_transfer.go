@@ -166,7 +166,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 			"exporting a page requires page edit permission")
 		return
 	}
-	doc, ok := h.currentDocument(w, rec)
+	doc, ok := h.currentDocument(r.Context(), w, rec)
 	if !ok {
 		return
 	}

@@ -824,7 +824,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			"a page's slug is its address; create a new page rather than renaming this one")
 		return
 	}
-	base, originalSpec, ok := h.currentDocumentSnapshot(w, rec)
+	base, originalSpec, ok := h.currentDocumentSnapshot(r.Context(), w, rec)
 	if !ok {
 		return
 	}
@@ -1538,15 +1538,15 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 }
 
 // currentDocument reads the stored spec so a PATCH can be applied to it.
-func (h *PageHandler) currentDocument(w http.ResponseWriter, rec *pageRecord) (*pages.Document, bool) {
-	doc, _, ok := h.currentDocumentSnapshot(w, rec)
+func (h *PageHandler) currentDocument(ctx context.Context, w http.ResponseWriter, rec *pageRecord) (*pages.Document, bool) {
+	doc, _, ok := h.currentDocumentSnapshot(ctx, w, rec)
 	return doc, ok
 }
 
 // Return the exact bytes alongside the parsed document for atomic replacement.
-func (h *PageHandler) currentDocumentSnapshot(w http.ResponseWriter, rec *pageRecord) (*pages.Document, string, bool) {
+func (h *PageHandler) currentDocumentSnapshot(ctx context.Context, w http.ResponseWriter, rec *pageRecord) (*pages.Document, string, bool) {
 	var specJSON string
-	if err := h.db.QueryRow(`SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
+	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
 		replyInternalError(w, h.logger, "read stored page spec", err)
 		return nil, "", false
 	}

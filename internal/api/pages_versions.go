@@ -220,7 +220,7 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, originalSpec, ok := h.currentDocumentSnapshot(w, rec)
+	current, originalSpec, ok := h.currentDocumentSnapshot(r.Context(), w, rec)
 	if !ok || !h.requireProjectDefinitions(w, r, current) {
 		return
 	}

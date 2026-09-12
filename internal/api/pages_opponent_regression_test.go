@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -220,5 +221,18 @@ func TestPageLegacyReplacementRejectsAnInterleavedHiddenPanel(t *testing.T) {
 				t.Fatal("concurrently added hidden panel was lost")
 			}
 		})
+	}
+}
+
+func TestCurrentDocumentSnapshotHonorsCancellation(t *testing.T) {
+	h, ws, _, _ := withheldFixture(t)
+	rec, err := h.loadPage(t.Context(), ws, "health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, _, ok := h.currentDocumentSnapshot(ctx, httptest.NewRecorder(), rec); ok {
+		t.Fatal("canceled read returned a document")
 	}
 }

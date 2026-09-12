@@ -38,4 +38,8 @@ test("anchors distinguish declarations and test names but tolerate shifted lines
  assert.notEqual(anchor(helper),anchor(helper.replace("first","second")))
  const method='class First { run() { const bad: string = 1 } }'
  assert.notEqual(anchor(method),anchor(method.replace("First","Second")))
+ assert.notEqual(anchor(method),anchor(method.replace("run()","other()")))
+ const expression='const first = function named() { const bad: string = 1 }'
+ assert.notEqual(anchor(expression),anchor(expression.replace("first","second")))
+ assert.notEqual(anchor(expression),anchor(expression.replace("named()","other()")))
 })
