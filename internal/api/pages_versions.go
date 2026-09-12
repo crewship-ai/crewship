@@ -405,7 +405,7 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"page_id": updated.ID, "slug": updated.Slug})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"page":           h.pageDocument(r.Context(), updated, panels, nil),
+		"page":           h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)),
 		"rolled_back_to": target,
 		"version":        seq,
 		// The panels a viewer is about to find dimmed, named — so the operator

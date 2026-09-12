@@ -67,3 +67,9 @@ the extracted spec reader. Those are corrected; the reader now honors canceled
 contexts, covered by a regression test. The review artifact URL is retained for
 provenance. Expanded targeted project/security/public-link/cancellation tests
 passed (36.297 s), and strict documentation inventory passed again.
+
+Final self-review reproduced another response-side race: an administrator can
+add a hidden panel after rollback commits but before its response loads panels.
+The rollback response now uses the same viewer filter as PATCH. A deterministic
+interleaving regression first exposed the full hidden declaration in a 200
+response; it now requires only the sealed placeholder.

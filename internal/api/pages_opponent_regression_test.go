@@ -236,3 +236,53 @@ func TestCurrentDocumentSnapshotHonorsCancellation(t *testing.T) {
 		t.Fatal("canceled read returned a document")
 	}
 }
+
+func TestPageRollbackResponseFiltersPanelsAddedAfterCommit(t *testing.T) {
+	h, ws, admin, publisher := withheldFixture(t)
+	update := func(body string) {
+		r := pagesRequest(t, "PATCH", "/", ws, admin, "OWNER", body)
+		r.SetPathValue("slug", "health")
+		w := httptest.NewRecorder()
+		h.Update(w, r)
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+	}
+	update(visiblePanelPatch)
+	production := h.db
+	hook := &reviewQueryHook{match: "SELECT pp.id, pp.panel_id, pp.schema", nth: 1, run: func() {
+		update(withheldCreateBody)
+	}}
+	h.db = reviewHookedDB(t, reviewDBPath(t, production), hook)
+	defer func() { h.db = production }()
+	r := pagesRequest(t, "POST", "/", ws, publisher, "MEMBER", `{"to":2}`)
+	r.SetPathValue("slug", "health")
+	w := httptest.NewRecorder()
+	h.Rollback(w, r)
+	if !hook.didFire() || w.Code != 200 {
+		t.Fatalf("rollback response interleaving: fired=%v status=%d %s", hook.didFire(), w.Code, w.Body.String())
+	}
+	var response struct {
+		Page struct {
+			Panels []map[string]any `json:"panels"`
+		} `json:"page"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	for _, panel := range response.Page.Panels {
+		if panel["panel_id"] != "sluzby" && panel["id"] != "sluzby" {
+			continue
+		}
+		if panel["sealed"] != true {
+			t.Fatalf("concurrently added hidden panel is not sealed: %s", w.Body.String())
+		}
+		for _, key := range []string{"actions", "producer", "title", "schema", "owner"} {
+			if _, exists := panel[key]; exists {
+				t.Fatalf("rollback response leaked %s", key)
+			}
+		}
+		return
+	}
+	t.Fatalf("interleaved hidden panel missing from response: %s", w.Body.String())
+}
