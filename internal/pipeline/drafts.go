@@ -205,15 +205,15 @@ WHERE wake_pipeline_id=? AND enabled=1 AND deleted_at IS NULL ORDER BY id`, pipe
 		}
 		values := mergeInputs(supplied, dsl)
 		for _, spec := range dsl.Inputs {
+			// Legacy inputs have no form contract; match execution's validation.
+			if !hasInputForm(spec) {
+				continue
+			}
 			value, exists := values[spec.Name]
 			if !exists || value == nil {
 				if spec.Required {
 					return &ScheduleDraftConflict{schedule, name, fmt.Sprintf("Input %s is required by the new recipe", spec.Name)}
 				}
-				continue
-			}
-			// Legacy inputs have no form contract; match execution's validation.
-			if !hasInputForm(spec) {
 				continue
 			}
 			if err := validateFormValue(spec, value); err != nil {

@@ -25,6 +25,13 @@ a Activate nyní ověřují výsledný preset v transakci zápisu; publikace i r
 posuzují také wake presety povolených plánů. Vypnutí a nesouvisející úpravy
 existujícího plánu zůstávají možné.
 
+Skutečné CodeRabbit review hlavy `bec616365` doplnilo dvě chyby: klávesová
+zkratka Ctrl/Cmd+Enter obcházela potvrzení Publish a chybějící legacy vstup
+bez form contract blokoval publikaci/wake navzdory tomu, že jej spuštění
+přijímá. Obě mají červenou reprodukci a následnou opravu; explicitní potvrzení
+je vyžadováno i z klávesnice a legacy pravidla jsou sjednocená. Ověření
+následné hlavy je oddělené ve veřejném protokolu níže.
+
 ## Kód, který skutečně obsluhuje UI
 
 Editor: `routine-create-dialog.tsx`, detail: `routine-card-detail.tsx`,

@@ -214,6 +214,16 @@ describe("shared routine editor", () => {
     expect(h.calls.some(c => c.url.endsWith("/publish"))).toBe(false)
   })
 
+  it.each(["ctrlKey", "metaKey"])("requires publication confirmation after %s+Enter", async (modifier) => {
+    render(<RoutineCreateDialog {...props} />)
+    await screen.findByText("Worker")
+    fireEvent.keyDown(screen.getByLabelText("Name"), { key: "Enter", [modifier]: true })
+    expect(screen.getByRole("heading", { name: "Confirm publication" })).toBeInTheDocument()
+    expect(h.calls.some((c) => c.url.endsWith("/publish") || c.url.endsWith("/test_run"))).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
+  })
+
   it("requires a change review and confirmation, and lets the user return to editing", async () => {
     render(<RoutineCreateDialog {...props} />)
     await screen.findByText("Worker")

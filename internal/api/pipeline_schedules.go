@@ -833,18 +833,19 @@ func (h *PipelineHandler) resolveSchedulePipelineID(r *http.Request, workspaceID
 	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
 }
 
-// isUserScheduleError sniffs error strings from the schedule store
-// that come from caller-supplied data (cron expr, timezone). The
-// store wraps these with stable prefixes so we can map to 400 here
-// without pattern-matching deep error chains.
+// isUserScheduleError recognizes typed trigger errors and the legacy store
+// prefixes, including when a transaction stage adds diagnostic context.
 func isUserScheduleError(err error) bool {
-	if err == nil {
-		return false
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		return true
 	}
-	msg := err.Error()
-	return errors.Is(err, pipeline.ErrInvalidTrigger) || strings.HasPrefix(msg, "invalid cron expression") ||
-		strings.HasPrefix(msg, "invalid timezone") ||
-		strings.HasPrefix(msg, "pipeline_schedules:")
+	for ; err != nil; err = errors.Unwrap(err) {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "invalid cron expression") || strings.HasPrefix(msg, "invalid timezone") || strings.HasPrefix(msg, "pipeline_schedules:") {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultIfBlank(s, fallback string) string {

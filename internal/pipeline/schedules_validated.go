@@ -16,7 +16,7 @@ import (
 func (s *ScheduleStore) SaveValidated(ctx context.Context, in SaveScheduleInput) (*Schedule, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SaveValidated: begin: %w", err)
 	}
 	defer tx.Rollback()
 	var before, saved *Schedule
@@ -29,13 +29,13 @@ func (s *ScheduleStore) SaveValidated(ctx context.Context, in SaveScheduleInput)
 		}
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SaveValidated: write: %w", err)
 	}
 	if err = validateEnabledSchedule(ctx, tx, before, saved); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SaveValidated: validate preset: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SaveValidated: commit: %w", err)
 	}
 	return saved, nil
 }
@@ -45,18 +45,18 @@ func (s *ScheduleStore) SaveValidated(ctx context.Context, in SaveScheduleInput)
 func (s *ScheduleStore) ActivateValidated(ctx context.Context, id string) (*Schedule, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ActivateValidated: begin: %w", err)
 	}
 	defer tx.Rollback()
 	saved, err := activateSchedule(ctx, tx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ActivateValidated: write: %w", err)
 	}
 	if err = validateEnabledSchedule(ctx, tx, nil, saved); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ActivateValidated: validate preset: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ActivateValidated: commit: %w", err)
 	}
 	return saved, nil
 }

@@ -385,3 +385,48 @@ func TestPresetGate_WakeRecipeChangeIsRefused(t *testing.T) {
 		t.Fatalf("refused wake change mutated recipe: %s", got)
 	}
 }
+
+func TestPresetGate_LegacyRequiredInputMatchesExecution(t *testing.T) {
+	for _, wake := range []bool{false, true} {
+		name := "target"
+		if wake {
+			name = "wake"
+		}
+		t.Run(name, func(t *testing.T) {
+			r := newPresetGateRig(t, ",enabled", ",1")
+			if wake {
+				target, err := r.store.Save(t.Context(), validSaveInput("target"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := r.store.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET target_pipeline_id=?,wake_pipeline_id=?,wake_inputs_json='{"who":"alice"}' WHERE id='plan'`, target.ID, r.p.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			in := validSaveInput("planned")
+			in.DefinitionJSON = `{"dsl_version":"1.0","name":"planned","inputs":[{"name":"legacy","type":"string","required":true}],"steps":[]}`
+			dsl, err := Parse([]byte(in.DefinitionJSON))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateFormInputs(dsl, nil); err != nil {
+				t.Fatal(err)
+			}
+			legacy, err := r.store.Save(t.Context(), in)
+			if err != nil {
+				t.Fatalf("publication rejects inputs execution accepts: %v", err)
+			}
+			version, err := r.store.HeadVersion(t.Context(), legacy.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			in.DefinitionJSON = presetGateV1
+			if _, err := r.store.Save(t.Context(), in); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.store.Rollback(t.Context(), r.p.ID, version); err != nil {
+				t.Fatalf("rollback rejects legacy inputs: %v", err)
+			}
+		})
+	}
+}

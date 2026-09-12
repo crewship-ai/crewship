@@ -241,7 +241,7 @@ func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion i
 	defer tx.Rollback() // best effort after commit
 	// Keep the compatibility check and HEAD update atomic, just like Save.
 	if err := s.checkSchedulePresetsTx(ctx, tx, pipelineID, target.DefinitionJSON); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Rollback: validate schedule presets: %w", err)
 	}
 	now := tsformat.Format(time.Now())
 	res, err := tx.ExecContext(ctx, `

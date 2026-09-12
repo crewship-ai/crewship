@@ -1175,7 +1175,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
     if (mode === "describe") {
       handleDescribe()
     } else if (mode === "advanced") {
-      void handleTestAndSave()
+      setReviewOpen(true)
     }
   }
 
