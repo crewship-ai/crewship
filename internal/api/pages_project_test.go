@@ -97,7 +97,7 @@ func TestPageProjectRoundTripAndDraftIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, ok := h.currentDocument(httptest.NewRecorder(), rec)
+	active, ok := h.currentDocument(t.Context(), httptest.NewRecorder(), rec)
 	if !ok {
 		t.Fatal("invalid active document")
 	}
@@ -238,7 +238,7 @@ func TestPageProjectDefinitionUpdateIsDraftOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, ok := h.currentDocument(httptest.NewRecorder(), rec)
+	doc, ok := h.currentDocument(t.Context(), httptest.NewRecorder(), rec)
 	if !ok {
 		t.Fatal("missing definition")
 	}
@@ -266,7 +266,7 @@ func TestPageProjectDefinitionUpdateIsDraftOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	live, ok := h.currentDocument(httptest.NewRecorder(), rec)
+	live, ok := h.currentDocument(t.Context(), httptest.NewRecorder(), rec)
 	if !ok || live.Metadata.Name != original {
 		t.Fatal("draft changed live page")
 	}

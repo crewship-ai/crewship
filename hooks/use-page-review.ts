@@ -76,7 +76,7 @@ export function publishConflictOf(error: unknown): PublishConflictWire | null {
 
 function normalizeConflict(body: unknown): PublishConflictWire {
   const raw = (body ?? {}) as Partial<PublishConflictWire>
-  const kinds = ["definition", "routines", "publication", "draft"] as const
+  const kinds = ["definition", "routines", "publication", "draft", "baseline"] as const
   const conflict = kinds.find(kind => kind === raw.conflict)
   const routines = Array.isArray(raw.routines) ? raw.routines.filter((r): r is string => typeof r === "string") : undefined
   return {

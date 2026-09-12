@@ -309,8 +309,31 @@ func (h *PageHandler) CheckProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Keep the candidate report complete for publication provenance, but expose
+	// only routines declared by panels this reader may see.
+	doc, ok := pageAuthorizedDocument(candidate.spec, candidate.authorizer.visible, nil)
+	if !ok {
+		replyInternalError(w, h.logger, "authorize check report", errors.New("invalid candidate document"))
+		return
+	}
+	routines := make(map[string]string)
+	all, _ := candidate.report["routine_definitions"].(map[string]string)
+	for _, panel := range doc.Spec.Panels {
+		for _, action := range panel.Actions {
+			if action.Kind == pages.ActionCall {
+				if digest, found := all[action.Routine]; found {
+					routines[action.Routine] = digest
+				}
+			}
+		}
+	}
+	report := make(map[string]any, len(candidate.report))
+	for key, value := range candidate.report {
+		report[key] = value
+	}
+	report["routine_definitions"] = routines
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"build_id": req.BuildID, "source_revision": candidate.record.SourceRevision, "git_commit": candidate.record.GitCommit, "artifact_digest": candidate.record.ArtifactDigest, "checks": candidate.report})
+	writeJSON(w, 200, map[string]any{"build_id": req.BuildID, "source_revision": candidate.record.SourceRevision, "git_commit": candidate.record.GitCommit, "artifact_digest": candidate.record.ArtifactDigest, "checks": report})
 }
 func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 	rec, ok := h.projectPage(w, r)

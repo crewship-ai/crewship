@@ -29,6 +29,10 @@ func newPageProjectCommand() *cobra.Command {
 		if revision > 0 {
 			endpoint += fmt.Sprintf("/history/%d", revision)
 		}
+		sourceOnly, _ := cmd.Flags().GetBool("source-only")
+		if sourceOnly {
+			endpoint += "/source"
+		}
 		resp, err := client.Get(endpoint)
 		if err != nil {
 			return err
@@ -57,6 +61,7 @@ func newPageProjectCommand() *cobra.Command {
 		}
 		return writeErr
 	}}
+	get.Flags().Bool("source-only", false, "Read shared source without the full panel definition; supports --revision")
 	get.Flags().Int64("revision", 0, "Read a historical source revision instead of the current draft")
 	set := &cobra.Command{Use: "set <slug>", Args: cobra.ExactArgs(1), Short: "Save a source YAML/JSON document against an expected draft revision", RunE: func(cmd *cobra.Command, args []string) error {
 		file, _ := cmd.Flags().GetString("file")

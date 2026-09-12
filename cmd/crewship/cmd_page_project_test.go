@@ -136,3 +136,27 @@ func TestPageProjectCLIGetHonoursFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestPageProjectGetSourceOnly(t *testing.T) {
+	for _, revision := range []string{"", "3"} {
+		t.Run("revision="+revision, func(t *testing.T) {
+			stub := pageStub(t)
+			route := "/api/v1/pages/health/project"
+			args := []string{"page", "project", "get", "health", "--source-only"}
+			if revision != "" {
+				route += "/history/" + revision
+				args = append(args, "--revision", revision)
+			}
+			route += "/source"
+			stub.OnGet(route, func(*http.Request, []byte) (int, []byte, string) {
+				return 200, []byte(`{"revision":3,"project":{"files":[]}}`), "application/json"
+			})
+			if _, err := runPageTransferCLI(t, "", args...); err != nil {
+				t.Fatal(err)
+			}
+			if len(stub.CallsFor("GET", route)) != 1 {
+				t.Fatal("source-only endpoint was not read")
+			}
+		})
+	}
+}
