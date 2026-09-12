@@ -7,6 +7,7 @@ import {
   EDITOR_SECTIONS,
   EDITOR_SECTION_HINT,
   EDITOR_SECTION_LABEL,
+  EDITOR_SECTION_SUMMARY,
   type EditorSection,
   type PageCapabilities,
 } from "@/lib/pages/editor-contract"
@@ -45,9 +46,15 @@ import { EditorHistorySection } from "@/components/features/pages/editor/section
  * it has to show, and none of them renders an empty application heading or a
  * permanently disabled Publish (U02).
  *
- * The section nav is CSS-responsive rather than JavaScript-responsive — a row
- * of named tabs at ≥768px, one labelled picker below it — so the same DOM
- * serves both and there is no first-paint flash while a media query resolves.
+ * Pressing Edit hands the whole content column to this shell (#2515): a
+ * header that names the Page, the way back and what viewers see meanwhile; a
+ * rail of sections on the left with one line under each name; the open
+ * section in a readable measure. The Pages list beside it stays mounted but
+ * steps out of the way, so its scroll and filters are there on return.
+ *
+ * The section nav is CSS-responsive rather than JavaScript-responsive — the
+ * rail at ≥768px, one labelled picker below it — so the same DOM serves both
+ * and there is no first-paint flash while a media query resolves.
  */
 
 const SECTION_COMPONENT: Record<EditorSection, React.ComponentType<EditorSectionProps>> = {
@@ -80,7 +87,7 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
   // arrived at the editor with focus on `<body>`: the single most common way
   // into this surface dropped them at the top of the document. A measured
   // pass found the same at every other seam, which is why `focusHeading` is
-  // exported and the dialog and `View page` use it too.
+  // exported and the dialog and `Back to page` use it too.
   const heading = React.useRef<HTMLHeadingElement>(null)
   React.useEffect(() => {
     heading.current?.focus()
@@ -104,9 +111,20 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
     onDirtyChange: setDirty,
   }
 
+  // What viewers see while this person edits. Stated in the header because
+  // the whole screen has just changed under them, and the first question is
+  // whether anything they touch here is already live. It is not: an
+  // application Page keeps serving its publication until Publish, and every
+  // other section writes only when its own control is pressed.
+  const audience = page?.has_application
+    ? `Viewers still see publication ${page.publication_version}`
+    : capabilities.hasApplicationDraft
+      ? "The application draft is not published"
+      : "Each section saves on its own"
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-white/[0.06] px-4 py-3">
+    <div data-slot="page-editor" className="flex h-full min-h-0 flex-col bg-background">
+      <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-2.5">
         <Button
           variant="outline"
           size="sm"
@@ -123,7 +141,7 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
           }}
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-          View page
+          Back to page
         </Button>
         <div className="min-w-0 flex-1">
           {/* The identity of the page being edited never leaves the screen,
@@ -142,71 +160,86 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
             {page?.name ?? slug}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
-            Editing · {EDITOR_SECTION_LABEL[section]}
+            Editing {EDITOR_SECTION_LABEL[section]} · {audience}
           </p>
         </div>
       </header>
 
-      <nav aria-label="Editor sections" className="hidden shrink-0 gap-1 border-b border-white/[0.06] px-3 py-1.5 md:flex">
-        {EDITOR_SECTIONS.map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setSection(id)}
-            aria-current={id === section ? "page" : undefined}
-            title={EDITOR_SECTION_HINT[id]}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs transition-colors coarse:min-h-11",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              id === section
-                ? "bg-white/[0.07] font-medium text-foreground"
-                : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
-            )}
-          >
-            {EDITOR_SECTION_LABEL[id]}
-          </button>
-        ))}
-      </nav>
-
-      <div className="shrink-0 border-b border-white/[0.06] px-4 py-2 md:hidden">
-        {/* A named picker, not four tabs squeezed into 360px — the reviewer's
-            §4 point, and the reason the label is visible rather than implied. */}
-        <label htmlFor="pages-editor-section" className="mb-1 block text-xs text-muted-foreground">
-          Editor section
-        </label>
-        <Select value={section} onValueChange={(next) => setSection(next as EditorSection)}>
-          <SelectTrigger id="pages-editor-section" className="w-full coarse:min-h-11">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {EDITOR_SECTIONS.map((id) => (
-              <SelectItem key={id} value={id}>
+      <div className="flex min-h-0 flex-1">
+        {/* The rail is the map of the editor: every section, with one line
+            saying what lives there, and the open one marked. It replaces the
+            row of tabs that sat under the page header — tabs said where you
+            were, never what the other three held (#2515). */}
+        <nav
+          aria-label="Editor sections"
+          className="hidden w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/[0.06] p-3 md:flex"
+        >
+          {EDITOR_SECTIONS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSection(id)}
+              aria-current={id === section ? "page" : undefined}
+              title={EDITOR_SECTION_HINT[id]}
+              className={cn(
+                "flex flex-col items-start gap-0.5 rounded-md border-l-2 px-3 py-2 text-left transition-colors coarse:min-h-11",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                id === section
+                  ? "border-primary bg-white/[0.07] text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+              )}
+            >
+              <span className={cn("text-sm", id === section ? "font-semibold" : "font-medium")}>
                 {EDITOR_SECTION_LABEL[id]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+              </span>
+              <span className="text-xs text-muted-foreground">{EDITOR_SECTION_SUMMARY[id]}</span>
+            </button>
+          ))}
+        </nav>
 
-      {/* Only this column scrolls, and wide content scrolls inside its own
-          container — the document itself must never move sideways.
-          
-          Padding and the readable measure live here rather than in each
-          section, so there is one answer instead of four that drift: three
-          sections had rendered flush against the container, and the review —
-          the surface someone spends the most time on — had no maximum width
-          at all, so its diff and its prose stretched the full span of an
-          ultrawide monitor. Sections narrow further where a form wants it;
-          none of them widens past this. */}
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
-          {loading && page == null ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading this Page…
-            </p>
-          ) : (
-            <Section {...sectionProps} />
-          )}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-white/[0.06] px-4 py-2 md:hidden">
+            {/* A named picker, not four tabs squeezed into 360px — the
+                reviewer's §4 point, and the reason the label is visible rather
+                than implied. */}
+            <label htmlFor="pages-editor-section" className="mb-1 block text-xs text-muted-foreground">
+              Editor section
+            </label>
+            <Select value={section} onValueChange={(next) => setSection(next as EditorSection)}>
+              <SelectTrigger id="pages-editor-section" className="w-full coarse:min-h-11">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EDITOR_SECTIONS.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {EDITOR_SECTION_LABEL[id]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Only this column scrolls, and wide content scrolls inside its own
+              container — the document itself must never move sideways.
+
+              Padding and the readable measure live here rather than in each
+              section, so there is one answer instead of four that drift: three
+              sections had rendered flush against the container, and the review —
+              the surface someone spends the most time on — had no maximum width
+              at all, so its diff and its prose stretched the full span of an
+              ultrawide monitor. Sections narrow further where a form wants it;
+              none of them widens past this. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+            <div className="mx-auto w-full max-w-5xl p-4 sm:p-6 lg:px-10">
+              {loading && page == null ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Loading this Page…
+                </p>
+              ) : (
+                <Section {...sectionProps} />
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

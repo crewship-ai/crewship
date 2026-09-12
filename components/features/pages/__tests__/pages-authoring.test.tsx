@@ -157,7 +157,7 @@ describe("the /pages shell offers the third door", () => {
     // dialogs. The address carries it, so a reload lands back here.
     expect(await screen.findByTestId("section-content")).toBeTruthy()
     expect(window.location.search).toBe("?mode=edit")
-    expect(screen.getByRole("button", { name: /view page/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /back to page/i })).toBeTruthy()
     // The list is still beside the editor — replacing it with the sections
     // was the review's U05, and the scroll-and-filters promise is the one
     // that breaks. The name appears twice on purpose: once in the rail, once
@@ -186,7 +186,8 @@ describe("the /pages shell offers the third door", () => {
     fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
     expect(await screen.findByTestId("section-content")).toBeTruthy()
     // Access is reachable on exactly the Page the old gate locked out of it.
-    fireEvent.click(screen.getByRole("button", { name: "Access" }))
+    // The rail button carries its one-line summary in its name too.
+    fireEvent.click(screen.getByRole("button", { name: /^Access/ }))
     expect(await screen.findByTestId("section-access")).toBeTruthy()
   })
 

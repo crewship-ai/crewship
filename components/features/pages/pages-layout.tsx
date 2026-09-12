@@ -244,16 +244,25 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
-        {/* The list stays. Replacing it with the editor's sections was the
-            first draft's riskiest idea and the review's U05: the promise that
-            a list restores its scroll and filters afterwards is the promise
-            that breaks. On a phone it is already an overlay, so the editor
-            gets the full width there without anyone deciding it should. */}
+        {/* The list stays MOUNTED. Replacing it with the editor's sections was
+            the first draft's riskiest idea and the review's U05: the promise
+            that a list restores its scroll and filters afterwards is the
+            promise that breaks. While editing it steps off-screen instead
+            (#2515): still in the DOM at its full width, so its scroll
+            position and its filter state are exactly where they were on
+            return — `display: none` would have reset the scroll — but out of
+            layout, out of the tab order and out of the accessibility tree,
+            so the editor has the whole width and nobody can tab into a list
+            they cannot see. */}
         <aside
+          inert={editing}
+          aria-hidden={editing || undefined}
+          data-editing={editing || undefined}
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
             isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
+            editing && "pointer-events-none absolute inset-y-0 left-0 -translate-x-full opacity-0",
           )}
         >
           {collapsed ? (
@@ -285,10 +294,15 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {editing && selectedSlug ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
-                initial={{ opacity: 0, x: 12 }}
+                // The editor arrives from the right edge and leaves the same
+                // way: it is a mode laid over the page, not the next page in
+                // a sequence, and the direction says so. MotionConfig
+                // (`reducedMotion="user"`) turns the travel into a plain
+                // fade for anyone who asked for less motion.
+                initial={{ opacity: 0.4, x: "100%" }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: duration.short, ease: "easeOut" }}
+                exit={{ opacity: 0.4, x: "100%" }}
+                transition={{ duration: duration.base, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
                 {/* Entering the editor unmounts the live application frame:

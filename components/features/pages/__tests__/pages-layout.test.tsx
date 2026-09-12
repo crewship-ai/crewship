@@ -167,6 +167,29 @@ describe("PagesLayout", () => {
     })
   })
 
+  // #2515: Edit hands the whole column to the editor. The rail must not be
+  // torn down for that — its scroll and filters have to be there on return —
+  // so it steps off-screen instead, and comes back with the same node.
+  it("keeps the rail mounted but out of the way while editing, and brings it back", async () => {
+    renderLayout([FLEET, CLOSE], "fleet-201")
+    await waitFor(() => expect(document.querySelector("[data-slot='panel-grid']")).toBeTruthy())
+    const rail = document.querySelector('[data-slot="pages-rail"]')
+    const aside = rail?.closest("aside")
+    expect(aside).toBeTruthy()
+    expect(aside?.hasAttribute("inert")).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeTruthy())
+    expect(document.querySelector('[data-slot="pages-rail"]')).toBe(rail)
+    expect(aside?.hasAttribute("inert")).toBe(true)
+    expect(aside?.getAttribute("aria-hidden")).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: /back to page/i }))
+    await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeNull())
+    expect(document.querySelector('[data-slot="pages-rail"]')).toBe(rail)
+    expect(aside?.hasAttribute("inert")).toBe(false)
+  })
+
   it("renders the overview with no slug, and the page's grid with one", async () => {
     renderLayout([FLEET, CLOSE])
     await waitFor(() => expect(screen.getByText("Overview")).toBeTruthy())
