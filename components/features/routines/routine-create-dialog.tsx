@@ -19,6 +19,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { describeCron } from "@/lib/cron-describe"
+import { formatRoutineTime } from "@/lib/routine-time"
+import { routinePresetSummary } from "@/lib/routine-preset-summary"
 import { RoutinePublicationReview } from "./routine-publication-review"
 import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
@@ -2064,6 +2067,50 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                     )}
                   </div>
                 )}
+              <div className="space-y-2 rounded-xl border p-3 text-sm">
+                <p>
+                  Runtime:{" "}
+                  {publishedRecipe &&
+                  (publishedRecipe.author_crew_id ?? "") !== authorCrewId
+                    ? `${crews.find((c) => c.id === publishedRecipe.author_crew_id)?.name || (publishedRecipe.author_crew_id ? "Team details unavailable" : "No team")} → `
+                    : ""}
+                  {describeCrew?.name || (authorCrewId ? "Team details unavailable" : "No team selected")}
+                </p>
+                {publishedRecipe &&
+                  (icon !== resolveRoutineIcon(publishedRecipe) ||
+                    color !== resolveRoutineColor(publishedRecipe)) && (
+                    <p>
+                      Appearance: {resolveRoutineIcon(publishedRecipe)} /{" "}
+                      {resolveRoutineColor(publishedRecipe)} → {icon} / {color}
+                    </p>
+                  )}
+                {!reviewingExisting && (
+                  <>
+                    <p>
+                      Starts:{" "}
+                      {trigger.kind === "schedule"
+                        ? `${describeCron(trigger.cron)} · ${trigger.timezone}`
+                        : trigger.kind === "once"
+                          ? formatRoutineTime(trigger.at)
+                          : trigger.kind === "event"
+                            ? "Configure event triggers in Plan after publication"
+                            : "Manual · no automatic start"}
+                    </p>
+                    {(trigger.kind === "schedule" || trigger.kind === "once") && (
+                      <p>
+                        {routinePresetSummary(
+                          Object.fromEntries(
+                            scheduledFields.map((field) => [
+                              field.name,
+                              scheduledValues[field.name] ?? field.default ?? "",
+                            ]),
+                          ),
+                        )}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
               <RoutinePublicationReview
                 draft={parsedDSL}
                 published={publishedRecipe?.definition}
@@ -2119,11 +2166,6 @@ function forkStatusDot(r: RoutineListItem): string {
   if (s === "failed" || s === "error") return "bg-destructive"
   if (r.invocation_count === 0) return "bg-muted-foreground/30"
   return "bg-primary"
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s
-  return s.slice(0, n - 1) + "…"
 }
 
 /** A partially authored definition must not crash its readable preview. */

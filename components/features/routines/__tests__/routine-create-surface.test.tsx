@@ -161,6 +161,7 @@ describe("New routine on CreateSurface", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     fireEvent.click(screen.getByRole("button", { name: /^Publish$/i }))
+    expect(screen.getByText("Starts: Manual · no automatic start")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
 
     await waitFor(() => {
