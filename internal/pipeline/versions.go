@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // PipelineVersion is one immutable snapshot in a pipeline's edit
@@ -241,7 +243,7 @@ func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion i
 	if err := s.checkSchedulePresetsTx(ctx, tx, pipelineID, target.DefinitionJSON); err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := tsformat.Format(time.Now())
 	res, err := tx.ExecContext(ctx, `
 UPDATE pipelines
 SET head_version = ?, definition_json = ?, definition_hash = ?, updated_at = ?

@@ -368,3 +368,20 @@ func TestPresetGate_TriggerCannotSmuggleABrokenPlanPast(t *testing.T) {
 		t.Errorf("the refused save still changed the recipe: %s", def)
 	}
 }
+
+func TestPresetGate_WakeRecipeChangeIsRefused(t *testing.T) {
+	r := newPresetGateRig(t, ",enabled", ",1")
+	target, err := r.store.Save(t.Context(), validSaveInput("target"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.store.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET target_pipeline_id=?,wake_pipeline_id=?,wake_inputs_json='{"who":"alice"}' WHERE id='plan'`, target.ID, r.p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.saveV2(t); err == nil {
+		t.Fatal("changing a wake recipe silently broke the enabled plan's wake preset")
+	}
+	if got := r.liveDefinition(t); got != presetGateV1 {
+		t.Fatalf("refused wake change mutated recipe: %s", got)
+	}
+}

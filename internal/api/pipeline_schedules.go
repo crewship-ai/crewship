@@ -351,7 +351,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          body.CatchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
 		// surface them as 400 not 500 so the UI can show "fix the
@@ -615,7 +615,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          catchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
 			replyError(w, http.StatusBadRequest, err.Error())
@@ -718,7 +718,11 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
-	activated, err := h.schedules.Activate(r.Context(), scheduleID)
+	activated, err := h.schedules.ActivateValidated(r.Context(), scheduleID)
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if errors.Is(err, pipeline.ErrScheduleNotDraft) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "schedule is not awaiting activation",
@@ -838,7 +842,7 @@ func isUserScheduleError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.HasPrefix(msg, "invalid cron expression") ||
+	return errors.Is(err, pipeline.ErrInvalidTrigger) || strings.HasPrefix(msg, "invalid cron expression") ||
 		strings.HasPrefix(msg, "invalid timezone") ||
 		strings.HasPrefix(msg, "pipeline_schedules:")
 }

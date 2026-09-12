@@ -18,6 +18,13 @@ Lidská brána §11 zůstává otevřená. Tento dokument doplňuje historii, ne
 | Inbox Retry a chat slash | `Prefer: respond-async` na skutečných routine run požadavcích | Testy obou klientských cest kontrolují hlavičku |
 | Nepřesná dokumentace | PRD úvod, P8b, CLI, work order, review audit | P8b má samostatný JSON s identitou původního nasazení; neprokazuje dnešní opravy |
 
+Dodatečná kontrola našla další tři mezery: samostatné Activate draftového
+plánu, zastaralý výsledek API preflightu při souběžné publikaci a změnu receptu
+wake rutiny. Všechny tři mají červenou reprodukci. Veřejné zápisy plánu
+a Activate nyní ověřují výsledný preset v transakci zápisu; publikace i rollback
+posuzují také wake presety povolených plánů. Vypnutí a nesouvisející úpravy
+existujícího plánu zůstávají možné.
+
 ## Kód, který skutečně obsluhuje UI
 
 Editor: `routine-create-dialog.tsx`, detail: `routine-card-detail.tsx`,

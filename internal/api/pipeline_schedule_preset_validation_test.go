@@ -679,3 +679,67 @@ func TestPresetValidation_ReenableChecksWakePreset(t *testing.T) {
 		t.Fatalf("repair wake and enable: %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestPresetValidation_CommitRechecksAfterPublication(t *testing.T) {
+	h, _, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	in := pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Initially disabled", TargetPipelineID: p.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Inputs: map[string]any{"region": "eu"}}
+	plan, err := h.schedules.Save(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a request whose preflight completed before another request published.
+	dsl, err := pipeline.Parse([]byte(presetValidationDef))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ValidateFormInputs(dsl, in.Inputs); err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	in.ID = plan.ID
+	in.Enabled = true
+	if _, err := h.schedules.SaveValidated(t.Context(), in); err == nil {
+		t.Fatal("stale preflight enabled a plan against incompatible HEAD")
+	}
+	after, err := h.schedules.GetByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Enabled || after.InputsJSON != plan.InputsJSON || after.UpdatedAt != plan.UpdatedAt {
+		t.Fatalf("refused write changed plan: %+v", after)
+	}
+}
+
+func TestPresetValidation_ActivateDraftChecksPreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	plan, err := h.schedules.Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Draft", TargetPipelineID: p.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Inputs: map[string]any{"region": "eu"}, Activation: pipeline.TriggerActivationDraft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	activate := func() *httptest.ResponseRecorder {
+		req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/activate", nil), ws), user, "OWNER")
+		req.SetPathValue("scheduleId", plan.ID)
+		rr := httptest.NewRecorder()
+		h.ActivateSchedule(rr, req)
+		return rr
+	}
+	if rr := activate(); rr.Code != 400 {
+		t.Fatalf("invalid draft activation: %d %s", rr.Code, rr.Body.String())
+	}
+	after, err := h.schedules.GetByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Enabled || after.Activation != pipeline.TriggerActivationDraft {
+		t.Fatalf("refused activation mutated plan: %+v", after)
+	}
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"inputs":{"zone":"eu"}}`); rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+	if rr := activate(); rr.Code != 200 {
+		t.Fatalf("repaired draft activation: %d %s", rr.Code, rr.Body.String())
+	}
+}
