@@ -44,6 +44,7 @@ import { FilePlus2, Pencil, Share2, Upload } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import {
@@ -108,6 +109,13 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const { pages, loading, error } = usePages(workspaceId)
   const detail = usePage(workspaceId, selectedSlug)
+
+  // Who "Mine" belongs to, and half of the key the rail's fold state is saved
+  // under. The tolerant variant on purpose: this shell is also mounted in
+  // tests and embeds with no provider, and a rail with no "Mine" group is a
+  // rail, while a throw is a blank column.
+  const session = useSessionSafe()
+  const currentUserId = session.data?.user.id ?? null
 
   const summary = React.useMemo(() => summarisePages(pages, now), [pages, now])
   const filtered = React.useMemo(
@@ -263,6 +271,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           ) : (
             <PagesRail
               pages={pages}
+              workspaceId={workspaceId}
+              currentUserId={currentUserId}
               search={search}
               onSearchChange={setSearch}
               filters={filters}

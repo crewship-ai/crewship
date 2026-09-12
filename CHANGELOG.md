@@ -22,6 +22,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **The Pages list is grouped by owner.** The rail folds into Mine, the crews you belong to, the other crews and Owned by others, each with its count in the header and the owner named there once rather than on every row. Groups collapse and remember it per workspace; a search opens every group that matches and hides the rest until it is cleared; opening a page unfolds its group; and the arrow keys walk the rows, with Left and Right folding and unfolding. When the server reports how you reach each page, the filter gains a Shared with me switch (#2523).
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 
 ### Added

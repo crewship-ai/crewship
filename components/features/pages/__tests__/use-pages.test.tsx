@@ -15,6 +15,9 @@ import { renderHook, waitFor, act } from "@testing-library/react"
 
 import {
   EMPTY_PAGE_FILTERS,
+  crewMembershipFromReach,
+  groupPagesByOwner,
+  hasReach,
   matchesPageFilters,
   normalizePage,
   normalizePageList,
@@ -270,22 +273,22 @@ describe("facets (§9b.1)", () => {
   it("matches a STATUS pick on ANY panel, not on the page's worst state", () => {
     // "Fleet" is ranked stale, but a filter looking for fresh panels must
     // still find it — otherwise the facet hides the row it was asked for.
-    expect(matchesPageFilters(pages[0], { states: ["fresh"], owners: [] }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: ["stale"], owners: [] }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: ["failed"], owners: [] }, "")).toBe(false)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["fresh"] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["stale"] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["failed"] }, "")).toBe(false)
   })
 
   it("is multi-select: two states are a union, not a replacement", () => {
-    expect(matchesPageFilters(pages[1], { states: ["stale", "fresh"], owners: [] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[1], { ...EMPTY_PAGE_FILTERS, states: ["stale", "fresh"] }, "")).toBe(true)
     expect(togglePageFilter(["stale"], "fresh")).toEqual(["stale", "fresh"])
     expect(togglePageFilter(["stale", "fresh"], "stale")).toEqual(["fresh"])
   })
 
   it("combines STATUS and OWNER instead of letting one clear the other (#1776)", () => {
     const f = { states: ["fresh"] as const, owners: ["crew/finance"] }
-    expect(matchesPageFilters(pages[1], { states: [...f.states], owners: f.owners }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: [...f.states], owners: f.owners }, "")).toBe(false)
-    expect(pageFilterCount({ states: ["fresh", "stale"], owners: ["crew/finance"] })).toBe(3)
+    expect(matchesPageFilters(pages[1], { ...EMPTY_PAGE_FILTERS, states: [...f.states], owners: f.owners }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: [...f.states], owners: f.owners }, "")).toBe(false)
+    expect(pageFilterCount({ states: ["fresh", "stale"], owners: ["crew/finance"], shared: false })).toBe(3)
     expect(pageFilterCount(EMPTY_PAGE_FILTERS)).toBe(0)
   })
 
@@ -302,6 +305,72 @@ describe("facets (§9b.1)", () => {
       { ref: "crew/finance", label: "finance", count: 1 },
       { ref: "crew/lookout", label: "lookout", count: 1 },
     ])
+  })
+})
+
+// ── groups and reach (#2523) ────────────────────────────────────────────────
+
+describe("groups by owner (#2523)", () => {
+  const ME = "u1"
+  const pages = [
+    toPageView(wirePage({ slug: "finance-close", name: "Nightly close", owner: "crew/finance", reach: ["role"] })),
+    toPageView(wirePage({ slug: "anna", name: "Anna's board", owner: "user/u2", reach: ["grant"] })),
+    toPageView(wirePage({ slug: "fleet", name: "Fleet", owner: "crew/lookout", reach: ["crew:lookout"] })),
+    toPageView(wirePage({ slug: "notes", name: "My notes", owner: `user/${ME}`, reach: ["owner"] })),
+    toPageView(wirePage({ slug: "alpha", name: "Alpha ops", owner: "crew/alpha", reach: ["role"] })),
+    toPageView(wirePage({ slug: "orphan", name: "Orphan", owner: null, owner_crew_slug: null })),
+  ]
+
+  it("reads `reach` off the wire and leaves it null when a server does not send it", () => {
+    expect(toPageView(wirePage({ reach: [" grant ", "role"] })).reach).toEqual(["grant", "role"])
+    expect(toPageView(wirePage({ reach: undefined })).reach).toBeNull()
+    expect(hasReach(pages)).toBe(true)
+    expect(hasReach([toPageView(wirePage({}))])).toBe(false)
+  })
+
+  it("derives the crews I belong to from `crew:<slug>` in my reach — no second request", () => {
+    expect([...crewMembershipFromReach(pages)]).toEqual(["lookout"])
+    expect(crewMembershipFromReach([toPageView(wirePage({}))]).size).toBe(0)
+  })
+
+  it("orders Mine, then my crews, then other crews A→Z, then Owned by others", () => {
+    const groups = groupPagesByOwner(pages, ME)
+    expect(groups.map((g) => [g.key, g.pages.map((p) => p.slug)])).toEqual([
+      ["mine", ["notes"]],
+      ["crew/lookout", ["fleet"]],
+      ["crew/alpha", ["alpha"]],
+      ["crew/finance", ["finance-close"]],
+      ["others", ["anna"]],
+      ["unowned", ["orphan"]],
+    ])
+    expect(groups.map((g) => g.label)).toEqual([
+      "Mine",
+      "lookout",
+      "alpha",
+      "finance",
+      "Owned by others",
+      "Unowned",
+    ])
+  })
+
+  it("never renders an empty group, and files nothing under Mine without a signed-in user", () => {
+    const groups = groupPagesByOwner(pages, null)
+    expect(groups.find((g) => g.key === "mine")).toBeUndefined()
+    // Without an identity every personal page is somebody else's.
+    expect(groups.find((g) => g.key === "others")?.pages.map((p) => p.slug)).toEqual(["anna", "notes"])
+    expect(groupPagesByOwner([], ME)).toEqual([])
+  })
+
+  it("'Shared with me' is a reach that is ONLY a grant", () => {
+    const shared = { ...EMPTY_PAGE_FILTERS, shared: true }
+    expect(matchesPageFilters(pages[1], shared, "")).toBe(true)
+    // Reached through a role as well: not "shared with me", it is mine to see anyway.
+    expect(matchesPageFilters(toPageView(wirePage({ reach: ["grant", "role"] })), shared, "")).toBe(false)
+    // A server that sends no reach can not answer the question, so nothing matches.
+    expect(matchesPageFilters(toPageView(wirePage({})), shared, "")).toBe(false)
+    expect(matchesPageFilters(toPageView(wirePage({ reach: [] })), shared, "")).toBe(false)
+    expect(pageFilterCount(shared)).toBe(1)
+    expect(pageFilterCount(EMPTY_PAGE_FILTERS)).toBe(0)
   })
 })
 
