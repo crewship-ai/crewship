@@ -1224,6 +1224,10 @@ common errors. Validation always runs over the whole candidate for everyone;
 only whether the refusal may name what failed depends on the caller, and a
 workspace administrator reads every panel and always gets the full sentence.
 
+The `project/check` response filters `checks.routine_definitions` to routines
+referenced by visible panels. Validation still covers the complete candidate;
+publication provenance retains the complete map server-side.
+
 ### Review a publication candidate
 
 `GET /api/v1/pages/{slug}/project/review`
@@ -1558,7 +1562,3 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
-
-The `project/check` response filters `checks.routine_definitions` to routines
-referenced by visible panels. Validation still covers the complete candidate;
-publication provenance retains the complete map server-side.
