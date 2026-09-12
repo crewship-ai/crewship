@@ -7,8 +7,11 @@
  *   AppSidebar   SidebarToolbar / Search /        Overview · or a single page
  *                FilterButton / Collapse
  *                ── STATUS ─────── All · Fresh · Stale · Failed · Never produced
- *                ── OWNER  ─────── per crew
- *                ── PAGES  ─────── the list, per-item icon + right-side badge
+ *                ── OWNER  ─────── per crew · Shared with me
+ *                ── MINE ───────── the list, grouped by owner (#2523):
+ *                ── <crew> ─────── Mine · crews I belong to · other crews ·
+ *                ── OWNED BY OTHERS  Owned by others — each a collapsible
+ *                                    section, the owner said once in its header
  *
  * Every control here comes from `components/layout/sidebar-kit.tsx`. That is a
  * hard requirement, not a preference: #1776 is open on five surfaces that each
@@ -24,6 +27,7 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
+import { Share2 } from "lucide-react"
 
 import { listRow } from "@/lib/motion"
 
@@ -42,11 +46,16 @@ import {
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import {
+  EMPTY_PAGE_FILTERS,
+  groupPagesByOwner,
+  hasReach,
   matchesPageFilters,
   ownerFacets,
+  pageFilterCount,
   stateFacetCounts,
   togglePageFilter,
   type PageFilters,
+  type PageGroup,
   type PageView,
 } from "@/hooks/use-pages"
 import type { PanelState } from "@/components/features/pages/panels/types"
@@ -54,6 +63,11 @@ import { PAGE_STATE_META, PAGE_STATE_ORDER } from "@/components/features/pages/p
 
 export interface PagesRailProps {
   pages: PageView[]
+  /** With `currentUserId`, the key the collapse state is saved under. */
+  workspaceId: string
+  /** `user/<id>` owner of the "Mine" group. Null while the session loads, or
+   *  in a context with no auth provider — then nothing is "mine". */
+  currentUserId?: string | null
   search: string
   onSearchChange: (value: string) => void
   filters: PageFilters
@@ -64,6 +78,56 @@ export interface PagesRailProps {
    *  still renders in a context that has no authoring affordance. */
   onCreatePage?: () => void
   onToggleCollapse?: () => void
+}
+
+// ── Collapse state (#2523) ──────────────────────────────────────────────────
+//
+// Saved per user AND per workspace: the same person folds different crews in
+// different workspaces, and two people on one browser must not share a fold.
+// Storage is treated as optional at every step — a private window, a full
+// quota, a policy that throws on access, or a value someone else wrote there
+// all have to leave the rail working with the default, which is "everything
+// open". Nothing here is worth an error boundary.
+
+export const collapseStorageKey = (workspaceId: string, userId: string | null | undefined) =>
+  `pages-rail:${workspaceId}:${userId ?? "anonymous"}`
+
+const NONE_COLLAPSED: ReadonlySet<string> = new Set()
+
+function readCollapsed(key: string): ReadonlySet<string> {
+  try {
+    const raw = globalThis.localStorage?.getItem(key)
+    if (!raw) return NONE_COLLAPSED
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return NONE_COLLAPSED
+    return new Set(parsed.filter((k): k is string => typeof k === "string"))
+  } catch {
+    return NONE_COLLAPSED
+  }
+}
+
+function writeCollapsed(key: string, collapsed: ReadonlySet<string>) {
+  try {
+    globalThis.localStorage?.setItem(key, JSON.stringify(Array.from(collapsed)))
+  } catch {
+    // Unsaveable is not unusable: the fold still holds for this mount.
+  }
+}
+
+/**
+ * Every element the arrow keys may land on, in document order: group headers
+ * (the kit's `aria-expanded` buttons) and the rows currently on screen. Read
+ * from the DOM at the keystroke rather than kept in state, because what is
+ * visible is exactly what is rendered — a folded group's rows are not there.
+ */
+const NAV_SELECTOR = "[data-rail-header], [data-rail-row]"
+
+function navigables(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(NAV_SELECTOR))
+}
+
+function focusHeader(root: HTMLElement, key: string) {
+  navigables(root).find((el) => el.dataset.railHeader === key)?.focus()
 }
 
 /**
@@ -95,6 +159,8 @@ function Count({ n, dim = false }: { n: number; dim?: boolean }) {
 
 export function PagesRail({
   pages,
+  workspaceId,
+  currentUserId,
   search,
   onSearchChange,
   filters,
@@ -114,9 +180,107 @@ export function PagesRail({
     () => pages.filter((p) => matchesPageFilters(p, filters, search)),
     [pages, filters, search],
   )
+  // The "Shared with me" switch exists only when the server can answer it.
+  // A toggle that can never match anything is a dead switch, and today's
+  // servers do not send `reach` yet.
+  const reachKnown = React.useMemo(() => hasReach(pages), [pages])
 
-  const activeCount = filters.states.length + filters.owners.length
+  const activeCount = pageFilterCount(filters)
   const ownerLabel = (ref: string) => owners.find((o) => o.ref === ref)?.label ?? ref
+
+  // ── Groups ────────────────────────────────────────────────────────────────
+  // Grouped from the DISPLAYED list, so a facet or a search narrows every
+  // group and a group it empties disappears rather than standing there with
+  // a zero. The header count is therefore "what is in it now".
+  const groups = React.useMemo(
+    () => groupPagesByOwner(displayed, currentUserId),
+    [displayed, currentUserId],
+  )
+
+  // ── Collapse state ────────────────────────────────────────────────────────
+  // State is kept WITH the key it was read under. When the user or workspace
+  // changes the stored value belongs to someone else, so it is dropped in the
+  // same render rather than shown for a frame and then written back under
+  // the new key — a persist effect keyed on the state alone would do exactly
+  // that write.
+  const storageKey = collapseStorageKey(workspaceId, currentUserId)
+  const [store, setStore] = React.useState(() => ({
+    key: storageKey,
+    collapsed: readCollapsed(storageKey),
+  }))
+  React.useEffect(() => {
+    if (store.key !== storageKey) setStore({ key: storageKey, collapsed: readCollapsed(storageKey) })
+  }, [storageKey, store.key])
+  const collapsed = store.key === storageKey ? store.collapsed : NONE_COLLAPSED
+
+  const setCollapsed = React.useCallback(
+    (key: string, fold: boolean) => {
+      setStore((prev) => {
+        const base = prev.key === storageKey ? prev.collapsed : readCollapsed(storageKey)
+        if (base.has(key) === fold) return prev.key === storageKey ? prev : { key: storageKey, collapsed: base }
+        const next = new Set(base)
+        if (fold) next.add(key)
+        else next.delete(key)
+        writeCollapsed(storageKey, next)
+        return { key: storageKey, collapsed: next }
+      })
+    },
+    [storageKey],
+  )
+
+  // A search opens every group that has a match and hides the rest; the
+  // saved fold is untouched and comes back the moment the query is cleared.
+  const searching = search.trim() !== ""
+  const isOpen = (g: PageGroup) => searching || !collapsed.has(g.key)
+
+  // The active page is always visible: selecting one inside a folded group
+  // unfolds it. Keyed on the selection, not on the fold — the person may fold
+  // the active group again afterwards and that has to stick.
+  const activeGroupKey = React.useMemo(
+    () => (selectedSlug ? groups.find((g) => g.pages.some((p) => p.slug === selectedSlug))?.key ?? null : null),
+    [groups, selectedSlug],
+  )
+  React.useEffect(() => {
+    if (activeGroupKey) setCollapsed(activeGroupKey, false)
+  }, [activeGroupKey, setCollapsed])
+
+  // ── Keyboard ──────────────────────────────────────────────────────────────
+  // One handler on the list, not one per row: the rows already answer Enter
+  // and Space through `ListRow`, and a header is a native button. What the
+  // list adds is movement — Up/Down/Home/End between whatever is on screen,
+  // Left to fold the group the focus is in (landing on its header, so the
+  // focus never falls off a row that just vanished) and Right to unfold it.
+  const listRef = React.useRef<HTMLDivElement>(null)
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const root = listRef.current
+    const target = e.target as HTMLElement | null
+    if (!root || !target) return
+    const groupKey = target.dataset.railHeader ?? target.dataset.railRow
+    if (groupKey == null) return
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      const items = navigables(root)
+      const i = items.indexOf(target)
+      if (i < 0) return
+      const last = items.length - 1
+      const step = e.key === "ArrowDown" ? 1 : -1
+      const next =
+        e.key === "Home" ? 0 : e.key === "End" ? last : Math.min(last, Math.max(0, i + step))
+      e.preventDefault()
+      items[next]?.focus()
+      return
+    }
+    if (e.key === "ArrowLeft") {
+      e.preventDefault()
+      setCollapsed(groupKey, true)
+      if (target.dataset.railRow != null) focusHeader(root, groupKey)
+      return
+    }
+    if (e.key === "ArrowRight") {
+      e.preventDefault()
+      setCollapsed(groupKey, false)
+    }
+  }
 
   return (
     // Tagged so a test can hold the node across a selection: the rail must not
@@ -138,7 +302,7 @@ export function PagesRail({
           // clips its overflow, so the panel is kept narrower than the
           // trigger's distance from the rail's left edge.
           panelClassName="w-[228px]"
-          onClear={() => onFiltersChange({ states: [], owners: [] })}
+          onClear={() => onFiltersChange(EMPTY_PAGE_FILTERS)}
         >
           <SidebarFacet
             first
@@ -195,6 +359,23 @@ export function PagesRail({
               ))}
             </SidebarFacet>
           )}
+
+          {reachKnown && (
+            <SidebarFacet
+              label="Reach"
+              resetLabel="Everything I reach"
+              resetActive={!filters.shared}
+              onReset={() => onFiltersChange({ ...filters, shared: false })}
+            >
+              <SidebarFacetOption
+                active={filters.shared}
+                onToggle={() => onFiltersChange({ ...filters, shared: !filters.shared })}
+              >
+                <Share2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                <span className="truncate">Shared with me</span>
+              </SidebarFacetOption>
+            </SidebarFacet>
+          )}
         </SidebarFilterPopover>
         {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
@@ -223,53 +404,83 @@ export function PagesRail({
             {ownerLabel(ref)}
           </SidebarActiveChip>
         ))}
+        {filters.shared && (
+          <SidebarActiveChip onRemove={() => onFiltersChange({ ...filters, shared: false })}>
+            Shared with me
+          </SidebarActiveChip>
+        )}
       </SidebarActiveChips>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <SidebarSection label="Pages" count={displayed.length} />
-        <div className="min-h-0 flex-1 overflow-y-auto pb-1">
-          {/* The rail is a FILTERED list: picking a facet above removes rows,
-              clearing it brings them back. Those are the two moments worth
-              drawing, so each row owns its own entry and exit rather than the
-              whole list being swapped out — and `listRow.layout` closes the gap
-              a removed row leaves instead of snapping the rest upward. */}
-          <AnimatePresence initial={false}>
-            {displayed.map((page) => {
-              const meta = page.state ? PAGE_STATE_META[page.state] : null
-              const Icon = meta?.icon ?? CONCEPT_ICON.pages
-              return (
-                <motion.div
-                  key={page.id || page.slug}
-                  {...listRow}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="overflow-hidden"
-                >
-              <SidebarRow
-                selected={selectedSlug === page.slug}
-                onSelect={() => onSelectPage(page.slug)}
-              >
-                <Icon
-                  className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate text-foreground/80" title={page.slug}>
-                  {page.name}
-                </span>
-                {/* The badge is the panel count and only ever the panel count.
-                    A badge that means one thing on some rows and another on
-                    the rest is unreadable at a glance. */}
-                {page.tally.total > 0 && (
-                  <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-foreground">
-                    {page.tally.total}
-                  </span>
-                )}
-              </SidebarRow>
-                </motion.div>
-              )
-            })}
-          </AnimatePresence>
+        <div
+          ref={listRef}
+          onKeyDown={onListKeyDown}
+          className="min-h-0 flex-1 overflow-y-auto pb-1"
+        >
+          {groups.map((group) => (
+            <SidebarSection
+              key={group.key}
+              collapsible
+              collapsed={!isOpen(group)}
+              onToggle={() => setCollapsed(group.key, !collapsed.has(group.key))}
+              label={group.label}
+              count={group.pages.length}
+              // The header is the only place the owner is written, and a crew
+              // name has no upper bound; the kit truncates it so the count
+              // stays on the line. `title` carries the whole of it.
+              headerClassName="min-w-0"
+              headerProps={{ "data-rail-header": group.key, title: group.label }}
+            >
+              {/* The rail is a FILTERED list: picking a facet above removes
+                  rows, clearing it brings them back. Those are the two moments
+                  worth drawing, so each row owns its own entry and exit rather
+                  than the whole list being swapped out — and `listRow.layout`
+                  closes the gap a removed row leaves instead of snapping the
+                  rest upward. */}
+              <AnimatePresence initial={false}>
+                {group.pages.map((page) => {
+                  const meta = page.state ? PAGE_STATE_META[page.state] : null
+                  const Icon = meta?.icon ?? CONCEPT_ICON.pages
+                  return (
+                    <motion.div
+                      key={page.id || page.slug}
+                      {...listRow}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <SidebarRow
+                        selected={selectedSlug === page.slug}
+                        onSelect={() => onSelectPage(page.slug)}
+                        data-rail-row={group.key}
+                      >
+                        <Icon
+                          className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
+                          aria-hidden
+                        />
+                        {/* One line, whatever the name's length; the full
+                            name is in `title`, and the owner is in the header
+                            above — never repeated here. */}
+                        <span className="min-w-0 flex-1 truncate text-foreground/80" title={page.name}>
+                          {page.name}
+                        </span>
+                        {/* The badge is the panel count and only ever the
+                            panel count. A badge that means one thing on some
+                            rows and another on the rest is unreadable at a
+                            glance. */}
+                        {page.tally.total > 0 && (
+                          <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-foreground">
+                            {page.tally.total}
+                          </span>
+                        )}
+                      </SidebarRow>
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            </SidebarSection>
+          ))}
           {displayed.length === 0 && (
             <div className="type-nav-sub px-3 py-6 text-center text-muted-foreground-soft">
               {pages.length === 0 ? (
