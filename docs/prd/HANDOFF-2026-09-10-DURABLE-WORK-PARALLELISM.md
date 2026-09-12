@@ -1136,3 +1136,27 @@ missing from this branch. Raw logs and failed runs are archived under
 Remote CI and actual review on the new pushed head remain separate requirements.
 The preceding CodeRabbit status was throttled, not reviewed. No merge or deploy
 is authorized by this local evidence, and the release gaps listed above remain.
+
+
+### CI follow-up after `0fe53ead`
+
+Push removed the merge conflict: GitHub reports MERGEABLE against current main.
+Fresh CI run 34705588463 found two additional contract mismatches:
+
+- Frontend test type fixtures still used the obsolete numeric `attempts` instead
+  of required `attempt_count`. Three fixtures now match the real summary/detail
+  contract; the type-error baseline was not raised.
+- The generated OpenAPI file lacked the new 409 response on legacy routine work
+  cancellation. Regeneration adds that response; the API reference table now
+  lists it too. The golangci-lint invocation itself reported 0 issues.
+
+Observed validation for this follow-up: **all 744 frontend test files and all
+8905 tests passed**, exit 0, 198.98 s. `pnpm test:types` reports no new diagnostics
+and leaves its 200 existing diagnostics (tracked in #2493) unchanged; this is
+not a claim that the entire TypeScript test tree has zero type errors. Changed
+fixtures pass ESLint. Complete generator/inventory packages pass (3.692 s /
+0.072 s), strict inventory passes. No production Go source changed after the
+complete successful Go run recorded above. This follow-up changes only frontend
+test fixtures, generated API documentation and documentation prose.
+
+New remote CI is required on the follow-up head. No merge/deployment occurred.

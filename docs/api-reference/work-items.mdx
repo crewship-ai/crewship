@@ -86,7 +86,7 @@ order.
 
 | Method | Path | Auth | Request | Response | Status |
 |---|---|---|---|---|---|
-| POST | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel` | `create` (MANAGER+) | No body | `{ id, state, outcome, detail }` | `200`, `400`, `401`, `403`, `404`, `500` |
+| POST | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel` | `create` (MANAGER+) | No body | `{ id, state, outcome, detail }` | `200`, `400`, `401`, `403`, `404`, `409`, `500` |
 
 Cancel is an **idempotent request, not an immediate terminal value**. The
 `outcome` field says what actually happened, and a client must not treat the

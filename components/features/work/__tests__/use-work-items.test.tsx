@@ -73,7 +73,7 @@ function workItem(over: Partial<WorkItem> = {}): WorkItem {
     state: "succeeded",
     state_reason: "",
     generation: 2,
-    attempts: 2,
+    attempt_count: 2,
     priority: 0,
     eligible_at: "2026-09-10T09:00:00.000000000Z",
     deadline_at: null,
@@ -121,8 +121,7 @@ function event(over: Partial<WorkEvent> = {}): WorkEvent {
 function detail(over: Partial<WorkItemDetail> = {}): WorkItemDetail {
   const { attempts, events, ...rest } = over
   const base = workItem(rest as Partial<WorkItem>)
-  const { attempts: _count, ...scalars } = base
-  return { ...scalars, attempts: attempts ?? [attempt()], events: events ?? [event()] }
+  return { ...base, attempts: attempts ?? [attempt()], events: events ?? [event()] }
 }
 
 function okJSON(body: unknown): Response {

@@ -34,7 +34,7 @@ function workItem(over: Partial<WorkItem> = {}): WorkItem {
     state: "queued",
     state_reason: "",
     generation: 0,
-    attempts: 0,
+    attempt_count: 0,
     priority: 0,
     eligible_at: "2026-09-10T09:00:00.000000000Z",
     deadline_at: null,
