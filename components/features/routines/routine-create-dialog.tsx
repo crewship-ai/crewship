@@ -299,6 +299,7 @@ export function RoutineCreateDialog({
   const [reviewError, setReviewError] = useState<string | null>(null)
   const reviewingExisting = !!draftRef.current?.base_pipeline_id || !!routine
   const publishedRecipe = routine ?? reviewBaseline
+  const reviewSlug = routine?.slug || draftRef.current?.slug || ""
   useEffect(() => {
     if (!reviewOpen || !reviewingExisting || routine) return
     const controller = new AbortController()
@@ -307,7 +308,7 @@ export function RoutineCreateDialog({
     void (async () => {
       try {
         const res = await apiFetch(
-          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`,
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(reviewSlug)}`,
           { signal: controller.signal },
         )
         if (!res.ok)
@@ -324,7 +325,7 @@ export function RoutineCreateDialog({
       }
     })()
     return () => controller.abort()
-  }, [reviewOpen, reviewingExisting, routine, workspaceId, slug])
+  }, [reviewOpen, reviewingExisting, routine, workspaceId, reviewSlug])
 
   const [forkSource, setForkSource] = useState<string | null>(null)
   // saveToken captured from the most recent successful /test_run.
@@ -896,7 +897,7 @@ export function RoutineCreateDialog({
         definition: parsed,
         skip_test_gate: false,
       }
-      if (!routine) {
+      if (!routine && !draftRef.current?.base_pipeline_id) {
         const values = Object.fromEntries(
           scheduledFields.map((f) => [
             f.name,
@@ -1843,13 +1844,13 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   Fix the recipe in Code to see its steps.
                 </p>
               )}
-              {routine && (
+              {reviewingExisting && (
                 <p className="text-sm text-muted-foreground">
                   Plans, webhooks and budgets are managed outside this draft, in the
                   routine’s Plan tab.
                 </p>
               )}
-              {!routine && (
+              {!reviewingExisting && (
                 <div className="space-y-5">
                   {" "}
                   <RoutineTriggerFields

@@ -9,6 +9,8 @@ const h = vi.hoisted(() => ({
   draftConflict: false,
   scheduleConflict: false,
   linked: false,
+  linkedExisting: false,
+  baselineFails: false,
   savedDrafts: false,
   draftReads: new Map<
     string,
@@ -62,6 +64,8 @@ vi.mock("@/lib/api-fetch", () => ({
           signal: init?.signal,
         })
       })
+    if (url.endsWith("/pipelines/existing") && !init?.method)
+      return new Response(JSON.stringify(h.baselineFails ? {error:"unavailable"} : routine), {status: h.baselineFails ? 503 : 200})
     if (url.endsWith("/draft") && h.linked)
       return {
         ok: true,
@@ -69,7 +73,7 @@ vi.mock("@/lib/api-fetch", () => ({
           id: "ai-draft-1",
           slug: "existing",
           revision: 4,
-          base_pipeline_id: "",
+          base_pipeline_id: h.linkedExisting ? "pipeline-existing" : "",
           base_revision: 0,
           document: {
             slug: "existing",
@@ -187,11 +191,29 @@ beforeEach(() => {
   h.draftConflict = false
   h.scheduleConflict = false
   h.linked = false
+  h.linkedExisting = false
+  h.baselineFails = false
   h.savedDrafts = false
   h.draftReads.clear()
   vi.clearAllMocks()
 })
 describe("shared routine editor", () => {
+  it("will not publish an existing linked draft without a readable comparison baseline", async () => {
+    h.linked = true; h.linkedExisting = true; h.baselineFails = true
+    render(<RoutineCreateDialog {...props} routine={undefined} savedDraftLink={{slug:"existing", id:"ai-draft-1", workspaceId:"ws1"}} />)
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    fireEvent.click(screen.getByRole("button", {name:"Publish"}))
+    await screen.findByText(/The published recipe could not be loaded for comparison/)
+    expect(screen.getByRole("button", {name:"Confirm and publish"})).toBeDisabled()
+    expect(h.calls.some(c => c.url.endsWith("/publish"))).toBe(false)
+    fireEvent.click(screen.getByRole("button", {name:"Back to editing"}))
+    expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat")
+    h.baselineFails = false
+    fireEvent.click(screen.getByRole("button", {name:"Publish"}))
+    await waitFor(() => expect(screen.getByRole("button", {name:"Confirm and publish"})).toBeEnabled())
+    expect(h.calls.some(c => c.url.endsWith("/publish"))).toBe(false)
+  })
+
   it("requires a change review and confirmation, and lets the user return to editing", async () => {
     render(<RoutineCreateDialog {...props} />)
     await screen.findByText("Worker")
