@@ -1611,11 +1611,12 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   </div>
                 </CreateSurfaceSection>
 
-                <CreateSurfaceSection title="Description" data-doc-section="description">
-                  <CreateSurfaceField
-                    label="Purpose · shown in the list"
-                    htmlFor="routine-description"
-                  >
+                <CreateSurfaceSection
+                  title="Purpose"
+                  hint="shown in the list"
+                  data-doc-section="description"
+                >
+                  <CreateSurfaceField label="What this routine does" htmlFor="routine-description">
                     <CreateSurfaceDescriptionInput
                       id="routine-description"
                       value={description || String(parsedDSL?.description ?? "")}
@@ -1647,7 +1648,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
                   title="Inputs"
                   hint={
                     definitionRows(parsedDSL?.inputs).length
-                      ? `${definitionRows(parsedDSL?.inputs).length} questions before a run`
+                      ? `${definitionRows(parsedDSL?.inputs).length} ${definitionRows(parsedDSL?.inputs).length === 1 ? "question" : "questions"} before a run`
                       : "no questions — a run starts immediately"
                   }
                   data-doc-section="inputs"

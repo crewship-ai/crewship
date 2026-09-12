@@ -157,7 +157,7 @@ describe("routine editor as a page", () => {
     ).map((el) => el.textContent?.replace(/\s+/g, " ").trim())
     expect(headings.slice(0, 4).map((h) => h?.split(" — ")[0])).toEqual([
       "Identity",
-      "Description",
+      "Purpose",
       "Inputs",
       "Recipe steps",
     ])
@@ -183,7 +183,7 @@ describe("routine editor as a page", () => {
     expect(screen.getByText("report")).toBeInTheDocument()
 
     // Description carries the list-facing label from the prototype.
-    expect(screen.getByLabelText("Purpose · shown in the list")).toHaveValue(
+    expect(screen.getByLabelText("What this routine does")).toHaveValue(
       "Original description",
     )
   })

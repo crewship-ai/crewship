@@ -38,7 +38,12 @@ export function useAutomations(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch("/api/v1/automations", { signal: controller.signal })
+      // The endpoint sits behind wsCtx: without the workspace it answers 400
+      // and every routine page logged one, so no rule ever reached the UI.
+      const res = await apiFetch(
+        `/api/v1/automations?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { signal: controller.signal },
+      )
       if (controller.signal.aborted) return
       if (!res.ok) {
         // 403 is the ordinary case for a member on an ADMIN-gated surface, not
