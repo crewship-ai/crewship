@@ -541,7 +541,7 @@ export function EditorApplicationReview(props: EditorSectionProps) {
           // for. Plain `:focus` always matches. Same utilities as the shell's
           // heading (`page-editor-shell.tsx:136`), so the two moves look
           // identical to the person following them.
-          className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          className="rounded-sm text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Review application changes
         </h2>

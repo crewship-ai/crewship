@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, FileText, History, KeyRound, Workflow, type LucideIcon } from "lucide-react"
+
+import { SIDEBAR_WIDTH, SidebarRow, SidebarSection } from "@/components/layout/sidebar-kit"
 
 import {
   EDITOR_SECTIONS,
-  EDITOR_SECTION_HINT,
   EDITOR_SECTION_LABEL,
   EDITOR_SECTION_SUMMARY,
   type EditorSection,
@@ -56,6 +57,15 @@ import { EditorHistorySection } from "@/components/features/pages/editor/section
  * rail at ≥768px, one labelled picker below it — so the same DOM serves both
  * and there is no first-paint flash while a media query resolves.
  */
+
+// The same icons the rest of the product uses for these nouns, so the rail
+// reads like the Settings nav and not like a second design.
+const SECTION_ICON: Record<EditorSection, LucideIcon> = {
+  content: FileText,
+  data: Workflow,
+  access: KeyRound,
+  history: History,
+}
 
 const SECTION_COMPONENT: Record<EditorSection, React.ComponentType<EditorSectionProps>> = {
   content: EditorContentSection,
@@ -146,16 +156,18 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
         <div className="min-w-0 flex-1">
           {/* The identity of the page being edited never leaves the screen,
               on any width — losing it is how someone edits the wrong Page. */}
-          {/* `outline-none` here meant the focus this shell moves on every
-              section change, on returning from the preview and after a
-              discard was invisible to a sighted keyboard user — the move was
-              correct and silent, which is the same as not making it. A
-              programmatic focus does not fire `:focus-visible` reliably, so
-              the ring is on `:focus`. */}
+          {/* The focus this shell moves on every section change, on returning
+              from the preview and after a discard must be visible to a
+              sighted keyboard user — a correct, silent move is the same as
+              not making it. The ring is on `:focus-visible`, not `:focus`:
+              browsers carry the input modality across a scripted focus, so a
+              person who arrived by keyboard sees the ring and a person who
+              clicked the rail with a mouse does not. On `:focus` it lit up
+              the page's name after every click, which read as a text field. */}
           <h2
             ref={heading}
             tabIndex={-1}
-            className="truncate rounded-sm text-body font-medium outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+            className="truncate rounded-sm text-body font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {page?.name ?? slug}
           </h2>
@@ -170,32 +182,37 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
             saying what lives there, and the open one marked. It replaces the
             row of tabs that sat under the page header — tabs said where you
             were, never what the other three held (#2515). */}
-        <nav
-          aria-label="Editor sections"
-          className="hidden w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/[0.06] p-3 md:flex"
-        >
-          {EDITOR_SECTIONS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSection(id)}
-              aria-current={id === section ? "page" : undefined}
-              title={EDITOR_SECTION_HINT[id]}
-              className={cn(
-                "flex flex-col items-start gap-0.5 rounded-md border-l-2 px-3 py-2 text-left transition-colors coarse:min-h-11",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                id === section
-                  ? "border-primary bg-white/[0.07] text-foreground"
-                  : "border-transparent text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
-              )}
-            >
-              <span className={cn("text-sm", id === section ? "font-semibold" : "font-medium")}>
-                {EDITOR_SECTION_LABEL[id]}
-              </span>
-              <span className="text-xs text-muted-foreground">{EDITOR_SECTION_SUMMARY[id]}</span>
-            </button>
-          ))}
-        </nav>
+        {/* Same vocabulary as the Settings nav and the Pages, Issues and
+            Routines rails: `sidebar-kit`'s width, ground, section header and
+            rows, with the selected row marked by the shared accent bar. The
+            one-line summary under each name is composed inside the row, the
+            way settings-nav composes its badges. */}
+        <aside className={cn(SIDEBAR_WIDTH, "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex")}>
+          <nav aria-label="Editor sections" className="flex-1 overflow-y-auto py-2">
+            <SidebarSection label="Sections">
+              {EDITOR_SECTIONS.map((id) => {
+                const Icon = SECTION_ICON[id]
+                const selected = id === section
+                return (
+                  <SidebarRow
+                    key={id}
+                    selected={selected}
+                    onSelect={() => setSection(id)}
+                    aria-current={selected ? "page" : undefined}
+                    aria-label={EDITOR_SECTION_LABEL[id]}
+                    className="items-start py-1.5"
+                  >
+                    <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", selected ? "opacity-100" : "opacity-60")} aria-hidden />
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{EDITOR_SECTION_LABEL[id]}</span>
+                      <span className="type-nav-sub truncate text-sidebar-foreground/50">{EDITOR_SECTION_SUMMARY[id]}</span>
+                    </span>
+                  </SidebarRow>
+                )
+              })}
+            </SidebarSection>
+          </nav>
+        </aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="shrink-0 border-b border-white/[0.06] px-4 py-2 md:hidden">
