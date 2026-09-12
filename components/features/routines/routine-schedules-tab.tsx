@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -261,7 +263,7 @@ export function RoutineSchedulesTab({
                             <span>
                               Next:{" "}
                               <span className="text-foreground/85">
-                                {new Date(s.next_run_at).toLocaleString("en-GB")}
+                                {formatRoutineTime(s.next_run_at, s.timezone)}
                               </span>
                             </span>
                           )}
@@ -269,7 +271,7 @@ export function RoutineSchedulesTab({
                             <span>
                               Last:{" "}
                               <span className="text-foreground/85">
-                                {new Date(s.last_run_at).toLocaleString("en-GB")}
+                                {formatRoutineTime(s.last_run_at, s.timezone)}
                               </span>
                               {s.last_status && (
                                 <span className="ml-1 text-muted-foreground">

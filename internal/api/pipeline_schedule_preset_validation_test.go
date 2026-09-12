@@ -628,3 +628,118 @@ func TestPresetValidation_AStorageFailureIsNotAPass(t *testing.T) {
 		t.Fatalf("failed judgement still wrote the plan: inputs=%s", inputs)
 	}
 }
+
+func TestPresetValidation_ReenableRequiresCompatiblePreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	rr := createSchedule(t, h, user, ws, p.ID, map[string]any{"region": "eu"})
+	if rr.Code != 201 {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if rr := patchPlan(t, h, user, ws, created.ID, `{"enabled":false}`); rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	rr = patchPlan(t, h, user, ws, created.ID, `{"enabled":true}`)
+	if rr.Code != 400 {
+		t.Fatalf("invalid re-enable: %d %s", rr.Code, rr.Body.String())
+	}
+	plan, err := h.schedules.GetByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Enabled {
+		t.Fatal("refused re-enable changed the row")
+	}
+	rr = patchPlan(t, h, user, ws, created.ID, `{"enabled":true,"inputs":{"zone":"eu"}}`)
+	if rr.Code != 200 {
+		t.Fatalf("repair and enable: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPresetValidation_ReenableChecksWakePreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	target := seedRoutineForPreset(t, h, ws, "target", `{"name":"target","steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`)
+	wake := seedRoutineForPreset(t, h, ws, "wake", presetValidationDef)
+	plan, err := h.schedules.Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Wake gated", TargetPipelineID: target.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Enabled: false, WakePipelineID: wake.ID, WakeInputs: map[string]any{"region": "eu"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "wake", presetV2Def)
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"enabled":true}`); rr.Code != 400 {
+		t.Fatalf("invalid wake preset accepted: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"enabled":true,"wake_inputs":{"zone":"eu"}}`); rr.Code != 200 {
+		t.Fatalf("repair wake and enable: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPresetValidation_CommitRechecksAfterPublication(t *testing.T) {
+	h, _, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	in := pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Initially disabled", TargetPipelineID: p.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Inputs: map[string]any{"region": "eu"}}
+	plan, err := h.schedules.Save(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a request whose preflight completed before another request published.
+	dsl, err := pipeline.Parse([]byte(presetValidationDef))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pipeline.ValidateFormInputs(dsl, in.Inputs); err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	in.ID = plan.ID
+	in.Enabled = true
+	if _, err := h.schedules.SaveValidated(t.Context(), in); err == nil {
+		t.Fatal("stale preflight enabled a plan against incompatible HEAD")
+	}
+	after, err := h.schedules.GetByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Enabled || after.InputsJSON != plan.InputsJSON || after.UpdatedAt != plan.UpdatedAt {
+		t.Fatalf("refused write changed plan: %+v", after)
+	}
+}
+
+func TestPresetValidation_ActivateDraftChecksPreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	plan, err := h.schedules.Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Draft", TargetPipelineID: p.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Inputs: map[string]any{"region": "eu"}, Activation: pipeline.TriggerActivationDraft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	activate := func() *httptest.ResponseRecorder {
+		req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/activate", nil), ws), user, "OWNER")
+		req.SetPathValue("scheduleId", plan.ID)
+		rr := httptest.NewRecorder()
+		h.ActivateSchedule(rr, req)
+		return rr
+	}
+	if rr := activate(); rr.Code != 400 {
+		t.Fatalf("invalid draft activation: %d %s", rr.Code, rr.Body.String())
+	}
+	after, err := h.schedules.GetByID(t.Context(), plan.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Enabled || after.Activation != pipeline.TriggerActivationDraft {
+		t.Fatalf("refused activation mutated plan: %+v", after)
+	}
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"inputs":{"zone":"eu"}}`); rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+	if rr := activate(); rr.Code != 200 {
+		t.Fatalf("repaired draft activation: %d %s", rr.Code, rr.Body.String())
+	}
+}

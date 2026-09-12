@@ -1183,3 +1183,36 @@ completed non-skipped job and was still running the full API race job. CodeQL
 34705999391 passed. These are not final results for a later head. CodeRabbit
 remains throttled rather than reviewed. Final remote evidence belongs in the
 PR and archived check outputs; no merge or deployment has occurred.
+
+
+### Second external review and integration of main (2026-09-12)
+
+The user supplied the second Anthropic review for `02b8b99b`. Its verdict is
+approval of the limited intermediate scope, not completion of the parallelism
+release. The review reports independent shutdown probes (8/8, no cancellation
+without a user request), R8 reproductions returning 409/503, and negative
+capability probes plus an overlay proving the R6 substitution guard. These are
+external review results supplied by the user, not new local executions. The
+linked Claude artifact could not be fetched by this session. CodeRabbit still
+reports throttled and must not be described as a completed review.
+
+CI 34708103020 was independently checked: success on exact head `02b8b99b`.
+Main subsequently advanced by one commit, `84615795` (#2514), touching routine
+UI, API and pipeline behavior, but not work/dispatch or migrations. Integration
+is conflict-free. Because routine execution depends on the pipeline engine,
+new validation is required on the integrated head; the earlier green CI is
+not its result.
+
+Open P2 findings from the second review:
+
+- Cancel during container startup can enter reconciliation because retained
+  launch location is established only immediately before RunAgent.
+- Routine webhook rate limiting runs before receipt acceptance/lookup, so it
+  can reject redelivery of already accepted work under throttling.
+- Routine receipts are absent from the delivery API, and receipt keys have no
+  retention policy.
+
+The complete release gaps remain open: shared admission for every producer,
+agent-facing R6 namespace/retry/MCP integration, R7 LLM proxy revocation,
+mailbox, real Claude T06/T07, and T14 power/OS crash evidence. Chat and webhook
+for the same agent may still overlap. No PR merge or deployment occurred.

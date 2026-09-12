@@ -187,7 +187,7 @@ func TestDraftPublicationChecksSchedulePresetsAtomically(t *testing.T) {
 	}
 	d := saveTestDraft(t, s, p.Slug)
 	in := publishInput(d)
-	in.DefinitionJSON = `{"name":"planned","inputs":[{"name":"new-field","type":"string","required":true}],"steps":[]}`
+	in.DefinitionJSON = `{"name":"planned","inputs":[{"name":"new-field","type":"string","widget":"text","required":true}],"steps":[]}`
 	if _, err = s.Save(ctx, in); !errors.Is(err, ErrDraftConflict) {
 		t.Fatalf("broken plan accepted: %v", err)
 	}

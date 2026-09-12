@@ -17,13 +17,21 @@ const h = vi.hoisted(() => ({
   calls: [] as { url: string; body: unknown }[],
 }))
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: h.role }) }))
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}))
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ role: h.role }),
+}))
 vi.mock("./../routine-definition-canvas", () => ({
   RoutineDefinitionCanvas: () => <div data-testid="graph" />,
 }))
 vi.mock("@/components/features/files/file-editor", () => ({
-  FileEditor: (p: { code: string; language: string; onDocChange: (value: string) => void }) => (
+  FileEditor: (p: {
+    code: string
+    language: string
+    onDocChange: (value: string) => void
+  }) => (
     <textarea
       data-testid="editor"
       data-language={p.language}
@@ -39,7 +47,10 @@ vi.mock("@/lib/api-fetch", () => ({
   AUTH_EVENT: "crewship:session-expired",
   AUTH_CHANNEL: "crewship-auth",
   apiFetch: vi.fn(async (url: string, init?: RequestInit) => {
-    h.calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined })
+    h.calls.push({
+      url,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    })
     if (url.endsWith("/draft"))
       return {
         ok: true,
@@ -55,10 +66,17 @@ vi.mock("@/lib/api-fetch", () => ({
     if (url.endsWith("/drafts") && init?.method === "POST")
       return {
         ok: true,
-        json: async () => ({ ...JSON.parse(String(init.body)), id: "draft-1", revision: 1 }),
+        json: async () => ({
+          ...JSON.parse(String(init.body)),
+          id: "draft-1",
+          revision: 1,
+        }),
       }
     if (url.includes("/test_run")) {
-      return { ok: true, json: async () => ({ status: "DRY_RUN_OK", save_token: "tok-1" }) }
+      return {
+        ok: true,
+        json: async () => ({ status: "DRY_RUN_OK", save_token: "tok-1" }),
+      }
     }
     if (url.endsWith("/publish")) {
       return { ok: true, json: async () => ({ slug: "my-routine" }) }
@@ -73,7 +91,12 @@ vi.mock("@/lib/api-fetch", () => ({
 import { RoutineCreateDialog } from "../routine-create-dialog"
 import { ImportRoutineDialog } from "../routines-layout"
 
-const PROPS = { workspaceId: "ws-1", open: true, onClose: vi.fn(), onCreated: vi.fn() }
+const PROPS = {
+  workspaceId: "ws-1",
+  open: true,
+  onClose: vi.fn(),
+  onCreated: vi.fn(),
+}
 
 function shell() {
   return document.querySelector('[data-slot="dialog-content"]')
@@ -84,7 +107,8 @@ describe("New routine on CreateSurface", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
-    const saves = () => h.calls.filter((call) => call.url.endsWith("/drafts") && call.body)
+    const saves = () =>
+      h.calls.filter((call) => call.url.endsWith("/drafts") && call.body)
     await waitFor(() => expect(saves()).toHaveLength(1))
     await screen.findByText(/Saved draft/)
     fireEvent.change(screen.getByTestId("editor"), {
@@ -92,14 +116,22 @@ describe("New routine on CreateSurface", () => {
         value: JSON.stringify({
           name: "renamed",
           steps: [
-            { id: "work", type: "transform", transform: { input: "ok", expression: "." } },
+            {
+              id: "work",
+              type: "transform",
+              transform: { input: "ok", expression: "." },
+            },
           ],
         }),
       },
     })
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     await waitFor(() => expect(saves()).toHaveLength(2))
-    expect(saves()[1].body).toMatchObject({ id: "draft-1", slug: "renamed", revision: 1 })
+    expect(saves()[1].body).toMatchObject({
+      id: "draft-1",
+      slug: "renamed",
+      revision: 1,
+    })
   })
   beforeEach(() => {
     cleanup()
@@ -129,6 +161,8 @@ describe("New routine on CreateSurface", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     fireEvent.click(screen.getByRole("button", { name: /^Publish$/i }))
+    expect(screen.getByText("Starts: Manual · no automatic start")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
 
     await waitFor(() => {
       expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(true)
@@ -137,7 +171,9 @@ describe("New routine on CreateSurface", () => {
     const test = h.calls.find((c) => c.url.includes("/test_run"))!
     expect(test.url).toBe("/api/v1/workspaces/ws-1/pipelines/test_run")
     expect(test.body).toMatchObject({ sample_inputs: {} })
-    expect((test.body as { definition: Record<string, unknown> }).definition).toMatchObject({
+    expect(
+      (test.body as { definition: Record<string, unknown> }).definition,
+    ).toMatchObject({
       name: "my-routine",
     })
 
@@ -166,7 +202,9 @@ describe("New routine on CreateSurface", () => {
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Test", exact: true }))
     expect(screen.getByRole("button", { name: "Test routine" })).toBeVisible()
-    expect(screen.getAllByRole("button", { name: "Publish", exact: true })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "Publish", exact: true })).toHaveLength(
+      1,
+    )
   })
 })
 
@@ -178,14 +216,20 @@ describe("Import routine bundle on CreateSurface", () => {
   })
 
   it("mounts the shared shell at sm", () => {
-    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
+    render(
+      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />,
+    )
     expect(shell()!.className).toContain("sm:max-w-[480px]")
   })
 
   it("posts the parsed bundle to the same endpoint", async () => {
     const onImported = vi.fn()
     render(
-      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={onImported} />,
+      <ImportRoutineDialog
+        workspaceId="ws-1"
+        onClose={() => {}}
+        onImported={onImported}
+      />,
     )
     fireEvent.change(screen.getByPlaceholderText(/"slug"/), {
       target: { value: '{"slug":"nightly","definition":{"name":"nightly"}}' },
@@ -200,8 +244,12 @@ describe("Import routine bundle on CreateSurface", () => {
   })
 
   it("shows a refusal that does not scroll away when the bundle is not JSON", async () => {
-    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
-    fireEvent.change(screen.getByPlaceholderText(/"slug"/), { target: { value: "not json" } })
+    render(
+      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />,
+    )
+    fireEvent.change(screen.getByPlaceholderText(/"slug"/), {
+      target: { value: "not json" },
+    })
     fireEvent.click(screen.getByRole("button", { name: /^import$/i }))
     await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
   })
@@ -213,7 +261,9 @@ describe("Import routine bundle on CreateSurface", () => {
   // them to export a backup they do not need, and it would be a data-loss
   // warning if the endpoint ever grew the behaviour it names.
   it("does not promise a replace the endpoint refuses to do", () => {
-    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
+    render(
+      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />,
+    )
     const body = shell()!.textContent ?? ""
     expect(body).not.toMatch(/existing routine is replaced/i)
     expect(body).toMatch(/refused/i)
@@ -221,7 +271,9 @@ describe("Import routine bundle on CreateSurface", () => {
   })
 
   it("carries the breadcrumb every other door has", () => {
-    render(<ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />)
+    render(
+      <ImportRoutineDialog workspaceId="ws-1" onClose={() => {}} onImported={() => {}} />,
+    )
     expect(screen.getByText("Routines")).toBeInTheDocument()
   })
 })

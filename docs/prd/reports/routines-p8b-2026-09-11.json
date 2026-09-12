@@ -1,0 +1,89 @@
+{
+  "checked_at": "2026-09-11T18:03:00.658647+00:00",
+  "instance": "dev1",
+  "source_commit": "7d470200a0f51c75725d4dadcec9ccf8a31ac00a",
+  "source_clean": true,
+  "pid": 3033655,
+  "binary_sha256": "5094be02810dd2f8498f5900e47438cc8bdeb05df0e58efece8aee2e8365f545",
+  "frontend_marker": "7d470200a0f51c75725d4dadcec9ccf8a31ac00a",
+  "index_sha256": "be2b6ec74f8ee3849a78b700fa6769d572e86a00c2c2e82dcc91dc8136a4fe2f",
+  "routines_html_sha256": "93708b3f87c98ec7a3647d9dc55cdf696532c5965b1b9c3cf7f296b79ef721c5",
+  "scope": "Historical P8b evidence from 11 September, not evidence of the 12 September opponent fixes.",
+  "checks": [
+    {
+      "name": "versions-list-retry",
+      "url": "https://crewship-dev1.unifylab.cz/routines?slug=codex-acceptance-1789149781278&workspace_id=cmtx1r5bh0273f3c24619&view=versions"
+    },
+    {
+      "name": "archive-retry-preserves-version",
+      "url": "https://crewship-dev1.unifylab.cz/routines?slug=codex-acceptance-1789149781278&workspace_id=cmtx1r5bh0273f3c24619&view=versions&version=1"
+    },
+    {
+      "name": "journal-retry",
+      "url": "https://crewship-dev1.unifylab.cz/journal?workspace_id=cmtx1r5bh0273f3c24619"
+    },
+    {
+      "name": "deferred-completed-on-v1",
+      "record": {
+        "pipeline_version": 1,
+        "id": "run_cmtx9oxkm000cb672cc30",
+        "status": "completed",
+        "started_at": "2026-09-11T18:06:01.462233183Z",
+        "ended_at": "2026-09-11T18:06:01.467075407Z",
+        "output": "{\"ran\":\"v1\"}",
+        "outcome": "SUCCEEDED"
+      },
+      "detail": {
+        "definition_hash": "09ca04424ab9f09b423d8915edbc07c54a95d036785898df6e447a9ee02aaa41",
+        "ended_at": "2026-09-11T18:06:01.467075407Z",
+        "id": "run_cmtx9oxkm000cb672cc30",
+        "inputs": {
+          "region": "us",
+          "zone": "us"
+        },
+        "outcome": "SUCCEEDED",
+        "output": "{\"ran\":\"v1\"}",
+        "pipeline_version": 1,
+        "started_at": "2026-09-11T18:06:01.462233183Z",
+        "status": "completed"
+      }
+    },
+    {
+      "name": "deferred-completed-on-v1",
+      "record": {
+        "pipeline_version": 1,
+        "id": "run_cmtx9n04s000b366664f8",
+        "status": "completed",
+        "started_at": "2026-09-11T18:04:31.468871428Z",
+        "ended_at": "2026-09-11T18:04:31.470488705Z",
+        "output": "{\"ran\":\"v1\"}",
+        "outcome": "SUCCEEDED"
+      },
+      "detail": {
+        "definition_hash": "09ca04424ab9f09b423d8915edbc07c54a95d036785898df6e447a9ee02aaa41",
+        "ended_at": "2026-09-11T18:04:31.470488705Z",
+        "id": "run_cmtx9n04s000b366664f8",
+        "inputs": {
+          "region": "eu"
+        },
+        "outcome": "SUCCEEDED",
+        "output": "{\"ran\":\"v1\"}",
+        "pipeline_version": 1,
+        "started_at": "2026-09-11T18:04:31.468871428Z",
+        "status": "completed"
+      }
+    }
+  ],
+  "cancel": {
+    "id": "run_cmtx9oyxj000f18d56f3a",
+    "status": "cancelled",
+    "outcome": "CANCELLED",
+    "error_message": "run cancelled at step hold"
+  },
+  "source_sha256": {
+    "deployment-proof.json": "37251dab512eb0a4ba99f19d3ab1b8adb6fe5fcd1719cc676ef6aba84fbce4d3",
+    "live-report.json": "b22c11f7bec28cc2d1c17e26d3012628ea251672d5cb3cfe0bc2f8ec2566c78c",
+    "cancel-report.json": "d571df5c6f0abc3b2291df209f96198593818092b7b0ef5c6be9dcc89754d8ea",
+    "archive-final-proof.json": "bdd9085957765b7a75e77fef4697825d8585ee7e711fd991694bbfe9902d5cb1"
+  }
+}

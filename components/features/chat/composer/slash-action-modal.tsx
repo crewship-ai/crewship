@@ -172,7 +172,10 @@ function Form({
       const url = endpointForCommand(command.id, workspaceId)
       const res = await apiFetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(routineSlugFromSlashId(command.id) ? { Prefer: "respond-async" } : {}),
+        },
         body: JSON.stringify(payload),
       })
       if (!res.ok) {

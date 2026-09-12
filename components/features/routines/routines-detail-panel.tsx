@@ -23,7 +23,10 @@ import {
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
-import { usePipelineRunRecords, isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
+import {
+  usePipelineRunRecords,
+  isActiveRunStatus,
+} from "@/hooks/use-pipeline-run-records"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { credentialTypeLabel, extractMissingCredentials } from "@/lib/credential-labels"
 import { extractProblemDetail } from "@/lib/problem-details"
@@ -235,16 +238,18 @@ export function RoutinesDetailPanel({
     // the same defect as a stale dialog reached through a different door.
     if (!routine || routine.slug !== slug) return
     const specs = routineInputSpecs(routine.definition)
-    if (specs.length === 0) {
-      void triggerAction("run")
-      return
-    }
     setPendingRun({ workspaceId, slug, inputs: specs })
   }
 
   const triggerAction = async (action: "run", inputs: Record<string, unknown> = {}) => {
     if (!routine || routine.slug !== slug) return
-    const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine, inputs)
+    const { url, body } = buildPipelineActionRequest(
+      workspaceId,
+      slug,
+      action,
+      routine,
+      inputs,
+    )
     const attempt = startIntent.current.begin(url, body)
     if (!attempt) return
     let accepted = false
@@ -322,7 +327,9 @@ export function RoutinesDetailPanel({
       }
       const data = await res.json()
       if (typeof data.run_id !== "string" || !data.run_id)
-        throw new Error("The start could not be confirmed. Retry to recover the same run.")
+        throw new Error(
+          "The start could not be confirmed. Retry to recover the same run.",
+        )
       accepted = true
       {
         // Surface the just-started run's live activity rail inline.
@@ -354,17 +361,23 @@ export function RoutinesDetailPanel({
   // endpoint, toasts the outcome, then refetches so the hero badge +
   // run-guard reflect the new status. enable/disable confirm first
   // (matches the rollback confirm() pattern in the Versions tab).
-  const governanceAction = async (action: "approve" | "reject" | "disable" | "enable") => {
+  const governanceAction = async (
+    action: "approve" | "reject" | "disable" | "enable",
+  ) => {
     if (!routine) return
     if (
       action === "disable" &&
-      !confirm(`Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`)
+      !confirm(
+        `Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`,
+      )
     ) {
       return
     }
     if (
       action === "reject" &&
-      !confirm(`Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`)
+      !confirm(
+        `Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`,
+      )
     ) {
       return
     }
@@ -401,7 +414,9 @@ export function RoutinesDetailPanel({
     if (!cancelTarget) {
       // No tab to send them to any more. The per-run cancel buttons are
       // in the Runs card's Manage view, on this same page.
-      toast.info("Multiple runs are active — open Runs → Manage and cancel the one you mean")
+      toast.info(
+        "Multiple runs are active — open Runs → Manage and cancel the one you mean",
+      )
       return
     }
     setCancelling(true)
@@ -470,7 +485,10 @@ export function RoutinesDetailPanel({
             ? { token: "FAILED", label: "Last run · failed" }
             : status === "running"
               ? { token: "IN_PROGRESS", label: "Running…" }
-              : { token: "PENDING", label: status ? `Last run · ${status}` : "Never invoked" }
+              : {
+                  token: "PENDING",
+                  label: status ? `Last run · ${status}` : "Never invoked",
+                }
 
   // Top-level tabs are collapsed to the three the redesign elevates
   // (Overview / Runs / Schedules); the four power-user surfaces
@@ -526,7 +544,8 @@ export function RoutinesDetailPanel({
                   </p>
                 ) : (
                   <p className="mt-0.5 text-[12px] text-warn/70">
-                    It was proposed for review and can&apos;t run until a manager approves it.
+                    It was proposed for review and can&apos;t run until a manager approves
+                    it.
                   </p>
                 )}
                 {/* The reasons are the category; this is the thing itself.
@@ -607,7 +626,10 @@ export function RoutinesDetailPanel({
             runId={lastRunId}
             awaiting={
               pendingApproval
-                ? { stepId: pendingApproval.step_id, ts: pendingApproval.created_at }
+                ? {
+                    stepId: pendingApproval.step_id,
+                    ts: pendingApproval.created_at,
+                  }
                 : null
             }
           />
@@ -663,7 +685,9 @@ export function RoutinesDetailPanel({
                         lifecycleBadge.className,
                       )}
                     >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)}
+                      />
                       {lifecycleBadge.label}
                     </span>
                   )}
@@ -760,6 +784,7 @@ export function RoutinesDetailPanel({
         </div>
       )}
       <RoutineRunInputsDialog
+        definition={routine?.definition}
         inputs={
           pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId
             ? pendingRun.inputs

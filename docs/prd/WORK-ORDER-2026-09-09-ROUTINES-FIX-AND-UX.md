@@ -588,17 +588,24 @@ Sloučený kód výše neuzavírá celý Blok 1. Nezaškrtnuté položky vyžadu
 doplnění příslušných důkazů; nasazení, živá přejímka a potvrzení uživatele
 zůstávají samostatné otevřené brány v živém PRD.
 
+Aktualizace 12. 9.: otevřené chyby a korekce review jsou v
+[odpovědi na oponenturu](reports/routines-opponent-2026-09-12.md). Nezaškrtnuté
+položky bez úplného důkazu nejsou automaticky hotové jen proto, že existuje kód.
+
 ### Blok 2 — čitelnost
 
 - [ ] F1 hotovo: **žádný krok v UI se nejmenuje technickým ID.** Ověřit na
       dev1 na všech 81 krocích.
-- [ ] F2 hotovo: `name` je v `Step`, ve `schemas/routine.v1.json` a v editoru
+- [x] F2 hotovo: `name` je v `Step`, ve `schemas/routine.v1.json` a v editoru
       kroku jako první pole. `internal/pipeline/schema_test.go` zelený.
-- [ ] F3 hotovo: seznam rutin ukazuje shrnutí a je v hlavním panelu.
+- [x] F3 hotovo: seznam rutin ukazuje shrnutí a je v hlavním panelu.
 - [ ] F4 hotovo: **jedno slovo pro jeden pojem**, `Test` / `Spustit` /
       `Publikovat`, včetně dokumentace. Mrtvý odkaz na „Triggers" pryč.
-- [ ] F5, F6 hotovo.
-- [ ] Editor má **≤ 4 navigovatelné plochy**. Dnes 29.
+- [x] F5: verdikt a chybný krok nahoře, důležitý krok otevřený; oponent potvrdil obsluhu.
+- [ ] F6: limit 12 kroků je implementovaný; úplné odstranění prázdných ploch není tímto měřením doloženo.
+- [x] Editor má **≤ 4 navigovatelné plochy**: Recipe a Code; Test je u kroku.
+      Historické číslo 29 již nepopisuje namountovaný editor. Oponentura ale
+      znovu otevřela živé editory uvnitř draftu a potvrzení Publish.
 - [ ] `Test` nese pravdivou větu o vedlejších účincích u každého režimu.
 
 ### Blok 3 — přejímka

@@ -476,7 +476,8 @@ func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, e
 	// cancel may label CANCELLED, which errs in the quiet direction
 	// the user asked for by cancelling.
 	status := "FAILED"
-	if ctx.Err() != nil {
+	// A deadline is a failure, matching runWasCancelled and the persisted row.
+	if ctx.Err() == context.Canceled {
 		status = "CANCELLED"
 	}
 	p := map[string]any{
