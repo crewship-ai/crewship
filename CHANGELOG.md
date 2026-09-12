@@ -22,6 +22,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Routines is one list, a three-answer routine, a one-sentence run and a full-page editor** (#2519) — `/routines` showed the same routines twice (an explorer sidebar beside the list), a routine as seven cards, a Run tab next to the Run button, and an editor in a modal with the steps below the fold. The page now opens on one dense list whose row says what the routine does, how it went last time and how it runs, with a waiting decision as a banner first; a routine opens on What it does · Last time · Before you run, with the status chrome, metadata and access folded into one Technical details; the tabs read Overview / History / Plan / Versions and the run is an item of History; a run leads with its verdict and, when it failed, what to do next, with activity and attempts in one disclosure; Edit opens the recipe as a page (`?view=edit`) with the document in reading order and nothing live until Publish is confirmed. The Health tab and the explorer sidebar are gone.
+
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 
 ### Added
