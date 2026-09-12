@@ -79623,6 +79623,13 @@
                       "publication_version": {
                         "type": "integer"
                       },
+                      "reach": {
+                        "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
                       "slug": {
                         "type": "string"
                       },
