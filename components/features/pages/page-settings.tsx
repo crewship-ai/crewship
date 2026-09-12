@@ -834,10 +834,12 @@ export function PanelVersionsCard({
   workspaceId,
   slug,
   title = "Panel definitions",
+  mayRestore = true,
 }: {
   workspaceId: string
   slug: string
   title?: React.ReactNode
+  mayRestore?: boolean
 }) {
   const { versions, loading, refusal, error } = usePageVersions(workspaceId, slug)
 
@@ -886,6 +888,7 @@ export function PanelVersionsCard({
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
         {rollbackRefusal && <Refusal>{rollbackRefusal}</Refusal>}
+        {!mayRestore && <ControlRefusal>Restoring a live definition requires access to every panel.</ControlRefusal>}
 
         {loading && !refusal && (
           <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
@@ -909,7 +912,7 @@ export function PanelVersionsCard({
               <VersionRow
                 key={v.seq}
                 version={v}
-                disabled={rollback.isPending}
+                disabled={!mayRestore || rollback.isPending}
                 onRollback={() => setTarget(v)}
               />
             ))}
@@ -937,9 +940,9 @@ export function PanelVersionsCard({
             <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
-              disabled={rollback.isPending}
+              disabled={!mayRestore || rollback.isPending}
               onClick={() => {
-                if (!target) return
+                if (!mayRestore || !target) return
                 rollback.mutate({ to: target.seq })
               }}
             >

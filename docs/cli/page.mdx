@@ -962,6 +962,9 @@ A busy compiler returns 429 without a waiting queue.
 
 ```sh
 crewship page project get health --revision 1
+# Review sources without requesting the complete panel declaration:
+crewship page project get health --source-only
+crewship page project get health --revision 1 --source-only
 crewship page project restore health --revision 1 --expected-revision 3
 crewship page project history health --before 50
 ```

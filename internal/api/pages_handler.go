@@ -824,8 +824,13 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			"a page's slug is its address; create a new page rather than renaming this one")
 		return
 	}
-	base, ok := h.currentDocument(w, rec)
+	base, originalSpec, ok := h.currentDocumentSnapshot(w, rec)
 	if !ok {
+		return
+	}
+	// Metadata-only edits remain available to partial readers. Replacing the
+	// panel list requires visibility of both the old and submitted documents.
+	if req.Panels != nil && !h.requireProjectDefinitions(w, r, base) {
 		return
 	}
 	// The arrangement as it stands, taken BEFORE the patch is applied to it —
@@ -845,17 +850,37 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		base.Spec.Panels = panels
+		if !h.requireProjectDefinitions(w, r, base) {
+			return
+		}
 	}
 	if err := base.Validate(); err != nil {
 		writeSpecError(w, err)
 		return
 	}
-	resolved, ok := h.resolveReferences(w, r, wsID, base)
-	if !ok {
+	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize page update", err)
 		return
 	}
-	gates, ok := h.resolveGates(w, r, wsID, base)
-	if !ok {
+	replyUpdateResolution := func(what string, err error) {
+		var ref *pageReferenceError
+		if errors.As(err, &ref) && !authorizer.visible(ref.Owner) {
+			replyError(w, http.StatusForbidden, "A panel you cannot read does not currently validate. Ask a workspace administrator to resolve it before updating this Page.")
+			return
+		}
+		h.replyResolution(w, what, err)
+	}
+	// A metadata-only editor may not read an existing panel. Its validation
+	// failures need the same neutral response as project check/publication.
+	resolved, err := h.resolvePanelReferences(r.Context(), wsID, base)
+	if err != nil {
+		replyUpdateResolution("resolve page update references", err)
+		return
+	}
+	gates, err := h.resolveGatePlan(r.Context(), wsID, base)
+	if err != nil {
+		replyUpdateResolution("resolve page update gates", err)
 		return
 	}
 
@@ -887,10 +912,18 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ?`,
-		base.Metadata.Name, base.Metadata.Description, string(specJSON), now, rec.ID); err != nil {
+	result, err := tx.ExecContext(r.Context(),
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
+		base.Metadata.Name, base.Metadata.Description, string(specJSON), now, rec.ID, originalSpec)
+	if err != nil {
 		replyInternalError(w, h.logger, "update page", err)
+		return
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		replyInternalError(w, h.logger, "check page update", err)
+		return
+	} else if n != 1 {
+		replyError(w, http.StatusConflict, "Page definition changed before the update; reload before saving")
 		return
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
@@ -967,7 +1000,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
-	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, nil))
+	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
 // ── 5. Delete — DELETE /api/v1/pages/{slug} ────────────────────────────────
@@ -1506,20 +1539,26 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 
 // currentDocument reads the stored spec so a PATCH can be applied to it.
 func (h *PageHandler) currentDocument(w http.ResponseWriter, rec *pageRecord) (*pages.Document, bool) {
+	doc, _, ok := h.currentDocumentSnapshot(w, rec)
+	return doc, ok
+}
+
+// Return the exact bytes alongside the parsed document for atomic replacement.
+func (h *PageHandler) currentDocumentSnapshot(w http.ResponseWriter, rec *pageRecord) (*pages.Document, string, bool) {
 	var specJSON string
 	if err := h.db.QueryRow(`SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
 		replyInternalError(w, h.logger, "read stored page spec", err)
-		return nil, false
+		return nil, "", false
 	}
 	var doc pages.Document
 	if err := json.Unmarshal([]byte(specJSON), &doc); err != nil {
 		replyInternalError(w, h.logger, "decode stored page spec", err)
-		return nil, false
+		return nil, "", false
 	}
 	doc.APIVersion = pages.DocumentAPIVersion
 	doc.Kind = pages.DocumentKind
 	doc.Metadata.Slug = rec.Slug
-	return &doc, true
+	return &doc, specJSON, true
 }
 
 // writeSpecError maps a pages.ValidationError onto HTTP.

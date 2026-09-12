@@ -258,6 +258,13 @@ half is absent, not an empty array.
 PATCH /api/v1/pages/{slug}
 ```
 
+Replacing `panels` requires visibility of every panel in both the current and
+submitted definition; otherwise the server returns a neutral 403. Metadata-only
+edits remain available under write authority and return sealed placeholders for
+unreadable panels. A concurrent live definition change returns 409 instead of
+being overwritten.
+
+
 **Authentication:** session cookie or CLI token. The page owner, a workspace
 ADMIN/OWNER, or the holder of a `write` grant.
 
@@ -645,6 +652,11 @@ and producers. Panel data is not versioned.
 ```
 POST /api/v1/pages/{slug}/rollback
 ```
+
+The caller must also be able to read every panel in both the current and archived
+definitions. A partial reader receives a neutral 403; a concurrent live definition
+change receives 409 and leaves the newer document intact.
+
 
 **Authentication:** session cookie or CLI token. A rollback is an edit of the
 arrangement, so it runs the same gate as PATCH: owner, workspace ADMIN/OWNER,
@@ -1544,3 +1556,7 @@ archived source digest, without the archived panel definition.
 authority, `404` Page or revision missing, `409` unsupported legacy revision,
 `500` archive/integrity error, `503` project storage unavailable.
 The response is `no-store`.
+
+The `project/check` response filters `checks.routine_definitions` to routines
+referenced by visible panels. Validation still covers the complete candidate;
+publication provenance retains the complete map server-side.

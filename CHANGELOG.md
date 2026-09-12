@@ -11,9 +11,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
+- **Legacy Page panel updates and rollback could overwrite panels the caller could not read.** Both current and target declarations now require visibility, concurrent definition changes return 409, and metadata replies retain sealed placeholders. Project check no longer names routines called only by hidden panels (#2502).
+
 - **Page draft, archived definition and export reads could reveal panels hidden from the caller.** Whole-document authoring now requires visibility of every panel, including for agent project reads. Partial readers review source through separate endpoints that omit the definition; saves cannot silently remove withheld panels. ⚠️ **Behaviour change:** a Page write grant alone no longer permits these complete-document reads or replacements (#2502).
 
 ### Fixed
+
+- **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
 
 - **Closing the Pages editor on an empty Page could leave keyboard focus on the document body.** Empty Pages now keep the same focusable heading as populated Pages.
 - **Form boundaries and the Pages Filter label were hard to distinguish.** Shared controls now use a separate contrast token; CSS and application motion honor reduced-motion preferences, including loading spinners (#2499).
@@ -23,6 +27,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 
 ### Added
+
+- `page project get --source-only`, also with `--revision`, reads shared source without requesting the full panel declaration.
 
 - **One editor for a Page, and a screen for reviewing what an agent changed** (#2491) — the Pages toolbar carried five separate doors into one job: Settings, Edit, App preview, Source history and Publications, side by side, three of them behind the same icon. None of them was where the work happens, and for a Page with a custom application the actual work — deciding whether an agent's change goes live — had no screen at all. `Edit` now opens a routed editor in the page's content column with four named sections (Content / Data & actions / Access / History) and the Pages list still beside it; the address carries the section, so reload, Back, Forward and a shared link all land where they should. A Page whose application has a candidate newer than its live publication opens on a review of that change: definition changes derived by comparing the two documents (never a summary the agent wrote), a per-file source diff, a warning naming any routine whose definition moved since the last publication, the candidate's build state, and a consent that is bound to one candidate and one set of baselines and resets, visibly and with a reason, when any of them changes. An ordinary panel Page is a complete case rather than the same screen with features switched off: no empty application headings and no Publish that can never be pressed.
 

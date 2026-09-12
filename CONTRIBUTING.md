@@ -646,10 +646,16 @@ we will say so here and in the PR template.
 `pnpm test:types` uses `tsconfig.tests.json`, including Vitest's jest-dom matcher
 types. It runs in the Frontend Test CI job. Existing debt is recorded in
 `scripts/test-types-baseline.json` (#2493); a passing gate means no new
-file/code/message/count diagnostics, not that the existing debt is gone.
+file/code/message/code-site/count diagnostics, not that the existing debt is gone.
 
 Fix new diagnostics instead of adding them to the baseline. After repairing
 recorded errors, run `node scripts/typecheck-tests.mjs --write-baseline` and
 review the diff: ordinary cleanup should remove entries or lower counts.
 Never refresh the baseline automatically in CI. Line shifts do not change a
-fingerprint, and fixing one message grants no allowance for another message.
+fingerprint. The code-site anchor hashes the enclosing statement and named test/function
+context, so an identical error moved into a different declaration or test is new.
+PR and merge-group CI also compare the submitted baseline with the target commit
+(`TEST_TYPES_BASE_REF`); increasing allowances fails even when the local baseline
+was regenerated. The first migration from the old unanchored format preserves
+its file/code/message counts. This is a regression gate, not proof of semantic
+error identity or protection against a PR deliberately rewriting CI itself.
