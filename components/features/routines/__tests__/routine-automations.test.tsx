@@ -347,15 +347,24 @@ describe("routine access and starting points", () => {
       routine({
         definition: {
           inputs: [
-            { name: "max_stale_hours", type: "number", required: true, default: 24 },
+            {
+              name: "max_stale_hours",
+              type: "number",
+              required: true,
+              default: 24,
+              description: "How old a page may be",
+            },
             { name: "token", type: "string", default: "private-value" },
           ],
+          outputs: [{ name: "change_report", type: "string" }],
           steps: [{ id: "probe", type: "script" }],
         },
       } as Partial<RoutineDetail>),
     )
     expect(screen.getByText("Max stale hours")).toBeInTheDocument()
     expect(screen.getByText(/number · required · has a default/)).toBeInTheDocument()
+    expect(screen.getByText("How old a page may be")).toBeInTheDocument()
+    expect(screen.getByText(/Produces:/).parentElement).toHaveTextContent("Change report")
     expect(screen.queryByText("private-value")).not.toBeInTheDocument()
     expect(screen.getByTestId("routine-effects-line")).toHaveTextContent(
       /Scripts, tools, notifications or called routines can perform actions/,
