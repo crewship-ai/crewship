@@ -192,17 +192,16 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
               </div>
             )}
 
-            <dl className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
+            <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
               <Stat n={visible.length} label={visible.length === 1 ? "routine" : "routines"} />
               <Stat n={runningCount} label="running" />
               <Stat n={failedCount} label="failed last time" />
               <div className="flex items-baseline gap-1.5">
-                <dt className="sr-only">Next planned start</dt>
-                <dd className="tabular-nums font-medium text-foreground">
+                <span className="tabular-nums font-medium text-foreground">
                   {nextPlan?.next_run_at
                     ? formatRoutineTime(nextPlan.next_run_at, nextPlan.timezone || undefined)
                     : "—"}
-                </dd>
+                </span>
                 <span>
                   next planned start
                   {nextPlan?.target_pipeline_slug && (
@@ -215,7 +214,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                   )}
                 </span>
               </div>
-            </dl>
+            </div>
 
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <div className="relative min-w-[220px] flex-1 sm:max-w-xs" data-routines-search>
@@ -366,8 +365,8 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
 function Stat({ n, label }: { n: number; label: string }) {
   return (
     <div className="flex items-baseline gap-1.5">
-      <dd className="tabular-nums font-medium text-foreground">{n}</dd>
-      <dt>{label}</dt>
+      <span className="tabular-nums font-medium text-foreground">{n}</span>
+      <span>{label}</span>
     </div>
   )
 }
