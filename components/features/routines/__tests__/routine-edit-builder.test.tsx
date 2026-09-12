@@ -23,20 +23,29 @@ vi.mock("../routine-schedules-tab", () => ({
 vi.mock("../routine-webhooks-tab", () => ({
   RoutineWebhooksTab: () => <div>Existing webhooks</div>,
 }))
-vi.mock("../routine-definition-canvas", () => ({ RoutineDefinitionCanvas: () => <div /> }))
-vi.mock("@/components/features/files/file-editor", () => ({ FileEditor: () => <div /> }))
+vi.mock("../routine-definition-canvas", () => ({
+  RoutineDefinitionCanvas: () => <div />,
+}))
+vi.mock("@/components/features/files/file-editor", () => ({
+  FileEditor: () => <div />,
+}))
 vi.mock("@/components/crew-icon-popover", () => ({
   CrewIconPopover: (p: { icon: string; onIconChange: (s: string) => void }) => (
     <button onClick={() => p.onIconChange("star")}>Icon: {p.icon}</button>
   ),
 }))
-vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: () => <span /> }))
+vi.mock("@/components/ui/agent-avatar", () => ({
+  AgentAvatar: () => <span />,
+}))
 vi.mock("@/components/features/crews/crew-picker", () => ({
   CrewPicker: (p: { value: string }) => <div data-testid="crew">{p.value}</div>,
 }))
 vi.mock("@/lib/api-fetch", () => ({
   apiFetch: vi.fn(async (url: string, init?: RequestInit) => {
-    h.calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} })
+    h.calls.push({
+      url,
+      body: init?.body ? JSON.parse(String(init.body)) : {},
+    })
     if (init?.method === "DELETE" && h.discardFails)
       return new Response("<html>Bad gateway</html>", { status: 502 })
     if (h.savedDrafts && url.endsWith("/drafts") && !init?.method)
@@ -48,7 +57,10 @@ vi.mock("@/lib/api-fetch", () => ({
       )
     if (h.savedDrafts && url.endsWith("/draft"))
       return new Promise<Response>((resolve) => {
-        h.draftReads.set(url.split("/").at(-2)!, { resolve, signal: init?.signal })
+        h.draftReads.set(url.split("/").at(-2)!, {
+          resolve,
+          signal: init?.signal,
+        })
       })
     if (url.endsWith("/draft") && h.linked)
       return {
@@ -83,15 +95,24 @@ vi.mock("@/lib/api-fetch", () => ({
       return {
         ok: false,
         status: 409,
-        json: async () => ({ error: "Another editor saved this draft. Reload and review." }),
+        json: async () => ({
+          error: "Another editor saved this draft. Reload and review.",
+        }),
       }
     if (url.endsWith("/drafts") && init?.method === "POST")
       return {
         ok: true,
-        json: async () => ({ ...JSON.parse(String(init.body)), id: "draft-1", revision: 1 }),
+        json: async () => ({
+          ...JSON.parse(String(init.body)),
+          id: "draft-1",
+          revision: 1,
+        }),
       }
     if (url.includes("/test_run"))
-      return { ok: true, json: async () => ({ status: "DRY_RUN_OK", save_token: "verified" }) }
+      return {
+        ok: true,
+        json: async () => ({ status: "DRY_RUN_OK", save_token: "verified" }),
+      }
     if (url.endsWith("/publish") && h.scheduleConflict)
       return {
         ok: false,
@@ -105,13 +126,20 @@ vi.mock("@/lib/api-fetch", () => ({
           },
         }),
       }
-    if (url.endsWith("/publish")) return { ok: true, json: async () => ({ slug: "existing" }) }
+    if (url.endsWith("/publish"))
+      return { ok: true, json: async () => ({ slug: "existing" }) }
     if (url.endsWith("/appearance")) return { ok: !h.appearanceFails }
     if (url.startsWith("/api/v1/agents"))
       return {
         ok: true,
         json: async () => [
-          { id: "a1", slug: "worker", name: "Worker", crew_id: "crew1", agent_role: "AGENT" },
+          {
+            id: "a1",
+            slug: "worker",
+            name: "Worker",
+            crew_id: "crew1",
+            agent_role: "AGENT",
+          },
         ],
       }
     return { ok: true, json: async () => [] }
@@ -134,10 +162,23 @@ const routine = {
     name: "existing",
     description: "Original description",
     inputs: [],
-    steps: [{ id: "work", type: "agent_run", agent_slug: "worker", prompt: "Do the work" }],
+    steps: [
+      {
+        id: "work",
+        type: "agent_run",
+        agent_slug: "worker",
+        prompt: "Do the work",
+      },
+    ],
   },
 } as unknown as RoutineDetail
-const props = { workspaceId: "ws1", open: true, routine, onCreated: vi.fn(), onClose: vi.fn() }
+const props = {
+  workspaceId: "ws1",
+  open: true,
+  routine,
+  onCreated: vi.fn(),
+  onClose: vi.fn(),
+}
 beforeEach(() => {
   cleanup()
   h.calls = []
@@ -151,32 +192,59 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 describe("shared routine editor", () => {
+  it("requires a change review and confirmation, and lets the user return to editing", async () => {
+    render(<RoutineCreateDialog {...props} />)
+    await screen.findByText("Worker")
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Reviewed name" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    expect(
+      screen.getByRole("heading", { name: "Confirm publication" }),
+    ).toBeInTheDocument()
+    expect(
+      h.calls.some((c) => c.url.endsWith("/publish") || c.url.endsWith("/test_run")),
+    ).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Back to editing" }))
+    expect(screen.getByLabelText("Name")).toHaveValue("Reviewed name")
+    expect(props.onClose).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
+  })
+
   it("keeps one recipe document and preserves edits when opening Code", async () => {
     render(<RoutineCreateDialog {...props} />)
     await waitFor(() =>
       expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } })
-    expect(screen.getByText("Existing schedules")).toBeVisible()
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Draft name" },
+    })
+    expect(screen.queryByText("Existing schedules")).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Continue", exact: true }),
     ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
     expect(screen.getByLabelText("Name")).toHaveValue("Draft name")
-    expect(h.calls.some((c) => c.url.endsWith("/publish") || c.url.includes("/test_run"))).toBe(
-      false,
-    )
+    expect(
+      h.calls.some((c) => c.url.endsWith("/publish") || c.url.includes("/test_run")),
+    ).toBe(false)
   })
   it("prefills identity and real agents, then saves the same recipe without creating a schedule", async () => {
     render(<RoutineCreateDialog {...props} />)
     expect(screen.getByLabelText("Name")).toHaveValue("Existing recipe")
     expect(screen.getByTestId("crew")).toHaveTextContent("crew1")
     await screen.findByText("Worker")
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Edited recipe" } })
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Edited recipe" },
+    })
     fireEvent.click(screen.getByText("Icon: clock"))
-    expect(screen.getByText("Existing schedules")).toBeInTheDocument()
+    expect(screen.queryByText("Existing schedules")).not.toBeInTheDocument()
+    expect(screen.queryByText("Existing webhooks")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith("existing"))
     const saved = h.calls.find((c) => c.url.endsWith("/drafts") && c.body.document)!.body
       .document as Record<string, unknown>
@@ -202,10 +270,12 @@ describe("shared routine editor", () => {
       expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
     fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
     await screen.findByText(/The recipe was saved, but its icon could not be saved/)
     expect(props.onCreated).not.toHaveBeenCalled()
     h.appearanceFails = false
     fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     expect(h.calls.filter((c) => c.url.endsWith("/publish"))).toHaveLength(1)
   })
@@ -213,8 +283,11 @@ describe("shared routine editor", () => {
     const creation = { ...props, routine: undefined }
     const view = render(<RoutineCreateDialog {...creation} />)
     fireEvent.click(screen.getByText("Write it yourself", { exact: true }))
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "First recipe" } })
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "First recipe" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Publish" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
     await waitFor(() => expect(props.onCreated).toHaveBeenCalled())
     view.rerender(<RoutineCreateDialog {...creation} open={false} />)
     view.rerender(<RoutineCreateDialog {...creation} open />)
@@ -227,7 +300,9 @@ describe("shared routine editor", () => {
     await waitFor(() =>
       expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unfinished draft" } })
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Unfinished draft" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     await screen.findByText(/Saved draft/)
     expect(
@@ -247,7 +322,9 @@ describe("shared routine editor", () => {
     await waitFor(() =>
       expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Keep my edit" } })
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Keep my edit" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     await screen.findByText(/Another editor saved this draft/)
     expect(screen.getByLabelText("Name")).toHaveValue("Keep my edit")
@@ -260,8 +337,14 @@ describe("shared routine editor", () => {
       expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument(),
     )
     fireEvent.click(screen.getByRole("button", { name: "Publish" }))
-    const link = await screen.findByRole("link", { name: "Review schedule: Daily" })
-    expect(link).toHaveAttribute("href", "/routines?slug=existing&view=plan#schedule-plan1")
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and publish" }))
+    const link = await screen.findByRole("link", {
+      name: "Review schedule: Daily",
+    })
+    expect(link).toHaveAttribute(
+      "href",
+      "/routines?slug=existing&view=plan#schedule-plan1",
+    )
     expect(link).toHaveAttribute("target", "_blank")
     expect(props.onCreated).not.toHaveBeenCalled()
     expect(props.onClose).not.toHaveBeenCalled()
@@ -273,13 +356,21 @@ describe("shared routine editor", () => {
       <RoutineCreateDialog
         {...props}
         routine={undefined}
-        savedDraftLink={{ slug: "existing", id: "ai-draft-1", workspaceId: "ws1" }}
+        savedDraftLink={{
+          slug: "existing",
+          id: "ai-draft-1",
+          workspaceId: "ws1",
+        }}
       />,
     )
-    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    await waitFor(() =>
+      expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"),
+    )
     fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
     await waitFor(() =>
-      expect(h.calls.some((c) => c.url.endsWith("/drafts") && c.body.document)).toBe(true),
+      expect(h.calls.some((c) => c.url.endsWith("/drafts") && c.body.document)).toBe(
+        true,
+      ),
     )
     expect(
       h.calls.find((c) => c.url.endsWith("/drafts") && c.body.document)?.body,
@@ -305,7 +396,10 @@ describe("shared routine editor", () => {
   })
   it("opens a historical version as an unsaved draft", () => {
     render(
-      <RoutineCreateDialog {...props} initialDraft={{ ...routine.definition, steps: [] }} />,
+      <RoutineCreateDialog
+        {...props}
+        initialDraft={{ ...routine.definition, steps: [] }}
+      />,
     )
     expect(screen.queryByText("1. work")).not.toBeInTheDocument()
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)

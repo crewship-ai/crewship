@@ -566,7 +566,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 
 	// Judge the plan this PATCH produces — target routine, effective pin,
 	// effective inputs — whenever the request changes any of the three
-	// things the preset is fed to. A PATCH that touches none of them
+	// things the preset is fed to, or enables a previously disabled plan. A PATCH that touches none of them
 	// (disabling, a new cron, a rename) is not judged, so an operator whose
 	// plan predates this gate can still switch it off or reschedule it
 	// without first repairing a preset the request never mentions.
@@ -581,14 +581,15 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	// review of #2498.
 	_, versionMentioned := rawKeys["target_pipeline_version"]
 	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
-	if body.Inputs != nil || targetChanged {
+	enabling := !existing.Enabled && enabled
+	if body.Inputs != nil || targetChanged || enabling {
 		if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
 			return
 		}
 	}
 	_, wakeMentioned := rawKeys["wake_pipeline_id"]
 	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
-	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned) {
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned || enabling) {
 		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
 			return
 		}

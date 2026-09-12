@@ -1,5 +1,6 @@
 "use client"
 
+import { RoutineRunEffects } from "./routine-run-effects"
 import { useState } from "react"
 import {
   Dialog,
@@ -33,11 +34,10 @@ import {
  * component. Two ways in, one form: what `/msn-etn-podklady` asks for in
  * chat is what Run asks for here, prefilled the same way.
  *
- * A routine that declares NO inputs never sees this dialog — the caller
- * checks first and runs straight away, so the button keeps its
- * single-click behaviour everywhere it always had it.
+ * Even without input questions, a real run requires a review of its effects.
  */
 export interface RoutineRunInputsDialogProps {
+  definition?: Record<string, unknown> | null
   submitLabel?: "Run" | "Schedule"
   /** Open when non-null; the specs are the routine's declared inputs. */
   versionChoices?: { value: string; label: string }[]
@@ -53,6 +53,7 @@ export interface RoutineRunInputsDialogProps {
 }
 
 export function RoutineRunInputsDialog({
+  definition,
   inputs,
   versionChoices,
   selectedVersion,
@@ -63,7 +64,7 @@ export function RoutineRunInputsDialog({
   onCancel,
   onRun,
 }: RoutineRunInputsDialogProps) {
-  if (inputs === null || (!inputs.length && !versionChoices?.length)) return null
+  if (inputs === null) return null
   return (
     <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
@@ -78,10 +79,11 @@ export function RoutineRunInputsDialog({
               : "Starting creates a new run in this routine’s history."}
           </DialogDescription>
         </DialogHeader>
+        <RoutineRunEffects definition={definition} />
         {versionChoices && (
           <p className="text-xs text-muted-foreground">
-            A new run repeats work using the selected version. It does not resume the previous
-            attempt or undo its actions.
+            A new run repeats work using the selected version. It does not resume the
+            previous attempt or undo its actions.
           </p>
         )}
         {versionChoices && (
@@ -103,8 +105,8 @@ export function RoutineRunInputsDialog({
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              Inputs are copied from the selected historical run where names match. Review them
-              before repeating external actions.
+              Inputs are copied from the selected historical run where names match. Review
+              them before repeating external actions.
             </p>
           </div>
         )}
@@ -203,7 +205,12 @@ export function InputsForm({
       ))}
       <DialogFooter>
         {onCancel && (
-          <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+          >
             Cancel
           </Button>
         )}

@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime, routineTimeZone } from "@/lib/routine-time"
+
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -71,7 +73,8 @@ export function RoutineCalendar({
     const grid = timeGrid.current
     const morning = grid?.querySelector<HTMLElement>('[data-calendar-hour="8"]')
     if (grid && morning && !loading)
-      grid.scrollTop += morning.getBoundingClientRect().top - grid.getBoundingClientRect().top - 42
+      grid.scrollTop +=
+        morning.getBoundingClientRect().top - grid.getBoundingClientRect().top - 42
   }, [view, anchorKey, loading])
   useEffect(() => {
     const controller = new AbortController()
@@ -133,13 +136,18 @@ export function RoutineCalendar({
       list.push(event)
       map.set(key, list)
     }
-    for (const list of map.values()) list.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+    for (const list of map.values())
+      list.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
     return map
   }, [events, bySlug, filter])
   const plan = (day: Date, hour?: number) => {
     if (!canSchedule) return
     const proposed = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour ?? 9)
-    if (hour == null && dateKey(day) === dateKey(new Date()) && proposed.getTime() <= Date.now()) {
+    if (
+      hour == null &&
+      dateKey(day) === dateKey(new Date()) &&
+      proposed.getTime() <= Date.now()
+    ) {
       const now = new Date()
       proposed.setHours(now.getHours() + 1, 0, 0, 0)
     }
@@ -159,7 +167,7 @@ export function RoutineCalendar({
             ? `/routines?${new URLSearchParams({ slug: event.slug, run: event.id })}`
             : `/routines?${new URLSearchParams({ slug: event.slug, view: "plan" })}`
         }
-        title={`${routine.name || event.name} · ${new Date(event.at).toLocaleString("en-GB")} · ${label}`}
+        title={`${routine.name || event.name} · ${formatRoutineTime(event.at)} · ${label}`}
         className={cn(
           "my-1 flex min-w-0 items-start gap-1.5 rounded-lg border-l-2 p-1.5 text-[11px] hover:bg-muted",
           event.kind === "run"
@@ -174,12 +182,17 @@ export function RoutineCalendar({
         />
         <span className="min-w-0">
           <span className="block font-medium">
-            {new Date(event.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            {new Date(event.at).toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
           </span>
           <span className="block truncate">{routine.name || event.name}</span>
           <span className="block text-muted-foreground">{label}</span>
           {event.kind !== "run" && (
-            <span className="block truncate text-muted-foreground">{routinePresetSummary(event.inputs)}</span>
+            <span className="block truncate text-muted-foreground">
+              {routinePresetSummary(event.inputs)}
+            </span>
           )}
         </span>
       </Link>
@@ -231,7 +244,9 @@ export function RoutineCalendar({
                       </span>
                     )
                   })}
-                  {list.length > 2 && <span className="text-[9px]">+{list.length - 2}</span>}
+                  {list.length > 2 && (
+                    <span className="text-[9px]">+{list.length - 2}</span>
+                  )}
                 </span>
               </button>
             ) : (
@@ -269,13 +284,19 @@ export function RoutineCalendar({
       : view === "month"
         ? anchor.toLocaleDateString("en-GB", { month: "long", year: "numeric" })
         : `${from.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}${view !== "day" ? ` – ${addDays(to, -1).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : ""}`
-  const days = Array.from({ length: view === "week" ? 7 : view === "three-days" ? 3 : 1 }, (_, i) =>
-    addDays(from, i),
+  const days = Array.from(
+    { length: view === "week" ? 7 : view === "three-days" ? 3 : 1 },
+    (_, i) => addDays(from, i),
   )
   return (
     <section className="space-y-4 rounded-3xl border border-white/[0.06] bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-medium">{title}</h2>
+        <div>
+          <h2 className="font-medium">{title}</h2>
+          <p className="text-xs text-muted-foreground">
+            Calendar times · {routineTimeZone()}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
@@ -284,7 +305,11 @@ export function RoutineCalendar({
           >
             Previous
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setDate(dateKey(new Date()))}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDate(dateKey(new Date()))}
+          >
             Today
           </Button>
           <Button
@@ -318,7 +343,9 @@ export function RoutineCalendar({
               onClick={() => setView(v)}
               className={cn(
                 "rounded-full px-3 py-1.5 text-xs",
-                view === v ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60",
+                view === v
+                  ? "bg-muted font-medium"
+                  : "text-muted-foreground hover:bg-muted/60",
               )}
             >
               {CALENDAR_LABELS[v]}
@@ -348,8 +375,9 @@ export function RoutineCalendar({
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        {Intl.DateTimeFormat().resolvedOptions().timeZone} · Blue entries are planned starts;
-        history shows actual runs.{canSchedule && " Click a date or time to schedule a routine."}
+        {Intl.DateTimeFormat().resolvedOptions().timeZone} · Blue entries are planned
+        starts; history shows actual runs.
+        {canSchedule && " Click a date or time to schedule a routine."}
       </p>
       {loading && <p role="status">Loading calendar…</p>}
       {error && (
@@ -362,7 +390,8 @@ export function RoutineCalendar({
       )}
       {truncated && (
         <p role="status" className="text-xs text-warn">
-          Some occurrences are omitted in this range. Open a shorter view to inspect a busy date.
+          Some occurrences are omitted in this range. Open a shorter view to inspect a
+          busy date.
         </p>
       )}
       {view === "year" ? (
@@ -394,7 +423,15 @@ export function RoutineCalendar({
           ref={timeGrid}
           className="max-h-[65vh] overflow-auto rounded-xl border border-border/60"
         >
-          <div className={days.length === 7 ? "min-w-[840px]" : days.length === 3 ? "min-w-[570px]" : "min-w-[260px]"}>
+          <div
+            className={
+              days.length === 7
+                ? "min-w-[840px]"
+                : days.length === 3
+                  ? "min-w-[570px]"
+                  : "min-w-[260px]"
+            }
+          >
             <div
               className={`sticky top-0 z-10 grid bg-card ${days.length === 7 ? "grid-cols-[54px_repeat(7,minmax(0,1fr))]" : days.length === 3 ? "grid-cols-[54px_repeat(3,minmax(0,1fr))]" : "grid-cols-[54px_minmax(0,1fr)]"}`}
             >

@@ -220,18 +220,29 @@ A discarded-and-recreated draft rejects the old link. Neither agent draft
 tool publishes or activates a trigger; legacy `save_routine` still publishes
 directly. Crew/workspace/acting-agent identity is checked by the server.
 
-A publication blocked by a recurring preset includes `schedule_conflict`
-with its `schedule_id`, `name`, and `reason`. In the editor, **Review schedule**
-opens that preset without losing the draft. **Edit inputs** uses the same
-typed form as a manual start; pinned schedules load their archived schema.
-For an unpinned schedule, select **Saved draft** to prepare its new fields,
-then retry publication. Preset changes take effect before publication, so
-pause a schedule first when the new values cannot serve its current recipe.
+A publication or rollback blocked by a recurring preset returns HTTP 409
+with `schedule_conflict` (`schedule_id`, `name`, `reason`). An enabled plan
+following HEAD must remain compatible with the selected recipe. Pinned
+plans retain their archived version; disabled plans do not block publication.
 
-New one-time starts using `fire_at` pin the preflighted published version.
-`routine pending list` shows that version. Older or delayed/debounced entries
-with no pin keep the existing live-at-dispatch policy. Missing archived
-versions fail explicitly instead of silently falling back to the current recipe.
+To repair incompatible schemas, save the recipe and its trigger inputs in
+one operation, or disable the plan, publish, then repair its inputs and enable
+it. Re-enabling validates the effective recipe version and inputs, including
+a wake routine's preset. Disabling an invalid legacy plan remains possible.
+Saving new inputs still checks the current target; pausing alone does not
+make inputs for an unpublished draft valid against the old HEAD.
+
+The browser keeps live plans, webhooks and budgets in **Plan**, outside the
+draft editor. Cancelling Edit discards local edits, not an explicitly saved
+draft. **Publish** opens a change review and requires confirmation before
+validation and publication. **Run** reviews inputs and possible effects;
+Test validates without running agents or external actions.
+
+New manual one-time, delayed and debounced starts pin the accepted published
+version. Coalescing preserves the first pin and validates the replacement
+inputs against it. `routine pending list` shows the version. Missing archives
+are refused explicitly; new manual deferrals without an archive return 409.
+Only older already-stored unpinned entries retain live-at-dispatch behavior.
 
 ## `crewship routine delete <slug>`
 
@@ -1273,7 +1284,7 @@ Pre-validates JSON locally before sending — typos at the keyboard get a local 
 crewship routine cancel run_cmovn40h30001c57bb667
 ```
 
-Signals the run goroutine. Run terminates at the next safe point and emits `pipeline.run.failed` with reason "cancelled". Already-terminal runs return 409.
+Signals the run goroutine. Run terminates at the next safe point; the row is `cancelled` and the `pipeline.run.failed` journal payload has status `CANCELLED`. Completed effects are not undone. Exceeding the run’s own deadline remains `failed` / `FAILED` in both records. Already-terminal runs return 409.
 
 ---
 

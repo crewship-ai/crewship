@@ -6,6 +6,11 @@ Doplňuje scénáře, které dřívější důkazy neuzavřely, a zaznamenává 
 prokázané vady. **Lidská přejímka (§11, pět úloh bez výkladu) není součástí
 tohoto protokolu a žádný agent ji nesmí odškrtnout.**
 
+**Doplnění 12. září:** tento protokol není doklad uzavření celého PRD.
+Oponentura znovu otevřela kompatibilitu plánů (rollback a re-enable), deadline
+journal a konkrétní UX brány. Viz [stav oprav](routines-opponent-2026-09-12.md).
+Původní měření níže zůstávají historií s uvedenými hranicemi.
+
 ## Prostředí
 
 | | |
@@ -441,7 +446,7 @@ Nasazení přes `systemctl reload crewship-ws@1` z čistého checkoutu:
 | Účtenka a debounce limit | přijatá kompatibilní koalescence zachovala pin 1; čas `17:16:02.654233405Z` odpovídá uloženému řádku a původnímu limitu 180 s |
 | Validace cíle plánu | odepnutí se starými vstupy, repin bez vstupů i neexistující v999 → 400 bez změny řádku; vypnutí → 200; repin s novými platnými vstupy → 200 |
 | Schéma a preset v jednom uložení | save samotné v2 → 409, hash původní rutiny zachován; v2 + upravený trigger preset → 201 |
-| Versions, archiv a Journal | browser 500 → viditelná chyba; Retry → 200 a obsah; po načtení v1 zůstává vybraná v1 |
+| Versions, archiv a samostatná stránka `/journal` | browser 500 → viditelná chyba; Retry → 200 a obsah; po načtení v1 zůstává vybraná v1 |
 | Skutečně chybějící archiv | v999 → 404, viditelná chyba a Retry, žádný historický obsah nahrazený HEAD |
 | Odpojení klienta | `run_cmtx7wrlh000f92098b00` → `cancelled`, důvod `run cancelled at step hold`; výstup prepare zachován, finish neproveden; browser „Run stopped“ / „Stopped at step“ |
 
@@ -460,10 +465,11 @@ po ustálení načtení seznamu verzí, aby zachycoval chybu, nikoli mezilehlé
 prošly; přeskočené/neutral kontroly se za provedené testy nepočítají.
 Kombinované cílené API/pipeline testy a `go vet ./...` prošly; frontend
 `pnpm lint` a `pnpm build` prošly. #2503 má skutečné CodeRabbit review
-hlavy `df0cb613a`. #2501 CodeRabbit opakovaně odmítl kvůli limitu;
-Codex provedl kontrolu a doložil red→green regrese podle výslovného
-fallbacku v CONTRIBUTING.md. **Není to nezávislé review** a v PR je to
-zapsáno, včetně žádosti o opakování.
+hlavy `df0cb613a`. **Oprava souhrnu po oponentuře:** skutečné strojové review
+chybělo u čtyř PR: #2497, #2498, #2501 a #2507. U #2494 není pokrytá
+koncová hlava. Jednotlivé fallbacky byly přiznány, ale předchozí souhrn je
+nevyjmenoval všechny. U #2507 nebyl retrigger skutečně odeslán před mergem.
+Vlastní kontrola a red→green důkazy nejsou nezávislé review.
 
 První úplná lokální sada dokončila všechny balíčky, ale selhal test záloh
 `TestBackup_TamperedPayload_VerifyReportsChecksumMismatch`. Stejné selhání
@@ -473,6 +479,29 @@ s původním manifestovým checksumem. Cílený balíček prošel (129,768 s);
 mutace, která poškození vypne, test prokazatelně shodí. Původní selhání se
 nepřepisuje na zelené. Opakovaná úplná sada a konečný stav opravy se
 zaznamenají při uzavření navazujícího PR.
+
+**Doplnění záloh 12. 9.:** oprava sondy přistála v #2507. Oponent zopakoval
+rodiče 133× bez chyby; původní lokální selhání proto nelze vydávat za
+spolehlivě reprodukovatelné na každém běhu. Změna testu zachovává platný gzip
+a cíleně mění payload; obě strany potvrzují, že její mutace test shodí.
+
+### P8b — Opakování na skutečně nasazeném `7d470200a` (11. 9., 18:03–18:06 UTC)
+
+Toto měření proběhlo již 11. září, ale do repozitáře bylo doplněno až po
+oponentuře 12. září. Není novým měřením následných oprav.
+[Strojově čitelný výběr důkazů](routines-p8b-2026-09-11.json) obsahuje
+identitu nasazení, běhy a checksumy původních soukromých protokolů.
+
+- commit `7d470200a0f51c75725d4dadcec9ccf8a31ac00a`, `dirty=false`, PID `3033655`;
+- SHA-256 `/proc/PID/exe` i souboru binárky:
+  `5094be02810dd2f8498f5900e47438cc8bdeb05df0e58efece8aee2e8365f545`;
+- delay `run_cmtx9n04s000b366664f8` a debounce `run_cmtx9oxkm000cb672cc30`
+  dokončeny na v1 po publikaci v2;
+- odpojení klienta `run_cmtx9oyxj000f18d56f3a`: `cancelled` / `CANCELLED`,
+  připravený výstup zachován, další krok neproveden;
+- browser Versions/archiv: 500 → Retry → obsah, výběr v1 zachován; skutečná
+  v999 → 404 bez náhrady HEAD. Journal 500 byl na stránce `/journal`,
+  **nikoli v journalu detailu běhu**.
 
 Důkazy jsou v soukromém adresáři
 `/srv/crewship/backups/crewship_1/routines-takeover-20260911/`:
@@ -508,13 +537,13 @@ aktuální nasazenou kombinaci a nové důkazy zaznamenává P8.
 | 3 | Dvojklik / opakovaný request | PASS | Živě: dva požadavky se stejným idempotency klíčem → jediný `run_cmtvp9dkr001eaf494dda` (§14) | Není to přejímka všech gest v UI |
 | 4 | Edit během běhu, publish během čekání ve frontě | PASS | P1 dokládá zachování v1 při běhu a obnově. P8 dokládá skutečný delay i koalescovaný debounce: po publikaci v2 oba dokončeny na v1, účtenka i uložený pin souhlasí | Nové ruční odklady bez archivu vracejí 409; staré již uložené nepřipnuté řádky a politika opakovaných plánů se zpětně nemění. Původní selhání a opravy viz N4 |
 | 5 | Dva editoři | PASS | Server: 200/409 nad stejnou revizí. **Browser 11. 9.: dva skutečné kontexty**, B dostal „Save failed — routine draft changed…“ a **podržel si svůj text** | — |
-| 6 | Změna schématu s existujícími plány | PASS | Živě 11. 9. celý průchod Edit → Test → Publish: 409 `schedule_conflict` (`psched_cmtwt3yna0001cd0e0145`, „Input recipient is required by the draft“), draft zachován, živý recept nezměněn → oprava presetu → publish 201. Testy na obou vrstvách | Brána platí pro **povolené a nepřipnuté** plány; vypnuté a připnuté jsou vyňaté záměrně |
+| 6 | Změna schématu s existujícími plány | ZNOVU OTEVŘENO 12. 9. | Živě 11. 9. celý průchod Edit → Test → Publish: 409 `schedule_conflict` (`psched_cmtwt3yna0001cd0e0145`, „Input recipient is required by the draft“), draft zachován, živý recept nezměněn → oprava presetu → publish 201. Testy na obou vrstvách | Oponentura našla obchvat rollbackem a zapnutím neplatného plánu. Historické PASS platilo jen pro změřené dveře; opravy viz zpráva z 12. 9. |
 | 7 | Větev neprovedena, foreach, více pokusů | PASS | Živě `run_cmtwqaand001db3acdea1`: skipped s důvodem „Condition was false“; foreach položky `/fan/items/N/each att=1`; skutečné pokusy `/flaky att=1..3` — rozlišené cestou, ne počtem | — |
 | 8 | HTTP chyba po možném externím zápisu | PASS na měřitelné vrstvě | `uncertain_external_effect_test.go` s recorderem: účinek 1×, běh FAILED, důvod zachován, následující krok 0× | **Živě nelze**: SSRF ochrana odmítá každou dosažitelnou adresu. Egress brány v tom rigu nejsou zapojené |
 | 9 | Restart u waitpointu a rozpracovaného kroku | PASS | Živě: dva `kill -9` nad `run_cmtwp7vt700033e66cfc6`; obnovené rozhodnutí na témže tokenu; `hold att=1 interrupted → att=2 completed`. Počitatelné at-least-once (1× vs 2×) v `…_ResumeReappliesTheInFlightStep` | **Exactly-once se netvrdí.** Počitatelný důkaz dvojího účinku je testový, ne živý — viz řádek 8 |
 | 10 | Dvě rozhodnutí / timeout / Issue takeover | PASS | Živě: timeout → 409 na opožděnou odpověď, stav nezměněn; čtyři souběhy, vždy jedno 200 a jedno 409, výsledek následoval verdikt. Server: `inbox_takeover_late_answer_test.go` — takeover→opožděná odpověď a odpověď→opožděný takeover, obojí 409 bez vedlejších účinků | Takeover × opožděná odpověď je doložen na serverové vrstvě, ne živým průchodem UI |
 | 11 | Výsledek existuje, chybí completion signal | PASS | Živě `run_cmtwt2dfj000560dd6f13`: `status=completed`, `outcome=FAILED`, `error="no outcome reported"`, výstup přítomen. **Browser:** pilulka „Result failed“, nadpis „A result was recorded, but completion was not confirmed“, RESULTS dál zobrazen | Vyrobeno `call_pipeline` krokem (token-zero); s agentem nevyzkoušeno |
-| 12 | Načtení outputs/journalu selže, archiv chybí | PASS | Původní browser 500 pro run/executions/artifacts a Retry. P8 doplňuje Versions list 500, archive detail 500 a Journal 500 → viditelná chyba, Retry 200 a návrat obsahu; vybraná verze zachována. Skutečný archiv 999 → 404, žádný obsah HEAD | `/journal/lookup` je nezměněná best-effort dekorace odkazu, nikoli výsledková plocha; jeho výpadek zůstává tichý |
+| 12 | Načtení outputs/journalu selže, archiv chybí | PASS | Původní browser 500 pro run/executions/artifacts a Retry. P8 doplňuje Versions list 500, archive detail 500 a stránku `/journal` s 500 → viditelná chyba, Retry 200 a návrat obsahu; vybraná verze zachována. Skutečný archiv 999 → 404, žádný obsah HEAD | `/journal/lookup` je nezměněná best-effort dekorace odkazu, nikoli výsledková plocha; jeho výpadek zůstává tichý |
 | 13 | Jednorázový start + recurrence + DST | PASS | Projekce (API + browser, 10.–11. 9.) **a nově skutečná dispatch cesta**: `schedules_dst_dispatch_test.go` — 25. 10. 2026 dvě odpálení (00:30Z, 01:30Z), 28. 3. 2027 žádné a due bar postoupí; hodinový kontrolní vzorek | Řízené hodiny v testu; hostitelský čas se nikdy neměnil |
 | 14 | Neoprávněný uživatel, cizí soubor | PASS | Živě, úplná matice se **skutečným druhým uživatelem**: 401 anonym, 403 čtení i všechny mutace, 404 při záměně workspace id, 403/400 na stažení souboru a path traversal; waitpoint zůstal pending pro vlastníka | Serverová vrstva; browser by ji nenahradil |
 | 15 | Klávesnice, úzký displej, reduced motion | PASS v rozsahu §9 | Browser: 390 px bez horizontálního přetečení (`scrollWidth == 390`), `/` fokusuje hledání (desktop), Escape čistí a nechá fokus v poli, Tab dosáhne akčních prvků s viditelným fokusem, reduced-motion → nula běžících animací | **Není to certifikace přístupnosti.** `/` na 390 px nefokusuje — vstup není vykreslen ve sbalené liště |

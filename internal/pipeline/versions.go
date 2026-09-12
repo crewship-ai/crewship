@@ -232,8 +232,17 @@ func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion i
 	if err != nil {
 		return nil, fmt.Errorf("Rollback: load target: %w", err)
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Rollback: begin: %w", err)
+	}
+	defer tx.Rollback() // best effort after commit
+	// Keep the compatibility check and HEAD update atomic, just like Save.
+	if err := s.checkSchedulePresetsTx(ctx, tx, pipelineID, target.DefinitionJSON); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, `
 UPDATE pipelines
 SET head_version = ?, definition_json = ?, definition_hash = ?, updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
@@ -244,6 +253,9 @@ WHERE id = ? AND deleted_at IS NULL`,
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("Rollback: commit: %w", err)
 	}
 	return s.GetByID(ctx, pipelineID)
 }

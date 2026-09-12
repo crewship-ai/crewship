@@ -628,3 +628,54 @@ func TestPresetValidation_AStorageFailureIsNotAPass(t *testing.T) {
 		t.Fatalf("failed judgement still wrote the plan: inputs=%s", inputs)
 	}
 }
+
+func TestPresetValidation_ReenableRequiresCompatiblePreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedRoutineForPreset(t, h, ws, "planned", presetValidationDef)
+	rr := createSchedule(t, h, user, ws, p.ID, map[string]any{"region": "eu"})
+	if rr.Code != 201 {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if rr := patchPlan(t, h, user, ws, created.ID, `{"enabled":false}`); rr.Code != 200 {
+		t.Fatal(rr.Body.String())
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetV2Def)
+	rr = patchPlan(t, h, user, ws, created.ID, `{"enabled":true}`)
+	if rr.Code != 400 {
+		t.Fatalf("invalid re-enable: %d %s", rr.Code, rr.Body.String())
+	}
+	plan, err := h.schedules.GetByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Enabled {
+		t.Fatal("refused re-enable changed the row")
+	}
+	rr = patchPlan(t, h, user, ws, created.ID, `{"enabled":true,"inputs":{"zone":"eu"}}`)
+	if rr.Code != 200 {
+		t.Fatalf("repair and enable: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPresetValidation_ReenableChecksWakePreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	target := seedRoutineForPreset(t, h, ws, "target", `{"name":"target","steps":[{"id":"a","type":"transform","transform":{"input":"hi","expression":"."}}]}`)
+	wake := seedRoutineForPreset(t, h, ws, "wake", presetValidationDef)
+	plan, err := h.schedules.Save(t.Context(), pipeline.SaveScheduleInput{WorkspaceID: ws, Name: "Wake gated", TargetPipelineID: target.ID, CronExpr: "0 9 * * *", Timezone: "UTC", Enabled: false, WakePipelineID: wake.ID, WakeInputs: map[string]any{"region": "eu"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "wake", presetV2Def)
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"enabled":true}`); rr.Code != 400 {
+		t.Fatalf("invalid wake preset accepted: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := patchPlan(t, h, user, ws, plan.ID, `{"enabled":true,"wake_inputs":{"zone":"eu"}}`); rr.Code != 200 {
+		t.Fatalf("repair wake and enable: %d %s", rr.Code, rr.Body.String())
+	}
+}
