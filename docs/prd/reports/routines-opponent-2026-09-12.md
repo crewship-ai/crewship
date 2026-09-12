@@ -42,14 +42,26 @@ samostatné testové soubory a nepoužívané mocky; testy živého editoru zůs
 
 ## Stav ověření
 
+[Veřejný protokol konečného ověření](https://github.com/crewship-ai/crewship/issues/2473#issuecomment-5646862404)
+uvádí aktuální head, merge, výsledek review a přesnou identitu nasazení.
+[PR #2514](https://github.com/crewship-ai/crewship/pull/2514) je zdrojem stavu CI
+a merge. Následující odstavec je snímek před mergem, nikoli pohyblivé tvrzení
+o tom, co právě běží na dev1.
+
 Cílené Go testy API/pipeline prošly po třech doložených červených reprodukcích.
-Frontend: 52 souborů, 337 testů prošlo; lint a produkční build prošly.
+Také vlastní živé HTTP sondy na nezměněném dev1 `7d470200a` reprodukovaly
+rollback 200 a re-enable 200 se změnou dat. Vlastní rutina a plán byly uklizené.
+Frontend: 52 souborů, 337 testů prošlo; dalších 39 testů pokrývá finální
+doplnění načtení baseline existujícího draftu z chatu. Lint, produkční build
+a `go vet ./...` prošly. První hlava PR měla chybu inicializace proměnné v tomto
+doplnění; lokální testy i CI ji zachytily a navazující commit ji opravil.
 Browser nad lokálním exportem a dev1 API potvrdil draft bez živých editorů,
 povinné potvrzení, návrat se zachovaným textem, Publish 201 s toastem,
 čas plánu v Europe/Prague, potvrzení Run i bez vstupů a 390 px bez overflow.
 To není důkaz nasazení nového backendu. Úplná Go sada, konečný review,
 merge a nasazení následných oprav nejsou tímto zápisem prohlášené za hotové.
-Stav bude doplněn podle výsledků, nikoli podle očekávání.
+Výsledky následujících kontrol a nasazení se zaznamenávají do veřejného
+protokolu výše; jeho identity nelze nahrazovat staršími P8/P8b.
 
 Soukromé pracovní logy: `/srv/crewship/backups/crewship_1/routines-opponent-20260912/`.
 Bez změn cizích rutin a workspace; WIP v hlavním checkoutu je zachován.

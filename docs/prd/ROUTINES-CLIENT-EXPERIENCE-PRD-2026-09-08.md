@@ -7,7 +7,9 @@ P8 dokládá `f7a43cd22`, doplnění P8b přesně `7d470200a`.
 **Technické uzavření bylo předčasné:** oponentura 12. září reprodukovala
 obchvat rollbackem, opětovným zapnutím plánu a rozpor deadline v journalu;
 požaduje také opravy publikace, oddělení živých editorů a času/spouštění.
-Stav následné práce uvádí [odpověď na oponenturu](reports/routines-opponent-2026-09-12.md).
+Rozsah následných oprav uvádí [odpověď na oponenturu](reports/routines-opponent-2026-09-12.md);
+aktuální merge a CI jsou v [PR #2514](https://github.com/crewship-ai/crewship/pull/2514),
+přesná identita nasazení ve [veřejném protokolu](https://github.com/crewship-ai/crewship/issues/2473#issuecomment-5646862404).
 Lidská přejímka §11 zůstává otevřená; sloučení ani testy ji nenahrazují.
 
 ## 1. Rozhodnutí a problém
