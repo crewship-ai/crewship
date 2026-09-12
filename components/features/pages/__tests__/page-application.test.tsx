@@ -19,9 +19,24 @@ it("keeps the opened application until the reader explicitly loads a new publica
   expect(screen.getByText("Release 1")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Load new version 2" }))
   expect(screen.getByText("Release 2")).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "Stop application / show panels" }))
+  // The Application | Panels switch lives in the page header now; the view
+  // only follows the prop. Showing panels unmounts the application frame.
+  rerender(<PageApplicationView {...props} panels />)
   expect(screen.queryByTestId("application")).toBeNull()
   expect(screen.getByText("Panel view")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /stop application/i })).toBeNull()
+})
+it("tells the header when an application is on screen, and when it no longer is", async () => {
+  const onAvailableChange = vi.fn()
+  const { rerender, unmount } = render(<PageApplicationView {...props} onAvailableChange={onAvailableChange} />)
+  expect(await screen.findByText("Release 1")).toBeTruthy()
+  expect(onAvailableChange).toHaveBeenLastCalledWith(true)
+  // Withdrawn: nothing is running, so there is nothing to switch to.
+  state.query.data = { ...release(1), publication: null, artifact: undefined, runtime_url: undefined } as unknown as PageApplication
+  rerender(<PageApplicationView {...props} onAvailableChange={onAvailableChange} />)
+  expect(onAvailableChange).toHaveBeenLastCalledWith(false)
+  unmount()
+  expect(onAvailableChange).toHaveBeenLastCalledWith(false)
 })
 it("removes cached executable content when authorization fails or Page data disappears", async () => {
   const { rerender } = render(<PageApplicationView {...props} />)

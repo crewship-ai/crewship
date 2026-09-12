@@ -483,7 +483,7 @@ function PageBody({
           <h1
             ref={headingRef}
             tabIndex={-1}
-            className="truncate rounded-sm text-lg font-semibold tracking-tight outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+            className="truncate rounded-sm text-lg font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {page.name}
           </h1>
