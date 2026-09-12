@@ -45,6 +45,8 @@ type liveAttempt struct {
 	assignment Assignment
 	locator    string
 	cancel     context.CancelFunc
+	shutdown   chan struct{}
+	done       chan struct{}
 }
 
 // New builds a dispatcher. It does not start anything; call Run.
@@ -109,7 +111,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 
 	for {
 		// Drain as much as capacity allows before waiting again.
-		for {
+		for ctx.Err() == nil {
 			claimed, err := d.claimOne(ctx)
 			if err != nil {
 				d.logger.Error("dispatch: claim failed", "error", err)
@@ -245,7 +247,7 @@ func (d *Dispatcher) start(ctx context.Context, a Assignment) {
 	}
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	live := &liveAttempt{assignment: a, locator: locator, cancel: cancel}
+	live := &liveAttempt{assignment: a, locator: locator, cancel: cancel, shutdown: make(chan struct{}), done: make(chan struct{})}
 	d.mu.Lock()
 	d.running[a.RunID] = live
 	d.mu.Unlock()
@@ -267,6 +269,10 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 		delete(d.running, a.RunID)
 		d.mu.Unlock()
 		live.cancel()
+		if releaser, ok := d.runtime.(interface{ Forget(string) }); ok {
+			releaser.Forget(live.locator)
+		}
+		close(live.done)
 	}()
 
 	// superseded closes when this attempt loses its lease to a newer one.
@@ -329,17 +335,16 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 		}
 		// No state is written here on purpose. This attempt no longer owns the
 		// work, and writing to it is exactly what the fence refuses.
-		<-runDone
 
 	case <-abandoned:
 		live.cancel()
 		d.park(settleCtx, a, "cancel requested and the runtime at "+live.locator+
 			" did not stop within the grace period")
-		<-runDone
 
+	case <-live.shutdown:
+		d.shutdownAttempt(live, runDone)
 	case <-ctx.Done():
 		live.cancel()
-		<-runDone
 	}
 }
 
@@ -384,6 +389,8 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 	requested, err := d.store.CancelRequested(ctx, a.RunID)
 	if err != nil {
 		d.logger.Error("dispatch: could not read the cancel request while settling", "run_id", a.RunID, "error", err)
+		d.park(ctx, a, "cancel state could not be checked while settling: "+err.Error())
+		return
 	}
 	if requested {
 		alive, err := d.runtime.Alive(ctx, live.locator)
@@ -557,38 +564,51 @@ func (d *Dispatcher) enforceCancel(ctx context.Context, live *liveAttempt, onAba
 	onAbandoned()
 }
 
-// drain stops supervising without pretending the runtimes are gone.
-//
-// Shutting down must not leave processes running while the ledger calls them
-// finished. Anything still live is parked for reconciliation, which is a
-// truthful "somebody has to look" rather than a convenient "it stopped".
+// drain asks each supervisor to settle its own attempt. It never writes a
+// competing outcome: the supervisor remains the sole owner through shutdown.
 func (d *Dispatcher) drain() {
 	d.mu.Lock()
 	live := make([]*liveAttempt, 0, len(d.running))
 	for _, l := range d.running {
 		live = append(live, l)
+		close(l.shutdown)
 	}
 	d.mu.Unlock()
+	for _, l := range live {
+		<-l.done
+	}
+}
 
+func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
+	stopped, stopErr := d.runtime.Stop(stopCtx, live.locator)
+	stopCancel()
+	live.cancel()
+	// The stop deadline may be exhausted. Persist with a fresh bounded context.
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	defer cancel()
-	for _, l := range live {
-		stopped, err := d.runtime.Stop(ctx, l.locator)
-		// A stop may consume its entire deadline. Persist its outcome with
-		// a fresh bounded context; using the expired stop context would leave
-		// precisely the unconfirmed runtime in starting/running at shutdown.
-		settleCtx, settleCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
-		if err == nil && stopped {
-			d.finish(settleCtx, l.assignment, work.StateCancelled, "stopped during shutdown")
-		} else {
-			d.park(settleCtx, l.assignment,
-				"the server shut down while this runtime was live at "+l.locator+"; it was not confirmed stopped")
-		}
-		settleCancel()
-		// Local supervision must end even when the external stop failed. Its
-		// context deliberately outlives Run's parent, so neither returning
-		// from Run nor closing the database cancels it. The parked ledger row
-		// remains the authority for the unconfirmed external runtime.
-		l.cancel()
+	requested, err := d.store.CancelRequested(ctx, live.assignment.RunID)
+	if err != nil {
+		d.park(ctx, live.assignment, "shutdown could not check user cancellation: "+err.Error())
+		return
+	}
+	if stopErr != nil || !stopped {
+		d.park(ctx, live.assignment, "server shutdown: runtime stop could not be confirmed at "+live.locator)
+		return
+	}
+	if requested {
+		d.finish(ctx, live.assignment, work.StateCancelled, "runtime confirmed stopped after user cancellation during shutdown")
+		return
+	}
+	// Stopping a process is not proof its external effects can be repeated.
+	// Let the runtime classify a completed result; otherwise retain the accepted
+	// work for explicit reconciliation, never invent a user cancellation.
+	select {
+	case runErr := <-runDone:
+		d.settle(ctx, live, runErr)
+	case <-ctx.Done():
+		persistCtx, persistCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
+		defer persistCancel()
+		d.park(persistCtx, live.assignment, "server shutdown: runtime stopped but its outcome was not returned")
 	}
 }

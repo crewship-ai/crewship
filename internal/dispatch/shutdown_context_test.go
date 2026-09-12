@@ -87,3 +87,35 @@ func testShutdownUnconfirmedStop(t *testing.T, blockStop bool) {
 		t.Fatal("shutdown left the runtime context alive after parking the work")
 	}
 }
+
+// A service restart is not a user cancellation. A stopped turn can already
+// have external effects, so an unclassified interruption must remain visible
+// for resolution, without a racing supervisor overwriting that outcome.
+func TestShutdown_ConfirmedStopPreservesAcceptedWork(t *testing.T) {
+	h := newHarness(t)
+	h.rt.block = make(chan struct{})
+	r := h.accept("shutdown-confirmed")
+	d, stop := h.runDispatcher(nil)
+	h.waitForState(r.WorkID, work.StateRunning)
+	stop()
+	item, err := h.store.Get(context.Background(), r.WorkID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != work.StateNeedsReconciliation {
+		t.Fatalf("service shutdown lost accepted work: got %s, want needs_reconciliation", item.State)
+	}
+	d.mu.Lock()
+	remaining := len(d.running)
+	d.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("shutdown returned before %d supervisors finished", remaining)
+	}
+	var cancelled int
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM work_events WHERE work_id=? AND to_state='cancelled'", r.WorkID).Scan(&cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 0 {
+		t.Fatalf("shutdown emitted %d user-cancellation transitions", cancelled)
+	}
+}

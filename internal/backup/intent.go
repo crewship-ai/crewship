@@ -259,6 +259,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// the dedup keys it holds are only meaningful against the work items above,
 	// which do not travel either.
 	"webhook_deliveries": IntentExcludeRuntime,
+	// Receipt identities refer to this instance's pipeline runtime history.
+	"routine_webhook_receipts": IntentExcludeRuntime,
 	// Undelivered chat turns waiting for their session. These ARE user words,
 	// which is the argument for including them — but they are addressed to a
 	// live session and a work item that do not survive the restore, so a

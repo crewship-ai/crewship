@@ -723,3 +723,32 @@ func decodeGeneratedScript(t *testing.T, recorded []string) string {
 	}
 	return best
 }
+
+// HOME cleanup must not erase the launch identity needed to settle a cancel.
+func TestRunLocation_ProbeSurvivesHomeRelease(t *testing.T) {
+	location := RunLocation{ContainerID: "probe-container", AgentSlug: "eva", RunID: "probe-run"}
+	retainRunHome(location.ContainerID, location.AgentSlug, location.RunID)
+	releaseRunHome(location.ContainerID, location.AgentSlug, location.RunID)
+	calls := 0
+	o := New(&mockContainer{execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+		calls++
+		if cfg.ContainerID != location.ContainerID || !strings.Contains(strings.Join(cfg.Cmd, " "), TmuxSessionName(location.AgentSlug, location.RunID)) {
+			t.Fatalf("probe targeted a different runtime: %+v", cfg)
+		}
+		return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader("ABSENT\n"))}, nil
+	}}, newMemState(), slog.Default())
+	if _, err := o.RunIsAlive(context.Background(), location.RunID); err == nil {
+		t.Fatal("HOME registry unexpectedly retained released run")
+	}
+	alive, err := o.RunIsAliveAt(context.Background(), location)
+	if err != nil || alive {
+		t.Fatalf("released HOME probe: alive=%v err=%v", alive, err)
+	}
+	stopped, err := o.StopRunAt(context.Background(), location)
+	if err != nil || !stopped {
+		t.Fatalf("released HOME stop: stopped=%v err=%v", stopped, err)
+	}
+	if calls != 2 {
+		t.Fatalf("container probes=%d, want 2", calls)
+	}
+}

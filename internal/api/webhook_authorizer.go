@@ -45,7 +45,7 @@ import (
 //     method is called at all, and it has to be there: two dispatchers must not
 //     both see a free slot.
 //   - Per-agent ingress rate and in-flight caps are enforced at ACCEPTANCE
-//     (webhook.go's agentRateLimit and agentRuns registry), because their job
+//     (arrival rate gate and the durable store's ingress limits), because their job
 //     is to refuse a flood at the door rather than to queue it.
 //   - A workspace backup holding the write lock is enforced inside the run
 //     itself (refuseIfBackupInProgress in runWebhookAgent), where the lock has

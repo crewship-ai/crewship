@@ -66,47 +66,30 @@ func TestPipelineWebhooks_Fire_OversizedBodyIs413(t *testing.T) {
 	}
 }
 
-// TestPipelineWebhooks_Fire_RecordsDeliveryAndWorkInOneCommit is W3.
-//
-// The reservation and the thing it reserved used to be two writes with a crash
-// window between them: a row in pipeline_run_idempotency written synchronously,
-// and the run created inside a goroutine after the 202 had gone out. A crash in
-// that window left a reservation naming a run that never existed, and every
-// redelivery was then answered "202 DEDUPED" pointing at the phantom.
-func TestPipelineWebhooks_Fire_RecordsDeliveryAndWorkInOneCommit(t *testing.T) {
+// The pipeline engine is the only lifecycle owner: no phantom queued work.
+func TestPipelineWebhooks_Fire_RecordsReceiptWithoutPhantomWork(t *testing.T) {
 	h, token, secret, wsID := routineAcceptanceRig(t)
-
 	rr := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-accept-1")
 	if rr.Code != 202 {
-		t.Fatalf("status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("HTTP %d: %s", rr.Code, rr.Body.String())
 	}
 	var got map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatal(err)
 	}
-	deliveryID, _ := got["delivery_id"].(string)
-	workID, _ := got["work_id"].(string)
-	runID, _ := got["run_id"].(string)
-	if deliveryID == "" || workID == "" || runID == "" {
-		t.Fatalf("202 must name the delivery, the work and the run: %v", got)
+	if _, present := got["work_id"]; present {
+		t.Fatalf("receipt advertises work-item control: %v", got)
+	}
+	var runID string
+	if err := h.db.QueryRow(`SELECT run_id FROM routine_webhook_receipts WHERE id = ? AND workspace_id = ?`, got["delivery_id"], wsID).Scan(&runID); err != nil {
+		t.Fatal(err)
+	}
+	if runID == "" || runID != got["run_id"] {
+		t.Fatalf("receipt points to %q, response %v", runID, got)
 	}
 	h.WaitWebhookDispatches()
-
-	db := h.db
-	var linked, domainKind, domainID, state string
-	if err := db.QueryRow(`
-		SELECT d.work_id, w.domain_kind, w.domain_id, w.state
-		  FROM webhook_deliveries d JOIN work_items w ON w.id = d.work_id
-		 WHERE d.id = ? AND d.workspace_id = ?`, deliveryID, wsID).
-		Scan(&linked, &domainKind, &domainID, &state); err != nil {
-		t.Fatalf("the 202 named rows that are not both there: %v", err)
-	}
-	if linked != workID {
-		t.Errorf("delivery.work_id = %q, want %q", linked, workID)
-	}
-	if domainKind != "pipeline_run" || domainID != runID {
-		t.Errorf("work domain = (%q, %q), want (pipeline_run, %q) — the record must "+
-			"name the run the sender was handed", domainKind, domainID, runID)
+	if n := countWebhookRows(t, h.db, `SELECT COUNT(*) FROM work_items`); n != 0 {
+		t.Fatalf("%d phantom work items", n)
 	}
 }
 
@@ -145,8 +128,8 @@ func TestPipelineWebhooks_Fire_DuplicateAnswersTheOriginalRun(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&work); err != nil {
 		t.Fatalf("count work: %v", err)
 	}
-	if work != 1 {
-		t.Errorf("work items = %d, want 1 — a redelivery must not create a second piece of work", work)
+	if work != 0 {
+		t.Errorf("work items = %d, want 0 — routine execution must not create phantom work", work)
 	}
 }
 
@@ -169,7 +152,7 @@ func TestPipelineWebhooks_Fire_SameKeyDifferentBodyIsConflict(t *testing.T) {
 	}
 
 	var n int
-	if err := h.db.QueryRow(`SELECT COUNT(*) FROM webhook_deliveries`).Scan(&n); err != nil {
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM routine_webhook_receipts`).Scan(&n); err != nil {
 		t.Fatalf("count deliveries: %v", err)
 	}
 	if n != 1 {

@@ -20,10 +20,11 @@ import (
 // requires the retry clock and the backoff jitter to be controllable in tests,
 // and §11 forbids sleep-based races.
 type Store struct {
-	db   *sql.DB
-	now  func() time.Time
-	rnd  func(int64) int64
-	idFn func() string
+	db            *sql.DB
+	now           func() time.Time
+	rnd           func(int64) int64
+	idFn          func() string
+	ingressLimits IngressLimits
 }
 
 // NewStore returns a Store over db with production time and randomness.
@@ -312,4 +313,11 @@ func (s *Store) Get(ctx context.Context, workID string) (*Item, error) {
 		return nil, ErrNotFound
 	}
 	return it, err
+}
+
+// WithIngressLimits configures acceptance capacity; zero values use defaults.
+func (s *Store) WithIngressLimits(limits IngressLimits) *Store {
+	c := *s
+	c.ingressLimits = limits
+	return &c
 }

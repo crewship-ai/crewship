@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/memory/memdiff"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -31,11 +32,12 @@ import (
 
 // hostStubCall records one request the sidecar made to the stub host.
 type hostStubCall struct {
-	method string
-	path   string
-	token  string
-	slug   string
-	body   map[string]any
+	capability string
+	method     string
+	path       string
+	token      string
+	slug       string
+	body       map[string]any
 }
 
 type hostStub struct {
@@ -53,11 +55,12 @@ func newHostStub(t *testing.T) *hostStub {
 	h := &hostStub{}
 	h.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := hostStubCall{
-			method: r.Method,
-			path:   r.URL.Path,
-			token:  r.Header.Get("X-Internal-Token"),
-			slug:   r.Header.Get(actingAgentSlugHeader),
-			body:   map[string]any{},
+			method:     r.Method,
+			capability: r.Header.Get("Authorization"),
+			path:       r.URL.Path,
+			token:      r.Header.Get("X-Internal-Token"),
+			slug:       r.Header.Get(actingAgentSlugHeader),
+			body:       map[string]any{},
 		}
 		if r.Body != nil {
 			raw, _ := io.ReadAll(r.Body)
@@ -472,5 +475,24 @@ func TestHandleMemoryWrite_ScreensWithTheCrewScrubberBeforeForwarding(t *testing
 	}
 	if stub.called(memoryHostMutationPath) != 0 {
 		t.Errorf("a credential was forwarded to the host before being screened")
+	}
+}
+
+func TestMemoryHostRequest_ForwardsAuthenticatedRunCapability(t *testing.T) {
+	stub := newHostStub(t)
+	stub.mutation = func() (int, string) { return http.StatusForbidden, `{"error":"host refused"}` }
+	s, _ := newHostWriteServer(t, stub.srv.URL)
+	s.runs = newRunRegistry()
+	s.ipc.WorkspaceID = "ws-cap"
+	s.ipc.AgentRunKey = internaltoken.DeriveAgentRunKey("test-master", "ws-cap", "crew-cap")
+	token := internaltoken.DeriveAgentRunToken(s.ipc.AgentRunKey, "ws-cap", s.ipc.AgentID, "run-cap")
+	req := httptest.NewRequest(http.MethodPost, "/memory/write", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	_, err := s.memoryHostRequest(req, http.MethodPost, memoryHostMutationPath, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.lastCall(t, memoryHostMutationPath).capability; got != "Bearer "+token {
+		t.Fatal("host did not receive the caller's exact capability")
 	}
 }

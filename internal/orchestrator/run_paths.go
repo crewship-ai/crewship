@@ -279,6 +279,19 @@ func (o *Orchestrator) RunIsAlive(ctx context.Context, runID string) (bool, erro
 		return false, fmt.Errorf("this process has no record of run %s; whether a runtime exists for it "+
 			"cannot be answered from here", runID)
 	}
+	return o.RunIsAliveAt(ctx, RunLocation{ContainerID: containerID, AgentSlug: agentSlug, RunID: runID})
+}
+
+// RunLocation is launch identity, independent of credential HOME lifetime.
+// Callers retain it until the attempt has settled; an absent HOME is not
+// evidence that the launched runtime has stopped.
+type RunLocation struct{ ContainerID, AgentSlug, RunID string }
+
+func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (bool, error) {
+	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
+	if containerID == "" || agentSlug == "" || runID == "" {
+		return false, fmt.Errorf("incomplete runtime location")
+	}
 	session := TmuxSessionName(agentSlug, runID)
 	// PRESENT / ABSENT are distinct tokens, and anything else — including an
 	// empty read — is not an answer.
@@ -318,6 +331,14 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 	if !found {
 		return false, fmt.Errorf("this process has no record of run %s; it cannot signal a runtime "+
 			"it does not know the location of", runID)
+	}
+	return o.StopRunAt(ctx, RunLocation{ContainerID: containerID, AgentSlug: agentSlug, RunID: runID})
+}
+
+func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (bool, error) {
+	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
+	if containerID == "" || agentSlug == "" || runID == "" {
+		return false, fmt.Errorf("incomplete runtime location")
 	}
 	session := TmuxSessionName(agentSlug, runID)
 	probe := "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +

@@ -119,6 +119,9 @@ func (s *Store) AcceptDeliveryTx(ctx context.Context, tx *sql.Tx, d Delivery, w 
 	var receipt Receipt
 	var workID any
 	if d.FilterDecision == FilterAccepted {
+		if err := s.CheckIngressTx(ctx, tx, s.ingressLimits, IngressRequest{WorkspaceID: d.WorkspaceID, EndpointID: d.EndpointID, SourceDeliveryID: d.SourceDeliveryID, BodyBytes: int64(d.BodyBytes)}); err != nil {
+			return Receipt{}, err
+		}
 		w.SourceRef = d.ID
 		if w.TargetRevision == "" {
 			w.TargetRevision = d.TargetRevision
@@ -257,14 +260,18 @@ func isUniqueViolation(err error) bool {
 // LookupDelivery answers "did you receive this one" outside a transaction. The
 // caller still needs workspace-scoped authorization: a receipt is an identifier,
 // not a capability to read the work behind it.
-func (s *Store) LookupDelivery(ctx context.Context, workspaceID, endpointID, sourceDeliveryID string) (*Receipt, error) {
+func (s *Store) LookupDelivery(ctx context.Context, workspaceID, endpointID, sourceDeliveryID string, expectedBodySHA256 ...string) (*Receipt, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, fmt.Errorf("work: begin delivery lookup: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	expected := ""
+	if len(expectedBodySHA256) > 0 {
+		expected = expectedBodySHA256[0]
+	}
 	r, err := s.lookupDeliveryTx(ctx, tx, Delivery{
-		WorkspaceID: workspaceID, EndpointID: endpointID, SourceDeliveryID: sourceDeliveryID,
+		WorkspaceID: workspaceID, EndpointID: endpointID, SourceDeliveryID: sourceDeliveryID, BodySHA256: expected,
 	})
 	if err != nil {
 		return nil, err

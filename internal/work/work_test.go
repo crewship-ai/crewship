@@ -877,7 +877,7 @@ func TestNeedsReconciliation_HoldsCapacityUntilResolved(t *testing.T) {
 	// Resolution is the ADMIN path, not a worker transition: A's attempt is
 	// over, so there is no live attempt to present and the worker path is
 	// unsatisfiable here by construction.
-	if err := s.Resolve(ctx, a.WorkID, StateFailed, "operator",
+	if err := s.Resolve(ctx, a.WorkID, claimA.Generation, StateFailed, "operator",
 		"checked the container; the runtime was gone"); err != nil {
 		t.Fatalf("resolve A: %v", err)
 	}

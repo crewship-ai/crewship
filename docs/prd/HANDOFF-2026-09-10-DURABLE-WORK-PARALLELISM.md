@@ -1027,3 +1027,112 @@ The final security-follow-up COMPLETE Go run finished with ROOT_FULL_EXIT=0:
 only changelog/handoff text changed afterwards. This remains RAM-backed test
 evidence, not power-loss evidence. New-head remote CI/CodeQL and an actual
 CodeRabbit review remain required; the earlier scanner pass covers 6bc2afc6.
+
+
+## 2026-09-12 — response to the second Anthropic review (work in progress)
+
+The negative merge verdict is accepted. Local merge `ab96578c` integrates
+`origin/main` at `a0a5b3cb`; previous green CI is not evidence for this tree.
+No merge or deployment has been performed. Issue #2488 is claimed for this work.
+
+Current uncommitted repairs:
+
+- Shutdown has one state writer, the attempt supervisor. Stopping for server
+  shutdown is not a user cancellation. A classified result can settle; an
+  ambiguous interrupted result remains `needs_reconciliation`.
+- The webhook adapter retains immutable container/slug/run launch identity
+  until settlement. Production StopRunAt/RunIsAliveAt no longer require the
+  credential HOME registry entry to survive RunAgent's cleanup. This identity
+  is process-local; restart lookup is still not a proven production capability.
+- Workspace resolve API and `work resolve` require current generation, terminal
+  outcome, authenticated manager, reason and runtime-stop attestation. This is
+  an operator decision, not an automatic probe. Replay is a separate action.
+- Routine delivery deduplication moves to `routine_webhook_receipts`, without a
+  work item. Pipeline execution remains direct. No durable pipeline dispatch
+  recovery is promised. Receipt keys currently persist without automatic expiry;
+  earlier routine receipts are copied without losing dedup identity, and unclaimed
+  phantom work is fenced into reconciliation for operator inspection. Pipeline
+  work cancel/replay is refused in favor of the pipeline API.
+- R8 throttled lookup checks payload hash and distinguishes database failure.
+  Accepted work checks ingress item/byte limits in its acceptance transaction.
+  Process-local execution occupancy no longer rejects acceptance.
+
+Observed evidence so far (logs `/tmp/crewship-2-review2-*`):
+
+| Check | Observed result | Scope |
+| --- | --- | --- |
+| shutdown red | failed with cancelled | successful-stop reproducer before fix |
+| dispatch package | pass, 12.137 s | entire package before later cancellation-read error guard |
+| R8 red | 202 instead of 409; 429 instead of 503 | actual failures, after fixing an invalid test URL |
+| R8 green | work 1.808 s, API 2.627 s | filtered acceptance/capacity tests |
+| resolve | work 1.509 s, API 2.130 s, CLI 7.546 s | filtered store/API/real CLI process |
+| launch location / queue capacity | orchestrator 0.044 s, API 2.353 s | filtered provider-probe and HTTP tests |
+| routine / production probe | API pass, 9.781 s | filtered routine tests and vertical test; agent execution and container transport substituted, production Stop/Alive retained |
+| OpenAPI schema catalog | generator 5.544 s, inventory 0.031 s | both whole packages |
+| full Go / vet | running, no final result yet | do not call green |
+
+Remaining review work: R6 authenticated capability binding and agent-facing
+mutation path; R7 proxy revocation; shared admission across chat and webhook;
+real Claude T06/T07; T14; mailbox. Parallel profile remains off. This entry is
+interim and does not approve merge. Final validation and migration/backward
+compatibility review are still required.
+
+
+Follow-up evidence during the same turn:
+
+- Full Go run found missing resolve role manifest entry and missing backup table
+  classification. Both corrected; this run is red, not a successful full suite.
+- R6 token-A/body-B reproducer wrote memory and returned HTTP 200 with guaranteed
+  profile before correction. The host now verifies the per-run MAC and matches
+  workspace, agent and run, in addition to the ledger generation check. Sidecar
+  forwards the caller's capability. Filtered internal memory / host memory /
+  run-status tests passed: API 5.958 s, sidecar 0.324 s. This does not complete
+  the MCP guaranteed-memory path or the whole R6 release requirement.
+- Vet exit 0; golangci-lint reported 0 issues; frontend lint exit 0 with 31
+  warnings; frontend static build exit 0. Vet/lint preceded the R6 binding and
+  legacy receipt migration additions and must be repeated for the final tree.
+
+
+### Final observed local validation for the 2026-09-12 follow-up
+
+The last complete run is `crewship-2-review2-all-go-verified.log`, with
+`ALL_GO_VERIFIED_EXIT=0`: **145 packages passed, 10 had no tests, zero failed
+packages and zero disk-full lines**. Command:
+
+```bash
+TMPDIR=/dev/shm/crewship-2-review2-AJOSNi GOTMPDIR=/dev/shm/crewship-2-review2-AJOSNi GOGC=50 GOMAXPROCS=4 go test -p 4 ./... -count=1 -timeout=30m
+```
+
+This run includes all production and test changes in this follow-up, including
+capability forwarding, the corrected registry fixture and the routine upgrade
+migration. It used the real Next.js export staged by the repository embed
+script (1341 files); RAM-backed test storage is not power-loss evidence.
+
+| Check | Final observed result |
+| --- | --- |
+| entire API package | 189.032 s, pass |
+| entire CLI package | 161.534 s, pass; acceptance tests execute CLI subprocesses |
+| entire database package | 361.966 s, pass |
+| entire sidecar package | 4.045 s, pass |
+| entire work / dispatch, race | 85.375 s / 86.693 s, pass |
+| API race, **filtered** | 62.664 s, pass: production location probe, capability mismatch, resolve |
+| location mutation overlay | exit 1, expected: removing the retained-location Alive path leaves work starting; production tree was not edited |
+| vet / golangci-lint | exit 0 / 0 issues (last subsequent code change was initialization in the test fixture; complete Go suite above covers it) |
+| frontend lint / static build | exit 0 / exit 0; lint has 31 warnings |
+| Go binary / linux sidecar build | exit 0 / exit 0; local review artifacts only, no install or deployment |
+| strict docs inventory | clean, 664 API operations / 907 CLI commands |
+| invariant / skip guards | pass; 144 skips at baseline 144 |
+
+Earlier complete run `all-go.log` failed the route-role and backup-classification
+gates. `all-go-final.log` failed a new test fixture's nil run registry. Both are
+archived, neither is relabelled green. The corrected entire sidecar package
+also passed independently (22.302 s) before the successful complete run.
+
+A final fetch confirmed origin/main still at `a0a5b3cb`, with zero commits
+missing from this branch. Raw logs and failed runs are archived under
+`/srv/crewship/backups/crewship_2/review-2026-09-12/`. Review build artifacts are
+`/tmp/crewship-2-review2-build/crewship` (with UI) and `crewship-sidecar` (Linux).
+
+Remote CI and actual review on the new pushed head remain separate requirements.
+The preceding CodeRabbit status was throttled, not reviewed. No merge or deploy
+is authorized by this local evidence, and the release gaps listed above remain.

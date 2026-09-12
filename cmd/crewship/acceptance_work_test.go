@@ -39,7 +39,7 @@ const (
 	workAcceptanceWebhookSecret = "ghp_acceptance_should_never_print"
 )
 
-func startWorkAcceptanceServer(t *testing.T) string {
+func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string {
 	t.Helper()
 
 	dbh := testutil.MigratedDB(t)
@@ -82,6 +82,9 @@ func startWorkAcceptanceServer(t *testing.T) string {
 	// stops it for real), and two finished webhook items — one whose payload
 	// is still held and one whose payload expired.
 	seed("wk-live-000001", "running", "chat", "", "agent-a", `{"message":"`+workAcceptanceChatSecret+`"}`, false)
+	if len(withReconciliation) > 0 && withReconciliation[0] {
+		seed("wk-reconcile-1", "needs_reconciliation", "manual", "", "agent-c", `{}`, false)
+	}
 	seed("wk-queued-0001", "queued", "manual", "", "agent-a", `{}`, false)
 	seed("wk-replay-0001", "failed", "webhook", "dlv-held-00001", "agent-b", `{"payload":"kept"}`, true)
 	seed("wk-expired-001", "failed", "webhook", "dlv-expired-01", "agent-b", `{"payload":"gone"}`, true)
@@ -372,5 +375,28 @@ func TestAcceptance_WorkList_FilterVocabularyMatchesTheServer(t *testing.T) {
 		if out, err := runWorkCLI(t, cfgPath, "work", "list", "--class", class); err != nil {
 			t.Fatalf("--class %s was refused by the server: %v\n%s", class, err, out)
 		}
+	}
+}
+
+func TestAcceptance_WorkResolve_RecordsEvidenceAndReleasesReconciliation(t *testing.T) {
+	cfg := startWorkAcceptanceServer(t, true)
+	common := []string{"work", "resolve", "wk-reconcile-1", "--state", "failed", "--generation", "2", "--reason", "container stopped; effects checked"}
+	if out, err := runWorkCLI(t, cfg, common...); err == nil {
+		t.Fatalf("resolution without stop attestation succeeded: %s", out)
+	}
+	args := append(common, "--runtime-stopped", "-f", "json")
+	out, err := runWorkCLI(t, cfg, args...)
+	if err != nil {
+		t.Fatalf("resolve CLI: %v: %s", err, out)
+	}
+	if !strings.Contains(out, `"state": "failed"`) {
+		t.Fatalf("wrong resolution response: %s", out)
+	}
+	detail, err := runWorkCLI(t, cfg, "work", "get", "wk-reconcile-1", "-f", "json")
+	if err != nil || !strings.Contains(detail, "container stopped; effects checked") || !strings.Contains(detail, "work-owner") {
+		t.Fatalf("resolution audit missing: %v: %s", err, detail)
+	}
+	if out, err := runWorkCLI(t, cfg, args...); err == nil {
+		t.Fatalf("already resolved item accepted again: %s", out)
 	}
 }

@@ -640,7 +640,7 @@ func (s *Store) CancelRequested(ctx context.Context, runID string) (bool, error)
 // a human or a reconciler who has established what actually happened, and says
 // so. It records who decided and why, because "someone marked this failed" is
 // the only evidence anyone will have later.
-func (s *Store) Resolve(ctx context.Context, workID string, to State, resolvedBy, reason string) error {
+func (s *Store) Resolve(ctx context.Context, workID string, generation int64, to State, resolvedBy, reason string) error {
 	if resolvedBy == "" || reason == "" {
 		return fmt.Errorf("%w: resolving a reconciliation needs an actor and a reason; "+
 			"it is a judgement someone made, and the record is the only evidence of it", ErrIllegalTransition)
@@ -654,6 +654,9 @@ func (s *Store) Resolve(ctx context.Context, workID string, to State, resolvedBy
 	it, err := getItemTx(ctx, tx, workID)
 	if err != nil {
 		return err
+	}
+	if generation <= 0 || it.Generation != generation {
+		return fmt.Errorf("%w: resolution requires the current generation", ErrStaleGeneration)
 	}
 	if it.State != StateNeedsReconciliation {
 		return fmt.Errorf("%w: Resolve is only for needs_reconciliation, %s is %s",

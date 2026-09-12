@@ -8,7 +8,8 @@ tag: Experimental
 
 # crewship work
 
-Every piece of agent work is recorded before anything starts running. `crewship
+Agent webhook work is recorded before its runtime starts. Chat, routine webhooks
+and other producers are not yet covered by this ledger. `crewship
 work` reads that ledger, so "we never received it", "we received it and
 filtered it out", and "it ran and failed" are three different answers instead
 of one shrug.
@@ -178,3 +179,22 @@ crewship work deliveries get cdl0000000000000
 
 The payload itself is never printed. `body_sha256` and the byte count identify
 it without publishing whatever the sender put inside.
+
+## `crewship work resolve <work-id>`
+
+An operator can settle `needs_reconciliation` after inspecting the runtime and
+its external effects. Stop any surviving runtime first. Read the current
+`generation` with `work get`, then record the observed outcome:
+
+```bash
+crewship work resolve cwk0000000000000 --generation 2 --state failed \
+  --runtime-stopped --reason "Container session stopped; checked provider audit, no deployment occurred"
+```
+
+Allowed outcomes are `succeeded`, `failed`, and `cancelled`. The command requires
+manager permissions, a reason, the current generation, and explicit confirmation
+that the runtime is stopped. It records the operator and reason, releases the
+held ledger capacity, and rejects stale decisions. The confirmation is an
+operator attestation; this command does not stop or automatically inspect a
+container. Any subsequent rerun requires a separate, deliberate `work replay`.
+Routine webhook runs remain under the pipeline API and have no work-item controls.

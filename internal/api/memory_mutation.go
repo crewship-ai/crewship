@@ -33,6 +33,10 @@ package api
 // MemoryHybridSearchHandler.SearchInternal does. The header can only ever
 // narrow the token's authority, never widen it.
 //
+// The mutation also requires the original per-run bearer capability, verified
+// with the host-derived crew run key and matched against workspace/agent/run.
+// A live sibling run of the same agent does not authorize this caller.
+//
 // # Authorize is real, not a placeholder
 //
 // The guaranteed profile refuses a nil Authorize, so the cheap way to satisfy
@@ -57,6 +61,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/memory/memdiff"
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -70,6 +75,7 @@ import (
 // content in — the SAME store memory_versions uses, so a recovered write and a
 // recorded version share their blobs.
 type MemoryMutationHandler struct {
+	masterToken string
 	db          *sql.DB
 	logger      *slog.Logger
 	storagePath string
@@ -82,8 +88,9 @@ type MemoryMutationHandler struct {
 // the real bind-mount source must not land somewhere no container reads (#1663),
 // and a guaranteed write with nowhere to park its durable intent is not a
 // guaranteed write.
-func NewMemoryMutationHandler(db *sql.DB, storagePath, blobRoot string, logger *slog.Logger) *MemoryMutationHandler {
+func NewMemoryMutationHandler(db *sql.DB, storagePath, blobRoot string, logger *slog.Logger, masterToken string) *MemoryMutationHandler {
 	return &MemoryMutationHandler{
+		masterToken: masterToken,
 		db:          db,
 		logger:      logger,
 		storagePath: storagePath,
@@ -328,6 +335,19 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 
 	target, ok := h.resolveTarget(w, r, wsID, slug, req.Scope, req.File)
 	if !ok {
+		return
+	}
+	// The authenticated capability, not the JSON body, supplies run identity.
+	// A crew IPC token authenticates the transport but cannot stand in for this.
+	auth := strings.Fields(r.Header.Get("Authorization"))
+	if len(auth) != 2 || !strings.EqualFold(auth[0], "Bearer") || h.masterToken == "" {
+		replyError(w, http.StatusForbidden, "authenticated run capability required")
+		return
+	}
+	runKey := internaltoken.DeriveAgentRunKey(h.masterToken, wsID, target.crewID)
+	capWS, capAgent, capRun, valid := internaltoken.ValidateAgentRunToken(runKey, auth[1])
+	if !valid || capWS != wsID || capAgent != target.agentID || capRun != req.RunID {
+		replyError(w, http.StatusForbidden, "run capability does not authorize this mutation")
 		return
 	}
 	if h.blobRoot == "" {

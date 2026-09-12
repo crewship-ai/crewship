@@ -1,7 +1,7 @@
 package main
 
 // workLedgerSchemaCatalog documents the durable work ledger's read surface and
-// its two operator actions (docs/prd/WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md
+// its operator actions (docs/prd/WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md
 // §9).
 //
 // Spelled out rather than left to the generic envelope for two reasons. The
@@ -159,6 +159,12 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 					"already_terminal: it finished first."},
 			"detail": str(),
 		}, "id", "state", "outcome", "detail"),
+		"WorkResolveRequest": object(map[string]any{
+			"generation":      map[string]any{"type": "integer", "minimum": 1},
+			"state":           enum("succeeded", "failed", "cancelled"),
+			"runtime_stopped": map[string]any{"type": "boolean", "enum": []any{true}, "description": "Operator attests runtime has stopped; this endpoint does not stop it."},
+			"reason":          map[string]any{"type": "string", "minLength": 1, "maxLength": 2048},
+		}, "generation", "state", "runtime_stopped", "reason"),
 		"WorkReplayRequest": object(map[string]any{
 			"reason": map[string]any{"type": "string", "maxLength": 2000,
 				"description": "Why this is being replayed. Recorded on the new work item."},
@@ -207,14 +213,16 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	components["WorkCancelRequest"].(map[string]any)["description"] =
 		"No body. Cancel is an idempotent request keyed by the work item in the path."
 	components["WorkReplayRequest"].(map[string]any)["additionalProperties"] = false
+	components["WorkResolveRequest"].(map[string]any)["additionalProperties"] = false
 
 	routes := map[string]DomainSchema{
-		"GET /api/v1/workspaces/{workspaceId}/work-items":                      {Response: ref("WorkItemPage")},
-		"GET /api/v1/workspaces/{workspaceId}/work-items/{workItemId}":         {Response: ref("WorkItemDetail")},
-		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel": {Request: ref("WorkCancelRequest"), Response: ref("WorkCancelResponse")},
-		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay": {Request: ref("WorkReplayRequest"), Response: ref("WorkItem"), SuccessStatuses: []string{"201"}},
-		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries":              {Response: ref("WebhookDeliveryPage")},
-		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}": {Response: ref("WebhookDelivery")},
+		"GET /api/v1/workspaces/{workspaceId}/work-items":                       {Response: ref("WorkItemPage")},
+		"GET /api/v1/workspaces/{workspaceId}/work-items/{workItemId}":          {Response: ref("WorkItemDetail")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel":  {Request: ref("WorkCancelRequest"), Response: ref("WorkCancelResponse")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve": {Request: ref("WorkResolveRequest"), Response: ref("WorkItem")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay":  {Request: ref("WorkReplayRequest"), Response: ref("WorkItem"), SuccessStatuses: []string{"201"}},
+		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries":               {Response: ref("WebhookDeliveryPage")},
+		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}":  {Response: ref("WebhookDelivery")},
 	}
 	return routes, components
 }

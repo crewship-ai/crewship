@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/webhook"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // The agent webhook surface on the durable acceptance path.
@@ -107,7 +108,6 @@ func newAcceptRig(t *testing.T, name string) *acceptRig {
 	// what these tests are about, and they are process-global, so a neighbouring
 	// test's burst must not be able to turn a 202 into a 429.
 	h.agentRatePerMin = 10000
-	h.agentMaxConcurrent = 1000
 	t.Cleanup(func() { _ = h.Close() })
 
 	return &acceptRig{h: h, db: db, container: container, resolver: resolver,
@@ -568,5 +568,71 @@ func TestAgentWebhookAcceptance_ThrottledDuplicateStillGetsItsReceipt(t *testing
 	got := decodeBody(t, rr)
 	if got["duplicate"] != true || got["work_id"] != first["work_id"] {
 		t.Errorf("throttled duplicate answered %v, want the original receipt %v", got, first)
+	}
+}
+
+func TestAgentWebhookAcceptance_ThrottleStillChecksPayloadAndLookupFailure(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		name := "conflicting body"
+		want := http.StatusConflict
+		if unavailable {
+			name = "lookup unavailable"
+			want = http.StatusServiceUnavailable
+		}
+		t.Run(name, func(t *testing.T) {
+			rig := newAcceptRig(t, "throttle-review-"+strings.ReplaceAll(name, " ", "-"))
+			rig.h.agentRatePerMin = 1
+			first := rig.serve(rig.keyedRequest(`{"event":"deploy","source":"a"}`, "same-id"))
+			if first.Code != http.StatusAccepted {
+				t.Fatalf("first HTTP %d: %s", first.Code, first.Body.String())
+			}
+			if unavailable {
+				if _, err := rig.db.Exec("DROP TABLE webhook_deliveries"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rr := rig.serve(rig.keyedRequest(`{"event":"deploy","source":"different"}`, "same-id"))
+			if rr.Code != want {
+				t.Fatalf("throttled HTTP %d, want %d: %s", rr.Code, want, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestAgentWebhookAcceptance_DurableIngressCapacityKeepsExistingReceipts(t *testing.T) {
+	for _, byBytes := range []bool{false, true} {
+		t.Run(fmt.Sprint("bytes-", byBytes), func(t *testing.T) {
+			rig := newAcceptRig(t, fmt.Sprint("capacity-", byBytes))
+			_, store := rig.h.acceptance()
+			const body = `{"event":"a"}`
+			limits := work.IngressLimits{EndpointNonTerminal: 1}
+			if byBytes {
+				limits = work.IngressLimits{WorkspaceRawBytes: int64(len(body))}
+			}
+			rig.h.workStore = store.WithIngressLimits(limits)
+			first := rig.serve(rig.keyedRequest(body, "first"))
+			if first.Code != 202 {
+				t.Fatalf("first: %d %s", first.Code, first.Body.String())
+			}
+			for _, tc := range []struct {
+				body, key string
+				want      int
+			}{
+				{body, "first", 202},
+				{`{"event":"changed"}`, "first", 409},
+				{body, "second", 429},
+			} {
+				rr := rig.serve(rig.keyedRequest(tc.body, tc.key))
+				if rr.Code != tc.want {
+					t.Fatalf("key %s: HTTP %d want %d: %s", tc.key, rr.Code, tc.want, rr.Body.String())
+				}
+				if tc.want == 429 && rr.Header().Get("Retry-After") == "" {
+					t.Fatal("capacity refusal has no Retry-After")
+				}
+			}
+			if n := countWebhookRows(t, rig.db, `SELECT COUNT(*) FROM work_items`); n != 1 {
+				t.Fatalf("accepted %d items past capacity", n)
+			}
+		})
 	}
 }

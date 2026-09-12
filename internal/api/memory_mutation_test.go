@@ -75,7 +75,7 @@ func newMemMutFixture(t *testing.T) *memMutFixture {
 	}
 	f.seedLiveRun(memMutRun, memMutAgent, 3, "running")
 
-	h := NewMemoryMutationHandler(db, f.storage, f.blobs, newTestLogger())
+	h := NewMemoryMutationHandler(db, f.storage, f.blobs, newTestLogger(), memMutMaster)
 	ih := NewInternalHandler(db, memMutMaster, newTestLogger())
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/internal/memory/mutation", ih.requireInternal(http.HandlerFunc(h.Mutate)))
@@ -130,7 +130,7 @@ func memMutBody(overrides map[string]any) map[string]any {
 	return b
 }
 
-func (f *memMutFixture) post(token, slug string, body map[string]any) (int, map[string]any, string) {
+func (f *memMutFixture) post(token, slug string, body map[string]any, capability ...string) (int, map[string]any, string) {
 	f.t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -141,6 +141,15 @@ func (f *memMutFixture) post(token, slug string, body map[string]any) (int, map[
 		f.t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	runID, _ := body["run_id"].(string)
+	runToken := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(memMutMaster, memMutWS, memMutCrew), memMutWS, memMutAgent, runID)
+	if len(capability) > 0 {
+		runToken = capability[0]
+	}
+	if runToken != "" {
+		req.Header.Set("Authorization", "Bearer "+runToken)
+	}
+
 	if token != "" {
 		req.Header.Set("X-Internal-Token", token)
 	}
@@ -628,7 +637,7 @@ func TestInternalMemoryCanonicalRead_RefusesTheSameWayTheWriteDoes(t *testing.T)
 // root where no container will ever read it. It must refuse instead.
 func TestInternalMemoryMutation_FailsClosedWithoutAHostRoot(t *testing.T) {
 	f := newMemMutFixture(t)
-	h := NewMemoryMutationHandler(f.db, "", f.blobs, newTestLogger())
+	h := NewMemoryMutationHandler(f.db, "", f.blobs, newTestLogger(), memMutMaster)
 	ih := NewInternalHandler(f.db, memMutMaster, newTestLogger())
 	srv := httptest.NewServer(ih.requireInternal(http.HandlerFunc(h.Mutate)))
 	defer srv.Close()
@@ -724,5 +733,24 @@ func TestInternalMemoryMutation_RefusesSymlinkedParent(t *testing.T) {
 				t.Fatalf("outside lock created: %v", err)
 			}
 		})
+	}
+}
+
+func TestInternalMemoryMutation_CapabilityCannotNameAnotherLiveRun(t *testing.T) {
+	f := newMemMutFixture(t)
+	f.seedLiveRun("another-live-run", memMutAgent, 1, "running")
+	tokenA := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(memMutMaster, memMutWS, memMutCrew), memMutWS, memMutAgent, memMutRun)
+	for _, token := range []string{tokenA, ""} {
+		status, _, raw := f.post(f.crewToken(), memMutSlug, memMutBody(map[string]any{"run_id": "another-live-run", "generation": 1}), token)
+		if status != http.StatusForbidden {
+			t.Fatalf("capability A / body B: HTTP %d want 403: %s", status, raw)
+		}
+	}
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM memory_mutations`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("unauthorized mutation created %d ledger rows", n)
 	}
 }

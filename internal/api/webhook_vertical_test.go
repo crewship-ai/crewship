@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -867,22 +868,8 @@ func TestVerticalServer_TheTimelineOfOneDelivery(t *testing.T) {
 // Two producers write `webhook` work into one table, and only one of them is
 // this dispatcher's to run.
 //
-// `webhook` is not a work type. An agent webhook accepts
-// {webhook, agent_run}; a routine webhook accepts {webhook, pipeline_run},
-// through a different handler, into the same `work_items`, to be executed by a
-// different engine. A dispatcher that filtered on the source alone would look
-// specific and take both.
-//
-// And taking is the harm, not refusing. By the time anything could object the
-// claim has already bumped the generation, burned an attempt and moved the item
-// out of `queued` — so a check after the claim cannot undo it. Worse here,
-// because pipeline work carries no agent id: this dispatcher's authorizer would
-// have refused it as "work naming no agent", and a routine trigger would have
-// died as `failed` with a reason about agents it never had.
-//
-// Both halves go through their REAL acceptance routes, over HTTP, into one
-// database, with the dispatcher running throughout — which is the only
-// arrangement in which the mistake is observable at all.
+// Real HTTP producers share a database, but only the agent route enters
+// the durable work queue. Routine execution belongs to its pipeline engine.
 func TestVerticalServer_TheAgentDispatcherLeavesPipelineWebhookWorkAlone(t *testing.T) {
 	rig := newVerticalRig(t)
 	// The stores the daemon attaches after route registration (server.go's boot
@@ -898,14 +885,13 @@ func TestVerticalServer_TheAgentDispatcherLeavesPipelineWebhookWorkAlone(t *test
 
 	rig.startDispatcher()
 
-	// The routine delivery lands FIRST, so it is sitting in the queue while the
-	// dispatcher is actively claiming.
+	// The routine delivery lands while the agent dispatcher is active.
 	routine := rig.fireRoutineWebhook(wh.Token, "routine-secret", `{"event":"deploy"}`)
 	if routine.Status != http.StatusAccepted {
 		t.Fatalf("routine webhook status = %d, want 202", routine.Status)
 	}
-	if routine.WorkID == "" {
-		t.Fatalf("the routine receipt names no work: %+v", routine)
+	if routine.WorkID != "" {
+		t.Fatalf("routine advertises phantom work: %+v", routine)
 	}
 
 	// Then the agent delivery, which this dispatcher DOES own. Its completion
@@ -918,37 +904,10 @@ func TestVerticalServer_TheAgentDispatcherLeavesPipelineWebhookWorkAlone(t *test
 	}
 	rig.waitForState(agent.WorkID, work.StateSucceeded)
 
-	// Several more poll ticks with both items in the table.
-	time.Sleep(5 * time.Second)
-
-	var state, domainKind string
-	var generation, attempts int
-	if err := rig.db.QueryRow(
-		`SELECT state, domain_kind, generation, attempts FROM work_items WHERE id = ?`, routine.WorkID).
-		Scan(&state, &domainKind, &generation, &attempts); err != nil {
-		t.Fatalf("read the routine work: %v", err)
+	if n := rig.count(`SELECT COUNT(*) FROM work_items WHERE domain_kind = ?`, work.DomainPipelineRun); n != 0 {
+		t.Fatalf("routine left %d phantom pipeline work items", n)
 	}
-	if domainKind != work.DomainPipelineRun {
-		t.Fatalf("the routine work's domain is %q, not %q — this test is not exercising what it "+
-			"claims to", domainKind, work.DomainPipelineRun)
-	}
-	if state != string(work.StateQueued) {
-		t.Errorf("the routine work is %q, want queued — the agent dispatcher consumed work "+
-			"belonging to the pipeline engine", state)
-	}
-	// State alone is not enough: a claim followed by a requeue would land back
-	// on `queued` having still burned an attempt and moved the fence.
-	if generation != 0 {
-		t.Errorf("the routine work's generation is %d, want 0 — it was claimed and fenced by a "+
-			"dispatcher that cannot run it", generation)
-	}
-	if attempts != 0 {
-		t.Errorf("the routine work has %d attempts, want 0 — one of its five was spent by the "+
-			"wrong executor", attempts)
-	}
-	if n := rig.count(`SELECT COUNT(*) FROM work_attempts WHERE work_id = ?`, routine.WorkID); n != 0 {
-		t.Errorf("%d attempt rows opened against routine work, want 0", n)
-	}
+	rig.router.PipelinesHandler.WaitWebhookDispatches()
 
 	// And exactly one runtime over the whole test: the agent's.
 	if got := rig.proc.runsStarted(); len(got) != 1 {
@@ -1248,4 +1207,66 @@ func (rig *verticalRig) sessionToken(t *testing.T) string {
 		t.Fatalf("issue token: %v", err)
 	}
 	return token
+}
+
+// Only agent execution and container transport are substituted. Stop and Alive
+// execute the production orchestrator's tmux probes, with no HOME registry entry.
+type locatedVerticalRunner struct {
+	*orchestrator.Orchestrator
+	proc *fakeAgentProcess
+}
+
+func (r *locatedVerticalRunner) RunAgent(ctx context.Context, req orchestrator.AgentRunRequest, handler orchestrator.EventHandler) error {
+	return r.proc.RunAgent(ctx, req, handler)
+}
+
+type probingVerticalContainer struct {
+	verticalContainer
+	proc *fakeAgentProcess
+}
+
+func (c probingVerticalContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	ids := c.proc.runsStarted()
+	if len(ids) != 1 {
+		return nil, fmt.Errorf("expected one launched run, got %d", len(ids))
+	}
+	script := strings.Join(cfg.Cmd, " ")
+	if !strings.Contains(script, ids[0]) {
+		return nil, fmt.Errorf("probe does not target launched run")
+	}
+	if strings.Contains(script, "kill-session") {
+		if _, err := c.proc.StopRun(ctx, ids[0]); err != nil {
+			return nil, err
+		}
+	}
+	alive, err := c.proc.RunIsAlive(ctx, ids[0])
+	if err != nil {
+		return nil, err
+	}
+	output := "ABSENT\n"
+	if alive {
+		output = "PRESENT\n"
+	}
+	return &provider.ExecResult{Reader: io.NopCloser(strings.NewReader(output))}, nil
+}
+func TestVerticalServer_CancelUsesLaunchLocationWithoutHomeRegistry(t *testing.T) {
+	rig := newVerticalRig(t)
+	rig.proc.hold = make(chan struct{})
+	runner := &locatedVerticalRunner{Orchestrator: orchestrator.New(probingVerticalContainer{proc: rig.proc}, nil, slog.Default()), proc: rig.proc}
+	rig.router.webhookHandler.orch = runner
+	rig.startDispatcher()
+	rec := rig.deliver(verticalBody)
+	rig.waitForState(rec.WorkID, work.StateRunning)
+	runID := rig.attemptRunID(rec.WorkID)
+	if _, err := runner.Orchestrator.RunIsAlive(context.Background(), runID); err == nil {
+		t.Fatal("test unexpectedly has a HOME registry entry")
+	}
+	out, err := rig.store.RequestCancel(context.Background(), rec.WorkID, "operator", "stop it")
+	if err != nil || out.Outcome != work.CancelOutcomeRequested {
+		t.Fatalf("cancel: %+v %v", out, err)
+	}
+	rig.waitForState(rec.WorkID, work.StateCancelled)
+	if !rig.proc.wasStopped(runID) {
+		t.Fatal("production probe did not stop the launched runtime")
+	}
 }

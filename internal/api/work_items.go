@@ -440,6 +440,11 @@ func (h *WorkItemsHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if item.Source == string(work.SourceWebhook) && item.DomainKind == work.DomainPipelineRun {
+		replyError(w, http.StatusConflict, "Routine execution is controlled through the pipeline API; inspect its run before resolving this legacy work item")
+		return
+	}
+
 	// One store call decides everything, from the row as it is HERE.
 	//
 	// This handler used to read the state, branch on it, and then ask for
@@ -526,6 +531,11 @@ func (h *WorkItemsHandler) Replay(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, "Work item not found")
 		return
 	}
+	if item.Source == string(work.SourceWebhook) && item.DomainKind == work.DomainPipelineRun {
+		replyError(w, http.StatusConflict, "Routine execution is controlled through the pipeline API; inspect its run before resolving this legacy work item")
+		return
+	}
+
 	if !work.State(item.State).Terminal() {
 		replyError(w, http.StatusConflict, "This work is still "+item.State+
 			"; replay creates a second run of the same input and is only available once the original has finished. Cancel it first if it is stuck.")
@@ -641,4 +651,72 @@ func (h *WorkItemsHandler) replayAvailability(r *http.Request, workspaceID strin
 		return msg, false, nil
 	}
 	return "", true, nil
+}
+
+// Resolve records an operator's investigated outcome; it does not kill a
+// runtime. The explicit stop attestation and observed generation prevent a
+// casual cancel or stale page from silently freeing unresolved capacity.
+func (h *WorkItemsHandler) Resolve(w http.ResponseWriter, r *http.Request) {
+	ws, ok := workReadContext(w, r)
+	if !ok || !requireRole(w, r, "create") {
+		return
+	}
+	user := UserFromContext(r.Context())
+	if user == nil || user.ID == "" {
+		replyError(w, http.StatusUnauthorized, "Authentication required")
+		return
+	}
+	var body struct {
+		State          string `json:"state"`
+		Generation     int64  `json:"generation"`
+		RuntimeStopped bool   `json:"runtime_stopped"`
+		Reason         string `json:"reason"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		replyError(w, http.StatusBadRequest, "Expected one JSON object")
+		return
+	}
+	body.Reason = strings.TrimSpace(body.Reason)
+	if body.Generation <= 0 || !body.RuntimeStopped || body.Reason == "" || len(body.Reason) > 2048 {
+		replyError(w, http.StatusBadRequest, "Resolution requires the observed generation, runtime_stopped=true and a reason (up to 2048 bytes)")
+		return
+	}
+	switch work.State(body.State) {
+	case work.StateSucceeded, work.StateFailed, work.StateCancelled:
+	default:
+		replyError(w, http.StatusBadRequest, "Resolve to succeeded, failed or cancelled; replay is a separate decision")
+		return
+	}
+	item, found, err := h.readItem(r, ws, r.PathValue("workItemId"))
+	if err != nil {
+		replyInternalError(w, h.logger, "read work for resolution", err)
+		return
+	}
+	if !found {
+		replyError(w, http.StatusNotFound, "Work item not found")
+		return
+	}
+	err = work.NewStore(h.db).Resolve(r.Context(), item.ID, body.Generation, work.State(body.State), user.ID,
+		"runtime confirmed stopped by operator; "+body.Reason)
+	if errors.Is(err, work.ErrIllegalTransition) || errors.Is(err, work.ErrStaleGeneration) || errors.Is(err, work.ErrTerminal) {
+		replyError(w, http.StatusConflict, "Work changed or is not awaiting reconciliation; read its current state before resolving")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve work", err)
+		return
+	}
+	auditFromRequest(r, h.db, "work.resolve", "WORK_ITEM", item.ID, map[string]interface{}{"state": body.State, "generation": body.Generation, "reason": body.Reason, "runtime_stopped": true})
+	resolved, found, err := h.readItem(r, ws, item.ID)
+	if err != nil || !found {
+		replyInternalError(w, h.logger, "read resolved work", fmt.Errorf("resolution committed but readback failed: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusOK, resolved)
 }

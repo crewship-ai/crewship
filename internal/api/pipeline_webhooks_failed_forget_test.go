@@ -102,7 +102,7 @@ func TestPipelineWebhooks_Fire_FailedRun_KeepsItsDeliveryRecorded(t *testing.T) 
 	// The delivery is still on the record. Nothing is deleted on failure: that
 	// deletion is what let an already-performed effect be repeated.
 	var deliveries int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM webhook_deliveries WHERE workspace_id = ?`, wsID).
+	if err := db.QueryRow(`SELECT COUNT(*) FROM routine_webhook_receipts WHERE workspace_id = ?`, wsID).
 		Scan(&deliveries); err != nil {
 		t.Fatalf("count deliveries: %v", err)
 	}

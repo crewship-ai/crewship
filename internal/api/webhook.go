@@ -55,19 +55,6 @@ type webhookSignatureCtxKey struct{}
 // healthy traffic.
 const defaultAgentWebhookRatePerMin = 60
 
-// defaultAgentWebhookMaxConcurrent caps how many agent-webhook runs a
-// single agent may have IN FLIGHT at once (process-local). RunAgent
-// holds the slot for up to its 10-min timeout; the registry frees it on
-// completion. This is the second layer of the R4#3 gate: even within the
-// per-minute budget, a burst that all lands before any run finishes can't
-// pin more than this many concurrent 10-min runs on one agent.
-const defaultAgentWebhookMaxConcurrent = 8
-
-// agentWebhookConcurrencyKey is the synthetic concurrency-key prefix for
-// agent-webhook runs in the shared RunRegistry. Keyed per agent so the
-// in-flight cap is per-agent, independent of pipeline runs.
-const agentWebhookConcurrencyKey = "agent-webhook"
-
 // agentRunner is the whole of what the webhook path needs from the thing that
 // runs agents: start one, stop one, ask whether one is still there.
 //
@@ -111,15 +98,8 @@ type WebhookHandler struct {
 	// broken one.
 	dispatchHint func(workID string)
 
-	// agentRatePerMin / agentMaxConcurrent gate agent-webhook dispatch
-	// (R4#3). agentRatePerMin is 0 by default, meaning "follow the runtime
-	// ratelimitcfg value" (admin-tunable, default 60/min) — see
-	// agentRateLimit(). A test sets a positive value to pin the gate
-	// deterministically. agentRuns is the shared in-flight registry backing
-	// the concurrency cap.
-	agentRatePerMin    int
-	agentMaxConcurrent int
-	agentRuns          *pipeline.RunRegistry
+	// Arrival rate limits are independent of durable queue capacity.
+	agentRatePerMin int
 
 	// acceptOnce / acceptRunner / workStore are the durable acceptance path:
 	// ONE transaction that records the delivery and the work it produces
@@ -267,16 +247,14 @@ func NewWebhookHandler(
 	logWriter *logcollector.Writer,
 ) *WebhookHandler {
 	wh := &WebhookHandler{
-		db:                 db,
-		logger:             logger,
-		resolver:           resolver,
-		orch:               orch,
-		hub:                hub,
-		container:          container,
-		logWriter:          logWriter,
-		agentRatePerMin:    0, // 0 → follow runtime ratelimitcfg (default defaultAgentWebhookRatePerMin)
-		agentMaxConcurrent: defaultAgentWebhookMaxConcurrent,
-		agentRuns:          pipeline.NewRunRegistry(),
+		db:              db,
+		logger:          logger,
+		resolver:        resolver,
+		orch:            orch,
+		hub:             hub,
+		container:       container,
+		logWriter:       logWriter,
+		agentRatePerMin: 0, // 0 → follow runtime ratelimitcfg (default defaultAgentWebhookRatePerMin)
 	}
 	// Fence with an observer so a webhook payload the scanner rates medium+ is
 	// logged (source + suspicion + finding count) — visibility into injection
@@ -634,36 +612,9 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	if !pipeline.AllowWebhookFire(agentWebhookRateKey(agentID), ratePerMin) {
 		h.logger.Warn("webhook rate gate: agent over per-minute limit",
 			"agent_id", agentID, "limit_per_min", ratePerMin)
-		return h.receiptOrRefusal(ctx, store, info.WorkspaceID, agentID, sourceDeliveryID,
+		return h.receiptOrRefusal(ctx, store, info.WorkspaceID, agentID, sourceDeliveryID, hex.EncodeToString(sum[:]),
 			fmt.Errorf("%w: agent %s rate limit exceeded (%d/min)",
 				webhook.ErrIngressFull, agentID, ratePerMin))
-	}
-
-	// In-flight concurrency cap, acquired UP FRONT so a throttled delivery
-	// warms no container and writes no run row. The slot is held for the
-	// lifetime of the run and released inside the dispatch closure.
-	var releaseSlot func()
-	if h.agentRuns != nil {
-		_, release, acqErr := h.agentRuns.Acquire(ctx, pipeline.AcquireOpts{
-			RunID:          runID,
-			WorkspaceID:    info.WorkspaceID,
-			ConcurrencyKey: agentWebhookConcurrencyKey + ":" + agentID,
-			MaxConcurrent:  h.agentMaxConcurrent,
-		})
-		if acqErr != nil {
-			h.logger.Warn("webhook concurrency gate: agent at in-flight cap",
-				"agent_id", agentID, "max_concurrent", h.agentMaxConcurrent)
-			return h.receiptOrRefusal(ctx, store, info.WorkspaceID, agentID, sourceDeliveryID,
-				fmt.Errorf("%w: agent %s concurrency limit reached (%d)",
-					webhook.ErrIngressFull, agentID, h.agentMaxConcurrent))
-		}
-		releaseSlot = release
-	}
-	releaseOnce := func() {
-		if releaseSlot != nil {
-			releaseSlot()
-			releaseSlot = nil
-		}
 	}
 
 	// The filter. A ping is recorded and answered, never run: §5 wants the
@@ -731,8 +682,9 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 		return nil
 	})
 	if acceptErr != nil {
-		releaseOnce()
 		switch {
+		case work.IsIngressFull(acceptErr):
+			return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrIngressFull, acceptErr)
 		case errors.Is(acceptErr, work.ErrDeliveryConflict):
 			// Same source id, different body. The original record is kept and
 			// the sender is told which of the two things it is, without being
@@ -759,7 +711,6 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	// message arrived twice" invariant is actually enforced — inside the same
 	// transaction that would have created the work.
 	if receipt.Duplicate || decision == work.FilterIgnored {
-		releaseOnce()
 		return acc, nil, nil
 	}
 
@@ -780,7 +731,6 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 	if h.dispatchHint != nil {
 		h.dispatchHint(acc.WorkID)
 	}
-	releaseOnce()
 	return acc, nil, nil
 }
 
@@ -791,15 +741,18 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 // gets its receipt back. So a refusal consults the ledger first and only
 // returns the refusal when this really is new work.
 //
-// The lookup is by source delivery id only, so it cannot detect a
-// same-id-different-body arrival; that stays the acceptance transaction's job.
-// The consequence is narrow and worth naming: a conflicting body arriving
-// during a flood is answered as a duplicate rather than as a 409, and the
-// sender sees the conflict on its next un-throttled retry.
+// Identity and body checks are identical under throttling: conflicts stay
+// conflicts, and an unavailable ledger is never reported as exhausted capacity.
 func (h *WebhookHandler) receiptOrRefusal(
-	ctx context.Context, store *work.Store, workspaceID, agentID, sourceDeliveryID string, refusal error,
+	ctx context.Context, store *work.Store, workspaceID, agentID, sourceDeliveryID, bodySHA256 string, refusal error,
 ) (webhook.Acceptance, func(), error) {
-	existing, err := store.LookupDelivery(ctx, workspaceID, agentID, sourceDeliveryID)
+	existing, err := store.LookupDelivery(ctx, workspaceID, agentID, sourceDeliveryID, bodySHA256)
+	if errors.Is(err, work.ErrDeliveryConflict) {
+		return webhook.Acceptance{}, nil, fmt.Errorf("%w: %w", webhook.ErrDeliveryConflict, err)
+	}
+	if err != nil && !errors.Is(err, work.ErrNotFound) {
+		return webhook.Acceptance{}, nil, fmt.Errorf("%w: delivery lookup: %w", webhook.ErrUnavailable, err)
+	}
 	if err == nil && existing != nil {
 		h.logger.Info("webhook: gate refused a delivery already in the ledger; answering with its receipt",
 			"agent_id", agentID, "delivery_id", existing.DeliveryID)
@@ -826,16 +779,11 @@ func (h *WebhookHandler) runWebhookAgent(
 	payload webhook.WebhookPayload,
 	releaseSlot func(),
 	started func(),
+	located ...func(orchestrator.RunLocation),
 ) error {
 	// 2. Create a chat session for THIS DELIVERY.
 	//
-	// It used to be fmt.Sprintf("webhook-%s", agentID) — one constant chat id
-	// per agent, "so we don't spam sessions". But h.agentMaxConcurrent (8)
-	// permits eight simultaneous runs of that same agent, so eight deliveries
-	// in flight all published on `session:webhook-<agentID>` and all appended
-	// to one conversation: two run streams merged on nothing but the agent id,
-	// which is exactly what the E0 contract forbids ("Dva run streams se nikdy
-	// nesloučí jen podle agent slug/ChatID" — IMPLEMENTATION §9).
+	// Sharing a chat id across deliveries would mix their conversation streams.
 	//
 	// Keyed by runID, which is already unique per delivery AND already
 	// deduplicated: a re-delivery short-circuits at the idempotency check well
@@ -1034,6 +982,9 @@ func (h *WebhookHandler) runWebhookAgent(
 			// Defer release so the guard is freed even if RunAgent
 			// panics. Matches assignments.go and query_handler.go.
 			defer guardRelease()
+			for _, observe := range located {
+				observe(orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID})
+			}
 			err = h.orch.RunAgent(runCtx, req, handler)
 		}
 

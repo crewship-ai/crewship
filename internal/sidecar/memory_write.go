@@ -1201,6 +1201,10 @@ func (s *Server) memoryHostRequest(r *http.Request, method, path string, body []
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+	// Preserve the run capability for host-side verification against body.run_id.
+	if capability := bearerToken(r); capability != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+capability)
+	}
 	httpReq.Header.Set(actingAgentSlugHeader, slug)
 
 	// The sent/not-sent evidence R5 turns on. GotConn fires once this call

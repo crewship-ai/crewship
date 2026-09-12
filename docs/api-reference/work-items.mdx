@@ -6,8 +6,9 @@ stability: experimental
 tag: Experimental
 ---
 
-Every piece of agent work Crewship accepts is recorded as a **work item**
-before anything starts running. The item is the durable answer to "did you
+Accepted agent webhook work is recorded as a **work item** before its runtime
+starts. Chat, routine webhooks and other producers are not yet covered by this
+queue. The item is the durable answer to "did you
 take this, and what happened to it" — it survives a restart, it keeps its
 identity across every retry, and it carries the authorization it was admitted
 under.
@@ -158,3 +159,29 @@ publishing whatever the sender put inside.
 ## CLI
 
 Everything above has a command: see [`crewship work`](/cli/work).
+
+## Resolve reconciliation
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| POST | `/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve` | `create` (MANAGER+) | JSON: `generation`, `state`, `runtime_stopped`, `reason` (all required) | Updated work item | `200`, `400`, `401`, `403`, `404`, `409`, `500` |
+
+Example request body:
+
+```json
+{"generation":2,"state":"failed","runtime_stopped":true,"reason":"Runtime stopped and external effects inspected"}
+```
+
+Only `needs_reconciliation` at the supplied generation can resolve, to
+`succeeded`, `failed`, or `cancelled`. Missing evidence returns 400; a stale
+generation or incompatible state returns 409. Success returns the updated work
+item and releases its ledger slots. The authenticated operator and reason are
+recorded. `runtime_stopped` is an explicit operator attestation, not a probe or a
+request to kill the process. Resolve does not start another attempt.
+
+
+Routine webhook receipts have no work-item controls. On upgrade, old unclaimed
+routine work records are preserved in `needs_reconciliation` with their original
+pipeline run identity. Inspect that pipeline run, then resolve the historical
+work item. Cancel and replay for these records return 409; use the pipeline API
+for any execution action.

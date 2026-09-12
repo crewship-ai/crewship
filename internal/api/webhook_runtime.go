@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -31,7 +33,8 @@ type webhookRunInput struct {
 // agent now. The handler used to return a closure that did this directly, which
 // made it a second owner of work the ledger already owned — review finding R3.
 type WebhookRuntime struct {
-	h *WebhookHandler
+	h         *WebhookHandler
+	locations sync.Map // run id -> immutable launch location
 }
 
 // NewWebhookRuntime wires the handler's runtime dependencies to the dispatcher.
@@ -66,7 +69,7 @@ func (rt *WebhookRuntime) Run(ctx context.Context, a dispatch.Assignment, starte
 		return fmt.Errorf("%w: resolve agent %s at dispatch: %w", errWebhookBeforeAgent, in.AgentID, err)
 	}
 
-	return rt.h.runWebhookAgent(ctx, info, in.AgentID, a.RunID, in.Payload, nil, started)
+	return rt.h.runWebhookAgent(ctx, info, in.AgentID, a.RunID, in.Payload, nil, started, func(location orchestrator.RunLocation) { rt.locations.Store(a.RunID, location) })
 }
 
 // errWebhookBeforeAgent marks the failures that provably happened BEFORE the
@@ -112,6 +115,15 @@ func (rt *WebhookRuntime) Stop(ctx context.Context, locator string) (bool, error
 	if runID == "" {
 		return false, fmt.Errorf("cannot read a run id out of locator %q", locator)
 	}
+	if runner, ok := rt.h.orch.(interface {
+		StopRunAt(context.Context, orchestrator.RunLocation) (bool, error)
+	}); ok {
+		location, found := rt.locations.Load(runID)
+		if !found {
+			return false, fmt.Errorf("no launch location for run %s", runID)
+		}
+		return runner.StopRunAt(ctx, location.(orchestrator.RunLocation))
+	}
 	stopped, err := rt.h.orch.StopRun(ctx, runID)
 	if err != nil {
 		return false, err
@@ -128,6 +140,15 @@ func (rt *WebhookRuntime) Alive(ctx context.Context, locator string) (bool, erro
 	runID := runIDFromLocator(locator)
 	if runID == "" {
 		return false, fmt.Errorf("cannot read a run id out of locator %q", locator)
+	}
+	if runner, ok := rt.h.orch.(interface {
+		RunIsAliveAt(context.Context, orchestrator.RunLocation) (bool, error)
+	}); ok {
+		location, found := rt.locations.Load(runID)
+		if !found {
+			return false, fmt.Errorf("no launch location for run %s", runID)
+		}
+		return runner.RunIsAliveAt(ctx, location.(orchestrator.RunLocation))
 	}
 	return rt.h.orch.RunIsAlive(ctx, runID)
 }
@@ -164,3 +185,7 @@ func (h *WebhookHandler) runRecordAbsent(ctx context.Context, runID string) (boo
 	}
 	return n == 0, nil
 }
+
+// Forget releases launch metadata only after the dispatcher has recorded the
+// outcome. It is separate from RunAgent's cleanup of credential-refresh HOMEs.
+func (rt *WebhookRuntime) Forget(locator string) { rt.locations.Delete(runIDFromLocator(locator)) }

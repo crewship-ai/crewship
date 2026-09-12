@@ -186,7 +186,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	//
 	// Acting identity comes from the internal token's binding narrowed by
 	// X-Acting-Agent-Slug, exactly as the hybrid search above.
-	memMut := NewMemoryMutationHandler(r.db, r.storagePath, r.memoryVersionsBlobRoot, r.logger)
+	memMut := NewMemoryMutationHandler(r.db, r.storagePath, r.memoryVersionsBlobRoot, r.logger, r.internalToken)
 	r.mux.Handle("POST /api/v1/internal/memory/mutation", internalAuth(http.HandlerFunc(memMut.Mutate)))
 	r.mux.Handle("GET /api/v1/internal/memory/canonical", internalAuth(http.HandlerFunc(memMut.Read)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))

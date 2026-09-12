@@ -703,3 +703,51 @@ func TestWorkItems_ReadWhatTheLedgerActuallyWrote(t *testing.T) {
 		t.Fatal("an event with no timestamp cannot be ordered by a client")
 	}
 }
+
+func TestWorkResolve_RequiresEvidenceAndCurrentGeneration(t *testing.T) {
+	for _, tc := range []struct {
+		name, role, state, body string
+		status                  int
+	}{
+		{"resolve", "MANAGER", "needs_reconciliation", `{"state":"failed","generation":3,"runtime_stopped":true,"reason":"checked container and provider receipt"}`, 200},
+		{"stale generation", "MANAGER", "needs_reconciliation", `{"state":"failed","generation":2,"runtime_stopped":true,"reason":"checked"}`, 409},
+		{"not reconciliating", "MANAGER", "running", `{"state":"failed","generation":3,"runtime_stopped":true,"reason":"checked"}`, 409},
+		{"missing stop evidence", "MANAGER", "needs_reconciliation", `{"state":"failed","generation":3,"reason":"checked"}`, 400},
+		{"missing reason", "MANAGER", "needs_reconciliation", `{"state":"failed","generation":3,"runtime_stopped":true}`, 400},
+		{"implicit retry", "MANAGER", "needs_reconciliation", `{"state":"retry_wait","generation":3,"runtime_stopped":true,"reason":"checked"}`, 400},
+		{"reader", "VIEWER", "needs_reconciliation", `{"state":"failed","generation":3,"runtime_stopped":true,"reason":"checked"}`, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			user := seedTestUser(t, db)
+			ws := seedTestWorkspace(t, db, user)
+			seedWorkItem(t, db, seededWork{ID: "resolve-item", WorkspaceID: ws, State: tc.state, Generation: 3})
+			h := NewWorkItemsHandler(db, quietLogger())
+			req := workReq(t, "POST", "/work-items/resolve-item/resolve", tc.body, user, ws, tc.role)
+			req.SetPathValue("workItemId", "resolve-item")
+			rr := httptest.NewRecorder()
+			h.Resolve(rr, req)
+			if rr.Code != tc.status {
+				t.Fatalf("HTTP %d, want %d: %s", rr.Code, tc.status, rr.Body.String())
+			}
+			var state string
+			if err := db.QueryRow("SELECT state FROM work_items WHERE id='resolve-item'").Scan(&state); err != nil {
+				t.Fatal(err)
+			}
+			if tc.status == 200 {
+				if state != "failed" {
+					t.Fatalf("resolved state %s", state)
+				}
+				var reason string
+				if err := db.QueryRow("SELECT reason FROM work_events WHERE work_id='resolve-item' ORDER BY seq DESC LIMIT 1").Scan(&reason); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(reason, user) || !strings.Contains(reason, "provider receipt") {
+					t.Fatalf("resolution lost actor/evidence: %s", reason)
+				}
+			} else if state != tc.state {
+				t.Fatalf("refusal changed work from %s to %s", tc.state, state)
+			}
+		})
+	}
+}

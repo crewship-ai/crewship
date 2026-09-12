@@ -567,7 +567,48 @@ without publishing whatever the sender put inside.`,
 	},
 }
 
+var workResolveCmd = &cobra.Command{
+	Use:   "resolve <work-id>",
+	Short: "Record an investigated outcome for work awaiting reconciliation",
+	Long: `Resolve only after verifying the runtime has stopped and checking its effects.
+This records your decision; it does not stop a process. Read the work's current
+generation first. Re-running its input requires a separate work replay.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		state, _ := cmd.Flags().GetString("state")
+		generation, _ := cmd.Flags().GetInt64("generation")
+		stopped, _ := cmd.Flags().GetBool("runtime-stopped")
+		reason, _ := cmd.Flags().GetString("reason")
+		if (state != "succeeded" && state != "failed" && state != "cancelled") || generation <= 0 || !stopped || strings.TrimSpace(reason) == "" {
+			return fmt.Errorf("provide --state succeeded|failed|cancelled, a positive --generation, --runtime-stopped and --reason")
+		}
+		client, err := workClient()
+		if err != nil {
+			return err
+		}
+		resp, err := client.Post(workspacePath(client, "/work-items/"+url.PathEscape(args[0])+"/resolve"), map[string]any{"state": state, "generation": generation, "runtime_stopped": stopped, "reason": reason})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out WorkItemRow
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() { cli.PrintSuccess(out.ID + " resolved as " + out.State) })
+	},
+}
+
 func init() {
+	workResolveCmd.Flags().String("state", "", "Investigated outcome: succeeded, failed or cancelled")
+	workResolveCmd.Flags().Int64("generation", 0, "Generation observed in work get")
+	workResolveCmd.Flags().Bool("runtime-stopped", false, "Confirm you verified the runtime is stopped")
+	workResolveCmd.Flags().String("reason", "", "Evidence supporting this resolution")
+	workCmd.AddCommand(workResolveCmd)
+
 	workListCmd.Flags().String("state", "", "Filter by state: queued, starting, running, waiting, retry_wait, succeeded, failed, expired, cancelled, needs_reconciliation")
 	workListCmd.Flags().String("class", "", "Filter by capacity class: chat or background")
 	workListCmd.Flags().String("source", "", "Filter by producer: webhook, chat, assignment, schedule, pipeline_step, manual")

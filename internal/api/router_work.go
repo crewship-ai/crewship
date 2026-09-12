@@ -33,6 +33,7 @@ func (r *Router) registerWorkRoutes() {
 	// runaway agent.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel", roleCreate, workItems.Cancel)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay", roleCreate, workItems.Replay)
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve", roleCreate, workItems.Resolve)
 
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/webhook-deliveries", authed(wsCtx(http.HandlerFunc(deliveries.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}", authed(wsCtx(http.HandlerFunc(deliveries.Get))))

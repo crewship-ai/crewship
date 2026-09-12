@@ -204,7 +204,7 @@ func TestRunStatus_AgreesWithTheMemoryMutationFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run status: %v", err)
 	}
-	mm := NewMemoryMutationHandler(db, t.TempDir(), t.TempDir(), quietLogger())
+	mm := NewMemoryMutationHandler(db, t.TempDir(), t.TempDir(), quietLogger(), "")
 	fenceErr := mm.authorizeRun(ws, "ag-1", "run-agree", 5)(context.Background())
 
 	if active != (fenceErr == nil) {
