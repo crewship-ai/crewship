@@ -187,7 +187,9 @@ func (s *Store) checkSchedulePresetsTx(ctx context.Context, tx *sql.Tx, pipeline
 	if err != nil {
 		return fmt.Errorf("schedule preset gate: parse definition: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id,name,inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND target_pipeline_version IS NULL AND enabled=1 AND deleted_at IS NULL ORDER BY id`, pipelineID)
+	rows, err := tx.QueryContext(ctx, `SELECT id,name,inputs_json FROM pipeline_schedules WHERE target_pipeline_id=? AND target_pipeline_version IS NULL AND enabled=1 AND deleted_at IS NULL
+UNION ALL SELECT id,name,wake_inputs_json FROM pipeline_schedules
+WHERE wake_pipeline_id=? AND enabled=1 AND deleted_at IS NULL ORDER BY id`, pipelineID, pipelineID)
 	if err != nil {
 		return fmt.Errorf("schedule preset gate: read enabled schedules: %w", err)
 	}
@@ -203,15 +205,15 @@ func (s *Store) checkSchedulePresetsTx(ctx context.Context, tx *sql.Tx, pipeline
 		}
 		values := mergeInputs(supplied, dsl)
 		for _, spec := range dsl.Inputs {
+			// Legacy inputs have no form contract; match execution's validation.
+			if !hasInputForm(spec) {
+				continue
+			}
 			value, exists := values[spec.Name]
 			if !exists || value == nil {
 				if spec.Required {
 					return &ScheduleDraftConflict{schedule, name, fmt.Sprintf("Input %s is required by the new recipe", spec.Name)}
 				}
-				continue
-			}
-			// Legacy inputs have no form contract; match execution's validation.
-			if !hasInputForm(spec) {
 				continue
 			}
 			if err := validateFormValue(spec, value); err != nil {

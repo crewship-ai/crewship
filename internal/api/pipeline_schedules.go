@@ -351,7 +351,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          body.CatchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
 		// surface them as 400 not 500 so the UI can show "fix the
@@ -566,7 +566,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 
 	// Judge the plan this PATCH produces — target routine, effective pin,
 	// effective inputs — whenever the request changes any of the three
-	// things the preset is fed to. A PATCH that touches none of them
+	// things the preset is fed to, or enables a previously disabled plan. A PATCH that touches none of them
 	// (disabling, a new cron, a rename) is not judged, so an operator whose
 	// plan predates this gate can still switch it off or reschedule it
 	// without first repairing a preset the request never mentions.
@@ -581,14 +581,15 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	// review of #2498.
 	_, versionMentioned := rawKeys["target_pipeline_version"]
 	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
-	if body.Inputs != nil || targetChanged {
+	enabling := !existing.Enabled && enabled
+	if body.Inputs != nil || targetChanged || enabling {
 		if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
 			return
 		}
 	}
 	_, wakeMentioned := rawKeys["wake_pipeline_id"]
 	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
-	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned) {
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned || enabling) {
 		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
 			return
 		}
@@ -614,7 +615,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          catchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
 			replyError(w, http.StatusBadRequest, err.Error())
@@ -717,7 +718,11 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
-	activated, err := h.schedules.Activate(r.Context(), scheduleID)
+	activated, err := h.schedules.ActivateValidated(r.Context(), scheduleID)
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if errors.Is(err, pipeline.ErrScheduleNotDraft) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "schedule is not awaiting activation",
@@ -828,18 +833,19 @@ func (h *PipelineHandler) resolveSchedulePipelineID(r *http.Request, workspaceID
 	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
 }
 
-// isUserScheduleError sniffs error strings from the schedule store
-// that come from caller-supplied data (cron expr, timezone). The
-// store wraps these with stable prefixes so we can map to 400 here
-// without pattern-matching deep error chains.
+// isUserScheduleError recognizes typed trigger errors and the legacy store
+// prefixes, including when a transaction stage adds diagnostic context.
 func isUserScheduleError(err error) bool {
-	if err == nil {
-		return false
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		return true
 	}
-	msg := err.Error()
-	return strings.HasPrefix(msg, "invalid cron expression") ||
-		strings.HasPrefix(msg, "invalid timezone") ||
-		strings.HasPrefix(msg, "pipeline_schedules:")
+	for ; err != nil; err = errors.Unwrap(err) {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "invalid cron expression") || strings.HasPrefix(msg, "invalid timezone") || strings.HasPrefix(msg, "pipeline_schedules:") {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultIfBlank(s, fallback string) string {

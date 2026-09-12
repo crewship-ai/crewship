@@ -380,7 +380,7 @@ func replyScheduleConflict(w http.ResponseWriter, err error) bool {
 		// to move together: neither satisfies the other on its own, so the
 		// escape is one save that carries both, or switching the plan off
 		// first.
-		"hint":              "Update this plan's inputs in the same save (send a `trigger` block), repair the plan first if the new inputs already fit, or disable the plan and re-enable it after publishing.",
+		"hint":              "Update this plan's inputs in the same save (send a `trigger` block), repair the plan first if the new inputs already fit, or disable the plan, publish, then repair its inputs before re-enabling it.",
 		"schedule_conflict": conflict,
 	})
 	return true
@@ -533,6 +533,9 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rolled, err := h.store.Rollback(r.Context(), p.ID, body.Version)
+	if replyScheduleConflict(w, err) {
+		return
+	}
 	if errors.Is(err, pipeline.ErrNotFound) {
 		replyError(w, http.StatusNotFound, "version not found")
 		return

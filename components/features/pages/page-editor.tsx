@@ -4,7 +4,7 @@
  * The in-app page editor — PRD `docs/prd/pages.md` §10b.1.
  *
  * "**The editor already exists.** CodeMirror 6 is in `package.json:27-40` […]
- * and `components/features/routines/routine-editor-tab.tsx` already wires it up
+ * and `components/features/routines/routine-create-dialog.tsx` already wires it up
  * for routines. The Pages editor is the same component with the YAML mode and a
  * linter fed by our own schema. Authoring is therefore: the CLI, the in-app
  * editor, or an agent — three doors onto one document."

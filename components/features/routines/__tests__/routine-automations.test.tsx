@@ -53,17 +53,24 @@ vi.mock("@/hooks/use-workspace-agent-directory", () => ({
   useWorkspaceAgentDirectory: () => ({ agents: [], error: false }),
 }))
 
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ role: "OWNER" }),
+}))
 
 // The graph and the code editor are heavy, unrelated, and mocked everywhere
 // else this card is exercised.
 vi.mock("../routine-definition-canvas", () => ({
   RoutineDefinitionCanvas: () => <div data-testid="canvas" />,
 }))
-vi.mock("../routine-editor-tab", () => ({ RoutineEditorTab: () => <div /> }))
-vi.mock("../routine-schedules-tab", () => ({ RoutineSchedulesTab: () => <div /> }))
-vi.mock("../routine-webhooks-tab", () => ({ RoutineWebhooksTab: () => <div /> }))
-vi.mock("../routine-versions-tab", () => ({ RoutineVersionsTab: () => <div /> }))
+vi.mock("../routine-schedules-tab", () => ({
+  RoutineSchedulesTab: () => <div />,
+}))
+vi.mock("../routine-webhooks-tab", () => ({
+  RoutineWebhooksTab: () => <div />,
+}))
+vi.mock("../routine-versions-tab", () => ({
+  RoutineVersionsTab: () => <div />,
+}))
 vi.mock("../routine-runs-tab", () => ({ RoutineRunsTab: () => <div /> }))
 vi.mock("../routine-budget-card", () => ({ RoutineBudgetCard: () => <div /> }))
 // The reach rows are the Access card's agent list now, so the card itself is
@@ -91,7 +98,11 @@ vi.mock("@/hooks/use-pipeline-schedules", () => ({
   }),
 }))
 vi.mock("@/hooks/use-automations", () => ({
-  useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
+  useAutomations: () => ({
+    automations: h.automations,
+    loading: false,
+    error: null,
+  }),
 }))
 
 import { RoutineCardDetail } from "../routine-card-detail"
@@ -149,7 +160,9 @@ function openAutomations() {
 
 describe("automations bound to a routine", () => {
   it("renders nothing extra when no automation targets this routine", () => {
-    h.automations = [rule({ id: "other", action: { routine_slug: "some-other-routine" } })]
+    h.automations = [
+      rule({ id: "other", action: { routine_slug: "some-other-routine" } }),
+    ]
     renderCard()
 
     // No pill, no pane, and — the point — no way to reach one. A routine with
@@ -165,13 +178,23 @@ describe("automations bound to a routine", () => {
     h.automations = [rule({ id: "a1" }), rule({ id: "a2" })]
     renderCard()
 
-    expect(screen.getByTestId("routine-automations-pill")).toHaveTextContent("2 automations")
+    expect(screen.getByTestId("routine-automations-pill")).toHaveTextContent(
+      "2 automations",
+    )
   })
 
   it("names each rule and the event it watches", () => {
     h.automations = [
-      rule({ id: "a1", name: "Triage new bugs", event_type: "mission.status_change" }),
-      rule({ id: "a2", name: "Escalate stalls", event_type: "assignment.failed" }),
+      rule({
+        id: "a1",
+        name: "Triage new bugs",
+        event_type: "mission.status_change",
+      }),
+      rule({
+        id: "a2",
+        name: "Escalate stalls",
+        event_type: "assignment.failed",
+      }),
     ]
     renderCard()
     openAutomations()
@@ -198,7 +221,9 @@ describe("automations bound to a routine", () => {
     h.automations = [rule()]
     renderCard()
     openAutomations()
-    expect(screen.getByTestId("routine-automations")).toHaveTextContent("crewship automation")
+    expect(screen.getByTestId("routine-automations")).toHaveTextContent(
+      "crewship automation",
+    )
   })
 })
 
@@ -287,13 +312,22 @@ describe("what a routine writes back to Crewship", () => {
         },
       }),
     )
-    expect(screen.getByTestId("routine-crewship-actions")).toHaveTextContent("issue.create")
+    expect(screen.getByTestId("routine-crewship-actions")).toHaveTextContent(
+      "issue.create",
+    )
   })
 })
 
 describe("routine access and starting points", () => {
   it("does not claim zero starts for a schedule bound by slug", () => {
-    h.schedules = [{id:"schedule-1", target_pipeline_slug:"daily-triage", enabled:true, cron_expr:"0 9 * * *"}]
+    h.schedules = [
+      {
+        id: "schedule-1",
+        target_pipeline_slug: "daily-triage",
+        enabled: true,
+        cron_expr: "0 9 * * *",
+      },
+    ]
     renderCard()
     expect(screen.queryByText("Schedule · 0")).not.toBeInTheDocument()
   })
@@ -328,11 +362,12 @@ describe("routine access and starting points", () => {
         .filter((link) => link.getAttribute("href") === "/credentials"),
     ).toHaveLength(2)
     expect(screen.getByRole("link", { name: /AI CLI token/ })).toBeInTheDocument()
-    expect(screen.getByText(/accounts are resolved when the run starts/)).toBeInTheDocument()
-    expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute(
-      "href",
-      "/crews?agent=morgan",
-    )
+    expect(
+      screen.getByText(/accounts are resolved when the run starts/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("link", { name: "morgan", exact: true })[0],
+    ).toHaveAttribute("href", "/crews?agent=morgan")
     const host = screen.getByText("api.github.com")
     expect(host.closest("details")).not.toHaveAttribute("open")
     fireEvent.click(screen.getByText("Allowed network hosts"))
