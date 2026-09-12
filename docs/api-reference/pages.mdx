@@ -94,7 +94,8 @@ not supply one).
     "panel_states": { "fresh": 4, "stale": 1, "failed": 0, "never_produced": 0 },
     "last_produced_at": "2026-08-13T17:41:02Z",
     "created_at": "2026-07-02T09:12:44Z",
-    "updated_at": "2026-08-11T14:03:19Z"
+    "updated_at": "2026-08-11T14:03:19Z",
+    "reach": ["crew:ops", "panel_crew:lookout"]
   }
 ]
 ```
@@ -105,6 +106,23 @@ what the reader sees. `last_produced_at` is the newest arrival across visible
 panels — deliberately not `updated_at`, which is when the *spec* last changed:
 a page edited an hour ago whose data last arrived a week ago must not read as
 "updated today".
+
+`reach` says how **you**, the caller, reach the page, in a fixed order:
+
+| Value | Meaning |
+|---|---|
+| `owner` | You are the page's owning user. |
+| `role` | Your workspace role carries `manage` (ADMIN or OWNER). |
+| `crew:<slug>` | You belong to the crew that owns the page. |
+| `panel_crew:<slug>` | You belong to a crew that owns a panel on it — one entry per distinct crew, in panel order. |
+| `grant` | A live [grant](#issue-a-grant) names you or one of your crews. |
+
+It is never empty and never omitted, because a page is in the list only when
+you reach it somehow. It describes you and nobody else: a page reached only
+through `grant` is one "shared with you", and the other subjects on a page are
+the ACL, which [List grants](#list-grants) returns behind its own gate. A
+`panel_crew` entry names a crew whose panel you can already read; it discloses
+nothing a sealed placeholder does not carry.
 
 **Statuses:**
 
