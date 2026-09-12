@@ -27,6 +27,33 @@ class ArtifactIdentityTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Image commit identity mismatch', result.stderr)
 
+    def test_registry_smoke_runs_selected_child_not_shared_index(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            index = {'manifests': [
+                {'platform': {'os': 'linux', 'architecture': arch}, 'digest': 'sha256:' + digit * 64}
+                for arch, digit in [('amd64', 'a'), ('arm64', 'b')]
+            ]}
+            docker = root / 'docker'
+            docker.write_text(
+                '#!/usr/bin/env python3\nimport json, sys\nfrom pathlib import Path\n'
+                'if sys.argv[1:3] == ["manifest", "inspect"]:\n'
+                ' print(' + repr(json.dumps(index)) + ')\n'
+                'else:\n'
+                ' Path(' + repr(str(root / 'invocation')) + ').write_text(json.dumps(sys.argv))\n'
+                ' print(' + repr(json.dumps({'client': {'commit': OTHER}})) + ')\n')
+            docker.chmod(0o755)
+            env = dict(os.environ, PATH=f'{root}:' + os.environ['PATH'])
+            for arch, digit in [('amd64', 'a'), ('arm64', 'b')]:
+                result = subprocess.run(['bash', str(ROOT / 'scripts/ci/smoke-image.sh'),
+                                         'ghcr.io/example/image@sha256:' + 'f' * 64,
+                                         EXPECTED, 'linux/' + arch], env=env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Image commit identity mismatch', result.stderr)
+                invocation = json.loads((root / 'invocation').read_text())
+                self.assertIn('ghcr.io/example/image@sha256:' + digit * 64, invocation)
+                self.assertNotIn('ghcr.io/example/image@sha256:' + 'f' * 64, invocation)
+
     def test_archive_rejects_matching_short_prefix_before_boot(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
