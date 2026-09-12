@@ -265,20 +265,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull image for tag
-        run: |
-          set -euo pipefail
-          docker pull "ghcr.io/${{ github.repository_owner }}/crewship:${TAG}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
 
-      - name: Probe `crewship version` inside container
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v2.6.3
+
+      - name: Verify and boot the exact published digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          OUT=$(docker run --rm "ghcr.io/${{ github.repository_owner }}/crewship:${TAG}" version)
-          echo "$OUT"
-          if ! echo "$OUT" | grep -qF "${TAG}"; then
-            echo "::error::container 'crewship version' output did not contain tag ${TAG}"
-            exit 1
-          fi
+          gh release download "$TAG" --repo "$REPO" --pattern image-manifest.json
+          jq -e --arg sha "$SHA" --arg tag "$TAG" --arg image "ghcr.io/${REPO%/*}/crewship" '.sha == $sha and .release == $tag and .image == $image and (.digest | test("^sha256:[0-9a-f]{64}$"))' image-manifest.json
+          IMAGE=$(jq -r '.image + "@" + .digest' image-manifest.json)
+          cosign verify --certificate-identity "https://github.com/$REPO/.github/workflows/release.yml@refs/tags/$TAG" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA"
 
   packages:
     name: Smoke ${{ matrix.pkg }} package

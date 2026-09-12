@@ -135,15 +135,9 @@ const pageBundleOwnerUse = "page (owner)"
 //
 // GET /api/v1/pages/{slug}/export
 //
-// The gate is mayEditSpec — the `write` verb — and not plain readership, which
-// is the one authorization decision in this file that is not copied from
-// pipelines. The reason is §7.1 rule 2: an ordinary reader receives panels
-// they may not see as SEALED placeholders (pageDocument), carrying no schema,
-// no producer and no SLA. An export carries the whole arrangement by
-// definition — a bundle with holes in it is not portable — so exporting under
-// a reader's authority would hand out exactly the fields sealing exists to
-// withhold. Owner, workspace admin, or a `write` grantee: the three principals
-// who can already see the entire spec by editing it.
+// Export requires edit authority and visibility of every exported panel.
+// A portable bundle cannot carry sealed placeholders: a write grant alone
+// must not disclose the declarations an ordinary read withholds.
 func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 	release, leased := h.pageLease(w, r)
 	if !leased {
@@ -169,8 +163,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		replyError(w, http.StatusForbidden,
-			"exporting a page carries every panel on it, including panels sealed to you; "+
-				"only the page owner, a workspace admin, or a write grantee may export it")
+			"exporting a page requires page edit permission")
 		return
 	}
 	doc, ok := h.currentDocument(w, rec)
@@ -189,6 +182,9 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		replyInternalError(w, h.logger, "load exported project", draftErr)
+		return
+	}
+	if !h.requireProjectDefinitions(w, r, doc) {
 		return
 	}
 	if project != nil {

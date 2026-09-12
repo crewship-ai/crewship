@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 import { Activity, Bot } from "lucide-react"
 import {
   BarMenu,

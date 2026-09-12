@@ -186,6 +186,16 @@ expect_not_contains "throttled and reviewed do not collapse" \
 expect_contains "throttled carries the wait the notice quoted" \
   "$(classify "$THROTTLED_IN")" "37m"
 
+UPDATED_THROTTLE="$(printf '%s' "$THROTTLED_IN" | jq '.comments[0].updatedAt = "2026-07-30T21:59:00Z"')"
+expect_eq "edited throttle starts the cooldown at its update" "2026-07-30T21:59:00Z" \
+  "$(classify "$UPDATED_THROTTLE" | cut -f4)"
+UPDATED_THROTTLE_WITH_REPLY="$(printf '%s' "$UPDATED_THROTTLE" | jq '.comments += [{createdAt:"2026-07-30T21:30:00Z", body:"Review rate limited."}]')"
+expect_eq "an old reply cannot hide the edited cooldown" "2026-07-30T21:59:00Z" \
+  "$(classify "$UPDATED_THROTTLE_WITH_REPLY" | cut -f4)"
+expect_contains "edited notice keeps its wait despite the later-listed reply" \
+  "$(classify "$UPDATED_THROTTLE_WITH_REPLY")" "37m"
+
+
 # Three phrasings each match a rate-limit notice, and the real fixture above
 # happens to carry all three — so a test built only on it cannot tell whether
 # two of the three were deleted. Pin each shape on its own, or the redundancy
@@ -288,8 +298,8 @@ expect_eq "a walkthrough with no commit range does not promote the approval" \
 STALE_CLEAN="$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" \
   "$(cmt 2026-07-30T21:16:00Z "$(clean_walkthrough "$BASE_SHA" "$OLD_SHA")")" \
   "$(rev 2026-07-30T21:20:00Z APPROVED "" "$OLD_SHA")")"
-expect_eq "a clean review of a superseded commit is still a review" \
-  "reviewed" "$(state_of "$STALE_CLEAN")"
+expect_eq "a clean review of a superseded commit does not cover current head" \
+  "absent" "$(state_of "$STALE_CLEAN")"
 expect_contains "…and is flagged stale against head" \
   "$(notes_of "$STALE_CLEAN")" "the newest push is unreviewed"
 
@@ -381,6 +391,10 @@ expect_eq "a review after a throttle clears it" "reviewed" \
       "$(rev 2026-07-30T21:50:00Z APPROVED "$REVIEW_BODY" "$SHA")")")"
 
 echo "== reviewed, but not of what is merging =="
+
+expect_eq "an older review without a later throttle is not current-head coverage" "absent" \
+  "$(state_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" "$NONE" \
+      "$(rev 2026-07-30T21:20:00Z APPROVED "$REVIEW_BODY" cccccccccccccccccccccccccccccccccccccccc)")")"
 
 expect_contains "a review of an older commit is flagged against head" \
   "$(notes_of "$(in_json "$NOW" "$OPENED" "$SHA" success "Review completed" "$NONE" \
@@ -505,6 +519,14 @@ expect_eq "an hours figure is converted to minutes" "120" \
   "$(wait_of 'Next review available in: 2 hours')"
 expect_eq "a singular minute parses" "1" \
   "$(wait_of 'next review available in 1 minute')"
+expect_eq "included review notice carries its cooldown" "29" \
+  "$(wait_of '> **Next included review available in 29 minutes.**')"
+expect_eq "fair-usage reply carries its cooldown" "4" \
+  "$(wait_of 'Your next included review will be available in 4 minutes.')"
+expect_eq "seconds round up to a safe whole minute" "1" \
+  "$(wait_of 'Next included review available in 30 seconds.')"
+expect_eq "partial minutes round up instead of retriggering early" "2" \
+  "$(wait_of 'Next included review available in 90 seconds.')"
 expect_eq "a body with no such line yields nothing" "" \
   "$(wait_of 'Actionable comments posted: 0')"
 

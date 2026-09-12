@@ -128,7 +128,15 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  /** A published application exists. See `has_project` for source that is not published yet. */
   has_application?: boolean
+  /**
+   * Application source exists — a draft, whether or not anything has been
+   * published from it. The two are different questions, and the review
+   * screen needs this one: a first publication has no live application, so
+   * `has_application` is false while the whole candidate is what must be read.
+   */
+  has_project?: boolean
   publication_version?: number
   id?: string | null
   slug?: string | null

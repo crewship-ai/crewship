@@ -1,13 +1,11 @@
 "use client"
 
 import { PageApplicationView } from "./page-application"
-import { PagePublicationsDialog } from "./page-publications"
-import { PageProjectHistoryDialog } from "./page-project-history"
 
 /**
  * The /pages shell — three zones, exactly as PRD §9b.1 draws them:
  *
- *   [icon rail]  [filter rail 280px]  [main: overview · or a single page]
+ *   [icon rail]  [filter rail 280px]  [main: overview · one page · the editor]
  *
  * Both routes render this: `/pages` with no slug is the overview, and
  * `/pages/<slug>` is that page. One shell rather than two means the rail keeps
@@ -21,18 +19,27 @@ import { PageProjectHistoryDialog } from "./page-project-history"
  * means no basis to compute, and claiming "all fresh" without one is the
  * silent-old-numbers failure §4 exists to prevent.
  *
- * The shell also owns the two AUTHORING affordances (§10b.1): New page, and
- * Edit on the page you are looking at. Both open the same YAML editor on the
- * same document — the third door beside the CLI and an agent — and the Edit
- * one lives here rather than in `page-view.tsx` because the header is the one
- * place both routes already share.
+ * ── The third zone has two modes now ────────────────────────────────────────
+ *
+ * This bar used to carry five separate doors into one job: Settings, Edit, App
+ * preview, Source history and Publications, side by side, three of them behind
+ * the same icon. None of them was the place a person actually works, and for a
+ * Page with a custom application the real work — deciding whether an agent's
+ * change goes live — had no screen at all.
+ *
+ * So there is one door, `Edit`, and it opens a routed editor in the content
+ * column: four named sections (Content / Data & actions / Access / History)
+ * with the Pages list still beside them on the desktop. Everything the five
+ * buttons reached is inside those sections; nothing was dropped, and the
+ * address carries the section so a reload, Back, Forward and a pasted link all
+ * land where they should.
  */
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { FilePlus2, Pencil, SlidersHorizontal, Upload, AppWindow} from "lucide-react"
+import { FilePlus2, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -52,10 +59,12 @@ import type { PanelState } from "@/components/features/pages/panels/types"
 import { PagesRail } from "@/components/features/pages/pages-rail"
 import { PagesOverview } from "@/components/features/pages/pages-overview"
 import { PageView } from "@/components/features/pages/page-view"
-import { PageEditor, sealedPanelCount, type PageEditorMode } from "@/components/features/pages/page-editor"
+import { PageEditor } from "@/components/features/pages/page-editor"
 import { PageImportDialog } from "@/components/features/pages/page-import-dialog"
-import { PagePreviewDialog } from "@/components/features/pages/page-preview"
-import { PageSettings } from "@/components/features/pages/page-settings"
+import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
+import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
+import { usePageGrants } from "@/hooks/use-page-grants"
+import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
 
 export interface PagesLayoutProps {
   workspaceId: string
@@ -68,41 +77,22 @@ export interface PagesLayoutProps {
 export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const isMobile = useIsMobile()
 
-  // WHICH PAGE IS OPEN IS STATE, NOT A ROUTE — and that is the difference
-  // between this surface feeling like /routines and feeling like a website.
+  // WHICH PAGE IS OPEN, WHETHER THE EDITOR IS OPEN, AND WHICH SECTION IT SHOWS
+  // ARE ONE PIECE OF STATE, AND THE ADDRESS BAR IS ITS MIRROR.
   //
   // `slug` still arrives as a prop, because /pages/[slug] is a real route and
   // has to keep working: a deep link, a refresh, a bookmark and a shared URL
-  // all enter that way. What changed is what a CLICK does. Routing to
+  // all enter that way. What a CLICK does is different — routing to
   // /pages/<slug> made Next unmount this whole subtree and build it again, so
-  // the rail — which has nothing to do with which page is open — blinked out
-  // and came back on every selection, taking its scroll position and its
-  // filter state with it.
+  // the rail blinked out and came back on every selection, taking its scroll
+  // position and its filter state with it.
   //
-  // So a click sets state and rewrites the address bar with history.pushState,
-  // which App Router supports without a navigation. Nothing unmounts, the URL
-  // stays honest, Back still works, and the route below still serves anyone
-  // arriving cold.
-  const [selectedSlug, setSelectedSlug] = React.useState<string | null>(slug ?? null)
+  // `useEditorRoute` owns that: it writes the address with history.pushState,
+  // reads it back on popstate, and is the single place that asks the
+  // unsaved-work question before the address is allowed to move.
+  const nav = useEditorRoute(slug ?? null)
+  const selectedSlug = nav.slug
 
-  // The prop wins whenever the route genuinely changes under us — arriving at
-  // /pages/x from somewhere else entirely, or a full reload.
-  React.useEffect(() => {
-    setSelectedSlug(slug ?? null)
-  }, [slug])
-
-  // Back and Forward move through the entries pushed below. The pathname is
-  // the only authority here: reading state we pushed ourselves would drift the
-  // moment somebody navigated with the keyboard.
-  React.useEffect(() => {
-    const onPop = () => {
-      const path = window.location.pathname
-      const match = /^\/pages\/([^/]+)/.exec(path)
-      setSelectedSlug(match ? decodeURIComponent(match[1]) : null)
-    }
-    window.addEventListener("popstate", onPop)
-    return () => window.removeEventListener("popstate", onPop)
-  }, [])
   const [collapsed, setCollapsed] = React.useState(false)
   // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE
   // the content, it replaces it. Collapse it when the viewport narrows and let
@@ -112,6 +102,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   }, [isMobile])
 
   const [importing, setImporting] = React.useState(false)
+  const [creating, setCreating] = React.useState(false)
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
@@ -129,16 +120,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       // Picking a page on a phone means "show me that", and the overlay
       // covering it would be the opposite.
       if (isMobile) setCollapsed(true)
-      setSelectedSlug(next)
-      window.history.pushState(null, "", `/pages/${encodeURIComponent(next)}`)
+      nav.openPage(next)
     },
-    [isMobile],
+    [isMobile, nav],
   )
 
-  const closePage = React.useCallback(() => {
-    setSelectedSlug(null)
-    window.history.pushState(null, "", "/pages")
-  }, [])
+  const closePage = React.useCallback(() => nav.openPage(null), [nav])
 
   const description = (
     <>
@@ -152,7 +139,6 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   )
 
   // ── Authoring (§10b.1) ───────────────────────────────────────────────────
-  const [editor, setEditor] = React.useState<PageEditorMode | null>(null)
   // The panel owner most of this workspace already uses, so the template's
   // first placeholder is one someone actually has. Only a `crew/` reference —
   // a panel's permission anchor is always a crew (§7.1).
@@ -160,75 +146,89 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     () => pages.find((p) => p.ownerRef?.startsWith("crew/"))?.ownerRef ?? null,
     [pages],
   )
-  // A page carrying a panel this viewer may not see cannot be edited from a
-  // document, because the document has no way to say "and one more I am not
-  // allowed to describe" — saving it would delete that panel (§11b.14).
-  const sealed = sealedPanelCount(detail.raw)
-  // Every one of these reads the SELECTION, not the route prop. They read the
-  // prop until selection became state, and the result was that opening a page
-  // in place left the Edit and Settings controls hidden: the URL had changed,
-  // the prop had not, and the two had silently stopped agreeing.
-  const canEdit = Boolean(selectedSlug) && detail.page != null && sealed === 0
 
-  // ── Settings (§7.1b, §10b.1) ─────────────────────────────────────────────
-  // Who reaches this page, and what this page is. It sits beside Edit rather
-  // than inside it: the editor owns one document, and grants and versions are
-  // rows in two other tables no document can express. Unlike Edit it is NOT
-  // gated on `sealed` — reading an ACL and rolling back a spec are exactly the
-  // things an owner of a partially-sealed page still needs, and the server
-  // gates both itself (§7.1 rule 3, and the version route's own refusal).
-  const [settingsOpen, setSettingsOpen] = React.useState(false)
-  const [previewOpen, setPreviewOpen] = React.useState(false)
-  const [sourceHistoryOpen, setSourceHistoryOpen] = React.useState(false)
-  const [publicationsOpen, setPublicationsOpen] = React.useState(false)
-  React.useEffect(() => { setPreviewOpen(false); setSourceHistoryOpen(false); setPublicationsOpen(false) }, [selectedSlug, workspaceId])
-  // A slug change means a different page; a settings sheet left open over it
-  // would be showing another page's ACL.
-  React.useEffect(() => setSettingsOpen(false), [selectedSlug])
+  // Per-section, not one boolean for the whole surface. The old gate hid Edit,
+  // App preview, Source history and Publications together the moment a Page
+  // carried one panel this viewer may not see — three of which the server
+  // would have answered (V01). What a sealed panel actually makes unsafe is
+  // replacing the DOCUMENT, and that is now the only thing it closes.
+  // `?mode=edit` on a slug that does not exist used to open the whole editor:
+  // the buttons were gated on the record, the address was not, so Access
+  // rendered its grant and mint forms and fired reads against a Page that is
+  // not there. The address is not allowed to reach a state the data does not
+  // support.
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
+
+  // One capability we can lower honestly without a second request: React
+  // Query shares this key with the Access section's own read, so asking here
+  // costs nothing extra, and only while the editor is open — a Page being
+  // looked at has no reason to fetch its ACL. The rest stay optimistic and
+  // the server's refusal renders at the control, which is the rule: a
+  // refusal must be visible where the action was, not turned into an absence
+  // that reads as "this product cannot do that".
+  const grants = usePageGrants(workspaceId, selectedSlug, editing)
+  const capabilities = usePageCapabilities(detail.raw, {
+    mayManageAccess: grants.refusal === null,
+  })
+
+  // Closing the editor unmounts the control that had focus, and a keyboard
+  // user was landing on `<body>`. This component renders both halves, so it
+  // is the one that can hand focus from one to the other; the view's heading
+  // is addressed by a ref rather than an id, because two page views can share
+  // a document and a fixed id collides.
+  // A pending request rather than a timed one. The first attempt focused on
+  // the next animation frame and a live pass found it still landing on
+  // `<body>`: `AnimatePresence mode="wait"` holds the incoming view until the
+  // outgoing one has finished leaving, so the heading does not exist yet.
+  // Guessing a longer delay would only move the race. The callback ref fires
+  // when the node actually attaches, which is the moment that matters.
+  const wantsFocus = React.useRef(false)
+  const viewHeading = React.useCallback((node: HTMLHeadingElement | null) => {
+    if (node === null || !wantsFocus.current) return
+    wantsFocus.current = false
+    node.focus()
+  }, [])
+  const focusTheView = React.useCallback(() => {
+    wantsFocus.current = true
+  }, [])
 
   return (
     <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
       <SubBar
         icon={CONCEPT_ICON.pages}
         title="Pages"
+        section={editing ? "Edit" : undefined}
         description={description}
         ariaLabel="Pages"
         actions={
           <>
-            {selectedSlug && (
+            {selectedSlug && !editing && (
               <SubBarSecondary
-                icon={SlidersHorizontal}
-                onClick={() => setSettingsOpen(true)}
+                icon={Share2}
+                onClick={() => nav.openEditor("access")}
                 disabled={detail.page == null}
-                title="Who reaches this page, and what it is"
+                title="Who reaches this Page, who may send it data, and its public links"
               >
-                Settings
+                Share
               </SubBarSecondary>
             )}
-            {selectedSlug && (
+            {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Pencil}
-                onClick={() => setEditor("edit")}
-                disabled={!canEdit}
-                title={
-                  sealed > 0
-                    ? "This page has panels you may not see; editing it here would delete them."
-                    : "Edit this page's YAML"
-                }
+                onClick={() => nav.openEditor()}
+                disabled={detail.page == null}
+                title="Edit this Page's content, data, access and history"
               >
                 Edit
               </SubBarSecondary>
             )}
-            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setPreviewOpen(true)}>App preview</SubBarSecondary>}
-            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setSourceHistoryOpen(true)}>Source history</SubBarSecondary>}
-            {selectedSlug && <SubBarSecondary icon={AppWindow} disabled={!canEdit} onClick={() => setPublicationsOpen(true)}>Publications</SubBarSecondary>}
             {/* Import sits beside New page because they are the same intent —
                 "a page that is not here yet" — and it was the one authoring
                 door that existed only as a CLI command. */}
             <SubBarSecondary icon={Upload} onClick={() => setImporting(true)}>
               Import
             </SubBarSecondary>
-            <SubBarPrimary icon={FilePlus2} onClick={() => setEditor("create")}>
+            <SubBarPrimary icon={FilePlus2} onClick={() => setCreating(true)}>
               New page
             </SubBarPrimary>
           </>
@@ -244,6 +244,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
+        {/* The list stays. Replacing it with the editor's sections was the
+            first draft's riskiest idea and the review's U05: the promise that
+            a list restores its scroll and filters afterwards is the promise
+            that breaks. On a phone it is already an overlay, so the editor
+            gets the full width there without anyone deciding it should. */}
         <aside
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
@@ -264,7 +269,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onFiltersChange={setFilters}
               selectedSlug={selectedSlug}
               onSelectPage={openPage}
-              onCreatePage={() => setEditor("create")}
+              onCreatePage={() => setCreating(true)}
               onToggleCollapse={() => setCollapsed(true)}
             />
           )}
@@ -277,7 +282,30 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               inside it — the rail beside it is not, so it never participates in
               the transition and never blinks. */}
           <AnimatePresence mode="wait">
-            {selectedSlug ? (
+            {editing && selectedSlug ? (
+              <motion.div
+                key={`editor-${selectedSlug}`}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: duration.short, ease: "easeOut" }}
+                className="absolute inset-0 flex flex-col overflow-hidden"
+              >
+                {/* Entering the editor unmounts the live application frame:
+                    the candidate under review and the running publication are
+                    two different programs and must not share a surface. */}
+                <PageEditorShell
+                  key={`${workspaceId}:${selectedSlug}`}
+                  workspaceId={workspaceId}
+                  slug={selectedSlug}
+                  page={detail.error ? null : detail.raw}
+                  loading={detail.loading}
+                  capabilities={capabilities}
+                  navigation={nav}
+                  onLeft={focusTheView}
+                />
+              </motion.div>
+            ) : selectedSlug ? (
               <motion.div
                 key={`page-${selectedSlug}`}
                 initial={{ opacity: 0, x: 12 }}
@@ -288,6 +316,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               >
                 <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} fallback={
                 <PageView
+                  headingRef={viewHeading}
                   page={detail.page}
                   slug={selectedSlug}
                   loading={detail.loading}
@@ -328,10 +357,6 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         </div>
       </div>
 
-      {/* Bound to the SELECTION, not to the route. Left on `slug` it would have
-          opened the settings of whichever page the URL happened to carry when
-          the shell mounted, which after the first in-place selection is not the
-          page on screen. */}
       {importing && (
         <PageImportDialog
           workspaceId={workspaceId}
@@ -343,31 +368,18 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         />
       )}
 
-      {settingsOpen && selectedSlug && (
-        <PageSettings
-          workspaceId={workspaceId}
-          slug={selectedSlug}
-          page={detail.raw}
-          onClose={() => setSettingsOpen(false)}
-        />
-      )}
-
-      {publicationsOpen && selectedSlug && workspaceId && <PagePublicationsDialog workspaceId={workspaceId} slug={selectedSlug} onClose={() => setPublicationsOpen(false)} />}
-      {sourceHistoryOpen && selectedSlug && workspaceId && <PageProjectHistoryDialog workspaceId={workspaceId} slug={selectedSlug} onClose={() => setSourceHistoryOpen(false)} />}
-      {previewOpen && selectedSlug && <PagePreviewDialog key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} onClose={() => setPreviewOpen(false)} />}
-
-      {editor && (
+      {/* Only creation opens the document editor from here now. Editing an
+          existing Page's document belongs to the editor's Content section,
+          beside the panels it changes. */}
+      {creating && (
         <PageEditor
           workspaceId={workspaceId}
-          mode={editor}
-          page={editor === "edit" ? detail.raw : null}
+          mode="create"
+          page={null}
           defaultOwner={suggestedOwner}
-          onClose={() => setEditor(null)}
-          // A created page is one you want to look at; an edited one you are
-          // already looking at, and the invalidation the mutation performed
-          // has already refetched it.
+          onClose={() => setCreating(false)}
           onSaved={(saved) => {
-            if (editor === "create" && saved && saved !== selectedSlug) openPage(saved)
+            if (saved && saved !== selectedSlug) openPage(saved)
           }}
         />
       )}

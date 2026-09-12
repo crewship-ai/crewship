@@ -48,7 +48,8 @@ func TestPageApplicationActionsPublicationFenceAndOwnReceipt(t *testing.T) {
 	if !waitForBackgroundWork(5e9) {
 		t.Fatal("build timeout")
 	}
-	body, _ := json.Marshal(map[string]any{"build_id": job.ID, "expected_revision": 1, "expected_publication": 0, "reviewed_code": true})
+	definitionDigest, routineDigests := pageFenceForTest(t, h, ws, pageActionSlug)
+	body, _ := json.Marshal(map[string]any{"build_id": job.ID, "expected_revision": 1, "expected_publication": 0, "reviewed_code": true, "expected_definition_digest": definitionDigest, "expected_routine_digests": routineDigests})
 	r = pagesRequest(t, "POST", "/", ws, user, "OWNER", string(body))
 	r.SetPathValue("slug", pageActionSlug)
 	w = httptest.NewRecorder()

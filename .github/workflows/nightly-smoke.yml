@@ -1,30 +1,20 @@
 name: Nightly Smoke
 
-# Runs immediately after nightly.yml publishes a fresh per-run
-# `nightly-<date>-r<run_number>` pre-release (#895 — the repo has
-# immutable releases enabled, so the old rolling `nightly` tag name is
-# burned for good; see #894). The release smoke-test.yml is gated on
-# `release: published` with strict tag-name assertions (it expects
-# v-prefixed semver), so it does not cover the nightly channel cleanly.
-# This workflow is the nightly-specific equivalent: it resolves the
-# pre-release the triggering Nightly run published, pulls its archive,
-# checks it boots, talks to its own health endpoint, that the cosign
-# signature on checksums.txt verifies, and that the deb/rpm packages
-# carry a good GPG signature from the committed Crewship Packages key
-# (#932 — the nightly channel is where package signing is exercised
-# continuously, not just at tag time).
-#
-# A red check here means the most recent main commit produced a binary
-# that beta testers shouldn't install. The signal to the maintainer is
-# "investigate that commit before pointing anyone at nightly," not "yank
-# the release" — nightly is explicitly disposable.
+# Verify the exact artifacts named by the successful Nightly run's manifest.
+# Manual triage requires a run ID. Check archive boot, checksum signatures,
+# package signatures and the immutable image digest; never select a rolling tag.
 
 on:
   workflow_run:
     workflows: ["Nightly"]
     types: [completed]
   # Manual re-run for triage after a transient flake.
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Nightly workflow run ID to verify
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -34,14 +24,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve:
+    name: Resolve immutable publication
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.manifest.outputs.sha }}
+      image: ${{ steps.manifest.outputs.image }}
+      release: ${{ steps.manifest.outputs.release }}
+      published: ${{ steps.manifest.outputs.published }}
+    steps:
+      - name: Read the triggering run's publication manifest
+        id: manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$REPO/actions/runs/$RUN_ID" > "$RUNNER_TEMP/run.json"
+          jq -e --arg repo "$REPO" '.name == "Nightly" and .conclusion == "success" and .head_repository.full_name == $repo and .head_branch == "main"' "$RUNNER_TEMP/run.json"
+          gh run download "$RUN_ID" --repo "$REPO" --name nightly-image-manifest --dir "$RUNNER_TEMP/publication"
+          manifest="$RUNNER_TEMP/publication/image-manifest.json"
+          published=$(jq -er '.published | if type == "boolean" then tostring else error("missing publication verdict") end' "$manifest")
+          echo "published=$published" >> "$GITHUB_OUTPUT"
+          if [ "$published" = false ]; then
+            echo '::notice::This run retained superseded candidates; no public release to smoke.'
+            exit 0
+          fi
+          sha=$(jq -er .sha "$manifest")
+          digest=$(jq -er .digest "$manifest")
+          image=$(jq -er .image "$manifest")
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [ "$image" = "ghcr.io/${REPO%/*}/crewship" ]
+          release=$(jq -er .release "$manifest")
+          [[ "$release" =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "image=$image@$digest" >> "$GITHUB_OUTPUT"
+
   binary:
+    needs: [resolve]
     name: Nightly binary smoke
     # Skip when the triggering Nightly run itself failed — no point
     # exercising a binary that never published. Always run on
     # workflow_dispatch (no triggering run to inspect).
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    if: needs.resolve.outputs.published == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -54,6 +88,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: repo
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -72,44 +108,17 @@ jobs:
           # on pushes to main). Matches the pattern PR #483 landed in
           # migration-lint.yml.
           REPO: ${{ github.repository }}
-          # Empty on workflow_dispatch — the resolve step falls back to
-          # the newest nightly pre-release for manual triage runs.
-          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+          TARGET_SHA: ${{ needs.resolve.outputs.sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release }}
         shell: bash
         run: |
           set -euo pipefail
-          # Resolve WHICH per-run pre-release to smoke (#895 replaced
-          # the rolling `nightly` tag with immutable per-run tags).
-          # workflow_run gives us the exact commit the triggering
-          # Nightly built, so we pin the smoke verdict to THAT release
-          # rather than "newest" — a concurrent later publish must not
-          # let this run report green/red for the wrong artifact. On
-          # workflow_dispatch (manual triage) there is no triggering
-          # run, so newest wins.
-          #
-          # Defense-in-depth: only tags matching the exact shape
-          # nightly.yml mints are eligible, and the tag is regex-gated
-          # again before use — a maintainer-created release with an
-          # odd name can neither be selected nor smuggle shell
-          # metacharacters into the commands below.
-          TAG=$(gh api "repos/$REPO/releases?per_page=30" --jq '
-            [ .[]
-              | select(.prerelease == true)
-              | select(.tag_name | test("^nightly-[0-9]{8}-r[0-9]+$"))
-              | select((env.TARGET_SHA == "") or (.target_commitish == env.TARGET_SHA))
-            ] | sort_by(.created_at) | reverse | (first // empty) | .tag_name')
-          if [ -z "${TAG:-}" ]; then
-            if [ -n "${TARGET_SHA:-}" ]; then
-              echo "::error::no nightly-* pre-release targets ${TARGET_SHA} — the triggering Nightly run reported success but its publish step produced nothing this smoke can verify."
-            else
-              echo "::error::no nightly-* pre-releases exist — run the Nightly workflow first."
-            fi
-            exit 1
-          fi
-          case "$TAG" in
-            nightly-*) ;;
-            *) echo "::error::resolved tag '$TAG' escaped the nightly-* filter — refusing to proceed"; exit 1 ;;
-          esac
+          # The manifest names the exact release, even after another run of
+          # this SHA publishes or the release falls outside the first API page.
+          TAG="$RELEASE_TAG"
+          [[ "$TAG" =~ ^nightly-[0-9]{8}-r[0-9]+$ ]]
+          gh api "repos/$REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          jq -e --arg sha "$TARGET_SHA" '.prerelease == true and .target_commitish == $sha' "$RUNNER_TEMP/release.json"
           echo "Resolved nightly release: $TAG"
           echo "NIGHTLY_TAG=$TAG" >> "$GITHUB_ENV"
           # Resolve the exact asset name from the Releases API instead
@@ -383,38 +392,32 @@ jobs:
           fi
 
   docker:
-    name: Nightly Docker smoke
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    if: needs.resolve.outputs.published == 'true'
+    name: Nightly Docker smoke (published digest)
+    needs: [resolve]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
     steps:
-      - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull nightly image
+          password: ${{ github.token }}
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+        with:
+          cosign-release: v2.6.3
+      - name: Verify signature and boot the published digest
         env:
-          OWNER: ${{ github.repository_owner }}
+          IMAGE: ${{ needs.resolve.outputs.image }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          docker pull "ghcr.io/$OWNER/crewship:nightly"
-
-      - name: Probe `crewship version` inside container
-        env:
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          OUT=$(docker run --rm "ghcr.io/$OWNER/crewship:nightly" version)
-          echo "$OUT"
-          if [ -z "$OUT" ] || echo "$OUT" | grep -qx "dev"; then
-            echo "::error::container 'crewship version' missing or returned 'dev' sentinel"
-            exit 1
-          fi
+          cosign verify --certificate-identity "https://github.com/$REPO/.github/workflows/nightly.yml@refs/heads/main" --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA"

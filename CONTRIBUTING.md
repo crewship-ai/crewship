@@ -188,9 +188,22 @@ package's `exports` map before reaching for a version pin. The alias fails
 loudly (every Sentry-importing suite stops loading); a ceiling fails quietly,
 by never moving.
 
+## CI and release verification
+
+Use `bash scripts/verify.sh quick` before pushing (`go` and `full` add the
+full language suites). CI, Security and CodeQL expose stable aggregate
+results; a planned skip is checked against the change plan rather than
+accepted merely because GitHub renders it green. The real image build now
+runs as part of CI Result, including for frontend changes.
+
+The publication flow, exact-SHA gates, artifact identities, local commands
+and runtime credential requirements are documented in
+[the CI/CD implementation runbook](docs/prd/reports/ci-cd-implementation-2026-09-11.md).
+
 ## Verify any change
 
-Run these locally before pushing — CI will run them too:
+Run the relevant checks locally before pushing. CI routes checks by change type
+(see Pull requests below); unknown paths and main pushes run the full suite:
 
 ```bash
 go test ./... -count=1 && go vet ./...      # Go: must pass
@@ -340,22 +353,15 @@ tick the boxes that apply and remove rows that don't.
 - Update this file when you change something a future contributor would
   otherwise have to re-discover.
 
-CI (`ci.yml`) runs `pnpm lint && pnpm build` and
-`go test ./... && go vet ./...` on every PR against `main`. The
-security workflow runs gitleaks and the dependency audit on the same
-trigger. Both must be green for review.
+CI classifies the actual Git diff. Code changes run the frontend, embedded
+server, browser and Docker checks; frontend-only changes skip the Go matrix.
+Documentation-only PRs retain the workflow/invariant and security verdicts.
+Unknown paths trigger the full suite, as do main pushes.
 
-The root `Dockerfile` itself is **not** built on every PR — a real `docker
-build` costs minutes even with caching, so `pr-image-build.yml` only runs
-when a PR touches the Dockerfile or something one of its stages `COPY`s
-(`go.mod`/`go.sum`, `package.json`/`pnpm-lock.yaml`/`pnpm-workspace.yaml`,
-`prisma/**`, `cmd/**`, `internal/**`, `schemas/**`, `web/**`,
-`docker/server-entrypoint.sh`); it builds `linux/amd64` only and never
-pushes. `scripts/pr-image-build-paths.sh` runs on every PR regardless and
-fails if that path list ever drifts from what the Dockerfile actually
-copies. Everything else the image build catches — a `COPY` the Dockerfile
-forgot (#849, #886), a `pnpm prisma generate` or `pnpm build` break, the
-`web/out/` release gate (#1567) — otherwise waits for `nightly.yml` (#2064).
+The root Dockerfile builds and boots on every code PR through the reusable
+`pr-image-build.yml` job. It tests `linux/amd64` without pushing; publication
+checks both amd64 and arm64. `scripts/pr-image-build-paths.sh` verifies that
+CI calls the image workflow and its final verdict requires the image job.
 
 ## Changelog entries
 
@@ -633,3 +639,17 @@ accepted under the same terms — by opening a PR you agree that:
 
 We do not currently require a CLA or DCO sign-off. If that changes,
 we will say so here and in the PR template.
+
+
+### Type-checking test fixtures
+
+`pnpm test:types` uses `tsconfig.tests.json`, including Vitest's jest-dom matcher
+types. It runs in the Frontend Test CI job. Existing debt is recorded in
+`scripts/test-types-baseline.json` (#2493); a passing gate means no new
+file/code/message/count diagnostics, not that the existing debt is gone.
+
+Fix new diagnostics instead of adding them to the baseline. After repairing
+recorded errors, run `node scripts/typecheck-tests.mjs --write-baseline` and
+review the diff: ordinary cleanup should remove entries or lower counts.
+Never refresh the baseline automatically in CI. Line shifts do not change a
+fingerprint, and fixing one message grants no allowance for another message.

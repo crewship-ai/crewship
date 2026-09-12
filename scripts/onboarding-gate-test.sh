@@ -99,10 +99,10 @@ if [ -z "$JOB_SRC" ]; then
 else
   pass "ci.yml defines the onboarding-journey job"
 
-  if printf '%s\n' "$JOB_SRC" | grep -qE '^    if:'; then
+  if printf '%s\n' "$JOB_SRC" | grep -E '^    if:' | grep -vFxq "    if: needs.changes.outputs.code == 'true'"; then
     fail "onboarding-journey carries a job-level 'if:' — it can now skip on a PR while still reporting green"
   else
-    pass "onboarding-journey has no job-level 'if:' (cannot skip itself on a PR)"
+    pass "onboarding-journey runs for code changes (plan and verdict tested by scripts/ci)"
   fi
 
   # The fresh-DB precondition step is what stops a silent pass: the spec skips

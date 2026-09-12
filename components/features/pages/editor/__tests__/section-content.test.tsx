@@ -1,0 +1,707 @@
+/**
+ * Content, on an ordinary panel Page — the independent review's U02.
+ *
+ * *"Běžný případ musí vypadat celistvě, ne jako ukázka s vypnutými funkcemi."*
+ * That is not a styling note; it is the acceptance test for this section, and
+ * it decomposes into assertions a regression can actually trip:
+ *
+ *  · The complete case renders completely — identity, address, the panels with
+ *    their type, producer and state, a Save that says what it changes, and the
+ *    application offer as an offer.
+ *  · The application half is ABSENT, not disabled. An empty tab, a publication
+ *    checklist or a greyed-out Publish on a Page that has no application is
+ *    the exact failure U02 names, and each is asserted absent here.
+ *  · `mayEditDocument: false` closes the document editor and nothing else. The
+ *    old surface-wide `canEdit` took Access and History with it (V01), and the
+ *    metadata form has no business being gated by a sealed panel: `PATCH
+ *    /pages/{slug}` carries no panel list.
+ *  · A refused save keeps what was typed (#1563 rule 3) and reports the
+ *    server's own sentence (rule 2).
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-library/react"
+
+// ── The two integration seams ──────────────────────────────────────────────
+//
+// `PageFactsCard` is being exported from page-settings.tsx by another stream,
+// and `application-review.tsx` is being written by S6. Both are mocked so this
+// suite's verdict is about THIS file, not about how far the other streams got.
+
+vi.mock("@/components/features/pages/page-settings", () => ({
+  PageFactsCard: ({ slug }: { slug: string }) => <div data-slot="page-facts">facts for {slug}</div>,
+}))
+
+vi.mock("@/components/features/pages/editor/application-review", () => ({
+  EditorApplicationReview: ({ slug }: { slug: string }) => (
+    <div data-slot="application-review">review of {slug}</div>
+  ),
+}))
+
+// The YAML document editor is the real one in the product and a CodeMirror
+// mount in a test. Only the fact that Edit OPENS it is this file's business.
+vi.mock("@/components/features/pages/page-editor", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/features/pages/page-editor")>()),
+  PageEditor: ({ mode }: { mode: string }) => <div data-slot="page-document-editor">document editor ({mode})</div>,
+}))
+
+import { EditorContentSection } from "@/components/features/pages/editor/section-content"
+import { derivePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
+import { NO_PAGE_CAPABILITIES, type PageCapabilities, type ReviewSnapshotWire } from "@/lib/pages/editor-contract"
+import type { WirePageDetail } from "@/hooks/use-page-grants"
+
+// ── Fixtures ───────────────────────────────────────────────────────────────
+
+/** An ordinary panel Page: no application, one panel with data and one that
+ *  has never received any. `has_application: false` matters — the capability
+ *  derivation reads a MISSING flag as "yes" on purpose. */
+const PANEL_PAGE: WirePageDetail = {
+  id: "cpage1",
+  slug: "fleet-overview",
+  name: "Fleet overview",
+  description: "Services and container memory",
+  owner: "crew/lookout",
+  // Both flags stated: `has_application` is a PUBLISHED application and
+  // `has_project` is source of any kind. The backend field may not have
+  // landed, and an absent one reads as false — which is the answer here, but
+  // only by luck, so the fixture says it.
+  has_application: false,
+  has_project: false,
+  created_at: "2026-07-01T08:00:00Z",
+  updated_at: "2026-08-10T08:00:00Z",
+  panels: [
+    {
+      id: "sluzby",
+      schema: "status.v1",
+      title: "Services",
+      owner: "crew/lookout",
+      producer: "routine/nightly",
+      sla_seconds: 300,
+      span: 8,
+      state: "fresh",
+      data: { items: [] },
+      provenance: { producer: "routine/nightly", run_id: "r1", produced_at: "2026-08-12T11:58:00Z" },
+    },
+    {
+      id: "memory",
+      schema: "metric.v1",
+      title: "Memory",
+      owner: "crew/lookout",
+      producer: "script/collector",
+      sla_seconds: 60,
+      span: 4,
+      state: "never_produced",
+    },
+  ],
+}
+
+const SEALED_PAGE: WirePageDetail = {
+  ...PANEL_PAGE,
+  panels: [
+    ...(PANEL_PAGE.panels as object[]),
+    { panel_id: "secret", sealed: true, span: 12, owner_crew_name: "Finance" },
+  ] as WirePageDetail["panels"],
+}
+
+/** The same Page once it carries a PUBLISHED application. */
+const APP_PAGE: WirePageDetail = { ...PANEL_PAGE, has_application: true, has_project: true }
+
+/**
+ * The same Page with application source that has never been published — the
+ * first-publication case. `has_application` is
+ * `EXISTS(page_project_live WHERE published=1)` and is therefore false here,
+ * which is exactly how gating the review on it hid this screen.
+ */
+const DRAFT_PAGE: WirePageDetail = { ...PANEL_PAGE, has_application: false, has_project: true }
+
+/**
+ * The authorized review snapshot. Whether the review opens is read from HERE
+ * and never from `has_application` — §5 rule 6, and F2.
+ */
+const SNAPSHOT: ReviewSnapshotWire = {
+  issued_at: "2026-09-10T09:00:00Z",
+  candidate: {
+    revision: 7,
+    git_commit: "abc1234",
+    source_digest: "sha256:candidate",
+    created_at: "2026-09-10T08:00:00Z",
+    definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
+    actor: { kind: "agent", id: "ag_demo" },
+    build: null,
+  },
+  baseline: {
+    publication_version: 3,
+    published: true,
+    definition_digest: "sha256:definition",
+    definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
+    excluded_panels: 0,
+    withheld_changed: false,
+    definition_diverged: false,
+    source_revision: 5,
+    git_commit: "old1234",
+    source_available: true,
+    source_unavailable_reason: null,
+  },
+  routines: [],
+  capabilities: { may_edit_spec: true, may_publish: true },
+  blockers: [],
+  initial_publication: false,
+}
+
+/** A candidate with nothing live behind it: publication 0, never published. */
+const FIRST_PUBLICATION: ReviewSnapshotWire = {
+  ...SNAPSHOT,
+  baseline: {
+    publication_version: 0,
+    published: false,
+    definition_digest: "sha256:definition",
+    definition: { apiVersion: "crewship/v1", kind: "Page", spec: { panels: [] } },
+    excluded_panels: 0,
+    withheld_changed: false,
+    definition_diverged: false,
+    source_revision: null,
+    git_commit: null,
+    source_available: false,
+    source_unavailable_reason: null,
+  },
+  initial_publication: true,
+}
+
+const FIRST_PUBLICATION_NO_CANDIDATE: ReviewSnapshotWire = {
+  ...FIRST_PUBLICATION,
+  candidate: null,
+  blockers: [{ code: "no_candidate", message: "No candidate has been submitted." }],
+}
+
+const NO_CANDIDATE: ReviewSnapshotWire = {
+  ...SNAPSHOT,
+  candidate: null,
+  blockers: [{ code: "no_candidate", message: "No candidate has been submitted." }],
+}
+
+const MATCHES_LIVE: ReviewSnapshotWire = {
+  ...SNAPSHOT,
+  blockers: [
+    { code: "candidate_matches_live", message: "The candidate is identical to the live application." },
+  ],
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response
+}
+
+interface Harness {
+  /** `null` stands for a detail read that failed — a 403 or a 500. */
+  page?: WirePageDetail | null
+  capabilities?: Partial<PageCapabilities>
+  /** Answer for `PATCH /api/v1/pages/{slug}`. */
+  patch?: Response
+  /** Answer for `GET …/project/preview` — the application-hosting probe. */
+  probe?: Response
+  /** Answer for `GET …/project/review` — the authorized review snapshot. */
+  review?: Response
+  /** Successive answers for the same read, for retry cases. The last repeats. */
+  reviewQueue?: Response[]
+}
+
+function mount(harness: Harness = {}) {
+  const page = harness.page === undefined ? PANEL_PAGE : harness.page
+  const calls: Array<{ method: string; url: string; body: unknown }> = []
+  const mockFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const method = (init?.method ?? "GET").toUpperCase()
+    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null })
+    if (url.includes("/project/review")) {
+      if (harness.reviewQueue && harness.reviewQueue.length > 0) {
+        return harness.reviewQueue.length > 1
+          ? harness.reviewQueue.shift()!
+          : harness.reviewQueue[0]
+      }
+      return harness.review ?? jsonResponse(200, SNAPSHOT)
+    }
+    if (url.includes("/project/preview")) {
+      return harness.probe ?? jsonResponse(404, { error: "page has no project draft" })
+    }
+    if (method === "PATCH") return harness.patch ?? jsonResponse(200, { slug: page?.slug })
+    return jsonResponse(404, { error: `unrouted ${method} ${url}` })
+  })
+  vi.stubGlobal("fetch", mockFetch)
+
+  const onNavigate = vi.fn()
+  const onDirtyChange = vi.fn()
+  const onPaneChange = vi.fn()
+  const capabilities: PageCapabilities = page
+    ? { ...derivePageCapabilities(page), ...harness.capabilities }
+    : { ...NO_PAGE_CAPABILITIES, ...harness.capabilities }
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+  render(
+    <QueryClientProvider client={qc}>
+      <EditorContentSection
+        workspaceId="ws-1"
+        slug={page?.slug ?? "fleet-overview"}
+        page={page}
+        capabilities={capabilities}
+        onNavigate={onNavigate}
+        pane="section"
+        onPaneChange={onPaneChange}
+        onLeaveEditor={vi.fn()}
+        onPageDeleted={vi.fn()}
+        onDirtyChange={onDirtyChange}
+      />
+    </QueryClientProvider>,
+  )
+  return { calls, onNavigate, onDirtyChange }
+}
+
+function panelRows(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-slot='page-panel-row']"))
+}
+
+beforeEach(() => cleanup())
+afterEach(() => vi.unstubAllGlobals())
+
+// ── 1. The ordinary Page is complete ───────────────────────────────────────
+
+describe("an ordinary panel Page renders as a complete product", () => {
+  it("shows the identity, the address and the derived facts", () => {
+    mount()
+
+    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
+      "Services and container memory",
+    )
+    // The address is a fact, not a field: the server refuses a slug change
+    // through PATCH because every producer pushes to that address.
+    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /copy address/i })).toBeTruthy()
+    // The derived facts come from the shared card, not from a second copy of it.
+    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
+  })
+
+  it("lists every panel with its type, its producer and its state", () => {
+    mount()
+    const rows = panelRows()
+    expect(rows).toHaveLength(2)
+
+    const services = rows[0]
+    expect(services.textContent).toContain("Services")
+    expect(services.textContent).toContain("status.v1")
+    expect(services.textContent).toContain("routine/nightly")
+    expect(services.textContent).toContain("Fresh")
+
+    const memory = rows[1]
+    expect(memory.textContent).toContain("Memory")
+    expect(memory.textContent).toContain("metric.v1")
+    expect(memory.textContent).toContain("script/collector")
+    // A panel nothing has ever pushed to says so in words. It must never be a
+    // zero, which would read as a measurement (§9b.4).
+    expect(memory.textContent).toContain("Never produced")
+    expect(memory.textContent).not.toMatch(/\b0\b/)
+  })
+
+  it("says the save changes the live Page, at the control", () => {
+    mount()
+    const save = screen.getByRole("button", { name: /save changes/i })
+    expect(save).toBeTruthy()
+    expect(
+      screen.getByText("Saving changes the live Page for everyone who can see it."),
+    ).toBeTruthy()
+  })
+
+  it("offers a custom application last, as a secondary offer that promises no one click", () => {
+    mount()
+    const offer = document.querySelector<HTMLElement>("[data-slot='add-application']")!
+    expect(offer).toBeTruthy()
+    // Last in the section: an optional extra, not a missing half.
+    const section = offer.parentElement!
+    expect(section.lastElementChild).toBe(offer)
+
+    const button = within(offer).getByRole("button", { name: /add a custom application/i })
+    // A ghost button, never the section's primary action.
+    expect(button.dataset.variant).toBe("ghost")
+
+    fireEvent.click(button)
+    const text = offer.textContent ?? ""
+    expect(text).toContain("not created from here in one click")
+    expect(text).toContain("MCP workflow")
+    expect(text).toContain("build profile")
+    expect(text).toContain("publishes")
+  })
+
+  it("opens the document editor from a panel's own Edit control", () => {
+    mount()
+    fireEvent.click(within(panelRows()[0]).getByRole("button", { name: /^edit$/i }))
+    const editor = document.querySelector("[data-slot='page-document-editor']")
+    expect(editor?.textContent).toContain("edit")
+  })
+
+  it("draws a sealed panel as sealed rather than as an unknown schema", () => {
+    mount({ page: SEALED_PAGE })
+    const sealed = panelRows().find((r) => r.dataset.sealed === "true")!
+    expect(sealed.textContent).toContain("Sealed")
+    expect(sealed.textContent).toContain("Finance")
+  })
+})
+
+// ── 2. The application half is absent, not disabled ────────────────────────
+
+describe("nothing application-shaped appears on a Page that has no application", () => {
+  it("renders no application tab, no checklist and no disabled Publish", () => {
+    mount()
+    // No tabs at all: the four sections are the shell's, and this section adds none.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0)
+    expect(screen.queryByRole("button", { name: /publish/i })).toBeNull()
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    const body = document.body.textContent ?? ""
+    expect(body).not.toMatch(/checklist/i)
+    expect(body).not.toMatch(/I reviewed/i)
+    expect(body).not.toMatch(/candidate/i)
+    // Nothing on the screen is disabled-and-application-shaped: the only
+    // disabled control an ordinary Page may show is Save with nothing to save.
+    const disabled = Array.from(document.querySelectorAll<HTMLElement>("[disabled]"))
+    for (const el of disabled) {
+      expect(el.textContent ?? "").toMatch(/save changes/i)
+    }
+  })
+
+  it("reads no review snapshot at all when neither flag is set", () => {
+    const { calls } = mount()
+    // Neither published (`has_application`) nor drafted (`has_project`): an
+    // ordinary panel Page must not pay for a review it cannot have.
+    expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(0)
+    expect(document.querySelector("[data-slot='add-application']")).toBeTruthy()
+  })
+})
+
+// ── 2b. An application Page keeps its own content (F1) ─────────────────────
+
+describe("an application Page shows the review AND the Page itself", () => {
+  async function mountApplicationPage(harness: Harness = {}) {
+    // Capabilities are DERIVED from the fixture, not forced: whether the
+    // review is asked for at all is the thing under test here.
+    const result = mount({ page: APP_PAGE, ...harness })
+    // Settle the snapshot read before asserting on what it decided.
+    await waitFor(() => expect(document.body.textContent).not.toMatch(/Checking whether an agent/))
+    return result
+  }
+
+  it("puts the review first and the Page's identity, facts and panels below it", async () => {
+    await mountApplicationPage()
+
+    const review = await screen.findByText("review of fleet-overview")
+    expect(review).toBeTruthy()
+
+    // F1: every one of these was unreachable when Content returned the review
+    // and nothing else — there was no other door onto them in the product.
+    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect(screen.getByLabelText("Description")).toBeTruthy()
+    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
+    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+    expect(screen.getByRole("button", { name: /edit document/i })).toBeTruthy()
+
+    // Order: the review is the work; the Page's own content sits under it.
+    const own = screen.getByRole("heading", { name: "This Page itself" })
+    expect(review.compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("renames an application Page through the same one PATCH", async () => {
+    const { calls } = await mountApplicationPage()
+    await screen.findByText("review of fleet-overview")
+
+    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Operations Lab" } })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].body).toEqual({
+      name: "Operations Lab",
+      description: "Services and container memory",
+    })
+  })
+
+  it("opens no review when the snapshot carries no candidate", async () => {
+    await mountApplicationPage({ review: jsonResponse(200, NO_CANDIDATE) })
+
+    expect(screen.queryByText("review of fleet-overview")).toBeNull()
+    // …and says why, rather than leaving a silent gap where a review would be.
+    const line = document.querySelector("[data-slot='nothing-to-review']")!
+    expect(line.textContent).toContain("published as version 3")
+    expect(line.textContent).toContain("nothing to review")
+    // The Page's own content is the whole screen then.
+    expect(panelRows()).toHaveLength(2)
+    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+  })
+
+  it("opens no review when the candidate is identical to what is live", async () => {
+    await mountApplicationPage({ review: jsonResponse(200, MATCHES_LIVE) })
+
+    expect(screen.queryByText("review of fleet-overview")).toBeNull()
+    expect(document.querySelector("[data-slot='nothing-to-review']")?.textContent).toBe(
+      "The candidate is identical to the live application.",
+    )
+    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("keeps the Page reachable when the snapshot itself cannot be read", async () => {
+    await mountApplicationPage({
+      review: jsonResponse(403, { error: "you may not read this application's review" }),
+    })
+
+    const warning = document.querySelector("[data-slot='review-unreadable']")!
+    // Never "nothing to review": an unreadable snapshot is not an empty one.
+    expect(warning.textContent).toContain("you may not read this application's review")
+    expect(warning.textContent).not.toMatch(/nothing to review/)
+    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("offers a working, keyboard-reachable retry when the snapshot read fails", async () => {
+    const reason = "Page project storage is not configured"
+    const { calls } = mount({
+      page: APP_PAGE,
+      reviewQueue: [jsonResponse(503, { error: reason }), jsonResponse(200, SNAPSHOT)],
+    })
+
+    const box = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-slot='review-unreadable']")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(box.textContent).toContain(reason)
+
+    // An accessibility pass walked all 60 tab stops on this screen and found
+    // no way out but a browser reload. A real focusable <button> is the fix,
+    // not a clickable div and not a control parked behind `tabindex="-1"`.
+    const retry = screen.getByRole("button", { name: /try reading the review again/i })
+    expect(retry.tagName).toBe("BUTTON")
+    expect(retry).not.toBeDisabled()
+    expect(retry.getAttribute("tabindex")).not.toBe("-1")
+    retry.focus()
+    expect(document.activeElement).toBe(retry)
+
+    fireEvent.click(retry)
+
+    // Pressing it refetches the query the GATE read, so a server that has
+    // recovered moves the gate rather than merely clearing the message.
+    expect(await screen.findByText("review of fleet-overview")).toBeTruthy()
+    expect(document.querySelector("[data-slot='review-unreadable']")).toBeNull()
+    expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(2)
+
+    // …and the Page's own content was reachable throughout, which is the part
+    // of this gate that was already verified and must stay true.
+    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("offers no second application on a Page that already has one", async () => {
+    await mountApplicationPage()
+    expect(document.querySelector("[data-slot='add-application']")).toBeNull()
+  })
+})
+
+// ── 2c. The first publication (has_project, no has_application) ────────────
+
+describe("a Page whose application has never been published", () => {
+  async function mountDraftPage(harness: Harness = {}) {
+    const result = mount({ page: DRAFT_PAGE, review: jsonResponse(200, FIRST_PUBLICATION), ...harness })
+    await waitFor(() => expect(document.body.textContent).not.toMatch(/Checking whether an agent/))
+    return result
+  }
+
+  it("opens the review for the first publication, and keeps the Page below it", async () => {
+    const { calls } = await mountDraftPage()
+
+    // The gate asked the server at all — `has_application` is false here, and
+    // keying on it is what hid this screen.
+    expect(calls.filter((c) => c.url.includes("/project/review"))).toHaveLength(1)
+
+    const review = await screen.findByText("review of fleet-overview")
+    expect(review).toBeTruthy()
+    // The first-publication framing itself belongs to the review surface; what
+    // this section owes it is the mount and the Page's own content underneath.
+    expect(document.querySelector("[data-slot='nothing-to-review']")).toBeNull()
+    expect(screen.getByRole("heading", { name: "This Page itself" })).toBeTruthy()
+    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("shows ordinary Content, and never 'version 0', when no candidate is waiting", async () => {
+    await mountDraftPage({ review: jsonResponse(200, FIRST_PUBLICATION_NO_CANDIDATE) })
+
+    expect(screen.queryByText("review of fleet-overview")).toBeNull()
+    const line = document.querySelector("[data-slot='nothing-to-review']")!
+    expect(line.textContent).toContain("nothing has been published from it yet")
+    // The bug this wording replaces: a baseline of `{published: false,
+    // publication_version: 0}` announced "published as version 0".
+    expect(line.textContent).not.toMatch(/version 0/)
+    expect(line.textContent).not.toMatch(/published as version/)
+
+    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("still offers no 'add a custom application' — a draft is already one", async () => {
+    await mountDraftPage()
+    expect(document.querySelector("[data-slot='add-application']")).toBeNull()
+  })
+})
+
+// ── 3. Capabilities are per-section, not per-surface ───────────────────────
+
+describe("a Page carrying a panel this viewer may not see", () => {
+  it("refuses the document editor with the reason and still allows the metadata", () => {
+    const refusal = "This Page carries a panel you may not see."
+    mount({
+      page: SEALED_PAGE,
+      capabilities: { mayEditDocument: false, documentRefusal: refusal, mayEditMetadata: true },
+    })
+
+    expect(screen.getByText(refusal)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /edit document/i })).toBeDisabled()
+    // The list is still there — refusing the save is not a reason to hide what
+    // the Page contains.
+    expect(panelRows().length).toBeGreaterThan(0)
+    // …and the metadata form is untouched by it.
+    expect(screen.getByLabelText("Page name")).not.toBeDisabled()
+  })
+
+  it("disables the metadata form only when the metadata capability is off", () => {
+    mount({ capabilities: { mayEditMetadata: false } })
+    expect(screen.getByLabelText("Page name")).toBeDisabled()
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
+  })
+})
+
+// ── 4. Saving name and description ─────────────────────────────────────────
+
+describe("saving the Page's name and description", () => {
+  it("issues exactly one PATCH with the two fields, and reports success", async () => {
+    const { calls, onDirtyChange } = mount()
+
+    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Fleet overview v2" } })
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true))
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].url).toContain("/api/v1/pages/fleet-overview")
+    expect(patches[0].url).toContain("workspace_id=ws-1")
+    // No `panels` and no `slug`: an omitted panel list leaves the stored
+    // panels, their gates and their automations exactly as they are.
+    expect(patches[0].body).toEqual({
+      name: "Fleet overview v2",
+      description: "Services and container memory",
+    })
+
+    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
+  })
+
+  it("keeps the typed values and says the server's own words when the save is refused", async () => {
+    const refusal =
+      "only the page owner, a workspace admin, or a write grantee may edit this page"
+    mount({ patch: jsonResponse(403, { error: refusal }) })
+
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "typed but unsaved" } })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(refusal))
+    // Rule 3: what was typed is what a retry needs.
+    expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
+      "typed but unsaved",
+    )
+    // …and the section is still standing, refusal and all.
+    expect(panelRows()).toHaveLength(2)
+  })
+
+  it("keeps the typed values when the network drops, and says so differently", async () => {
+    const mockFetch = vi.fn(async () => {
+      throw new Error("connection reset")
+    })
+    vi.stubGlobal("fetch", mockFetch)
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <EditorContentSection
+          workspaceId="ws-1"
+          slug="fleet-overview"
+          page={PANEL_PAGE}
+          capabilities={derivePageCapabilities(PANEL_PAGE)}
+          onNavigate={vi.fn()}
+          pane="section"
+          onPaneChange={vi.fn()}
+          onLeaveEditor={vi.fn()}
+          onPageDeleted={vi.fn()}
+          onDirtyChange={vi.fn()}
+        />
+      </QueryClientProvider>,
+    )
+
+    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Renamed offline" } })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Could not reach the server"))
+    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Renamed offline")
+  })
+
+  it("refuses to submit an empty name rather than letting the server delete it", () => {
+    mount()
+    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "   " } })
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
+    expect(screen.getByText(/A Page needs a name/)).toBeTruthy()
+  })
+})
+
+// ── 5. The application offer names the real limitation ─────────────────────
+
+describe("the application offer is honest about this installation", () => {
+  it("fetches nothing until it is opened", () => {
+    const { calls } = mount()
+    expect(calls.filter((c) => c.url.includes("/project/preview"))).toHaveLength(0)
+  })
+
+  it("names the concrete limitation when the build worker is not configured", async () => {
+    const reason = "Page build worker is not configured"
+    mount({ probe: jsonResponse(503, { error: reason }) })
+
+    fireEvent.click(screen.getByRole("button", { name: /add a custom application/i }))
+    await waitFor(() => expect(screen.getByText(new RegExp(reason))).toBeTruthy())
+    expect(document.querySelector("[data-slot='offer-state']")?.textContent).toContain(
+      "separate runtime origin",
+    )
+  })
+
+  it("names the permission when the server refuses the caller", async () => {
+    const reason = "reading or editing project sources requires page edit permission"
+    mount({ probe: jsonResponse(403, { error: reason }) })
+
+    fireEvent.click(screen.getByRole("button", { name: /add a custom application/i }))
+    await waitFor(() => expect(screen.getByText(reason)).toBeTruthy())
+  })
+})
+
+// ── 6. A Page that could not be read ───────────────────────────────────────
+
+describe("a failed detail read", () => {
+  it("says the Page could not be read rather than drawing an empty Page", () => {
+    mount({ page: null })
+    expect(screen.getByRole("status").textContent).toContain("could not be read")
+    expect(screen.queryByLabelText("Page name")).toBeNull()
+    expect(panelRows()).toHaveLength(0)
+    // The absence must not read as a fact about the Page.
+    expect(document.body.textContent).not.toMatch(/declares no panels/)
+  })
+})

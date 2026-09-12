@@ -118,7 +118,7 @@ export function SidebarFilterButton({
         "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
-          : "bg-white/[0.04] border-white/[0.08] text-muted-foreground/70 hover:text-foreground",
+          : "bg-white/[0.04] border-white/[0.08] text-muted-foreground hover:text-foreground",
         className,
       )}
       {...props}
