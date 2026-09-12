@@ -22,7 +22,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
-- **Edit takes over the whole Page.** Pressing Edit now slides the editor in over the page instead of adding a row of tabs under its header: the sections sit in a rail on the left with one line under each name, the open section fills the rest, and the header names the way back and what viewers see meanwhile. The Pages list stays where it was, scroll and filters included, and returns on Back to page (#2515).
+- **Edit takes over the whole Page.** Pressing Edit now slides the editor in over the page instead of adding a row of tabs under its header: the sections sit in a rail on the left with one line under each name, the open section fills the rest, and the header names the way back and what viewers see meanwhile. The Pages list stays where it was, scroll and filters included, and returns on Back to page. The "Stop application / show panels" bar under an application Page is gone; the header carries an **Application | Panels** switch instead, shown only while an application is on screen — Panels closes the application in this tab and stops nothing for anyone else (#2515).
 
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 

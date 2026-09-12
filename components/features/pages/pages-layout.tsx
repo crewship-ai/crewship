@@ -39,7 +39,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { FilePlus2, Pencil, Share2, Upload } from "lucide-react"
+import { AppWindow, FilePlus2, LayoutGrid, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -159,6 +159,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // support.
   const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
 
+  // Application | Panels. The switch lives in the page header beside Edit,
+  // because that is where the page is named and where a person looks for
+  // what to do with it; it replaces a second bar under the header that read
+  // "Stop application / show panels". Showing panels unmounts the
+  // application frame — the host's direct way of ending sandboxed code in
+  // this tab — and stops nothing for anyone else. The switch is drawn only
+  // while an application is actually on screen (`applicationAvailable`,
+  // reported by the view), and a newly opened Page starts on its application.
+  const [showPanels, setShowPanels] = React.useState(false)
+  const [applicationAvailable, setApplicationAvailable] = React.useState(false)
+  React.useEffect(() => {
+    setShowPanels(false)
+  }, [selectedSlug])
+
   // One capability we can lower honestly without a second request: React
   // Query shares this key with the Access section's own read, so asking here
   // costs nothing extra, and only while the editor is open — a Page being
@@ -202,6 +216,41 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
+            {selectedSlug && !editing && applicationAvailable && (
+              <div
+                role="group"
+                aria-label="Show"
+                className="mr-1 flex h-7 items-center rounded-md border border-white/[0.08] p-0.5"
+              >
+                <button
+                  type="button"
+                  aria-pressed={!showPanels}
+                  onClick={() => setShowPanels(false)}
+                  className={cn(
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    !showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <AppWindow className="h-3 w-3" aria-hidden />
+                  Application
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={showPanels}
+                  onClick={() => setShowPanels(true)}
+                  title="Show this Page's panels instead; the application is closed in this tab and keeps running for everyone else"
+                  className={cn(
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <LayoutGrid className="h-3 w-3" aria-hidden />
+                  Panels
+                </button>
+              </div>
+            )}
             {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Share2}
@@ -328,7 +377,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} fallback={
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}
