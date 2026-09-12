@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { usePipelineRuns } from "@/hooks/use-pipelines"
 import { usePipelineRunRecords, isActiveRunStatus, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { apiFetch } from "@/lib/api-fetch"
+import { formatRoutineTime } from "@/lib/routine-time"
 import { useRunSubSpans } from "@/hooks/use-run-sub-spans"
 import { cn } from "@/lib/utils"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
@@ -451,7 +452,7 @@ function RunWaterfall({
         {deduped.map((s, i) => (
           <li key={i} className="flex items-center gap-3 text-sm">
             <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
-              {new Date(s.ts).toLocaleTimeString()}
+              {formatRoutineTime(s.ts)}
             </span>
             <Pill
               tone={
@@ -550,7 +551,7 @@ function formatRelative(iso: string): string {
   if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
   if (hr < 24) return `${hr}h ago`
-  return new Date(iso).toLocaleDateString()
+  return formatRoutineTime(iso)
 }
 
 // toGroupedRun maps a v83 PipelineRunRecord to the GroupedRun shape

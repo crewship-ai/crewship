@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { formatRoutineTime } from "@/lib/routine-time"
 import { Button } from "@/components/ui/button"
 
 interface Execution {
@@ -54,7 +55,7 @@ export function RoutineExecutionHistory({ workspaceId, runId, active }: { worksp
       <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left text-sm" onClick={() => setSelected(selected === row.id ? null : row.id)} aria-expanded={selected === row.id}>
         <span>{row.kind === "agent_attempt" ? "Agent invocation" : row.step_id} · Attempt {row.attempt}</span><span className="text-xs text-muted-foreground">{row.status}</span>
       </button>
-      <p className="mt-1 break-all text-xs text-muted-foreground">{row.execution_path} · {new Date(row.started_at).toLocaleTimeString()}{row.agent_slug && ` · ${row.agent_slug}`}{row.model && ` · requested ${row.model}`}</p>
+      <p className="mt-1 break-all text-xs text-muted-foreground">{row.execution_path} · {formatRoutineTime(row.started_at)}{row.agent_slug && ` · ${row.agent_slug}`}{row.model && ` · requested ${row.model}`}</p>
       {row.error && <p className="mt-2 whitespace-pre-wrap text-xs text-destructive">{row.error}</p>}
       {selected === row.id && <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs">{outputError ? "This output is unavailable." : output === null ? "Loading output…" : output || "No output recorded."}</pre>}
     </div>)}
