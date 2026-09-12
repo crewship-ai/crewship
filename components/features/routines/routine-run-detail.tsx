@@ -335,6 +335,26 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   const mapHeight = Math.min(560, Math.max(300, (dsl?.steps?.length ?? 1) * 78))
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4">
+      {/* A run reached by a deep link (Inbox banner, a shared URL) needs a way
+        back to its routine and to the list; the layout's breadcrumb bar only
+        renders around the routine detail. */}
+      <nav
+        aria-label="Run location"
+        className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+      >
+        <Link className="hover:text-foreground" href="/routines">
+          Routines
+        </Link>
+        <span aria-hidden>›</span>
+        <Link
+          className="font-medium text-foreground/85 hover:text-foreground"
+          href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug })}`}
+        >
+          {run.pipeline_name || run.pipeline_slug}
+        </Link>
+        <span aria-hidden>›</span>
+        <span>Run</span>
+      </nav>
       <RoutineIdentityHeader
         routine={identity}
         workspaceId={workspaceId}
@@ -442,12 +462,16 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         {failed && (
           <p className="text-xs text-muted-foreground" data-testid="run-next-step">
             What you can do: fix the step in{" "}
-            <Link
-              className="text-primary hover:underline"
-              href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, view: "edit" })}`}
-            >
-              Edit recipe
-            </Link>
+            {roleAtLeast(role, "MANAGER") ? (
+              <Link
+                className="text-primary hover:underline"
+                href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, view: "edit" })}`}
+              >
+                Edit recipe
+              </Link>
+            ) : (
+              "the recipe (a manager can edit it)"
+            )}
             , then{" "}
             {roleAtLeast(role, "MEMBER") ? (
               <button

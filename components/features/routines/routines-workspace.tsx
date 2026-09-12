@@ -24,6 +24,7 @@ import {
   type RoutineStatusFilter,
 } from "@/lib/routine-filters"
 import { cn } from "@/lib/utils"
+import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { RoutineCalendar } from "./routine-calendar"
 
 export const routineRunHref = (slug: string, id: string) =>
@@ -65,7 +66,19 @@ interface RoutinesWorkspaceProps {
   onSearchChange?: (value: string) => void
   filters?: RoutineFilterState
   onFilter?: (status: RoutineStatusFilter) => void
+  /** Ephemeral routines and `test-*` fixtures are hidden unless asked for. */
+  showHidden?: boolean
+  onToggleHidden?: (show: boolean) => void
 }
+
+/** StatusPill tone for a run presentation tone. */
+const PILL_TONE = {
+  success: "success",
+  destructive: "danger",
+  warn: "warn",
+  blue: "blue",
+  default: "muted",
+} as const
 
 /** The word and tone for a routine's last run, from the row plus the live feed. */
 export function routineLastState(
@@ -80,7 +93,20 @@ export function routineLastState(
   if (routine.last_run_outcome === "FAILED") return { status: "FAILED", label: "Result failed" }
   if (status === "cancelled") return { status: "CANCELLED", label: "Stopped" }
   if (status === "completed") return { status: "SUCCEEDED", label: "Completed" }
-  return { status: status.toUpperCase(), label: status }
+  // Anything else (queued, interrupted, dry_run …) gets the word and tone the
+  // run page gives it, never the raw token.
+  const p = routineRunPresentation({ status, outcome: routine.last_run_outcome })
+  const tone =
+    p.tone === "destructive"
+      ? "FAILED"
+      : p.tone === "warn"
+        ? "WAITING"
+        : p.tone === "blue"
+          ? "RUNNING"
+          : p.tone === "success"
+            ? "SUCCEEDED"
+            : "PENDING"
+  return { status: tone, label: p.label }
 }
 
 function lastResultText(routine: Pipeline, state: ReturnType<typeof routineLastState>) {
@@ -254,6 +280,22 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                   ))}
                 </div>
               )}
+              {props.onToggleHidden && (
+                <button
+                  type="button"
+                  aria-pressed={!!props.showHidden}
+                  onClick={() => props.onToggleHidden?.(!props.showHidden)}
+                  title="Also show temporary routines and release-verification fixtures"
+                  className={cn(
+                    "rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors",
+                    props.showHidden
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Show hidden
+                </button>
+              )}
               <span className="ml-auto text-[11px] text-muted-foreground">
                 {displayed.length} of {visible.length}
               </span>
@@ -394,14 +436,7 @@ function RecentRoutineRuns({
       <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
         {visibleRuns.map((run) => {
           const routine = routines.find((r) => r.slug === run.pipeline_slug)
-          const tone =
-            run.outcome === "FAILED" || run.status === "failed"
-              ? "FAILED"
-              : isAwaitingApproval(run.status)
-                ? "WAITING"
-                : run.status === "completed"
-                  ? "SUCCEEDED"
-                  : run.status.toUpperCase()
+          const presentation = routineRunPresentation(run)
           return (
             <Link
               key={run.id}
@@ -419,7 +454,7 @@ function RecentRoutineRuns({
               <span className="font-mono text-[11px] text-muted-foreground">
                 {formatRoutineTime(run.started_at).split(" · ")[0]}
               </span>
-              <StatusPill status={tone} label={routineRunLabel(run)} />
+              <StatusPill tone={PILL_TONE[presentation.tone]} label={presentation.label} />
             </Link>
           )
         })}

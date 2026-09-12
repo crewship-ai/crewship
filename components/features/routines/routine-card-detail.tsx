@@ -109,30 +109,23 @@ export function RoutineCardDetail({
 }: Props) {
   const [selectedView, setView] = useUrlSelection("view")
   const view = ROUTINE_VIEWS.find((v) => v === selectedView) ?? "definition"
-  const [editing, setEditing] = React.useState(false)
   const { role } = useAbilities()
   const canEdit = roleAtLeast(role, "MANAGER")
+  // `?view=edit` IS the editing state (#2519): reload, Back and Forward all
+  // land where the address says, and leaving the routine clears it.
+  const editing = (selectedView === "edit" || selectedView === "settings") && canEdit
   const [draft, setDraft] = React.useState<{
     definition: Record<string, unknown>
     version: number
   } | null>(null)
+  const openEditor = React.useCallback(() => setView("edit"), [setView])
   React.useEffect(() => {
-    if (editRequest > 0 && canEdit) setEditing(true)
-  }, [editRequest, canEdit])
-  // `?view=edit` is a place (the full-page editor), not a flag that flips
-  // and disappears: reload and Back land on the editor again (#2519).
-  React.useEffect(() => {
-    if ((selectedView === "edit" || selectedView === "settings") && canEdit) setEditing(true)
-  }, [selectedView, canEdit])
-  const openEditor = React.useCallback(() => {
-    setEditing(true)
-    setView("edit")
-  }, [setView])
+    if (editRequest > 0 && canEdit) openEditor()
+  }, [editRequest, canEdit, openEditor])
   const closeEditor = React.useCallback(() => {
-    setEditing(false)
     setDraft(null)
-    if (selectedView === "edit" || selectedView === "settings") setView(null, { replace: true })
-  }, [selectedView, setView])
+    setView(null, { replace: true })
+  }, [setView])
   const [selected, setSelected] = React.useState<string | null>(null)
   // Separate from `selected`: selection is a persistent choice, focus a
   // one-shot "bring this into view". Merged, a re-render could yank the
@@ -236,8 +229,7 @@ export function RoutineCardDetail({
             onRolledBack={onChanged}
             onPrepareDraft={(definition, version) => {
               setDraft({ definition, version })
-              setEditing(true)
-              setView("definition")
+              openEditor()
             }}
           />
           <details className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs">
@@ -329,10 +321,7 @@ export function RoutineCardDetail({
           </p>
           <button
             className="mt-2 text-xs text-primary"
-            onClick={() => {
-              setDraft(null)
-              setEditing(false)
-            }}
+            onClick={closeEditor}
           >
             Discard draft
           </button>

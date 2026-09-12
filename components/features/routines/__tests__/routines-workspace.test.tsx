@@ -152,6 +152,27 @@ describe("<RoutinesWorkspace> — the one list", () => {
     expect(screen.getByRole("textbox", { name: "Search routines" })).toBeInTheDocument()
   })
 
+  it("keeps a door to hidden routines now that the explorer's toggles are gone", () => {
+    h.runs = []
+    h.schedules = []
+    const onToggleHidden = vi.fn()
+    render(
+      <RoutinesWorkspace
+        workspaceId="ws"
+        routines={rows}
+        loading={false}
+        error={null}
+        onSelect={vi.fn()}
+        filters={filters}
+        onFilter={vi.fn()}
+        showHidden={false}
+        onToggleHidden={onToggleHidden}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Show hidden", pressed: false }))
+    expect(onToggleHidden).toHaveBeenCalledWith(true)
+  })
+
   it("says what the empty list means instead of leaving a pane", () => {
     h.runs = []
     h.schedules = []
