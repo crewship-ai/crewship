@@ -1160,3 +1160,26 @@ complete successful Go run recorded above. This follow-up changes only frontend
 test fixtures, generated API documentation and documentation prose.
 
 New remote CI is required on the follow-up head. No merge/deployment occurred.
+
+
+### Exact claim ownership guard after routine separation
+
+Moving routine webhooks out of the ledger removed the old HTTP test's foreign
+queued item. `TestClaimKinds_OnlyDeclaredPairsCanConsumeWork` now independently
+seeds higher-priority foreign work and proves that only declared (source, kind)
+pairs can be claimed. It also proves that an empty domain kind is a value, not
+a wildcard, and checks that foreign generation, retry budget and attempt rows
+remain untouched.
+
+The complete `internal/work` package passed (5.249 s,
+`CLAIM_GUARD_PACKAGE_EXIT=0`). Separate Go overlays changing the filter to
+source-only and to independent source/domain allowlists both failed the guard
+with a foreign work claim (exit 1). Production source was not edited by these
+mutations. This follow-up adds only this test and this evidence entry; the full
+Go run above predates the new test.
+
+As of 2026-09-12 17:22 UTC, CI 34705999489 on `4ca91853` had passed every
+completed non-skipped job and was still running the full API race job. CodeQL
+34705999391 passed. These are not final results for a later head. CodeRabbit
+remains throttled rather than reviewed. Final remote evidence belongs in the
+PR and archived check outputs; no merge or deployment has occurred.
