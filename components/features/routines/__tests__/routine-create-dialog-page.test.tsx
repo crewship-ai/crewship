@@ -124,9 +124,9 @@ describe("routine editor as a page", () => {
     // The editor itself, not a stripped-down copy: identity, the Recipe | Code
     // strip, the draft strip and the footer.
     expect(screen.getByLabelText("Name")).toHaveValue("Existing recipe")
-    expect(screen.getByRole("button", { name: "Code", exact: true })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Save draft", exact: true })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Publish", exact: true })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Publish" })).toBeInTheDocument()
   })
 
   it("keeps the dialog presentation by default", async () => {
