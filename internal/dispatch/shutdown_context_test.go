@@ -119,3 +119,31 @@ func TestShutdown_ConfirmedStopPreservesAcceptedWork(t *testing.T) {
 		t.Fatalf("shutdown emitted %d user-cancellation transitions", cancelled)
 	}
 }
+
+// A cancel that arrives after the run completed did not cancel anything. The
+// runtime reports success; recording `cancelled` over it would hide effects
+// that happened. The cancel is noted, the state is the truth.
+func TestSettle_CompletionThatBeatsACancelIsRecordedAsSucceeded(t *testing.T) {
+	h := newHarness(t)
+	h.rt.block = make(chan struct{})
+	h.cfg.CancelPollInterval = time.Hour // the cancel is never delivered to the runtime
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+	r := h.accept("cancel-after-completion")
+	h.waitForState(r.WorkID, work.StateRunning)
+	if _, err := h.store.RequestCancel(context.Background(), r.WorkID, "operator", "too late"); err != nil {
+		t.Fatal(err)
+	}
+	close(h.rt.block) // the run finishes on its own, successfully
+	it := h.waitForState(r.WorkID, work.StateSucceeded)
+	if it.State != work.StateSucceeded {
+		t.Fatalf("state = %s, want succeeded", it.State)
+	}
+	var cancelled int
+	if err := h.db.QueryRow("SELECT COUNT(*) FROM work_events WHERE work_id=? AND to_state='cancelled'", r.WorkID).Scan(&cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 0 {
+		t.Fatalf("%d cancelled transitions recorded over a completed run", cancelled)
+	}
+}

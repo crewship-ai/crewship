@@ -70,6 +70,43 @@ type webhookLaunch struct {
 	// stopped records that a stop was requested. Set before launch it closes
 	// the gate; set after launch it is informational.
 	stopped bool
+	// confirmed is set once a process is KNOWN to exist: the provider's probe
+	// answered present, or the run produced a stream event. Between Launch and
+	// this, a process may or may not exist yet — creation is in flight inside
+	// RunAgent — and nothing observed at the location proves it will not.
+	confirmed bool
+	// returned is set when Run has returned. After that no creation is
+	// pending: RunAgent is synchronous, so a process that does not exist now
+	// is a process that will not be created.
+	returned bool
+}
+
+// launchPhase is the answer to "what can a stop or a probe honestly say".
+type launchPhase int
+
+const (
+	// launchPreparing: no location yet. Nothing exists, and the gate keeps it
+	// that way once a stop is recorded.
+	launchPreparing launchPhase = iota
+	// launchPending: the location is recorded and RunAgent is running, but no
+	// process has been confirmed. An absent probe here is NOT a stopped
+	// process — creation may still be in flight — so nothing is concluded
+	// from it. This is the window the second review reproduced.
+	launchPending
+	// launchSettled: the process was confirmed to exist, or Run has returned
+	// (so nothing further can be created). The provider's probe is the truth.
+	launchSettled
+)
+
+func (l *webhookLaunch) phaseLocked() launchPhase {
+	switch {
+	case l.location == nil:
+		return launchPreparing
+	case l.confirmed || l.returned:
+		return launchSettled
+	default:
+		return launchPending
+	}
 }
 
 // webhookLaunchGate is what runWebhookAgent asks before each pre-agent step
@@ -132,6 +169,23 @@ func (rt *WebhookRuntime) Run(ctx context.Context, a dispatch.Assignment, starte
 	defer cancel()
 	launch := &webhookLaunch{cancel: cancel}
 	rt.launches.Store(a.RunID, launch)
+	// A stream event is proof the process exists; Run returning is proof no
+	// creation is still pending. Both are recorded on the launch state BEFORE
+	// they reach the dispatcher, so a Stop or an Alive that follows either
+	// answers from the settled phase.
+	confirmed := func() {
+		launch.mu.Lock()
+		launch.confirmed = true
+		launch.mu.Unlock()
+		if started != nil {
+			started()
+		}
+	}
+	defer func() {
+		launch.mu.Lock()
+		launch.returned = true
+		launch.mu.Unlock()
+	}()
 
 	// Resolved here, not carried from acceptance. This is where a revoked
 	// permission, a deleted crew or a disabled agent takes effect.
@@ -142,7 +196,7 @@ func (rt *WebhookRuntime) Run(ctx context.Context, a dispatch.Assignment, starte
 		return fmt.Errorf("%w: resolve agent %s at dispatch: %w", errWebhookBeforeAgent, in.AgentID, err)
 	}
 
-	return rt.h.runWebhookAgent(runCtx, info, in.AgentID, a.RunID, in.Payload, nil, started, launch)
+	return rt.h.runWebhookAgent(runCtx, info, in.AgentID, a.RunID, in.Payload, nil, confirmed, launch)
 }
 
 // errWebhookBeforeAgent marks the failures that provably happened BEFORE the
@@ -186,15 +240,27 @@ func (rt *WebhookRuntime) Classify(a dispatch.Assignment, err error) dispatch.Ou
 // errWebhookInputUnreadable is a permanent fault in immutable data.
 var errWebhookInputUnreadable = errors.New("webhook run input is unreadable")
 
-// Stop signals the runtime for this attempt.
+// Stop signals the runtime for this attempt, and says only what it can prove.
 //
-// Before the agent is launched there is nothing to signal, and the answer is
-// "stopped" only because the gate now guarantees nothing will be launched: the
-// stop is recorded under the launch lock, and the run's context is cancelled
-// so a preparation that honours it ends early. After launch the request goes to
-// the provider's own probe at the recorded location, and a false is not a
-// failure: it means "asked, still there", which the dispatcher must turn into
-// reconciliation rather than into a cancellation nobody performed.
+// Before launch there is nothing to signal, and the answer is "stopped" only
+// because the gate now guarantees nothing will be launched: the stop is
+// recorded under the launch lock, and the run's context is cancelled so a
+// preparation that honours it ends early.
+//
+// While the launch is PENDING — location recorded, RunAgent running, no
+// process confirmed — the stop is recorded, the context is cancelled so a
+// creation that honours it aborts, and the kill probe is sent in case the
+// process already exists; but the answer is "not confirmed stopped" whatever
+// the probe says. An absent probe in this phase proves nothing: creation may
+// still complete a moment later, and calling it a stop is how the second
+// review watched an agent execute behind a confirmed cancellation. The stop
+// becomes answerable once the phase settles — a process is confirmed, or Run
+// returns — and the dispatcher asks again then.
+//
+// After that the request goes to the provider's own probe at the recorded
+// location, and a false is not a failure: it means "asked, still there",
+// which the dispatcher must turn into reconciliation rather than into a
+// cancellation nobody performed.
 func (rt *WebhookRuntime) Stop(ctx context.Context, locator string) (bool, error) {
 	runID := runIDFromLocator(locator)
 	if runID == "" {
@@ -210,35 +276,77 @@ func (rt *WebhookRuntime) Stop(ctx context.Context, locator string) (bool, error
 	}
 	launch.mu.Lock()
 	launch.stopped = true
-	location := launch.location
-	if location == nil {
-		// Nothing launched, and the gate now refuses to. Ending the run's
-		// context lets a preparation that honours it stop early; one that
-		// does not is caught at its next step. The context is NOT cancelled
-		// after launch: a running CLI is stopped by the provider's probe at
-		// its location, and cutting its stream would only make the run
-		// return early while the process carried on.
+	phase := launch.phaseLocked()
+	var location orchestrator.RunLocation
+	if launch.location != nil {
+		location = *launch.location
+	}
+	if phase != launchSettled {
+		// Nothing confirmed yet. Ending the run's context lets a preparation
+		// or a creation that honours it stop before a process exists; one
+		// that does not is caught by the gate (before launch) or by the
+		// probes once the phase settles. The context is NOT cancelled once
+		// a process is confirmed: a running CLI is stopped by the provider's
+		// probe at its location, and cutting its stream would only make the
+		// run return early while the process carried on.
 		launch.cancel()
-		launch.mu.Unlock()
-		return true, nil
 	}
 	launch.mu.Unlock()
+
+	switch phase {
+	case launchPreparing:
+		return true, nil
+	case launchPending:
+		// Best effort against a process that may already exist; the answer
+		// stays "not confirmed" regardless, and a present process is recorded
+		// as such so the next probe answers from the settled phase.
+		stopped, err := rt.stopAt(ctx, runID, location)
+		if err == nil && !stopped {
+			launch.mu.Lock()
+			launch.confirmed = true
+			launch.mu.Unlock()
+		}
+		return false, nil
+	default:
+		return rt.stopAt(ctx, runID, location)
+	}
+}
+
+func (rt *WebhookRuntime) stopAt(ctx context.Context, runID string, location orchestrator.RunLocation) (bool, error) {
 	if runner, ok := rt.h.orch.(interface {
 		StopRunAt(context.Context, orchestrator.RunLocation) (bool, error)
 	}); ok {
-		return runner.StopRunAt(ctx, *location)
+		return runner.StopRunAt(ctx, location)
 	}
 	return rt.h.orch.StopRun(ctx, runID)
 }
 
-// Alive reports whether a runtime still exists for this attempt.
+func (rt *WebhookRuntime) aliveAt(ctx context.Context, runID string, location orchestrator.RunLocation) (bool, error) {
+	if runner, ok := rt.h.orch.(interface {
+		RunIsAliveAt(context.Context, orchestrator.RunLocation) (bool, error)
+	}); ok {
+		return runner.RunIsAliveAt(ctx, location)
+	}
+	return rt.h.orch.RunIsAlive(ctx, runID)
+}
+
+// Alive reports whether a runtime still exists for this attempt, and refuses
+// to answer "no" while the answer could still change.
 //
 // Before launch the answer is a definite no: no process was created, and the
-// launch state is the record of that. After launch it is the provider's own
-// answer at the recorded location. An error is deliberately not a "no":
-// treating an unreachable container as an absent process is the same mistake
-// as reading a missing locator as "nothing started" — it converts "I do not
-// know" into "it is safe to start another".
+// launch state is the record of that. While the launch is pending, a present
+// probe confirms the process (that is how a silent CLI gets recorded as
+// running) but an absent one is an error, not a no — creation may still be in
+// flight. Once the phase settles the provider's own answer stands, with one
+// more question after Run has returned without a confirmation: if the
+// provider says absent but the orchestrator's journal shows an exec was
+// requested for this run, a process was created and is gone, and whether it
+// did anything is unknown — that is an error, and reconciliation, rather than
+// a cancellation. Only "absent, and no exec was ever requested" is a no.
+//
+// An error is deliberately not a "no": treating an unreachable container as an
+// absent process is the same mistake as reading a missing locator as "nothing
+// started" — it converts "I do not know" into "it is safe to start another".
 func (rt *WebhookRuntime) Alive(ctx context.Context, locator string) (bool, error) {
 	runID := runIDFromLocator(locator)
 	if runID == "" {
@@ -250,17 +358,61 @@ func (rt *WebhookRuntime) Alive(ctx context.Context, locator string) (bool, erro
 			"cannot be answered from here", runID)
 	}
 	launch.mu.Lock()
-	location := launch.location
+	phase := launch.phaseLocked()
+	confirmed := launch.confirmed
+	var location orchestrator.RunLocation
+	if launch.location != nil {
+		location = *launch.location
+	}
 	launch.mu.Unlock()
-	if location == nil {
+
+	if phase == launchPreparing {
 		return false, nil
 	}
-	if runner, ok := rt.h.orch.(interface {
-		RunIsAliveAt(context.Context, orchestrator.RunLocation) (bool, error)
-	}); ok {
-		return runner.RunIsAliveAt(ctx, *location)
+	alive, err := rt.aliveAt(ctx, runID, location)
+	if err != nil {
+		return false, err
 	}
-	return rt.h.orch.RunIsAlive(ctx, runID)
+	if alive {
+		launch.mu.Lock()
+		launch.confirmed = true
+		launch.mu.Unlock()
+		return true, nil
+	}
+	if phase == launchPending {
+		return false, fmt.Errorf("run %s: no process at %s yet, and its creation is still pending; "+
+			"absence cannot be concluded until the launch settles", runID, location.RunID)
+	}
+	if !confirmed {
+		// Run returned and nothing ever confirmed the process. The provider
+		// says absent now, but "absent" and "never existed" differ by one
+		// question the journal can answer.
+		requested, qerr := rt.h.execRequested(ctx, runID)
+		if qerr != nil {
+			return false, fmt.Errorf("run %s: absent, and whether a process was ever created could not be "+
+				"established: %w", runID, qerr)
+		}
+		if requested {
+			return false, fmt.Errorf("run %s: a process was requested for it and is gone; what it did before "+
+				"ending is unknown", runID)
+		}
+	}
+	return false, nil
+}
+
+// execRequested reports whether the orchestrator ever asked the container for
+// a process on behalf of runID. The `exec.command` journal entry is emitted
+// immediately before the exec is created, under the run's trace id, so its
+// presence means creation was attempted — succeeded or failed — and its
+// absence means the run never reached that line.
+func (h *WebhookHandler) execRequested(ctx context.Context, runID string) (bool, error) {
+	var n int
+	if err := h.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM journal_entries WHERE trace_id = ? AND entry_type = ?`,
+		runID, string(journal.EntryExecCommand)).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 func (rt *WebhookRuntime) loadLaunch(runID string) (*webhookLaunch, bool) {

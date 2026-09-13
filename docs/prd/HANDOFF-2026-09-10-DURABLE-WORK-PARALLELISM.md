@@ -1290,8 +1290,26 @@ orchestrator's probes with a fake container transport: the container start
 blocks until the run's context is cancelled and then completes anyway (gate
 must refuse) or aborts (shutdown). Both are red on the previous runtime
 (overlay: `needs_reconciliation` in both cases) and green on this branch.
-Residual, stated: between `Launch` recording the location and the tmux session
-existing, a stop's kill probe can answer ABSENT and the turn then runs to
-completion; settle's probe finds it gone and records `cancelled` for work that
-in fact completed. That window is inside `orchestrator.RunAgent`'s preflight
-and is not closed here.
+Second independent review (2026-09-13, `review-2026-09-13-independent/`)
+reproduced the residual window this entry first only disclosed: with the
+location recorded and `RunAgent` still in its preflight, the stop's kill probe
+answered ABSENT, the dispatcher took that as a confirmed stop, and the preflight
+then created the agent behind a `cancelled` ledger row. The runtime now has
+three launch phases. Pending (location recorded, process unconfirmed): `Stop`
+cancels the creation's context, sends the kill probe, and answers "not
+confirmed" whatever the probe says; `Alive` treats absent as an error, present
+as confirmation (so a silent CLI is still recorded running). Settled (process
+confirmed, or `Run` returned so nothing can be created): the provider's probe
+decides, and after `Run` returned without a confirmation an absent process is
+"never existed" only if no `exec.command` journal entry carries the run id —
+otherwise it is an unknown outcome and reconciliation. `settle` records
+`succeeded` when the run reports success even if a cancel was requested: a
+cancel delivered after completion cancelled nothing. Tests: cancel and
+shutdown at the pending-creation barrier (production probes, absent fake
+transport, real HTTP cancel route), completion racing a cancel, the reviewer's
+own reproducer; pre-fix runtime and dispatcher under an overlay fail all but
+the shutdown case (which parked before too). Not proven: a creation that
+ignores its context and outlives `RunAgent`'s return without ever being
+probed present — the journal check is what stands between that and a false
+`cancelled`, and it is a check of the orchestrator's own emission order, not
+of the process.
