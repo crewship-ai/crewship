@@ -50,6 +50,14 @@ exception in the other direction: it prints YAML unless you ask for
 | `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `grants <slug>` | List a page's grants |
+| `folder list` | List the folders you can see, with how many of their pages you reach |
+| `folder create <slug> --owner crew/<slug>` | Create a folder owned by a crew |
+| `folder show <slug>` | Show a folder and the pages in it you reach |
+| `folder update <slug>` | Rename a folder or change its icon or colour |
+| `folder delete <slug> --yes` | Delete an empty folder |
+| `folder add <folder> <page>` | File a page in a folder |
+| `folder remove <folder> <page>` | Take a page out of a folder |
+| `move <page> --folder <slug>\|--unfiled` | Move a page into a folder, or out of the one it is in |
 | `webhook create <slug> --panel <id>` | Mint a URL that lets something outside the workspace write one panel |
 | `webhook list <slug>` | List a page's webhook tokens and say which still work |
 | `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
@@ -692,6 +700,139 @@ crewship page grants fleet-201
 
 Lists every grant on the page: subject type, subject, level, and (for
 `produce`) which panels it covers.
+
+---
+
+## `crewship page folder`
+
+A folder is a named group of pages owned by one crew, with an icon from the
+crew icon set and a colour from the crew palette — the same picker a crew uses.
+One level, a page in at most one folder; a page outside any folder is
+*unfiled*. Folders arrange and do not share: filing a page in one changes
+nobody's access to it, and a folder shows you only the pages in it you already
+reach.
+
+Every folder command is backed by the [folder endpoints](/api-reference/pages#folders).
+
+### `crewship page folder list`
+
+```bash
+crewship page folder list
+```
+
+The folders you can see — the ones you reach a page in, your crews' own, or all
+of them as an admin — with `PAGES` counting the pages in each that you reach.
+`--format quiet` prints one slug per line.
+
+### `crewship page folder create <slug>`
+
+```bash
+crewship page folder create ops-board --name "Ops board" --owner crew/ops
+crewship page folder create ops-board --name "Ops board" --owner crew/ops --icon rocket --color amber
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | The folder's display name. Defaults to the slug. |
+| `--owner crew/<slug>` | The owning crew. Required — a folder is owned by a crew, never by a person. The `crew/` prefix may be omitted. |
+| `--icon <name>` | A crew icon name, from the crew icon picker's set. The server refuses anything outside it and says so. |
+| `--color <key>` | A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
+
+A workspace admin, or a MANAGER (or higher) who belongs to the owning crew,
+may create it; the folder is the crew's from birth.
+
+### `crewship page folder show <slug>`
+
+```bash
+crewship page folder show ops-board
+```
+
+The folder and the pages in it you reach, each with its `REACH` column. A
+folder you reach no page in — and have no standing on as its crew or an admin
+— is a 404, indistinguishable from one that does not exist.
+
+### `crewship page folder update <slug>`
+
+```bash
+crewship page folder update ops-board --name "Operations"
+crewship page folder update ops-board --icon chart --color cyan
+crewship page folder update ops-board --icon ""
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | A new display name. |
+| `--icon <name>` | A crew icon name. Pass `""` to clear it. |
+| `--color <key>` | A crew palette key. Pass `""` to clear it. |
+
+Only the flags you pass are sent. The slug and the owning crew are fixed at
+creation. An admin, or the owning crew's MANAGER (or higher).
+
+### `crewship page folder delete <slug>`
+
+```bash
+crewship page folder delete ops-board --yes
+```
+
+| Flag | Description |
+|---|---|
+| `--yes`, `-y` | Skip the confirmation prompt. Required in a script. |
+
+Only an empty folder: one still holding a page — including one you cannot see
+— is refused with 409, and the refusal does not say how many. Move the pages
+out first (`crewship page move <page> --unfiled`).
+
+### `crewship page folder add <folder> <page>`
+
+```bash
+crewship page folder add ops-board fleet-201
+```
+
+The same as `crewship page move fleet-201 --folder ops-board`. See
+[`page move`](#crewship-page-move-page) for the two authorities it needs and
+the fences it carries.
+
+### `crewship page folder remove <folder> <page>`
+
+```bash
+crewship page folder remove ops-board fleet-201
+```
+
+The same as `crewship page move fleet-201 --unfiled`, naming the folder
+explicitly. The page's owner or a workspace admin may; the folder is not
+consulted.
+
+---
+
+## `crewship page move <page>`
+
+```bash
+crewship page move fleet-201 --folder ops-board
+crewship page move fleet-201 --unfiled
+```
+
+| Flag | Description |
+|---|---|
+| `--folder <slug>` | File the page in this folder, moving it out of any other. |
+| `--unfiled` | Take the page out of whichever folder it is in. The folder is read from the page, so you name none. |
+
+Exactly one of the two. Moving changes nobody's access to the page.
+
+**Who may.** Filing needs both halves of the authority in one caller: you
+initiate as the page's owner or a workspace admin, and the folder accepts you
+as an admin or a MANAGER (or higher) of its owning crew. Lacking either, the
+refusal names who can. Unfiling is the page owner's or an admin's alone —
+taking your page back never waits for anyone.
+
+**The fences.** The command reads the page's `pages_version` and the folder's
+`grants_version` right before it writes and sends exactly what it read. A
+**409** therefore means somebody else moved the page, or changed the folder,
+between that read and the write; the error prints the current pair — look
+again and re-run. There is deliberately no flag to type a fence by hand: a
+fence you typed says nothing about what you saw.
+
+Moves and removals are journalled as `page.folder_membership_changed`; the
+folder's own changes as `page.folder_changed`.
 
 ---
 

@@ -265,6 +265,11 @@ type pageWire struct {
 	Panels             []any  `json:"panels"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+	// Folder is the folder this page is filed in, or null — never omitted, so
+	// a client cannot mistake "unfiled" for "this build does not say". A move
+	// carries PagesVersion as its fence (pages_folders.go).
+	Folder       *pageFolderRef `json:"folder"`
+	PagesVersion int64          `json:"pages_version"`
 
 	// Authored says the panels below carry their authored half — `public`,
 	// `actions`, `wake`, `on_failure`, `refresh` — because this caller may
@@ -331,6 +336,11 @@ type pageListWire struct {
 	// that named the other subjects on a page would be the ACL, and the ACL
 	// has its own endpoint with its own gate (ListGrants).
 	Reach []string `json:"reach"`
+	// Folder and PagesVersion are the same two fields pageWire carries, for
+	// the same reasons: the rail groups rows by folder, and a move from the
+	// rail needs the fence without a second read.
+	Folder       *pageFolderRef `json:"folder"`
+	PagesVersion int64          `json:"pages_version"`
 }
 
 // zeroPanelStates is the rollup's fixed shape (§11b decision 15).
@@ -371,6 +381,8 @@ type pageRecord struct {
 	Description        string
 	OwnerUserID        string
 	OwnerCrewID        string
+	FolderID           string
+	PagesVersion       int64
 	CreatedAt          string
 	UpdatedAt          string
 }
@@ -436,18 +448,61 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	rows, err := h.db.QueryContext(r.Context(), `
+	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load page viewer", err)
+		return
+	}
+	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
+	if err != nil {
+		replyInternalError(w, h.logger, "list pages", err)
+		return
+	}
+	out := make([]pageListWire, 0, len(index.rows))
+	for i := range index.rows {
+		out = append(out, h.pageListRow(&index.rows[i], index.folders, viewer))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// pageIndex is what the index and the folder readers share: every page in
+// scope that the CALLER reaches, with the panels, owner slug and reach the
+// listing row is rendered from, plus the workspace's folders keyed by id.
+//
+// It is one function so the statement count is one number. Every load in it
+// is a bulk load — the pages, the viewer's grants, the panels, the crew slugs,
+// the folders — never one per page, and TestPagesList_QueryCountDoesNotGrowWithPages
+// holds it there whatever the page count and however many folders there are.
+// A page the caller cannot reach is not in `rows` at all: the same "sealed
+// rather than visible-but-denied" posture §11b decision 14 takes for panels,
+// and the verdict Get reaches through canSeePage. An empty reach IS that
+// verdict.
+type pageIndex struct {
+	rows    []pageIndexRow
+	folders map[string]*pageFolderRecord
+}
+
+type pageIndexRow struct {
+	rec           pageRecord
+	panels        []*panelRecord
+	ownerCrewSlug string
+	reach         []string
+}
+
+func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
+	args := append([]any{wsID}, scope.args...)
+	rows, err := h.db.QueryContext(ctx, `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
+		       COALESCE(p.folder_id, ''), p.pages_version,
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0)
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
-		WHERE p.workspace_id = ?
-		ORDER BY p.updated_at DESC, p.slug ASC`, wsID)
+		WHERE p.workspace_id = ? AND `+scope.where+`
+		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
 	if err != nil {
-		replyInternalError(w, h.logger, "list pages", err)
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -455,54 +510,45 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
-			replyInternalError(w, h.logger, "scan page", err)
-			return
+			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
+			return nil, err
 		}
 		records = append(records, p)
 	}
 	if err := rows.Err(); err != nil {
-		replyInternalError(w, h.logger, "rows iteration (pages)", err)
-		return
+		return nil, err
 	}
 
-	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "load page viewer", err)
-		return
-	}
-
-	// Every grant in the workspace, in ONE query, with its use-time verdict
-	// already decided by the single reader (pages_grants_authz.go). Asking per
-	// row would make the ACL check cost one statement per page, and a listing
+	// Every grant in scope, in ONE query, with its use-time verdict already
+	// decided by the single reader (pages_grants_authz.go). Asking per row
+	// would make the ACL check cost one statement per page, and a listing
 	// whose permission check is the slow part is a permission check somebody
 	// deletes later.
-	grantsByPage, err := h.loadPageGrantRecordsIn(r.Context(), wsID, "")
+	grantsByPage, err := h.loadPageGrantRecordsIn(ctx, wsID, scope.page)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page grants", err)
-		return
+		return nil, err
 	}
 	mine := pageViewerGrantMatch(viewer)
 
-	// The same holds for panels and for the owning crews' slugs: one statement
-	// each for the workspace, never one per page. The index's statement count
-	// is fixed whatever the page count, and TestPagesList_QueryCountDoesNotGrowWithPages
-	// holds it there — the day a per-page read slips in, an 80-page workspace
-	// pays for it 80 times over on every rail refresh.
-	panelsByPage, err := h.loadPanelsIn(r.Context(), wsID, pagesInWorkspace(wsID))
+	// The same holds for panels, for the owning crews' slugs and for the
+	// folders: one statement each for the scope, never one per page.
+	panelsByPage, err := h.loadPanelsIn(ctx, wsID, scope)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page panels", err)
-		return
+		return nil, err
 	}
-	crewSlugs, err := h.loadCrewSlugs(r.Context(), wsID)
+	crewSlugs, err := h.loadCrewSlugs(ctx, wsID)
 	if err != nil {
-		replyInternalError(w, h.logger, "load crew slugs", err)
-		return
+		return nil, err
+	}
+	folders, err := h.loadFoldersIn(ctx, wsID)
+	if err != nil {
+		return nil, err
 	}
 
-	out := make([]pageListWire, 0, len(records))
+	out := &pageIndex{folders: folders, rows: make([]pageIndexRow, 0, len(records))}
 	for i := range records {
-		rec := &records[i]
+		rec := records[i]
 		panels := panelsByPage[rec.ID]
 		// Rendered the way ownerRef renders it: the slug when the crew row is
 		// there, the id when it is not.
@@ -513,55 +559,59 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 				ownerCrewSlug = rec.OwnerCrewID
 			}
 		}
-		// A page this caller cannot reach is not listed as a locked row — it is
-		// not listed at all, the same "sealed rather than visible-but-denied"
-		// posture §11b decision 14 takes for panels, and the same verdict Get
-		// reaches through canSeePage. An empty reach IS that verdict.
-		reach := h.pageReach(rec, ownerCrewSlug, panels, viewer,
+		reach := h.pageReach(&rec, ownerCrewSlug, panels, viewer,
 			anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)))
 		if len(reach) == 0 {
 			continue
 		}
-		row := pageListWire{
-			HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
-			ID:          rec.ID,
-			Slug:        rec.Slug,
-			Name:        rec.Name,
-			Description: rec.Description,
-			Owner:       "user/" + rec.OwnerUserID,
-			PanelCount:  len(panels),
-			PanelStates: zeroPanelStates(),
-			CreatedAt:   rec.CreatedAt,
-			UpdatedAt:   rec.UpdatedAt,
-			Reach:       reach,
-		}
-		if rec.OwnerCrewID != "" {
-			row.Owner = "crew/" + ownerCrewSlug
-			row.OwnerCrewSlug = ownerCrewSlug
-		}
-		// The rollup counts only the panels this viewer may see. A sealed
-		// panel contributes to panel_count (the grid draws it) and to nothing
-		// else: reporting its state would disclose the health of data the
-		// viewer is not entitled to read.
-		var newest time.Time
-		for _, panel := range panels {
-			if !h.canSeePanel(viewer, panel) {
-				continue
-			}
-			v := h.verdict(panel)
-			row.PanelStates[string(v.State)]++
-			if panel.HasData && panel.ProducedAt.After(newest) {
-				newest = panel.ProducedAt
-			}
-		}
-		row.State = string(worstPanelState(row.PanelStates))
-		if !newest.IsZero() {
-			row.LastProducedAt = newest.UTC().Format(time.RFC3339)
-		}
-		out = append(out, row)
+		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach})
 	}
+	return out, nil
+}
 
-	writeJSON(w, http.StatusOK, out)
+// pageListRow renders one index row for this viewer. It costs no statement:
+// everything it reads was loaded in bulk by loadPageIndex.
+func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
+	rec := &row.rec
+	out := pageListWire{
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		ID:           rec.ID,
+		Slug:         rec.Slug,
+		Name:         rec.Name,
+		Description:  rec.Description,
+		Owner:        "user/" + rec.OwnerUserID,
+		PanelCount:   len(row.panels),
+		PanelStates:  zeroPanelStates(),
+		CreatedAt:    rec.CreatedAt,
+		UpdatedAt:    rec.UpdatedAt,
+		Reach:        row.reach,
+		Folder:       folders[rec.FolderID].ref(),
+		PagesVersion: rec.PagesVersion,
+	}
+	if rec.OwnerCrewID != "" {
+		out.Owner = "crew/" + row.ownerCrewSlug
+		out.OwnerCrewSlug = row.ownerCrewSlug
+	}
+	// The rollup counts only the panels this viewer may see. A sealed
+	// panel contributes to panel_count (the grid draws it) and to nothing
+	// else: reporting its state would disclose the health of data the
+	// viewer is not entitled to read.
+	var newest time.Time
+	for _, panel := range row.panels {
+		if !h.canSeePanel(viewer, panel) {
+			continue
+		}
+		v := h.verdict(panel)
+		out.PanelStates[string(v.State)]++
+		if panel.HasData && panel.ProducedAt.After(newest) {
+			newest = panel.ProducedAt
+		}
+	}
+	out.State = string(worstPanelState(out.PanelStates))
+	if !newest.IsZero() {
+		out.LastProducedAt = newest.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // worstPanelState mirrors hooks/use-pages.ts worstPanelState: the page reports
@@ -1057,12 +1107,14 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 	err := h.db.QueryRowContext(ctx, `
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
+		       COALESCE(folder_id, ''), pages_version,
 		       created_at, updated_at,
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
+		&p.FolderID, &p.PagesVersion,
 		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
@@ -1099,10 +1151,19 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 type pageScope struct {
 	where string
 	args  []any
+	// page is set when the scope IS one page, so the grant reader can narrow
+	// to it; empty means "the workspace's grants", which is what the index
+	// wants anyway.
+	page string
 }
 
-func pageOnly(pageID string) pageScope       { return pageScope{"p.id = ?", []any{pageID}} }
-func pagesInWorkspace(wsID string) pageScope { return pageScope{"p.workspace_id = ?", []any{wsID}} }
+func pageOnly(pageID string) pageScope { return pageScope{"p.id = ?", []any{pageID}, pageID} }
+func pagesInWorkspace(wsID string) pageScope {
+	return pageScope{"p.workspace_id = ?", []any{wsID}, ""}
+}
+func pagesInFolder(folderID string) pageScope {
+	return pageScope{"p.folder_id = ?", []any{folderID}, ""}
+}
 
 // loadPanelsIn is loadPanels over a scope, keyed by page id. A page with no
 // panels has no entry. Three statements whatever the scope holds: the panel
@@ -1445,6 +1506,10 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		CreatedAt:   rec.CreatedAt,
 		UpdatedAt:   rec.UpdatedAt,
 		Authored:    authored,
+		// One statement, only for a filed page; the index never comes
+		// through here (it renders from loadPageIndex's bulk load).
+		Folder:       h.folderRefFor(ctx, rec),
+		PagesVersion: rec.PagesVersion,
 	}
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
