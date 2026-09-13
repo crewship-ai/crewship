@@ -17,7 +17,7 @@ import {
   ownPathsSentence,
   toFolderShared,
   type FolderAclEntry,
-} from "@/lib/pages/folder-sharing"
+ FOLDER_ADDS_NOTHING, GRANTS_STAY } from "@/lib/pages/folder-sharing"
 
 const entry = (over: Partial<FolderAclEntry>): FolderAclEntry => ({
   subjectType: "crew",
@@ -30,8 +30,13 @@ const entry = (over: Partial<FolderAclEntry>): FolderAclEntry => ({
 })
 
 describe("the marker", () => {
-  it("reads the wire's three words and nothing else", () => {
-    expect(toFolderShared("crew")).toBe("crew")
+  it("reads the wire's five words and nothing else", () => {
+    expect(toFolderShared("people")).toBe("people")
+    expect(toFolderShared("crews")).toBe("crews")
+    expect(toFolderShared("people_and_crews")).toBe("people_and_crews")
+    // The pre-audit spelling is not a word any more; an old server's "crew"
+    // is read as "none" rather than as a claim about crews.
+    expect(toFolderShared("crew")).toBe("none")
     expect(toFolderShared("workspace")).toBe("workspace")
     expect(toFolderShared("none")).toBe("none")
     expect(toFolderShared(undefined)).toBe("none")
@@ -39,8 +44,10 @@ describe("the marker", () => {
   })
 
   it("is one of three sentences", () => {
-    expect(folderSharingSentence("none")).toBe("Only the owning crew")
-    expect(folderSharingSentence("crew")).toBe("Shared with a crew")
+    expect(folderSharingSentence("none")).toBe("Only the owning crew and workspace admins")
+    expect(folderSharingSentence("people")).toBe("Shared with named people")
+    expect(folderSharingSentence("crews")).toBe("Shared with named crews")
+    expect(folderSharingSentence("people_and_crews")).toBe("Shared with named people and crews")
     expect(folderSharingSentence("workspace")).toBe("Shared with everyone in this workspace")
   })
 
@@ -69,7 +76,7 @@ describe("After the move, with names", () => {
     expect(moveImpactFromAcl([entry({ canWrite: true }), entry({ subjectType: "user", subjectId: "u1", label: "ada@example.com", canWrite: true })])).toBe(
       "Crew Support and ada@example.com can view and edit.",
     )
-    expect(moveImpactFromAcl([])).toBe("Visible to the owning crew only.")
+    expect(moveImpactFromAcl([])).toBe(`${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`)
   })
 
   it("joins three names with commas and an and", () => {
@@ -81,9 +88,10 @@ describe("After the move, with names", () => {
 
 describe("After the move, without names", () => {
   it("is built from the marker alone", () => {
-    expect(moveImpactFromShared("workspace")).toBe("Visible to everyone in this workspace.")
-    expect(moveImpactFromShared("crew")).toBe("Visible to members of the shared crews.")
-    expect(moveImpactFromShared("none")).toBe("Visible to the owning crew only.")
+    expect(moveImpactFromShared("workspace")).toBe(`Through the folder, everyone in this workspace can see it. ${GRANTS_STAY}`)
+    expect(moveImpactFromShared("crews")).toBe(`Through the folder, named crews can see it. ${GRANTS_STAY}`)
+    expect(moveImpactFromShared("people")).toBe(`Through the folder, named people can see it. ${GRANTS_STAY}`)
+    expect(moveImpactFromShared("none")).toBe(`${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`)
     expect(MOVE_IMPACT_UNFILED).toBe("No folder permissions apply; the page's own access stays as it is.")
   })
 })

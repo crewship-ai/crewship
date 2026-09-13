@@ -62,7 +62,7 @@ import {
   usePageAccessMe,
   type PageFolderView,
 } from "@/hooks/use-page-folders"
-import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 const SELECT_CLASS = cn(
   CREATE_SURFACE_INPUT,
@@ -186,8 +186,7 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, p
 
   const title = folder ? (
     <span className="inline-flex items-center gap-1.5">
-      <FolderDot color={folder.color} />
-      <FolderGlyph icon={folder.icon} className="text-muted-foreground" />
+      <FolderGlyph icon={folder.icon} color={folder.color} className={folder.color ? undefined : "text-muted-foreground"} />
       <span className="min-w-0 truncate">{folder.name}</span>
     </span>
   ) : (

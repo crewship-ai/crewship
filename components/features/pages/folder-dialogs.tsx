@@ -70,7 +70,7 @@ import {
   type PageFolderView,
 } from "@/hooks/use-page-folders"
 import { MOVE_IMPACT_UNFILED, moveImpactFromAcl, moveImpactFromShared } from "@/lib/pages/folder-sharing"
-import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 const SELECT_CLASS = cn(
   CREATE_SURFACE_INPUT,
@@ -237,7 +237,7 @@ export function FolderEditDialog({
                 </span>
               )}
               <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
-                <FolderDot color={color} />
+                <FolderGlyph icon={icon} color={color} className={icon ? undefined : "opacity-60"} />
                 {icon ?? "No icon"}
                 {color ? ` · ${color}` : ""}
               </span>
@@ -548,8 +548,7 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
                       : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
                   )}
                 >
-                  <FolderDot color={o.folder?.color} />
-                  <FolderGlyph icon={o.folder?.icon} className={o.folder ? undefined : "opacity-60"} />
+                  <FolderGlyph icon={o.folder?.icon} color={o.folder?.color} className={o.folder ? undefined : "opacity-60"} />
                   <span className="min-w-0 flex-1 truncate" title={o.name}>
                     {o.name}
                   </span>
