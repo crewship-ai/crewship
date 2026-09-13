@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
     timezone: string
     next_run_at?: string
   }[],
+  automations: [] as { id: string; enabled: boolean; action: { routine_slug: string } }[],
 }))
 
 vi.mock("@/hooks/use-issue-detail", () => ({ useUrlSelection: () => [null, vi.fn()] }))
@@ -27,6 +28,9 @@ vi.mock("@/hooks/use-pipeline-schedules", () => ({
   usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null }),
 }))
 vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: vi.fn() }))
+vi.mock("@/hooks/use-automations", () => ({
+  useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
+}))
 vi.mock("../routine-calendar", () => ({ RoutineCalendar: () => <div>Calendar</div> }))
 
 const rows = [
@@ -65,6 +69,7 @@ const filters = { status: "all" as const, invocations: "all" as const, authorAge
 describe("<RoutinesWorkspace> — the one list", () => {
   it("shows purpose, step count and how it runs on the row, and selects the recipe", () => {
     h.runs = []
+    h.automations = [{ id: "a1", enabled: true, action: { routine_slug: "other" } }]
     h.schedules = [
       {
         id: "s1",
@@ -83,7 +88,6 @@ describe("<RoutinesWorkspace> — the one list", () => {
         loading={false}
         error={null}
         onSelect={select}
-        search="service"
         filters={filters}
       />,
     )
@@ -91,10 +95,13 @@ describe("<RoutinesWorkspace> — the one list", () => {
     const row = within(list).getByRole("button", { name: /Weekly report/ })
     expect(within(row).getByText("Summarize service health")).toBeVisible()
     expect(row.textContent).toMatch(/4 steps · .*Europe\/Prague/)
+    // A routine an automation can start is not "Manual".
+    expect(within(list).getByRole("button", { name: /Other routine/ }).textContent).toMatch(
+      /1 step · 1 automation/,
+    )
     expect(within(row).getByText("Completed")).toBeVisible()
     expect(within(row).getByText(/Finished ·/)).toBeVisible()
-    expect(within(list).queryByText("Other routine")).not.toBeInTheDocument()
-    // No second list, no health dashboard, no explorer buckets.
+    // No health dashboard; the explorer beside this panel owns the buckets.
     expect(screen.queryByRole("tab", { name: /Health/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/Awaiting approval/)).not.toBeInTheDocument()
     fireEvent.click(row)
@@ -104,6 +111,7 @@ describe("<RoutinesWorkspace> — the one list", () => {
   it("puts the waiting decision first, as a banner that opens the run", () => {
     h.runs = [{ id: "run_1", pipeline_slug: "report", pipeline_name: "Weekly report", status: "waiting" }]
     h.schedules = []
+    h.automations = []
     render(
       <RoutinesWorkspace
         workspaceId="ws"
@@ -128,6 +136,7 @@ describe("<RoutinesWorkspace> — the one list", () => {
   it("counts the routines that failed last time and applies the explorer's filters", () => {
     h.runs = []
     h.schedules = []
+    h.automations = []
     render(
       <RoutinesWorkspace
         workspaceId="ws"

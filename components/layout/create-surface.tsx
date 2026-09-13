@@ -1788,11 +1788,7 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
 }
 
 export function CreateSurfaceFooter({
-  hint = (
-    <>
-      <kbd className="font-mono">⌘↵</kbd> to confirm · <kbd className="font-mono">Esc</kbd> to cancel
-    </>
-  ),
+  hint: hintProp,
   aside,
   onCancel,
   cancelLabel = "Cancel",
@@ -1808,6 +1804,22 @@ export function CreateSurfaceFooter({
   className,
   ...props
 }: CreateSurfaceFooterProps) {
+  // The keyboard contract is only true inside a dialog: the page presentation
+  // ignores Escape, so its footer must not advertise it.
+  const footerInDialog = React.useContext(InDialog)
+  const hint =
+    hintProp !== undefined ? (
+      hintProp
+    ) : (
+      <>
+        <kbd className="font-mono">⌘↵</kbd> to confirm
+        {footerInDialog && (
+          <>
+            {" "}· <kbd className="font-mono">Esc</kbd> to cancel
+          </>
+        )}
+      </>
+    )
   const guard = React.useContext(CloseGuard)
   return (
     <div

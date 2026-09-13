@@ -528,6 +528,18 @@ describe("what the migrations asked for", () => {
 describe("CreateSurface as a page", () => {
   beforeEach(() => cleanup())
 
+  it("does not advertise Esc in its footer, because a page ignores it", () => {
+    render(
+      <CreateSurface open onOpenChange={vi.fn()} presentation="page" ariaLabel="Page">
+        <CreateSurfaceHeader title="Page" onClose={vi.fn()} />
+        <CreateSurfaceBody>body</CreateSurfaceBody>
+        <CreateSurfaceFooter primaryLabel="Save" onPrimary={vi.fn()} onCancel={vi.fn()} />
+      </CreateSurface>,
+    )
+    expect(screen.queryByText(/Esc/)).toBeNull()
+    expect(screen.getByText(/to confirm/)).toBeInTheDocument()
+  })
+
   function Page(props: {
     dirty?: boolean
     open?: boolean

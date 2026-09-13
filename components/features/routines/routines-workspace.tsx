@@ -12,6 +12,8 @@ import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules, type PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
+import { useAutomations } from "@/hooks/use-automations"
+import { automationsForRoutine } from "@/lib/automations"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -104,10 +106,11 @@ function lastResultText(routine: Pipeline, state: ReturnType<typeof routineLastS
   return `Finished · ${when}`
 }
 
-/** "Every day at 09:00 · Europe/Prague" for the enabled plan of a routine, or "Manual". */
-function whenItRuns(schedule?: PipelineSchedule): string {
-  if (!schedule) return "Manual"
-  return `${describeCron(schedule.cron_expr)} · ${schedule.timezone || "UTC"}`
+/** "Every day at 09:00 · Europe/Prague" for the enabled plan, else what starts it. */
+function whenItRuns(schedule: PipelineSchedule | undefined, automations: number): string {
+  const plan = schedule ? `${describeCron(schedule.cron_expr)} · ${schedule.timezone || "UTC"}` : null
+  const rules = automations > 0 ? `${automations} automation${automations === 1 ? "" : "s"}` : null
+  return [plan, rules].filter(Boolean).join(" · ") || "Manual"
 }
 
 export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
@@ -115,6 +118,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
   const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
+  const { automations } = useAutomations(props.workspaceId)
   const filters = props.filters
   const search = props.search ?? ""
 
@@ -241,8 +245,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
 
             <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
               <div
-                className="hidden gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid"
-                style={{ gridTemplateColumns: "minmax(0,1fr) 150px 60px minmax(0,220px) 60px" }}
+                className="hidden gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_150px_60px_minmax(0,220px)_60px]"
                 aria-hidden
               >
                 <span>Routine and purpose</span>
@@ -260,8 +263,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                       <button
                         type="button"
                         onClick={() => props.onSelect(routine.slug)}
-                        className="grid w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 md:items-center"
-                        style={{ gridTemplateColumns: "minmax(0,1fr) 150px 60px minmax(0,220px) 60px" }}
+                        className="grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/30 md:grid-cols-[minmax(0,1fr)_150px_60px_minmax(0,220px)_60px] md:items-center md:gap-3"
                       >
                         <span className="flex min-w-0 items-start gap-3">
                           <CrewIcon
@@ -283,7 +285,10 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                                   {stepCount} {stepCount === 1 ? "step" : "steps"} ·{" "}
                                 </>
                               )}
-                              {whenItRuns(scheduleBySlug.get(routine.slug))}
+                              {whenItRuns(
+                                scheduleBySlug.get(routine.slug),
+                                automationsForRoutine(automations, routine.slug).length,
+                              )}
                             </span>
                           </span>
                         </span>
@@ -294,13 +299,14 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                             live={state.status === "RUNNING"}
                           />
                         </span>
-                        <span className="text-right font-mono text-xs tabular-nums text-muted-foreground">
+                        <span className="font-mono text-xs tabular-nums text-muted-foreground md:text-right">
                           {routine.invocation_count ?? 0}
+                          <span className="md:hidden"> {routine.invocation_count === 1 ? "run" : "runs"}</span>
                         </span>
                         <span className="truncate text-xs text-muted-foreground">
                           {lastResultText(routine, state)}
                         </span>
-                        <span className="text-right text-xs text-primary">Open →</span>
+                        <span className="text-xs text-primary md:text-right">Open →</span>
                       </button>
                     </li>
                   )

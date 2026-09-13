@@ -14,7 +14,8 @@ const h = vi.hoisted(() => ({
   error: null as string | null,
   waitpoint: null as Record<string, unknown> | null,
   approvalError: null as string | null,
-  refresh: vi.fn(),
+  traceRefresh: vi.fn(),
+  approvalRefresh: vi.fn(),
   push: vi.fn(),
 }))
 
@@ -34,7 +35,7 @@ vi.mock("@/hooks/use-trace", () => ({
     dsl: h.dsl,
     loading: false,
     error: h.error,
-    refresh: h.refresh,
+    refresh: h.traceRefresh,
   }),
 }))
 vi.mock("@/hooks/use-pending-approval", () => ({
@@ -42,7 +43,7 @@ vi.mock("@/hooks/use-pending-approval", () => ({
     waitpoint: h.waitpoint,
     deciding: false,
     decide: vi.fn(),
-    refresh: h.refresh,
+    refresh: h.approvalRefresh,
     error: h.approvalError,
   }),
 }))
@@ -382,6 +383,8 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(alerts.some((t) => /Updates unavailable/.test(t))).toBe(true)
     expect(alerts.some((t) => /Could not load or update the decision/.test(t))).toBe(true)
     for (const retry of screen.getAllByRole("button", { name: "Retry" })) fireEvent.click(retry)
-    expect(h.refresh).toHaveBeenCalledTimes(2)
+    // Each Retry reaches its own hook, not "two calls somewhere".
+    expect(h.traceRefresh).toHaveBeenCalledTimes(1)
+    expect(h.approvalRefresh).toHaveBeenCalledTimes(1)
   })
 })
