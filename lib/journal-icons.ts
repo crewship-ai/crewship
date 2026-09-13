@@ -19,6 +19,8 @@ import {
   CheckCircle,
   Eye,
   FilePen,
+  Folder,
+  FolderInput,
   FilePlus,
   FileX,
   Gauge,
@@ -275,6 +277,9 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "page.produce_denied": ShieldOff,
   "page.grant_added": UserPlus,
   "page.grant_removed": UserMinus,
+  // Folders (#2527): the folder itself, and a page moving in or out of one.
+  "page.folder_changed": Folder,
+  "page.folder_membership_changed": FolderInput,
   // Freshness (§4) reads as a clock going quiet and a clock catching up; a
   // wake gate (§5) is the one entry here that means an agent was started.
   "page.panel.stale": Clock,

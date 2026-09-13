@@ -79451,6 +79451,1753 @@
         ]
       }
     },
+    "/api/v1/page-folders": {
+      "get": {
+        "operationId": "get_api_v1_page-folders",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "folders": {
+                      "items": {
+                        "properties": {
+                          "color": {
+                            "description": "A crew palette key, or empty.",
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "grants_version": {
+                            "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
+                            "type": "integer"
+                          },
+                          "icon": {
+                            "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "description": "`crew/\u003cslug\u003e` — a folder is owned by a crew, always.",
+                            "type": "string"
+                          },
+                          "owner_crew_name": {
+                            "type": "string"
+                          },
+                          "page_count": {
+                            "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
+                            "type": "integer"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "slug",
+                          "name",
+                          "icon",
+                          "color",
+                          "owner",
+                          "owner_crew_name",
+                          "page_count",
+                          "grants_version",
+                          "created_at",
+                          "updated_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "folders"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      },
+      "post": {
+        "operationId": "post_api_v1_page-folders",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "color": {
+                    "description": "Optional. A crew palette key; anything else is refused.",
+                    "type": "string"
+                  },
+                  "icon": {
+                    "description": "Optional. A crew icon name; anything outside the crew icon set is refused.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "description": "`crew/\u003cslug\u003e`, required. The creator must be a workspace admin, or a MANAGER (or higher) who belongs to that crew.",
+                    "type": "string"
+                  },
+                  "slug": {
+                    "description": "Optional; derived from the name when omitted.",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "description": "A crew palette key, or empty.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "grants_version": {
+                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
+                      "type": "integer"
+                    },
+                    "icon": {
+                      "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`crew/\u003cslug\u003e` — a folder is owned by a crew, always.",
+                      "type": "string"
+                    },
+                    "owner_crew_name": {
+                      "type": "string"
+                    },
+                    "page_count": {
+                      "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name",
+                    "icon",
+                    "color",
+                    "owner",
+                    "owner_crew_name",
+                    "page_count",
+                    "grants_version",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "description": "A crew palette key, or empty.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "grants_version": {
+                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
+                      "type": "integer"
+                    },
+                    "icon": {
+                      "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`crew/\u003cslug\u003e` — a folder is owned by a crew, always.",
+                      "type": "string"
+                    },
+                    "owner_crew_name": {
+                      "type": "string"
+                    },
+                    "page_count": {
+                      "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name",
+                    "icon",
+                    "color",
+                    "owner",
+                    "owner_crew_name",
+                    "page_count",
+                    "grants_version",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
+    "/api/v1/page-folders/{slug}": {
+      "delete": {
+        "operationId": "delete_api_v1_page-folders_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      },
+      "get": {
+        "operationId": "get_api_v1_page-folders_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "pages": {
+                    "description": "The pages in this folder the caller reaches, as index rows.",
+                    "items": {
+                      "properties": {
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "color": {
+                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                  "type": "string"
+                                },
+                                "icon": {
+                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_project": {
+                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "last_produced_at": {
+                          "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string"
+                        },
+                        "owner_crew_slug": {
+                          "type": "string"
+                        },
+                        "pages_version": {
+                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                          "type": "integer"
+                        },
+                        "panel_count": {
+                          "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                          "type": "integer"
+                        },
+                        "panel_states": {
+                          "properties": {
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "fresh": {
+                              "type": "integer"
+                            },
+                            "never_produced": {
+                              "type": "integer"
+                            },
+                            "stale": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "publication_version": {
+                          "type": "integer"
+                        },
+                        "reach": {
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "description": "The page's worst panel.",
+                          "enum": [
+                            "fresh",
+                            "stale",
+                            "failed",
+                            "never_produced"
+                          ],
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "properties": {
+                    "color": {
+                      "description": "A crew palette key, or empty.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "grants_version": {
+                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
+                      "type": "integer"
+                    },
+                    "icon": {
+                      "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`crew/\u003cslug\u003e` — a folder is owned by a crew, always.",
+                      "type": "string"
+                    },
+                    "owner_crew_name": {
+                      "type": "string"
+                    },
+                    "page_count": {
+                      "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name",
+                    "icon",
+                    "color",
+                    "owner",
+                    "owner_crew_name",
+                    "page_count",
+                    "grants_version",
+                    "created_at",
+                    "updated_at",
+                    "pages"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_v1_page-folders_slug",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "color": {
+                    "description": "An empty string clears the colour; an omitted field keeps it.",
+                    "type": "string"
+                  },
+                  "icon": {
+                    "description": "An empty string clears the icon; an omitted field keeps it.",
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "color": {
+                      "description": "A crew palette key, or empty.",
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "grants_version": {
+                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
+                      "type": "integer"
+                    },
+                    "icon": {
+                      "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "description": "`crew/\u003cslug\u003e` — a folder is owned by a crew, always.",
+                      "type": "string"
+                    },
+                    "owner_crew_name": {
+                      "type": "string"
+                    },
+                    "page_count": {
+                      "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
+                      "type": "integer"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name",
+                    "icon",
+                    "color",
+                    "owner",
+                    "owner_crew_name",
+                    "page_count",
+                    "grants_version",
+                    "created_at",
+                    "updated_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
+    "/api/v1/page-folders/{slug}/pages": {
+      "post": {
+        "operationId": "post_api_v1_page-folders_slug_pages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "grants_version": {
+                    "description": "The folder's grants_version as last read. Required.",
+                    "type": "integer"
+                  },
+                  "page": {
+                    "description": "The slug of the page to file here; it leaves any other folder it was in.",
+                    "type": "string"
+                  },
+                  "pages_version": {
+                    "description": "The page's pages_version as last read. Required.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "page": {
+                      "properties": {
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "color": {
+                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                  "type": "string"
+                                },
+                                "icon": {
+                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_project": {
+                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "last_produced_at": {
+                          "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string"
+                        },
+                        "owner_crew_slug": {
+                          "type": "string"
+                        },
+                        "pages_version": {
+                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                          "type": "integer"
+                        },
+                        "panel_count": {
+                          "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                          "type": "integer"
+                        },
+                        "panel_states": {
+                          "properties": {
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "fresh": {
+                              "type": "integer"
+                            },
+                            "never_produced": {
+                              "type": "integer"
+                            },
+                            "stale": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "publication_version": {
+                          "type": "integer"
+                        },
+                        "reach": {
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "description": "The page's worst panel.",
+                          "enum": [
+                            "fresh",
+                            "stale",
+                            "failed",
+                            "never_produced"
+                          ],
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
+    "/api/v1/page-folders/{slug}/pages/{page}": {
+      "delete": {
+        "operationId": "delete_api_v1_page-folders_slug_pages_page",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "page": {
+                      "properties": {
+                        "created_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "folder": {
+                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "color": {
+                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                  "type": "string"
+                                },
+                                "icon": {
+                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "has_application": {
+                          "type": "boolean"
+                        },
+                        "has_project": {
+                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                          "type": "boolean"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "last_produced_at": {
+                          "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string"
+                        },
+                        "owner_crew_slug": {
+                          "type": "string"
+                        },
+                        "pages_version": {
+                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                          "type": "integer"
+                        },
+                        "panel_count": {
+                          "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                          "type": "integer"
+                        },
+                        "panel_states": {
+                          "properties": {
+                            "failed": {
+                              "type": "integer"
+                            },
+                            "fresh": {
+                              "type": "integer"
+                            },
+                            "never_produced": {
+                              "type": "integer"
+                            },
+                            "stale": {
+                              "type": "integer"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "publication_version": {
+                          "type": "integer"
+                        },
+                        "reach": {
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "slug": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "description": "The page's worst panel.",
+                          "enum": [
+                            "fresh",
+                            "stale",
+                            "failed",
+                            "never_produced"
+                          ],
+                          "type": "string"
+                        },
+                        "updated_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
     "/api/v1/page-webhooks/{token}": {
       "post": {
         "operationId": "post_api_v1_page-webhooks_token",
@@ -79575,6 +81322,33 @@
                       "description": {
                         "type": "string"
                       },
+                      "folder": {
+                        "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "color": {
+                                "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                "type": "string"
+                              },
+                              "icon": {
+                                "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "slug": {
+                                "type": "string"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "has_application": {
                         "type": "boolean"
                       },
@@ -79598,6 +81372,10 @@
                       },
                       "owner_crew_slug": {
                         "type": "string"
+                      },
+                      "pages_version": {
+                        "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                        "type": "integer"
                       },
                       "panel_count": {
                         "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
@@ -79873,6 +81651,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -79889,6 +81694,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -80050,6 +81859,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -80066,6 +81902,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -80832,6 +82672,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -80848,6 +82715,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -81009,6 +82880,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -81025,6 +82923,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -81531,6 +83433,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -81547,6 +83476,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -81941,6 +83874,33 @@
                     "description": {
                       "type": "string"
                     },
+                    "folder": {
+                      "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "color": {
+                              "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                              "type": "string"
+                            },
+                            "icon": {
+                              "description": "A crew icon name, or empty for the client's default folder glyph.",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "slug": {
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "has_application": {
                       "type": "boolean"
                     },
@@ -81957,6 +83917,10 @@
                     "owner": {
                       "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                       "type": "string"
+                    },
+                    "pages_version": {
+                      "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                      "type": "integer"
                     },
                     "panels": {
                       "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",
@@ -89432,6 +91396,33 @@
                         "description": {
                           "type": "string"
                         },
+                        "folder": {
+                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "color": {
+                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                  "type": "string"
+                                },
+                                "icon": {
+                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "slug": {
+                                  "type": "string"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
                         "has_application": {
                           "type": "boolean"
                         },
@@ -89448,6 +91439,10 @@
                         "owner": {
                           "description": "`user/\u003cid\u003e` or `crew/\u003cslug\u003e` — exactly one of the two (§7.1 rule 1).",
                           "type": "string"
+                        },
+                        "pages_version": {
+                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                          "type": "integer"
                         },
                         "panels": {
                           "description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14).",

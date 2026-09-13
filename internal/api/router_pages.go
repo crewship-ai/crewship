@@ -104,6 +104,30 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
 
+	// Folders (#2527, pages_folders.go). Under /page-folders rather than
+	// /pages/folders: `GET /pages/folders/{slug}` and `GET /pages/{slug}/grants`
+	// both match /pages/folders/grants and neither is more specific, which
+	// Go's mux refuses at registration — the same reason inbound webhooks
+	// live at /page-webhooks. The three mutations that need MANAGER+ by §4
+	// (create; rename; delete; and add, whose accepting half is MANAGER+ or
+	// admin) declare roleCreate so the middleware refuses a MEMBER before the
+	// handler decides crew membership; remove is the page owner's, who may
+	// be a MEMBER, so it is roleSelf.
+	// openapi: responses 200,400,401,500
+	r.mux.Handle("GET /api/v1/page-folders", authed(wsCtx(http.HandlerFunc(p.ListFolders))))
+	// openapi: responses 200,400,401,404,500
+	r.mux.Handle("GET /api/v1/page-folders/{slug}", authed(wsCtx(http.HandlerFunc(p.GetFolder))))
+	// openapi: responses 201,400,401,403,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders", roleCreate, p.CreateFolder)
+	// openapi: responses 200,400,401,403,404,413,500
+	r.authedMut("PATCH", "/api/v1/page-folders/{slug}", roleCreate, p.UpdateFolder)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/page-folders/{slug}", roleCreate, p.DeleteFolder)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders/{slug}/pages", roleCreate, p.AddFolderPage)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("DELETE", "/api/v1/page-folders/{slug}/pages/{page}", roleSelf, p.RemoveFolderPage)
+
 	// Export/import (§10b.2) and the version history behind `page rollback`
 	// (§10b.1) register themselves, next to their handlers — see
 	// router_pages_transfer.go.

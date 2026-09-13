@@ -310,6 +310,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.spec.changed": "page",
   "page.grant_added": "page",
   "page.grant_removed": "page",
+  "page.folder_changed": "page",
+  "page.folder_membership_changed": "page",
   "page.owner_transferred": "page",
   "page.published": "page",
   "page.link_revoked": "page",

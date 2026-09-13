@@ -74,6 +74,21 @@ func pagesSetOwner(t *testing.T, h *PageHandler, pageID, ownerUser, ownerCrew st
 	}
 }
 
+// pagesFileInOwnFolder creates a folder owned by crew/engine and files the
+// page in it, straight into the tables: this file is about what the index
+// costs, and the folder endpoints have their own rules and their own tests.
+func pagesFileInOwnFolder(t *testing.T, h *PageHandler, wsID, pageID, slug string) {
+	t.Helper()
+	if _, err := h.db.Exec(`INSERT INTO page_folders (id, workspace_id, slug, name, owner_crew_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'crew-engine', '2026-09-13T00:00:00Z', '2026-09-13T00:00:00Z')`,
+		"folder-"+pageID, wsID, "folder-"+slug, "Folder "+slug); err != nil {
+		t.Fatalf("insert folder for %s: %v", slug, err)
+	}
+	if _, err := h.db.Exec(`UPDATE pages SET folder_id = ?, pages_version = 1 WHERE id = ?`, "folder-"+pageID, pageID); err != nil {
+		t.Fatalf("file %s: %v", slug, err)
+	}
+}
+
 func pagesJoinCrew(t *testing.T, h *PageHandler, userID, crewID string) {
 	t.Helper()
 	if _, err := h.db.Exec(`INSERT INTO crew_members (id, crew_id, user_id, role) VALUES (?, ?, ?, 'MEMBER')`,
@@ -243,9 +258,11 @@ func TestPagesList_ReachNamesOnlyTheCallersPaths(t *testing.T) {
 //
 // Each page has two panels owned by different crews and one grant, so every
 // arm of reach has something to look at, and the caller is the grantee so the
-// grant arm is the one deciding. The count is taken for 3 pages and for 80,
-// and they must be EQUAL: a per-page statement of any kind — a crew slug, a
-// grant check, a panel scan — would show up as 77 extra.
+// grant arm is the one deciding. Every page is also filed in a folder of its
+// own (#2527, A14), so the folder each row carries has to be looked up too.
+// The count is taken for 3 pages and for 80, and they must be EQUAL: a
+// per-page statement of any kind — a crew slug, a grant check, a panel scan,
+// a folder read — would show up as 77 extra.
 func TestPagesList_QueryCountDoesNotGrowWithPages(t *testing.T) {
 	countFor := func(t *testing.T, pageCount int) int {
 		t.Helper()
@@ -256,6 +273,7 @@ func TestPagesList_QueryCountDoesNotGrowWithPages(t *testing.T) {
 			id := pagesCreateWith(t, h, wsID, ownerID, pagesReachBody(slug, "lookout", "engine"))
 			pagesSetOwner(t, h, id, "", "crew-engine")
 			pagesGrant(t, h, wsID, ownerID, slug, `{"subject_type":"user","subject":"dave","level":"read"}`)
+			pagesFileInOwnFolder(t, h, wsID, id, slug)
 		}
 		counter.reset()
 		rows := pagesListRows(t, h, wsID, "dave", "MEMBER")
@@ -266,6 +284,10 @@ func TestPagesList_QueryCountDoesNotGrowWithPages(t *testing.T) {
 		for slug, row := range rows {
 			if got := pagesReachOf(t, row); !reflect.DeepEqual(got, []string{"grant"}) {
 				t.Fatalf("%s: reach = %v, want [grant]", slug, got)
+			}
+			folder, _ := row["folder"].(map[string]any)
+			if folder["slug"] != "folder-"+slug {
+				t.Fatalf("%s: folder = %v, want folder-%s", slug, row["folder"], slug)
 			}
 		}
 		return n

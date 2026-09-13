@@ -94,6 +94,34 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"tab":             str(),
 	})
 
+	// Folders (#2527, pages_folders.go). folderRef is what a page row carries;
+	// folder is the folder endpoints' own document.
+	folderRef := obj(map[string]any{
+		"slug": str(), "name": str(),
+		"icon":  map[string]any{"type": "string", "description": "A crew icon name, or empty for the client's default folder glyph."},
+		"color": map[string]any{"type": "string", "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty."},
+	})
+	folderOnPage := map[string]any{
+		"folder": map[string]any{"oneOf": []any{folderRef, map[string]any{"type": "null"}},
+			"description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted."},
+		"pages_version": map[string]any{"type": "integer",
+			"description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale."},
+	}
+	folder := obj(map[string]any{
+		"id": str(), "slug": str(), "name": str(),
+		"icon":            map[string]any{"type": "string", "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty."},
+		"color":           map[string]any{"type": "string", "description": "A crew palette key, or empty."},
+		"owner":           map[string]any{"type": "string", "description": "`crew/<slug>` — a folder is owned by a crew, always."},
+		"owner_crew_name": str(),
+		"page_count": map[string]any{"type": "integer",
+			"description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size."},
+		"grants_version": map[string]any{"type": "integer",
+			"description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence."},
+		"created_at": timeString(), "updated_at": timeString(),
+	})
+	folder["required"] = []string{"id", "slug", "name", "icon", "color", "owner", "owner_crew_name",
+		"page_count", "grants_version", "created_at", "updated_at"}
+
 	page := obj(map[string]any{
 		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
@@ -103,6 +131,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"items":       map[string]any{"oneOf": []any{panel, sealedPanel}},
 			"description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14)."},
 		"created_at": timeString(), "updated_at": timeString(),
+		"folder": folderOnPage["folder"], "pages_version": folderOnPage["pages_version"],
 	})
 
 	pageRow := obj(map[string]any{
@@ -120,9 +149,20 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"last_produced_at": map[string]any{"type": "string", "format": "date-time",
 			"description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\"."},
 		"created_at": timeString(), "updated_at": timeString(),
+		"folder": folderOnPage["folder"], "pages_version": folderOnPage["pages_version"],
 		"reach": map[string]any{"type": "array", "items": str(),
 			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
 	})
+
+	folderShow := mergeProps(folder, map[string]any{
+		"pages": map[string]any{"type": "array", "items": pageRow,
+			"description": "The pages in this folder the caller reaches, as index rows."},
+	})
+	folderShow["required"] = append(append([]string{}, folder["required"].([]string)...), "pages")
+	folderList := obj(map[string]any{"folders": arr(folder)})
+	folderList["required"] = []string{"folders"}
+	folderPage := obj(map[string]any{"page": pageRow})
+	folderPage["required"] = []string{"page"}
 
 	// The write half carries three fields the read half does not echo to an
 	// ordinary reader: the sensor (§5, §4 rule 4) and the refresh trigger
@@ -383,6 +423,52 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"DELETE /api/v1/pages/{slug}/grants": {Response: grantsResponse},
 		"GET /api/v1/pages/{slug}/access":    {Response: accessResponse},
 		"GET /api/v1/pages/access":           {Response: subjectAccessResponse},
+
+		// Folders (#2527). Reads are filtered to what the caller reaches
+		// (§5/12); the two membership writes carry version fences (§5/8).
+		"GET /api/v1/page-folders": {Response: folderList},
+		"POST /api/v1/page-folders": {
+			Request: obj(map[string]any{
+				"name":  str(),
+				"slug":  map[string]any{"type": "string", "description": "Optional; derived from the name when omitted."},
+				"icon":  map[string]any{"type": "string", "description": "Optional. A crew icon name; anything outside the crew icon set is refused."},
+				"color": map[string]any{"type": "string", "description": "Optional. A crew palette key; anything else is refused."},
+				"owner": map[string]any{"type": "string", "description": "`crew/<slug>`, required. The creator must be a workspace admin, or a MANAGER (or higher) who belongs to that crew."},
+			}),
+			RequestRequired: true,
+			Response:        folder,
+		},
+		"GET /api/v1/page-folders/{slug}": {Response: folderShow},
+		"PATCH /api/v1/page-folders/{slug}": {
+			Request: obj(map[string]any{
+				"name":  str(),
+				"icon":  map[string]any{"type": "string", "description": "An empty string clears the icon; an omitted field keeps it."},
+				"color": map[string]any{"type": "string", "description": "An empty string clears the colour; an omitted field keeps it."},
+			}),
+			RequestRequired: true,
+			Response:        folder,
+		},
+		"DELETE /api/v1/page-folders/{slug}": {
+			// 204, no body. Refused with 409 while any page — reachable by
+			// the caller or not — is in the folder.
+			Response: obj(map[string]any{}),
+		},
+		"POST /api/v1/page-folders/{slug}/pages": {
+			Request: obj(map[string]any{
+				"page":           map[string]any{"type": "string", "description": "The slug of the page to file here; it leaves any other folder it was in."},
+				"pages_version":  map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},
+				"grants_version": map[string]any{"type": "integer", "description": "The folder's grants_version as last read. Required."},
+			}),
+			RequestRequired: true,
+			Response:        folderPage,
+		},
+		"DELETE /api/v1/page-folders/{slug}/pages/{page}": {
+			Request: obj(map[string]any{
+				"pages_version": map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},
+			}),
+			RequestRequired: true,
+			Response:        folderPage,
+		},
 
 		"GET /api/v1/pages/{slug}/versions": {
 			Response: obj(map[string]any{
