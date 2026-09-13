@@ -21,10 +21,23 @@
  */
 
 /** The marker every folder row carries — who, roughly, the folder is shared with. */
-export type FolderShared = "none" | "crew" | "workspace"
+/**
+ * The no-names sharing label the server puts on every folder. It tells the
+ * KINDS of subject apart — a folder shared with one person is not "shared
+ * with a crew" (audit 2026-09-13, F1) — and never who.
+ */
+export type FolderShared = "none" | "people" | "crews" | "people_and_crews" | "workspace"
 
 export function toFolderShared(value: unknown): FolderShared {
-  return value === "crew" || value === "workspace" ? value : "none"
+  switch (value) {
+    case "people":
+    case "crews":
+    case "people_and_crews":
+    case "workspace":
+      return value
+    default:
+      return "none"
+  }
 }
 
 export type FolderAclSubjectType = "user" | "crew" | "workspace"
@@ -53,10 +66,14 @@ export function folderSharingSentence(shared: FolderShared): string {
   switch (shared) {
     case "workspace":
       return "Shared with everyone in this workspace"
-    case "crew":
-      return "Shared with a crew"
+    case "people":
+      return "Shared with named people"
+    case "crews":
+      return "Shared with named crews"
+    case "people_and_crews":
+      return "Shared with named people and crews"
     default:
-      return "Only the owning crew"
+      return "Only the owning crew and workspace admins"
   }
 }
 
@@ -90,21 +107,32 @@ function capitalise(s: string): string {
 export function moveImpactFromAcl(entries: readonly FolderAclEntry[]): string {
   const viewers = entries.filter((e) => !e.canWrite).map(aclSubjectPhrase)
   const editors = entries.filter((e) => e.canWrite).map(aclSubjectPhrase)
-  if (viewers.length === 0 && editors.length === 0) return "Visible to the owning crew only."
+  // What the FOLDER adds, never a claim about the page's whole audience: the
+  // page's own grants, its owner and the crews owning its panels reach it
+  // exactly as before the move, so "only" was false in both directions
+  // (audit 2026-09-13, F2).
+  if (viewers.length === 0 && editors.length === 0) return `${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`
   if (editors.length === 0) return `Visible to ${joinNames(viewers)}.`
   if (viewers.length === 0) return `${capitalise(joinNames(editors))} can view and edit.`
   return `Visible to ${joinNames(viewers)}; ${joinNames(editors)} can edit.`
 }
 
+export const FOLDER_ADDS_NOTHING = "The folder adds no sharing of its own."
+export const GRANTS_STAY = "The page's own grants, its owner and the crews owning its panels reach it as before."
+
 /** "After the move", for a reader who may not read the ACL: the marker only. */
 export function moveImpactFromShared(shared: FolderShared): string {
   switch (shared) {
     case "workspace":
-      return "Visible to everyone in this workspace."
-    case "crew":
-      return "Visible to members of the shared crews."
+      return `Through the folder, everyone in this workspace can see it. ${GRANTS_STAY}`
+    case "people":
+      return `Through the folder, named people can see it. ${GRANTS_STAY}`
+    case "crews":
+      return `Through the folder, named crews can see it. ${GRANTS_STAY}`
+    case "people_and_crews":
+      return `Through the folder, named people and crews can see it. ${GRANTS_STAY}`
     default:
-      return "Visible to the owning crew only."
+      return `${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`
   }
 }
 

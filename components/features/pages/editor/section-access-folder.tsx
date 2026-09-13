@@ -33,7 +33,7 @@ import { SectionCard } from "@/components/ui/section-card"
 import { Spinner } from "@/components/ui/spinner"
 import { CardAnswer, CardLabel, ControlRefusal, Refusal } from "@/components/features/pages/page-settings"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
-import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 import { toPageFolderRef } from "@/hooks/use-pages"
 import type { WirePageDetail } from "@/hooks/use-page-grants"
 import { useFolderAcl, usePageAccessMe, usePageFolders } from "@/hooks/use-page-folders"
@@ -72,8 +72,7 @@ export function FolderAccessCard({
         <CardLabel icon={Folder}>
           <span className="inline-flex items-center gap-1.5">
             From folder
-            <FolderDot color={ref.color} />
-            <FolderGlyph icon={ref.icon} className="h-3 w-3" />
+            <FolderGlyph icon={ref.icon} color={ref.color} className="h-3.5 w-3.5" />
             <span className="min-w-0 truncate normal-case tracking-normal" title={ref.name}>
               {ref.name}
             </span>

@@ -50,7 +50,7 @@ const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", own
 const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", folder: null, pages_version: 0, panels: [] }
 const DRAFT: WirePage = { id: "p3", slug: "draft", name: "Draft", owner: "user/u1", folder: null, pages_version: 2, panels: [] }
 
-const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5, shared: "crew" }
+const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5, shared: "crews" }
 const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, acl_version: 1, shared: "workspace" }
 
 const LONG = "a-very-long-crew-display-name-that-goes-on-and-on-and-on-past-any-reasonable-column"
@@ -255,7 +255,7 @@ describe("Folder → Sharing, for everyone else (U1)", () => {
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     const dialog = await openSharing("Ops")
     await waitFor(() => expect(dialog.querySelector('[data-slot="folder-sharing-marker"]')).toBeTruthy())
-    expect(within(dialog).getByText("Shared with a crew")).toBeTruthy()
+    expect(within(dialog).getByText("Shared with named crews")).toBeTruthy()
     expect(within(dialog).getByText(REFUSAL)).toBeTruthy()
     expect(within(dialog).queryByRole("table")).toBeNull()
     await waitFor(() => expect(dialog.querySelector('[data-slot="own-paths"]')?.textContent).toContain("You reach it through your crew lookout and the folder ops."))
@@ -302,9 +302,9 @@ describe("the move dialog says who will see the page (U2)", () => {
     chooseFromRowMenu(rowOf("My notes"), /move to folder/i)
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(await within(dialog).findByRole("radio", { name: /^Archive/ }))
-    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Visible to everyone in this workspace."))
+    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Through the folder, everyone in this workspace can see it."))
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Ops/ }))
-    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Visible to members of the shared crews."))
+    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Through the folder, named crews can see it."))
   })
 
   it("sends acl_version, and on a 409 re-reads the ACL, regenerates the block and sends the fresh version next", async () => {
@@ -379,7 +379,7 @@ describe("moving several pages at once", () => {
     const dialog = await selectTwo()
     expect(within(dialog).getByText("2 pages")).toBeTruthy()
     fireEvent.click(await within(dialog).findByRole("radio", { name: /^Ops/ }))
-    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("For all 2 pages: Visible to members of the shared crews."))
+    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("For all 2 pages: Through the folder, named crews can see it."))
     fireEvent.click(within(dialog).getByRole("button", { name: "Move" }))
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0]).toEqual({

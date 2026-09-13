@@ -28,7 +28,7 @@ const FILED: WirePageDetail = {
 }
 
 const FOLDERS = {
-  folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5, shared: "crew" }],
+  folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5, shared: "crews" }],
 }
 
 function json(status: number, body: unknown): Response {
@@ -103,7 +103,7 @@ describe("From folder", () => {
   it("says the marker, the product's refusal and the reader's own paths — for everyone else", async () => {
     mount(FILED)
     const card = await waitFor(() => document.querySelector('[data-slot="page-folder-access"]') as HTMLElement)
-    await waitFor(() => expect(card.querySelector('[data-slot="folder-sharing-marker"]')?.textContent).toBe("Shared with a crew"))
+    await waitFor(() => expect(card.querySelector('[data-slot="folder-sharing-marker"]')?.textContent).toBe("Shared with named crews"))
     expect(card.textContent).toContain("Only a manager of Lookout or a workspace admin can see who Ops is shared with.")
     await waitFor(() =>
       expect(card.querySelector('[data-slot="own-paths"]')?.textContent).toBe("You reach it through your crew lookout and the folder ops."),

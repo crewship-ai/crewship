@@ -524,15 +524,18 @@ describe("PagesRail folders", () => {
       "Unfiled1",
     ])
     const ops = groupHeader("Ops")
-    // The colour is a dot, drawn inline from the palette — never a class
-    // that means "blue" for every colour the registry does not know.
-    const dot = ops.querySelector<HTMLElement>("[data-slot='folder-dot']")
-    expect(dot).toBeTruthy()
-    expect(dot!.style.backgroundColor).not.toBe("")
-    // The icon is the crew-icon glyph; an SVG in the header, before the name.
-    expect(ops.querySelector("svg")).toBeTruthy()
-    // No colour, no dot — "no colour" and "blue" must not look the same.
-    expect(groupHeader("Archive").querySelector("[data-slot='folder-dot']")).toBeNull()
+    // The colour is ON the icon — the same symbol the picker previewed —
+    // drawn inline from the palette, never a class that means "blue" for
+    // every colour the registry does not know (audit 2026-09-13, F4: a grey
+    // glyph beside a coloured dot read as two facts).
+    const glyph = ops.querySelector<HTMLElement>("[data-slot='folder-glyph']")
+    expect(glyph).toBeTruthy()
+    expect(glyph!.style.color).not.toBe("")
+    expect(ops.querySelector("[data-slot='folder-dot']")).toBeNull()
+    // No colour, no inline colour — "no colour" and "blue" must not look the same.
+    const plain = groupHeader("Archive").querySelector<HTMLElement>("[data-slot='folder-glyph']")
+    expect(plain).toBeTruthy()
+    expect(plain!.style.color).toBe("")
     // The owner is not said on a folder row: the group is the folder.
     expect(rowOf("Flotila .201").textContent).not.toMatch(/lookout/)
   })

@@ -75,7 +75,7 @@ import { PageFactsCard } from "@/components/features/pages/page-settings"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
 import { toPageFolderRef } from "@/hooks/use-pages"
 import { MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
-import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 // Content on an application Page opens the review of the agent's change.
 // S6 owns that surface; import it lazily so the ordinary panel Page never
@@ -549,8 +549,7 @@ function PageFolderLine({
         <p className="type-page-value flex items-center gap-1.5 text-foreground/85">
           {folder ? (
             <>
-              <FolderDot color={folder.color} />
-              <FolderGlyph icon={folder.icon} className="text-muted-foreground" />
+              <FolderGlyph icon={folder.icon} color={folder.color} className={folder.color ? undefined : "text-muted-foreground"} />
               <span className="min-w-0 truncate" title={folder.name}>
                 {folder.name}
               </span>

@@ -66,7 +66,7 @@ import { SHARED_WITH_WORKSPACE_TITLE } from "@/lib/pages/folder-sharing"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PAGE_STATE_META, PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
-import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 import { FolderHeaderMenu, PageRowMenu } from "@/components/features/pages/pages-rail-menus"
 
 export type PagesGroupBy = "folder" | "owner"
@@ -663,11 +663,16 @@ export function PagesRail({
               }}
               label={
                 group.kind === "folder" ? (
-                  // The folder's colour as a dot and its icon, before the
-                  // name. Both are the folder's, drawn once, in the header.
+                  // The folder's icon in the folder's colour, before the
+                  // name — one symbol, the one the picker showed, drawn once
+                  // in the header. A folder without a colour keeps the muted
+                  // icon.
                   <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
-                    <FolderDot color={group.folder?.color} />
-                    <FolderGlyph icon={group.folder?.icon} className="h-3 w-3 text-muted-foreground-soft" />
+                    <FolderGlyph
+                      icon={group.folder?.icon}
+                      color={group.folder?.color}
+                      className={cn("h-3.5 w-3.5", !group.folder?.color && "text-muted-foreground-soft")}
+                    />
                     <span className="min-w-0 truncate">{group.label}</span>
                     {/* The one sharing fact everyone may know: this folder is
                         open to the whole workspace (#2533). Names are the

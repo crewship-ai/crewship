@@ -22,9 +22,31 @@ export function folderIconOf(icon: string | null | undefined) {
   return icon && KNOWN.has(icon) ? getCrewIconDef(icon).icon : Folder
 }
 
-export function FolderGlyph({ icon, className }: { icon: string | null | undefined; className?: string }) {
+/**
+ * The folder's icon, in the folder's colour when it has one — the same
+ * symbol the picker previewed, so what was chosen is what the sidebar shows
+ * (audit 2026-09-13, F4: the icon rendered grey with the colour off to the
+ * side as a dot, which read as two facts instead of one). 14 px by default.
+ * Colour never encodes a permission; the sharing marker is separate.
+ */
+export function FolderGlyph({
+  icon,
+  color,
+  className,
+}: {
+  icon: string | null | undefined
+  color?: string | null
+  className?: string
+}) {
   const Icon = folderIconOf(icon)
-  return <Icon className={cn("h-3.5 w-3.5 shrink-0", className)} aria-hidden />
+  return (
+    <Icon
+      data-slot="folder-glyph"
+      className={cn("h-3.5 w-3.5 shrink-0", className)}
+      style={color ? { color: getCrewDotColor(color) } : undefined}
+      aria-hidden
+    />
+  )
 }
 
 export function FolderDot({ color, className }: { color: string | null | undefined; className?: string }) {
