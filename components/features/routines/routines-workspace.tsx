@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import Link from "next/link"
-import { AlertCircle, CalendarClock, Search, Workflow } from "lucide-react"
+import { AlertCircle, CalendarClock, Workflow } from "lucide-react"
 
 import { formatRoutineTime } from "@/lib/routine-time"
 import { formatRelativeTime } from "@/lib/time"
@@ -15,13 +15,11 @@ import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-rou
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
-import { Input } from "@/components/ui/input"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import {
   matchesRoutineFilters,
   routineFilterInput,
   type RoutineFilterState,
-  type RoutineStatusFilter,
 } from "@/lib/routine-filters"
 import { cn } from "@/lib/utils"
 import { routineRunPresentation } from "@/lib/routine-run-presentation"
@@ -39,22 +37,13 @@ export function routineRunLabel(run: { status?: string; outcome?: string }) {
         : run.status || "Recorded"
 }
 
-// One list, not two. The explorer sidebar used to repeat every routine
-// beside this panel, with the status buckets as a second navigation; the
-// filters now sit above the rows and the routine row itself answers the
-// three questions a reader brings: what it does, how it went last time,
-// and whether it needs them (#2519).
+// The explorer sidebar owns navigation, search and the status buckets, as it
+// does on every page. This panel does not repeat those controls: its row
+// answers the three questions a reader brings — what the routine does, how
+// it went last time, and whether it needs them (#2519).
 
 type ListTab = "routines" | "calendar" | "recent runs"
 const TABS: readonly ListTab[] = ["routines", "calendar", "recent runs"]
-
-const STATUS_CHIPS: { value: RoutineStatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "awaiting", label: "Need me" },
-  { value: "running", label: "Running" },
-  { value: "failed", label: "Failed" },
-  { value: "never", label: "Never run" },
-]
 
 interface RoutinesWorkspaceProps {
   workspaceId: string
@@ -62,13 +51,9 @@ interface RoutinesWorkspaceProps {
   loading: boolean
   error: string | null
   onSelect: (slug: string) => void
+  /** Search and filters belong to the explorer sidebar; the list only applies them. */
   search?: string
-  onSearchChange?: (value: string) => void
   filters?: RoutineFilterState
-  onFilter?: (status: RoutineStatusFilter) => void
-  /** Ephemeral routines and `test-*` fixtures are hidden unless asked for. */
-  showHidden?: boolean
-  onToggleHidden?: (show: boolean) => void
 }
 
 /** StatusPill tone for a run presentation tone. */
@@ -242,63 +227,10 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
               </div>
             </div>
 
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[220px] flex-1 sm:max-w-xs" data-routines-search>
-                <Search
-                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden
-                />
-                <Input
-                  aria-label="Search routines"
-                  placeholder="Search by name or purpose"
-                  value={search}
-                  onChange={(e) => props.onSearchChange?.(e.target.value)}
-                  className="h-8 pl-8 text-xs"
-                />
-              </div>
-              {filters && props.onFilter && (
-                <div
-                  role="group"
-                  aria-label="Filter by last result"
-                  className="flex overflow-hidden rounded-md border border-border"
-                >
-                  {STATUS_CHIPS.map((chip) => (
-                    <button
-                      key={chip.value}
-                      type="button"
-                      aria-pressed={filters.status === chip.value}
-                      onClick={() => props.onFilter?.(chip.value)}
-                      className={cn(
-                        "px-2.5 py-1.5 text-xs transition-colors",
-                        filters.status === chip.value
-                          ? "bg-muted font-medium text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {chip.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {props.onToggleHidden && (
-                <button
-                  type="button"
-                  aria-pressed={!!props.showHidden}
-                  onClick={() => props.onToggleHidden?.(!props.showHidden)}
-                  title="Also show temporary routines and release-verification fixtures"
-                  className={cn(
-                    "rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors",
-                    props.showHidden
-                      ? "bg-muted font-medium text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  Show hidden
-                </button>
-              )}
-              <span className="ml-auto text-[11px] text-muted-foreground">
-                {displayed.length} of {visible.length}
-              </span>
+            <div className="mb-3 flex items-center justify-end text-[11px] text-muted-foreground">
+              {displayed.length === visible.length
+                ? `${visible.length} ${visible.length === 1 ? "routine" : "routines"}`
+                : `${displayed.length} of ${visible.length} match the explorer's filters`}
             </div>
 
             {props.error && (
@@ -382,7 +314,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                       props.loading
                         ? "Loading routines…"
                         : search || (filters && filters.status !== "all")
-                          ? "No routines match these filters."
+                          ? "No routines match the explorer's filters."
                           : "No routines yet. Create one with New routine, or import a bundle."
                     }
                   />

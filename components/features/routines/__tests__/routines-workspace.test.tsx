@@ -85,7 +85,6 @@ describe("<RoutinesWorkspace> — the one list", () => {
         onSelect={select}
         search="service"
         filters={filters}
-        onFilter={vi.fn()}
       />,
     )
     const list = screen.getByRole("region", { name: "Routine list" })
@@ -113,7 +112,6 @@ describe("<RoutinesWorkspace> — the one list", () => {
         error={null}
         onSelect={vi.fn()}
         filters={filters}
-        onFilter={vi.fn()}
       />,
     )
     const banner = screen.getByRole("status")
@@ -127,10 +125,9 @@ describe("<RoutinesWorkspace> — the one list", () => {
     expect(within(list).getByText("Needs your decision")).toBeVisible()
   })
 
-  it("counts the routines that failed last time and filters by result", () => {
+  it("counts the routines that failed last time and applies the explorer's filters", () => {
     h.runs = []
     h.schedules = []
-    const onFilter = vi.fn()
     render(
       <RoutinesWorkspace
         workspaceId="ws"
@@ -139,38 +136,16 @@ describe("<RoutinesWorkspace> — the one list", () => {
         error={null}
         onSelect={vi.fn()}
         filters={{ ...filters, status: "failed" }}
-        onFilter={onFilter}
       />,
     )
     expect(screen.getByText("failed last time").previousSibling).toHaveTextContent("1")
     const list = screen.getByRole("region", { name: "Routine list" })
     expect(within(list).getByText("Broken routine")).toBeVisible()
     expect(within(list).queryByText("Weekly report")).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Failed", pressed: true })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Never run" }))
-    expect(onFilter).toHaveBeenCalledWith("never")
-    expect(screen.getByRole("textbox", { name: "Search routines" })).toBeInTheDocument()
-  })
-
-  it("keeps a door to hidden routines now that the explorer's toggles are gone", () => {
-    h.runs = []
-    h.schedules = []
-    const onToggleHidden = vi.fn()
-    render(
-      <RoutinesWorkspace
-        workspaceId="ws"
-        routines={rows}
-        loading={false}
-        error={null}
-        onSelect={vi.fn()}
-        filters={filters}
-        onFilter={vi.fn()}
-        showHidden={false}
-        onToggleHidden={onToggleHidden}
-      />,
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Show hidden", pressed: false }))
-    expect(onToggleHidden).toHaveBeenCalledWith(true)
+    expect(screen.getByText(/1 of 3 match the explorer's filters/)).toBeInTheDocument()
+    // The explorer owns search and the buckets; the panel repeats neither.
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Never run" })).not.toBeInTheDocument()
   })
 
   it("says what the empty list means instead of leaving a pane", () => {
