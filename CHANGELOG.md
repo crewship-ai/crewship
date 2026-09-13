@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+
+- **`dev.sh status` now says when a workstation serves old code.** A `STALE:` line names the HEAD `web/out/` was built from when the repo has moved past it, or a running binary older than HEAD's commit, with the reload command to run — two dev slots were serving day-old frontends while looking healthy. `.env.local` also stopped gaining another `CREWSHIP_ALLOWED_ORIGINS` line and banner on every start (clone 3 had over a hundred).
+
 ### Security
 
 - **Page draft, archived definition and export reads could reveal panels hidden from the caller.** Whole-document authoring now requires visibility of every panel, including for agent project reads. Partial readers review source through separate endpoints that omit the definition; saves cannot silently remove withheld panels. ⚠️ **Behaviour change:** a Page write grant alone no longer permits these complete-document reads or replacements (#2502).
