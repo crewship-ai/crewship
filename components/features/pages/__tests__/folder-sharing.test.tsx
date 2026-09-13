@@ -290,7 +290,7 @@ describe("the move dialog says who will see the page (U2)", () => {
     fireEvent.click(await within(dialog).findByRole("radio", { name: /^Ops/ }))
     await waitFor(() =>
       expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain(
-        "Visible to crew Support and everyone in this workspace; crew Ops can edit.",
+        "Through the folder: visible to crew Support and everyone in this workspace; crew Ops can edit.",
       ),
     )
     expect(within(dialog).queryByText(/restore sharing/i)).toBeNull()
@@ -332,7 +332,7 @@ describe("the move dialog says who will see the page (U2)", () => {
     chooseFromRowMenu(rowOf("My notes"), /move to folder/i)
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(await within(dialog).findByRole("radio", { name: /^Ops/ }))
-    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Visible to crew Support."))
+    await waitFor(() => expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Through the folder: visible to crew Support."))
     const aclReadsBefore = reads("/api/v1/page-folders/ops/acl").length
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Move" }))
@@ -342,7 +342,7 @@ describe("the move dialog says who will see the page (U2)", () => {
     await waitFor(() => expect(within(dialog).getByText("The folder or the page changed; try again.")).toBeTruthy())
     expect(reads("/api/v1/page-folders/ops/acl").length).toBeGreaterThan(aclReadsBefore)
     await waitFor(() =>
-      expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Visible to crew Support and everyone in this workspace."),
+      expect(dialog.querySelector('[data-slot="move-impact"]')?.textContent).toContain("Through the folder: visible to crew Support and everyone in this workspace."),
     )
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Move" }))

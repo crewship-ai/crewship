@@ -17,7 +17,7 @@ import {
   ownPathsSentence,
   toFolderShared,
   type FolderAclEntry,
- FOLDER_ADDS_NOTHING, GRANTS_STAY } from "@/lib/pages/folder-sharing"
+ FOLDER_ADDS_NOTHING, GRANTS_STAY, SHARING_UNKNOWN } from "@/lib/pages/folder-sharing"
 
 const entry = (over: Partial<FolderAclEntry>): FolderAclEntry => ({
   subjectType: "crew",
@@ -34,17 +34,20 @@ describe("the marker", () => {
     expect(toFolderShared("people")).toBe("people")
     expect(toFolderShared("crews")).toBe("crews")
     expect(toFolderShared("people_and_crews")).toBe("people_and_crews")
-    // The pre-audit spelling is not a word any more; an old server's "crew"
-    // is read as "none" rather than as a claim about crews.
-    expect(toFolderShared("crew")).toBe("none")
     expect(toFolderShared("workspace")).toBe("workspace")
     expect(toFolderShared("none")).toBe("none")
-    expect(toFolderShared(undefined)).toBe("none")
-    expect(toFolderShared("everyone")).toBe("none")
+    // Anything else is "unknown", never "none": the pre-audit "crew" meant
+    // real sharing, a newer server may add a word, and a missing field is a
+    // read that did not happen. None of those is a claim about privacy
+    // (counter-review 2026-09-13, R2).
+    expect(toFolderShared("crew")).toBe("unknown")
+    expect(toFolderShared(undefined)).toBe("unknown")
+    expect(toFolderShared("everyone")).toBe("unknown")
   })
 
   it("is one of three sentences", () => {
     expect(folderSharingSentence("none")).toBe("Only the owning crew and workspace admins")
+    expect(folderSharingSentence("unknown")).toBe(SHARING_UNKNOWN)
     expect(folderSharingSentence("people")).toBe("Shared with named people")
     expect(folderSharingSentence("crews")).toBe("Shared with named crews")
     expect(folderSharingSentence("people_and_crews")).toBe("Shared with named people and crews")
@@ -66,15 +69,15 @@ describe("After the move, with names", () => {
         entry({ subjectType: "workspace", subjectId: "", label: "Everyone in this workspace" }),
         entry({ subjectType: "crew", subjectId: "ops", label: "Ops", canWrite: true }),
       ]),
-    ).toBe("Visible to crew Support and everyone in this workspace; crew Ops can edit.")
+    ).toBe(`Through the folder: visible to crew Support and everyone in this workspace; crew Ops can edit. ${GRANTS_STAY}`)
   })
 
   it("has a shape for viewers only, editors only, and nobody", () => {
     expect(moveImpactFromAcl([entry({ subjectType: "user", subjectId: "u1", label: "ada@example.com" })])).toBe(
-      "Visible to ada@example.com.",
+      `Through the folder: visible to ada@example.com. ${GRANTS_STAY}`,
     )
     expect(moveImpactFromAcl([entry({ canWrite: true }), entry({ subjectType: "user", subjectId: "u1", label: "ada@example.com", canWrite: true })])).toBe(
-      "Crew Support and ada@example.com can view and edit.",
+      `Through the folder: crew Support and ada@example.com can view and edit. ${GRANTS_STAY}`,
     )
     expect(moveImpactFromAcl([])).toBe(`${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`)
   })
@@ -92,6 +95,8 @@ describe("After the move, without names", () => {
     expect(moveImpactFromShared("crews")).toBe(`Through the folder, named crews can see it. ${GRANTS_STAY}`)
     expect(moveImpactFromShared("people")).toBe(`Through the folder, named people can see it. ${GRANTS_STAY}`)
     expect(moveImpactFromShared("none")).toBe(`${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`)
+    expect(moveImpactFromShared("unknown")).toContain("could not be determined")
+    expect(moveImpactFromShared("unknown")).toContain(GRANTS_STAY)
     expect(MOVE_IMPACT_UNFILED).toBe("No folder permissions apply; the page's own access stays as it is.")
   })
 })

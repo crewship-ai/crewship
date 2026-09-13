@@ -219,7 +219,7 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, p
           </p>
         ) : acl.refusal !== null ? (
           <div data-slot="folder-sharing-marker" className="flex flex-col gap-3">
-            <p className="text-sm font-medium text-foreground">{folderSharingSentence(folder?.shared ?? "none")}</p>
+            <p className="text-sm font-medium text-foreground">{folderSharingSentence(folder?.shared ?? "unknown")}</p>
             <p data-slot="control-refusal" className="type-page-meta rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-muted-foreground">
               {acl.refusal}
             </p>
