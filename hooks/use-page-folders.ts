@@ -192,7 +192,7 @@ function ws(workspaceId: string): string {
   return `?${new URLSearchParams({ workspace_id: workspaceId }).toString()}`
 }
 
-const FOLDERS = "/api/v1/pages/folders"
+const FOLDERS = "/api/v1/page-folders"
 
 function folderRoute(workspaceId: string, slug: string): string {
   return `${FOLDERS}/${encodeURIComponent(slug)}${ws(workspaceId)}`

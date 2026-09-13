@@ -230,7 +230,7 @@ function mount(harness: Harness = {}) {
       return harness.probe ?? jsonResponse(404, { error: "page has no project draft" })
     }
     if (method === "PATCH") return harness.patch ?? jsonResponse(200, { slug: page?.slug })
-    if (method === "GET" && url.startsWith("/api/v1/pages/folders?")) {
+    if (method === "GET" && url.startsWith("/api/v1/page-folders?")) {
       return jsonResponse(200, { folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, grants_version: 2 }] })
     }
     return jsonResponse(404, { error: `unrouted ${method} ${url}` })
@@ -720,7 +720,7 @@ describe("where the Page is filed", () => {
     expect(line.textContent).toContain("Ops")
     expect(line.querySelector("[data-slot='folder-dot']")).toBeTruthy()
     // Nothing is fetched to draw the line: the folder rides on the record.
-    expect(calls.filter((c) => c.url.startsWith("/api/v1/pages/folders"))).toHaveLength(0)
+    expect(calls.filter((c) => c.url.startsWith("/api/v1/page-folders"))).toHaveLength(0)
 
     fireEvent.click(within(line as HTMLElement).getByRole("button", { name: "Change…" }))
     const dialog = await screen.findByRole("dialog")

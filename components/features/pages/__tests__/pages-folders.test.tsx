@@ -86,7 +86,7 @@ function mount(harness: Harness = {}, slug?: string) {
     calls.push(call)
     const answered = harness.answer?.(call)
     if (answered) return answered
-    if (method === "GET" && url.startsWith("/api/v1/pages/folders?")) return json(200, { folders: folders() })
+    if (method === "GET" && url.startsWith("/api/v1/page-folders?")) return json(200, { folders: folders() })
     if (method === "GET" && url.startsWith("/api/v1/crews?"))
       return json(200, { data: [{ id: "c1", slug: "lookout", name: "Lookout" }, { id: "c2", slug: "finance", name: "Finance" }] })
     if (method === "GET" && url.startsWith("/api/v1/pages?")) return json(200, pages())
@@ -134,7 +134,7 @@ describe("the rail is grouped by folder from the folder route", () => {
   })
 
   it("groups by owner and offers no folder control when the folder route answers 404", async () => {
-    mount({ answer: (c) => (c.method === "GET" && c.url.startsWith("/api/v1/pages/folders?") ? json(404, { error: "not found" }) : null) })
+    mount({ answer: (c) => (c.method === "GET" && c.url.startsWith("/api/v1/page-folders?") ? json(404, { error: "not found" }) : null) })
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     await waitFor(() => expect(groupHeaders().map((h) => h.textContent)).toEqual(["lookout1", "Owned by others1"]))
     expect(screen.queryByRole("button", { name: "New folder" })).toBeNull()
@@ -144,7 +144,7 @@ describe("the rail is grouped by folder from the folder route", () => {
 describe("moving a page (U2)", () => {
   it("moves a page into a folder from the keyboard alone, sending the page's and the folder's versions", async () => {
     const { writes } = mount({
-      answer: (c) => (c.method === "POST" && c.url.startsWith("/api/v1/pages/folders/ops/pages") ? json(200, { page: { ...NOTES, folder: OPS_REF, pages_version: 1 } }) : null),
+      answer: (c) => (c.method === "POST" && c.url.startsWith("/api/v1/page-folders/ops/pages") ? json(200, { page: { ...NOTES, folder: OPS_REF, pages_version: 1 } }) : null),
     })
     await waitFor(() => expect(screen.getByText("My notes")).toBeTruthy())
     await waitFor(() => expect(groupHeaders().length).toBe(4))
@@ -167,7 +167,7 @@ describe("moving a page (U2)", () => {
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0]).toEqual({
       method: "POST",
-      url: `/api/v1/pages/folders/ops/pages?${WS}`,
+      url: `/api/v1/page-folders/ops/pages?${WS}`,
       body: { page: "my-notes", pages_version: 0, grants_version: 5 },
     })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -179,7 +179,7 @@ describe("moving a page (U2)", () => {
     const { calls, writes } = mount({
       pages: () => [FLEET, { ...NOTES, pages_version: version }],
       answer: (c) => {
-        if (c.method === "POST" && c.url.startsWith("/api/v1/pages/folders/ops/pages")) {
+        if (c.method === "POST" && c.url.startsWith("/api/v1/page-folders/ops/pages")) {
           attempts += 1
           if (attempts === 1) {
             // Somebody else moved the page meanwhile: the list is now behind.
@@ -193,7 +193,7 @@ describe("moving a page (U2)", () => {
     })
     await waitFor(() => expect(screen.getByText("My notes")).toBeTruthy())
     await waitFor(() => expect(groupHeaders().length).toBe(4))
-    const folderReadsBefore = calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages/folders?")).length
+    const folderReadsBefore = calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/page-folders?")).length
     const listReadsBefore = calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages?")).length
 
     chooseFromRowMenu(rowOf("My notes"), /move to folder/i)
@@ -205,7 +205,7 @@ describe("moving a page (U2)", () => {
     await waitFor(() => expect(within(dialog).getByText("The folder or the page changed; try again.")).toBeTruthy())
     expect(within(dialog).getByText("pages_version is stale")).toBeTruthy()
     // Both lists were read again — not just the one that tripped.
-    expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages/folders?")).length).toBeGreaterThan(folderReadsBefore)
+    expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/page-folders?")).length).toBeGreaterThan(folderReadsBefore)
     expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages?")).length).toBeGreaterThan(listReadsBefore)
 
     // Nothing was retried on the person's behalf.
@@ -219,7 +219,7 @@ describe("moving a page (U2)", () => {
   it("shows a refusal in the dialog, in the server's words, and keeps the choice", async () => {
     const { writes } = mount({
       answer: (c) =>
-        c.method === "POST" && c.url.startsWith("/api/v1/pages/folders/busy/pages")
+        c.method === "POST" && c.url.startsWith("/api/v1/page-folders/busy/pages")
           ? json(403, { error: "Only a manager of Finance or a workspace admin can file pages into Busy." })
           : null,
     })
@@ -242,7 +242,7 @@ describe("moving a page (U2)", () => {
 describe("removing a page from its folder (U3)", () => {
   it("sends the page's pages_version with the DELETE", async () => {
     const { writes } = mount({
-      answer: (c) => (c.method === "DELETE" && c.url.startsWith("/api/v1/pages/folders/ops/pages/fleet-201") ? json(204, null) : null),
+      answer: (c) => (c.method === "DELETE" && c.url.startsWith("/api/v1/page-folders/ops/pages/fleet-201") ? json(204, null) : null),
     })
     await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
     await waitFor(() => expect(groupHeaders().length).toBe(4))
@@ -252,7 +252,7 @@ describe("removing a page from its folder (U3)", () => {
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0]).toEqual({
       method: "DELETE",
-      url: `/api/v1/pages/folders/ops/pages/fleet-201?${WS}`,
+      url: `/api/v1/page-folders/ops/pages/fleet-201?${WS}`,
       body: { pages_version: 3 },
     })
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Flotila .201 is no longer in Ops."))
@@ -275,7 +275,7 @@ describe("New folder", () => {
   it("posts the name, the owning crew, and the icon and colour picked through the shared picker", async () => {
     const { writes } = mount({
       answer: (c) =>
-        c.method === "POST" && c.url.startsWith("/api/v1/pages/folders?")
+        c.method === "POST" && c.url.startsWith("/api/v1/page-folders?")
           ? json(201, { id: "f9", slug: "runbooks", name: "Runbooks", icon: "rocket", color: "amber", owner: "crew/finance", page_count: 0, grants_version: 0 })
           : null,
     })
@@ -299,7 +299,7 @@ describe("New folder", () => {
     await waitFor(() => expect(writes()).toHaveLength(1))
     expect(writes()[0]).toEqual({
       method: "POST",
-      url: `/api/v1/pages/folders?${WS}`,
+      url: `/api/v1/page-folders?${WS}`,
       body: { name: "Runbooks", owner: "crew/finance", icon: "rocket", color: "amber" },
     })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -308,7 +308,7 @@ describe("New folder", () => {
   it("renders the server's 403 at the control and keeps what was typed", async () => {
     mount({
       answer: (c) =>
-        c.method === "POST" && c.url.startsWith("/api/v1/pages/folders?")
+        c.method === "POST" && c.url.startsWith("/api/v1/page-folders?")
           ? json(403, { error: "You are not a manager in Lookout; ask one, or a workspace admin." })
           : null,
     })
@@ -339,7 +339,7 @@ describe("Rename and Delete", () => {
     fireEvent.change(name, { target: { value: "Operations" } })
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }))
     await waitFor(() => expect(writes()).toHaveLength(1))
-    expect(writes()[0]).toEqual({ method: "PATCH", url: `/api/v1/pages/folders/ops?${WS}`, body: { name: "Operations" } })
+    expect(writes()[0]).toEqual({ method: "PATCH", url: `/api/v1/page-folders/ops?${WS}`, body: { name: "Operations" } })
   })
 
   it("refuses to delete a folder with pages the caller can see, saying how many", async () => {
@@ -355,7 +355,7 @@ describe("Rename and Delete", () => {
   it("shows the server's not-empty sentence when it refuses a folder that looked empty", async () => {
     const { writes } = mount({
       answer: (c) =>
-        c.method === "DELETE" && c.url.startsWith("/api/v1/pages/folders/archive?")
+        c.method === "DELETE" && c.url.startsWith("/api/v1/page-folders/archive?")
           ? json(409, { error: "Archive still holds pages you cannot see; ask their owners to move them out first." })
           : null,
     })
@@ -365,7 +365,7 @@ describe("Rename and Delete", () => {
     const dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete folder" }))
     await waitFor(() => expect(writes()).toHaveLength(1))
-    expect(writes()[0]).toEqual({ method: "DELETE", url: `/api/v1/pages/folders/archive?${WS}`, body: null })
+    expect(writes()[0]).toEqual({ method: "DELETE", url: `/api/v1/page-folders/archive?${WS}`, body: null })
     await waitFor(() =>
       expect(within(dialog).getByRole("alert").textContent).toContain(
         "Archive still holds pages you cannot see; ask their owners to move them out first.",

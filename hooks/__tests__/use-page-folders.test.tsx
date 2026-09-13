@@ -81,7 +81,7 @@ describe("usePageFolders", () => {
     apiFetch.mockResolvedValue(json({ folders: [{ slug: "ops", name: "Ops", page_count: 2 }, { slug: "arc", name: "Archive" }] }))
     const { result } = renderHook(() => usePageFolders("ws-1"), { wrapper: wrapper() })
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(lastCall()).toMatchObject({ url: "/api/v1/pages/folders?workspace_id=ws-1", method: "GET" })
+    expect(lastCall()).toMatchObject({ url: "/api/v1/page-folders?workspace_id=ws-1", method: "GET" })
     expect(result.current.folders.map((f) => f.name)).toEqual(["Archive", "Ops"])
     expect(result.current.supported).toBe(true)
   })
@@ -108,7 +108,7 @@ describe("usePageFolderMutations", () => {
     const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })
     const page = await result.current.addPage.mutateAsync({ folder: "ops", page: "p", pagesVersion: 3, grantsVersion: 5 })
     expect(lastCall()).toEqual({
-      url: "/api/v1/pages/folders/ops/pages?workspace_id=ws-1",
+      url: "/api/v1/page-folders/ops/pages?workspace_id=ws-1",
       method: "POST",
       body: { page: "p", pages_version: 3, grants_version: 5 },
     })
@@ -141,7 +141,7 @@ describe("usePageFolderMutations", () => {
     const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })
     await result.current.removePage.mutateAsync({ folder: "ops", page: "fleet 201", pagesVersion: 3 })
     expect(lastCall()).toEqual({
-      url: "/api/v1/pages/folders/ops/pages/fleet%20201?workspace_id=ws-1",
+      url: "/api/v1/page-folders/ops/pages/fleet%20201?workspace_id=ws-1",
       method: "DELETE",
       body: { pages_version: 3 },
     })
@@ -152,7 +152,7 @@ describe("usePageFolderMutations", () => {
     const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })
     const folder = await result.current.create.mutateAsync({ name: "Runbooks", owner: "crew/ops", icon: "rocket", color: "amber" })
     expect(lastCall()).toEqual({
-      url: "/api/v1/pages/folders?workspace_id=ws-1",
+      url: "/api/v1/page-folders?workspace_id=ws-1",
       method: "POST",
       body: { name: "Runbooks", owner: "crew/ops", icon: "rocket", color: "amber" },
     })
@@ -163,11 +163,11 @@ describe("usePageFolderMutations", () => {
     apiFetch.mockResolvedValue(json({ slug: "ops", name: "Operations" }))
     const { result } = renderHook(() => usePageFolderMutations("ws-1"), { wrapper: wrapper() })
     await result.current.update.mutateAsync({ slug: "ops", name: "Operations" })
-    expect(lastCall()).toEqual({ url: "/api/v1/pages/folders/ops?workspace_id=ws-1", method: "PATCH", body: { name: "Operations" } })
+    expect(lastCall()).toEqual({ url: "/api/v1/page-folders/ops?workspace_id=ws-1", method: "PATCH", body: { name: "Operations" } })
 
     apiFetch.mockResolvedValue(json({ error: "Move its 3 pages out first." }, 409))
     const err = (await result.current.remove.mutateAsync("ops").catch((e: unknown) => e)) as Error
-    expect(lastCall()).toEqual({ url: "/api/v1/pages/folders/ops?workspace_id=ws-1", method: "DELETE", body: null })
+    expect(lastCall()).toEqual({ url: "/api/v1/page-folders/ops?workspace_id=ws-1", method: "DELETE", body: null })
     expect(err.message).toBe("Move its 3 pages out first.")
   })
 })

@@ -102,6 +102,7 @@ function renderLayout(list: WirePage[], slug?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes("/api/v1/page-folders")) return okJSON({ folders: [] })
     if (url.includes("/api/v1/pages/")) {
       const wanted = decodeURIComponent(url.split("/api/v1/pages/")[1].split("?")[0])
       return okJSON(list.find((p) => p.slug === wanted) ?? null)
