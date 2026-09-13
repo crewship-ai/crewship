@@ -1,365 +1,363 @@
-# Pages: kolekce, hromadné sdílení a sidebar — analýza po oponentuře
+# Pages: Složky, sdílení a sidebar — návrh v3
 
-Datum: 2026-09-12, verze 2 (verze 1 je commit 4be01545). Stav: **P0 sidebar
-schválen k implementaci v zúženém rozsahu; kolekce a delegované `manage`
-zůstávají návrhem a potřebují druhé kolo.** Sledování: #2521. Základ:
-`main` 84615795. Navazuje na `docs/prd/pages.md` §7.1, na #2502 a na PR
-#2516.
+Datum: 2026-09-13, verze 3. Historie: v1 (4be01545) → oponentura OpenAI
+2026-09-12 (devět nálezů) → v2 (46e63492) → validace implementace sidebaru
+2026-09-13 (čtyři nálezy, všechny opraveny, viz §0) → **v3: zadání „vlastní
+složky s ikonkami a skutečnou správou oprávnění“**. Sledování: #2521.
+Základ: `main` 84615795 plus otevřené PR uvedené v §0.
 
-Nezávislou oponenturu (OpenAI, 2026-09-12, nad commitem 4be01545) jsem
-prověřil proti kódu; všech devět tvrzení o dnešním chování je pravdivých a
-každý nález je zapracován níže. §0 říká, co se změnilo a proč. Tam, kde jsem
-oponenta neposlechl, to stojí výslovně.
+V rozhraní se objekt jmenuje **Složka** (anglicky *Folder*); interně a v API
+zůstává `collection`. Složka je skupina stránek, nikdy skupina lidí.
 
-## 0. Co oponentura změnila
+## 0. Co už existuje a co je tento dokument
 
-| # | Nález | Závažnost | Co se v návrhu změnilo |
-|---|---|---|---|
-| 1 | Chybí životní cyklus delegovaných grantů: grant vydaný držitelem `manage` musí zaniknout s jeho autoritou; dnešní `loadPageGrantRecordsIn` ověřuje vydavatele při každém použití a řetězce nezná | vysoká | Nové pravidlo §5/11: grant nese `authority` (čím byl vydavatel oprávněn) a je platný jen dokud ta autorita trvá; `manage` se v první verzi **nedá delegovat dál**. Testy: odebrání `manage`, jeho expirace, přesun stránky mimo spravovanou kolekci. |
-| 2 | „Čtyři úrovně“ nejsou žebříček; kolekční `produce` by opravňovalo k zápisu do všech panelů i budoucích stránek; `mayProduce` dnes nekontroluje `canSeePanel` | vysoká | §5/3 popisuje oprávnění jako **množinu schopností**, ne stupně; `manage` z grantu je výslovně jiná věc než `canRole(role, "manage")`. **Kolekční `produce` v první verzi neexistuje**; produkce zůstává na stránce a panelech. |
-| 3 | Přesun má rozpornou autoritu (§5/2 vs §5/6) a potvrzení nemá definovanou platnost; odebrání ze sbírky nesmí blokovat správce kolekce | vysoká | §5/2 přepsáno: přesun iniciuje jen vlastník stránky nebo admin; za cílovou kolekci přijímá vlastnická crew nebo držitel `manage` kolekce; potvrzení nese verzi členství a verzi grantů cíle a při změně vrací 409; odebrání z kolekce nikdy nepotřebuje souhlas kolekce. Věta „N lidí přestane stránku vidět“ se počítá ze všech zbývajících cest. |
-| 4 | `batch_id` nestačí k bezpečnému vrácení dávky; UPSERT v `PutGrant` mění vydavatele | vysoká | §5/8 a §6: dávka zapisuje ke každé změně `change_id` a stav (created / unchanged / modified s předchozí hodnotou); vrácení kontroluje aktuální oprávnění volajícího a shodu verze grantu; dávka a její journal záznam vznikají v jedné transakci. Dávka není produktová entita. |
-| 5 | Expirace přijímaná v P1, vynucovaná až v P2 | střední | Expirace **přesunuta celá do P1**; do té doby API `expires_at` odmítá (400). Journal `page.grant_expired` nese čas vypršení i čas zaznamenání a zapíše se jednou. S2 už neslibuje „přístup zmizí“, ale „tato cesta zmizí“. |
-| 6 | Převod kolekce po smazání crew není dnešní pravidlo; „čeká na přiřazení“ odporuje povinnému vlastníkovi | střední | §5/1 přepsáno: smazání (i soft delete) crew, která vlastní kolekci, se **odmítá**, dokud kolekci někdo ručně nepřevede. Kdo jedná za crew: člen crew s rolí MANAGER+ ve workspace, nebo admin. |
-| 7 | Čtení kolekce potřebuje vlastní pravidlo; dosah na jednu stránku nesmí odhalit ostatní ani ACL; prázdná kolekce musí být otevřitelná vlastníkovi | střední | Nové §5/12: běžný čtenář vidí jen stránky, na které dosáhne, a jejich počet; granty a journal kolekce vyžadují `manage` nebo vlastnictví; vlastník a admin otevřou i prázdnou kolekci; každá vazba ověřuje shodný workspace. |
-| 8 | Efektivní přístup nevysvětlí včerejší stav; stránka může mít víc cest naráz; hledání podle příjemců nesmí prozradit ACL | střední | §5/10: vrací **množinu** cest, ne jeden důvod; historie odděleně z journalu (S4 zúženo); facet „sdíleno se mnou“ ukazuje jen vlastní cesty volajícího. |
-| 9 | P0 není celé bez backendu (`reach` na drátě neexistuje); chybí pravidla sidebaru | střední | §7 rozděleno na **P0a navigace bez backendu** a **P0b serverový `reach`**; doplněna pravidla pro cizí osobní stránky, hledání ve sbalených sekcích, stabilní výběr a fokus, klávesnici, úzkou obrazovku a dlouhé názvy; hover-checkbox a drag-and-drop nejsou jediné ovládání. |
+| Věc | Stav | Hlava |
+|---|---|---|
+| Sidebar seskupený podle vlastníka, hledání přes sbalené skupiny, uložený stav, klávesnice, facet „Shared with me“ (P0a) | PR #2525, CI zelené, ruční review v PR; validace 2026-09-13 našla dvě chyby, **opraveny** (výběr druhé stránky ve sbalené skupině; sbalování během hledání) | `f87845f5` |
+| `reach` v list API pro volajícího, seznam 7 dotazů pro libovolný počet stránek (P0b) | PR #2526, CI zelené, ruční review v PR | `2ec8a71b` |
+| Editační režim přes celou stránku, přepínač Application/Panels | PR #2516; validace 2026-09-13 nález 4 (hlášení dostupnosti v `useEffect`) **opraven** přechodem na `useLayoutEffect` | `ce8b36e6` |
+| `dev.sh status` hlásí zastaralý build | PR #2518; validace nález 3 (nahrazená binárka čtená přes `readlink -f`) **opraven** čtením `/proc/<pid>/exe` | `7dfc4863` |
+| Tento dokument | PR #2522 | tento commit |
 
-Standardy (oponentura §standardy): opraveno v §4. NIST RBAC neříká, že crew
-má být jediná skupina lidí; je to produktové zjednodušení a tak je to
-napsáno. SOC 2 CC6.2/CC6.3 podporují životní cyklus delegací, ne počet
-úrovní. ISO odkaz je na 27001:2022 / 27002:2022, ne na starou strukturu
-„A.9“, a dokument netvrdí shodu s normou.
+Seskupení podle vlastníka v #2525 **není** cíl; je to navigace nad dnešními
+daty. Cíl jsou složky z §3–§6. Nic z §3–§6 není implementováno.
 
-Kde jsem oponenta neposlechl: nikde v pravidlech. V §7 nechávám drag-and-drop
-jako doplněk vedle tlačítek, protože oponent žádal, aby nebyl *jedinou*
-cestou, ne aby zmizel.
+Nálezy druhého kola oponentury (v2 §11) zatím nedorazily; §9 je proto
+seznam bezpečnostně neuzavřených bodů, které jdou k cílené oponentuře
+**před** implementací sdílení složek. Části bez nové autorizační sémantiky
+(§10, PR F1 a F2) lze stavět hned.
 
 ## 1. Rozhodnutí
 
-1. **Sidebar P0a** (navigace bez backendu) jde do implementace hned.
-2. **Sidebar P0b** (`reach` v list API a facet „sdíleno se mnou“) jde po
-   něm, jako malý backendový krok nezávislý na kolekcích.
-3. **Kolekce** jako jediný nový objekt: pojmenovaná skupina stránek
-   vlastněná crew, jedna úroveň, stránka nejvýš v jedné kolekci.
-4. **Granty na kolekci se dědí aditivně a jen dolů**; žádné deny.
-5. **Pravidlo §7.1/2 zůstává nadřazené** viditelnosti panelů. Zápis do
-   panelu (`produce`) se v první verzi přes kolekci neuděluje vůbec.
-6. **Grant nese svou autoritu** a platí, jen dokud ta autorita trvá.
-   `manage` z grantu není totéž co role manage a nedá se delegovat dál.
-7. **Hromadné sdílení je dávka změn s trvalou evidencí každé z nich**,
-   vrácení je samostatně autorizovaná operace nad konkrétními změnami.
-8. **Expirace grantu** přichází s vynucováním, nikdy napřed.
-9. **Efektivní přístup** je serverový výpočet množiny cest; historie je
-   z journalu.
-10. **Neskupinovat lidi mimo crew** (produktové zjednodušení, §4).
+1. **Složka** = pojmenovaná skupina stránek vlastněná jednou crew, s ikonkou
+   z existující sady `CREW_ICONS` (osm ikon, `lib/crew-icons.ts`) a
+   volitelnou barvou, stejný výběr jako u crew (`CrewIconPickerDialog`).
+2. **Jedna úroveň, stránka nejvýš v jedné složce.** Stránky mimo složku
+   jsou v sekci **Nezařazené** (*Unfiled*).
+3. **Tlačítka a klávesnice jsou plnohodnotné ovládání** přesunu i výběru;
+   drag-and-drop je doplněk a nikdy jediná cesta.
+4. **Oprávnění složky jsou tři oddělené schopnosti:** *číst* (`read`),
+   *upravovat* (`write`), *spravovat sdílení* (`manage`). Není to žebříček;
+   `manage` bez `read` je platná, i když neobvyklá kombinace, a UI ji
+   pojmenuje.
+5. **Sdílení složky nemění viditelnost panelů.** Pravidlo §7.1/2 platí beze
+   změny; dialog sdílení to řekne před potvrzením.
+6. **Žádné `produce` na složce.** Zápis dat zůstává grantem na stránku a
+   její panely.
+7. **`manage` z grantu není role administrátora workspace** a **nedá se
+   delegovat**. Grant vydaný držitelem `manage` nese odkaz na konkrétní
+   grant `manage`, ze kterého byl odvozen; zanikne s ním a nové vydání
+   `manage` ho neoživí.
+8. **Přesun stránky mění oprávnění.** Iniciuje ho vlastník stránky nebo
+   admin; cílová složka ho přijímá autorizovaně; potvrzení nese verze a
+   server zastaralý souhlas odmítne.
+9. **Odebrání stránky ze složky nikdy nečeká na správce složky. Smazání
+   složky je možné jen u prázdné složky.**
+10. **Expirace grantu se přijímá až s vynucováním.** Do té doby API
+    `expires_at` odmítá.
+11. **Hromadné změny mají vlastní trvalou evidenci** (`page_grant_changes`),
+    ne journal; vrácení kontroluje aktuální oprávnění a verze.
+12. **Efektivní přístup se počítá na serveru a je potřeba už pro sdílení a
+    přesuny** (náhled dopadu), proto je v dodávce před sdílením, ne po něm.
+13. **Seznamy, počty, hledání a vysvětlení přístupu nikdy neodhalí
+    nedostupnou stránku ani cizí ACL.**
+14. **Dosah stránky přes `write`/`produce` zůstává** jak je; není to
+    viditelnost panelů a dokument to nikde neslučuje.
+15. **Objekt „projekt“ se nezavádí.** Složka pokrývá seskupení, sdílení a
+    navigaci; projekt by přidal jen životní cyklus (stav, termín), pro který
+    zatím nikdo nepředložil potřebu, kterou složka neřeší. Kdyby vznikla,
+    složka je jeho podmnožina, ne konkurent.
 
-## 2. Dnešní stav, ověřeno v kódu
+## 2. Dnešní stav (ověřeno v kódu, doplněno o #2525/#2526)
 
 | Fakt | Kde |
 |---|---|
-| Stránka má právě jednoho vlastníka: `owner_user_id` xor `owner_crew_id`. Při odchodu uživatele se převádí; bez nástupce erasure **odmítne**, nikdy sirotek. | `docs/prd/pages.md` §7.1/1, 1b; `pages_transfer_owner.go`; `ON DELETE RESTRICT` |
+| Stránka: jeden vlastník (`owner_user_id` xor `owner_crew_id`); převod při odchodu uživatele; bez nástupce erasure odmítne. | `pages.md` §7.1/1, 1b; `pages_transfer_owner.go` |
 | Viditelnost panelu = členství ve vlastnické crew nebo role manage; jinak sealed placeholder. | `pages_authz.go` `canSeePanel` |
-| Dosah bez grantu: role manage, vlastník, člen vlastnické crew, člen crew vlastnící aspoň jeden panel. Jinak grant. | `pages_authz.go` `pageReachedWithoutGrant`, `canSeePage` |
-| Granty `(page_id, subject user/crew/agent, subject_id, level read/produce/write, panel_ids?)`, `granted_by_user_id NOT NULL`. | migrace `20260812155322_pages.sql:240` |
-| **Grant platí jen tehdy, když jeho vydavatel má dnes právo ho vydat**: `loadPageGrantRecordsIn` při každém použití ověřuje vydavatele proti vlastnictví, členství a roli. Řetězce delegace neexistují. | `pages_grants_authz.go:233–260` |
-| **`produce` grant opravňuje k zápisu do pokrytých panelů bez ohledu na `canSeePanel`.** Viditelnost chrání čtení, ne zápis. | `pages_authz.go` `mayProduce` |
-| `PutGrant` je UPSERT; opakované vydání **přepíše vydavatele a čas**. | `pages_grants.go:242–248` |
+| Dosah stránky: `pageReach` (od #2526): `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant`; `pageReachedWithoutGrant` = reach bez grantu neprázdný. | `pages_authz.go` |
+| Granty `(page, subject user/crew/agent, level read/produce/write, panel_ids?)`, `granted_by NOT NULL`; platnost vydavatele se ověřuje při každém použití; UPSERT přepisuje vydavatele; žádné řetězce. | migrace `…_pages.sql:240`; `pages_grants_authz.go:233`; `pages_grants.go:242` |
+| `produce` opravňuje k zápisu bez ohledu na `canSeePanel`. | `pages_authz.go` `mayProduce` |
 | Granty spravuje role manage nebo vlastník stránky. | `pages_grants.go` `mayAdministerGrants` |
-| `write` neotevírá celý dokument bez viditelnosti všech panelů (#2502). | `pages_project_authoring.go` |
-| Změny grantů se journalují (`EntryPageGrantAdded/Removed`). | `pages_grants.go:253, 383` |
-| Veřejné odkazy: povinná `expires_at`, revokace. Granty expiraci nemají. | `page_public_tokens` |
-| CLI: `page grant`, `page grants`, `page links`. Žádná dávka. | `cmd/crewship/cmd_page_grants.go` |
-| Sidebar: hledání podle názvu a vlastníka, facety `states`, `owners`, jedna plochá sekce. **Na drátě není důvod dosahu.** | `hooks/use-pages.ts` `PageFilters`, `WirePage`; `pages-rail.tsx` |
-| Seznam stránek načítá granty hromadně (`loadPageGrantRecordsIn(..., "")`), ne per stránku. | `pages_grants_authz.go` |
+| Veřejné odkazy s povinnou expirací; granty expiraci nemají. | `page_public_tokens` |
+| Seznam stránek: viewer, panely celého workspace, granty hromadně, slugy crew: 7 dotazů. | `pages_handler.go` `List`, `loadPanelsIn`, `loadCrewSlugs` (#2526) |
+| Sidebar: skupiny podle vlastníka z `reach`, hledání, uložený stav `pages-rail:<ws>:<user>`, klávesnice po stromu. | `pages-rail.tsx`, `use-pages.ts` `groupPagesByOwner` (#2525) |
+| Ikonky a barva: `CREW_ICONS` (8), `CrewIconPickerDialog` (`icon`, `color`, `onSave`). Crew má sloupce `icon`, `color`. | `lib/crew-icons.ts`, `components/features/crews/crew-icon-picker-dialog.tsx` |
+| Access sekce editoru: seznam grantů, formulář subjekt/úroveň/scope, tokeny, veřejné odkazy. | `section-access.tsx`, `use-page-grants.ts` |
+| CLI: `page list/get/create/update/grant/grants/links/...`; `page project …`. | `cmd/crewship/cmd_page*.go` |
 
-## 3. Scénáře
+## 3. Obrazovky
 
-S1. Vedoucí Ops chce, aby crew Support četla všechny Ops stránky včetně
-    budoucích. Jedna akce, jeden journal záznam s výčtem stránek.
+Vše ze sdílených komponent: `sidebar-kit` (rail), `SectionCard`, `Dialog`,
+`CrewIconPickerDialog` (přejmenovaný na obecný `IconPickerDialog` bez změny
+chování), `AlertDialog` pro potvrzení, formulář grantu z Access sekce.
 
-S2. Admin vybere pět release stránek a dá crew QA `read` na 14 dní. Po
-    uplynutí **tato cesta** zmizí; pokud QA dosáhne jinak (panel, jiný grant),
-    stránku dál vidí a efektivní přístup to ukáže. Journal nese čas vypršení
-    i čas, kdy to systém zaznamenal.
+**S-1 Sidebar se složkami.** Sekce = složky (ikonka, barva jako tečka před
+názvem, počet *dostupných* stránek), pak **Nezařazené**. Sbalitelné, stav
+uložený jako dnes. Hledání otevírá sbalené složky na shody, bez zápisu
+stavu (#2525). Klávesnice: strom jako dnes. Kontextové menu řádku
+(tlačítko „⋯“ i Shift+F10): *Move to folder…*, *Remove from folder*.
+Tlačítko „New folder“ v hlavičce railu (jen pro koho §4 dovolí). Seskupení
+podle vlastníka zůstává jako přepínač zobrazení „Group by: Folder | Owner“
+v Filter popoveru; výchozí Folder.
 
-S3. Vlastník stránky s panelem crew Lookout dá crew Support `read` na
-    kolekci. Support vidí stránku, panel Lookout jako sealed placeholder.
+**S-2 Nová složka / Přejmenovat / Ikonka.** Dialog: název (povinný, unikátní
+slug ve workspace), vlastnická crew (výběr z crew, kde mám MANAGER+; admin
+z každé), ikonka + barva (`IconPickerDialog`). Přejmenování a změna ikonky
+tentýž dialog.
 
-S4. Petr přestal vidět stránku. Admin otevře „Access“: **aktuální** cesty
-    žádné. Historie z journalu ukáže: 2026-09-11 skončilo členství v crew
-    Engine, které bylo jedinou cestou. Dokument neslibuje víc než to, co je v
-    journalu.
+**S-3 Smazání složky.** `AlertDialog`, povolené jen pro prázdnou složku;
+jinak tlačítko disabled s větou „Move its N pages out first“ (N = počet
+stránek, které volající *vidí*; pokud existují i nedostupné, věta říká
+„and pages you cannot see“ bez počtu, §1/13).
 
-S5. Agent nikdy nezíská dosah implicitně; grant kolekce pro agenta je
-    jmenovitý.
+**S-4 Přesun stránky.** Z railu (menu, klávesnice), z hromadné lišty
+(výběr více řádků, tlačítko *Select* v toolbaru; Shift-klik; Space) a z
+Content sekce editoru („Folder: Ops · Change…“). Dialog ukáže cíl, a **před
+potvrzením dopad**: „Po přesunu stránku uvidí navíc: crew Support (read),
+Petr (write). Přestanou ji vidět: nikdo.“ z §6 efektivního přístupu, plus
+větu „Panely crew Lookout zůstanou pro ostatní zapečetěné“. Potvrzení nese
+verze (§5/8); při 409 dialog zobrazí nový dopad a žádá znovu.
 
-S6. Crew, která vlastní kolekci, má být smazána: operace se odmítne, dokud
-    kolekci někdo nepřevede. Kdo: člen crew s rolí MANAGER+ nebo admin.
+**S-5 Složka: Sdílení.** Stránka složky (klik na hlavičku → ozubené kolo)
+se dvěma kartami: *Pages* (dostupné stránky) a *Sharing* (granty složky:
+subjekt, schopnosti jako tři checkboxy read/write/manage, vydal, kdy,
+expirace až s P-F5). Formulář nad tím s větou: „Sdílení složky dává přístup
+ke stránkám ve složce, včetně stránek přidaných později. Panely vlastněné
+jinou crew zůstanou zapečetěné.“ Držitel `manage` bez `read` vidí kartu
+Sharing, ne Pages.
 
-S7. Petr má `manage` na kolekci Ops a dal Janě `read`. Vlastník Petrovi
-    `manage` odebere. Janin grant přestane platit tím okamžikem, protože jeho
-    autorita (`manage` Petra na Ops) zanikla. Totéž při expiraci Petrova
-    `manage` a při přesunu stránky mimo Ops, pokud grant byl na stránku.
+**S-6 Access sekce stránky.** Tři bloky: *Direct* (dnešní granty),
+*Inherited from folder Ops* (jen ke čtení, odkaz na S-5, jen pro toho, kdo
+smí číst granty složky; ostatním jen věta „Some access comes from the
+folder“), *Effective access* (kdo dosáhne a kterou cestou; §6).
 
-S8. Uživatel v sidebaru vidí stránky ve sbalitelných skupinách, hledání
-    najde stránku i ve sbalené skupině, výběr a fokus přežijí přepnutí
-    stránky, a na 360 px se nic neláme.
+## 4. Oprávnění jednotlivých operací
 
-## 4. Proč kolekce a ne skupiny lidí
+| Operace | Kdo | Poznámka |
+|---|---|---|
+| Vytvořit složku | admin; člen crew s rolí MANAGER+ ve workspace (vlastnická crew = ta jeho) | crew je vlastník od vzniku |
+| Přejmenovat, ikonka, barva | admin; vlastnická crew (MANAGER+); držitel `write` na složce | `write` = upravovat složku, ne stránky |
+| Smazat složku | admin; vlastnická crew (MANAGER+) | jen prázdná (žádná stránka, ani nedostupná volajícímu) |
+| Přidat / přesunout stránku do složky | **iniciuje** vlastník stránky nebo admin; **přijímá** admin, vlastnická crew cíle (MANAGER+) nebo držitel `manage` cíle | v1: volající musí mít obě autority najednou, jinak 403 s větou, kdo může; požadavek „ke schválení“ je v §12 |
+| Odebrat stránku ze složky | vlastník stránky nebo admin | nikdy nečeká na složku |
+| Číst složku (seznam) | kdo dosáhne aspoň na jednu její stránku, nebo drží jakýkoli grant složky, nebo vlastnická crew, nebo admin | vidí jen dostupné stránky a jejich počet |
+| Číst granty složky | admin; vlastnická crew; držitel `manage` | ostatní jen „some access comes from the folder“ |
+| Vydat / odebrat grant složky | admin; vlastnická crew (MANAGER+); držitel `manage` v rozsahu vlastních schopností, nikdy `manage` | §5/6, §5/11 |
+| Efektivní přístup stránky | admin; vlastník stránky; držitel `manage` stránky nebo její složky | jen cesty, žádná jména panelů cizí crew |
+| Efektivní přístup subjektu (na co dosáhne) | admin; uživatel sám na sebe | |
+| Hromadný grant / vrácení | `mayAdministerGrants` na každou stránku, v okamžiku volání | §5/8 |
 
-RBAC podle NIST rozlišuje uživatele, role, oprávnění a zvlášť skupiny; nic v
-něm neříká, že skupina lidí má být jedna. Crewship má dnes tři místa, kde se
-rozhoduje o lidech: workspace role, členství v crew a přímé granty. Čtvrté
-místo (uživatelské skupiny) by přidalo další zdroj pravdy, který by musel
-zůstat konzistentní s crew. **Je to produktové zjednodušení, ne norma.**
-Chybějící kus je na straně objektů: nad stránkou dnes nic není. Hierarchie
-zdrojů o jedné úrovni je nejmenší přidaná struktura, která scénář S1 řeší.
+Workspace role VIEWER nikdy nic z tabulky nemění; MEMBER jen jako vlastník
+stránky nebo držitel grantu.
 
-SOC 2 CC6.2/CC6.3 (autorizace, odebírání přístupu, nejmenší oprávnění,
-oddělení povinností) podporují §5/11 (životní cyklus delegací) a §5/8
-(audit dávky). Neříkají nic o počtu úrovní. ISO/IEC 27001:2022 a 27002:2022
-(řízení přístupu) jsou relevantní rámec; tento dokument shodu s normou
-netvrdí a neověřuje.
+## 5. Pravidla (§7.4 do `pages.md`, verze 3)
 
-## 5. Pravidla (návrh §7.4 do `pages.md`)
+1. **Složka má právě jednoho vlastníka a je to crew.** Smazání crew (i soft
+   delete) se odmítá, dokud nejsou její složky převedeny; za crew jedná
+   MANAGER+ člen nebo admin.
+2. **Jedna úroveň, stránka nejvýš v jedné složce.** Bez vnořování.
+3. **Schopnosti složky: `read`, `write`, `manage`; bez `produce`.** `read` =
+   vidět stránky složky (panely podle §7.1/2), `write` = upravovat složku
+   (název, ikonka), `manage` = spravovat granty složky. Žádná neobsahuje
+   jinou. Grant `manage` ≠ role manage.
+4. **Dědění aditivní, jen dolů.** Efektivní schopnosti subjektu na stránce =
+   sjednocení(role, vlastnictví, členství v crew vlastnící panel, platné
+   granty stránky, `read` ze složky). `write` složky se na stránku
+   **nedědí** (upravovat složku ≠ upravovat dokument stránky); `manage`
+   složky dává právo vydávat granty *složky*, ne granty stránek.
+5. **§7.1/2 je nadřazené.** Žádná cesta z bodu 4 neodhalí panel cizí crew
+   mimo roli manage.
+6. **`manage` vydává jen schopnosti, které jeho držitel na složce sám má, a
+   nikdy `manage`.** Nemění vlastníka, nepřesouvá stránky, nemaže složku.
+7. **Expirace** volitelná, serverové hodiny, `page.grant_expired` jednou
+   (`expired_at`, `observed_at`). Přijímá se až s vynucováním (P-F5).
+8. **Přesun nese verze.** Požadavek obsahuje `pages_version` stránky
+   (mění se každou změnou členství stránky ve složce) a `grants_version`
+   cílové složky (mění se každou změnou grantů složky). Server odmítne 409,
+   pokud kterákoli nesedí, a odpověď nese aktuální dopad, aby UI ukázalo
+   nový náhled. Odebrání ze složky nese jen `pages_version` stránky.
+9. **Agent nikdy nezíská dosah implicitně.** Grant složky pro agenta je
+   jmenovitý.
+10. **Efektivní přístup** = množina cest per subjekt: `role`, `owner`,
+    `panel_crew:<slug>`, `grant:page:<change_id>`,
+    `grant:folder:<change_id>`. Historie zvlášť z journalu. Výpis nikdy
+    nepojmenuje panel ani crew, které volající nevidí.
+11. **Autorita grantu.** Každý grant nese `authority`: `owner` | `role` |
+    `manage:<change_id>` (konkrétní grant `manage`, ze kterého vzešel). Při
+    vyhodnocení se ověří, že vydavatel autoritu **stále má a je to táž**:
+    u `manage:<change_id>` musí grant s tímto `change_id` existovat, být
+    platný a patřit vydavateli. Odebrání a nové vydání `manage` vytvoří nový
+    `change_id`, takže staré odvozené granty zůstanou mrtvé (nikdy se
+    „neoživí“) a journal je zapíše jako `page.grant_orphaned`. Vydavatel s
+    autoritou `owner`/`role` se ověřuje jako dnes (`loadPageGrantRecordsIn`).
+12. **Čtení složky je filtrované** (§4). Počty jsou počty dostupných stránek.
+    Hledání prohledává jen dostupné stránky. Každá vazba ověřuje
+    `workspace_id`.
+13. **Hromadné změny.** `page_grant_changes(change_id, batch_id, op
+    created|unchanged|modified|reverted, previous_json, actor, at,
+    version)` je zdroj pravdy pro vrácení; journal je jen záznam.
 
-1. **Kolekce má právě jednoho vlastníka a je to crew.** Smazání crew, včetně
-   soft delete, se odmítá, dokud každou její kolekci někdo nepřevede na
-   jinou crew. Za vlastnickou crew jedná člen crew s rolí MANAGER nebo vyšší,
-   nebo admin workspace. Žádný automatický nástupce, žádný stav „čeká“.
-2. **Stránka patří nejvýš do jedné kolekce, bez vnořování.** Přesun **do**
-   kolekce iniciuje vlastník stránky nebo admin a **přijímá** vlastnická
-   crew cílové kolekce nebo držitel jejího `manage`. Potvrzení nese
-   `membership_version` stránky a `grants_version` cílové kolekce; změní-li
-   se mezi zobrazením a zápisem, server vrátí 409 a UI ukáže nové důsledky.
-   Odebrání **z** kolekce provádí vlastník stránky nebo admin a nepotřebuje
-   souhlas kolekce: revokaci přístupu nesmí nikdo blokovat. Věta o dopadu
-   („N lidí přestane stránku vidět“) se počítá ze všech zbývajících cest
-   (§5/10), ne z jedné.
-3. **Oprávnění je množina schopností, ne žebříček.** `read` = vidět stránku
-   a panely, na které dosáhnu; `write` = měnit uspořádání (s omezením #2502);
-   `produce` = zapisovat do vyjmenovaných panelů; `manage` = vydávat a
-   odebírat granty. Žádná schopnost neobsahuje jinou. Grant `manage` je
-   **jiná věc než workspace role manage** (`canRole(role, "manage")`): role
-   dává vše, grant dává jen správu grantů. Grant na kolekci může nést `read`,
-   `write` a `manage`; **`produce` na kolekci neexistuje** (panelový rozsah
-   nelze stanovit pro stránky, které teprve vzniknou).
-4. **Dědění je aditivní a jen dolů.** Efektivní schopnosti = sjednocení
-   (role, vlastnictví, členství v crew vlastnící panel, platné granty
-   stránky, platné granty kolekce). Žádné deny. Odebrat přístup = odebrat
-   grant nebo členství.
-5. **§7.1/2 je nadřazené.** Žádná cesta z bodu 4 nezpřístupní obsah panelu
-   cizí crew mimo roli manage. `write` z kolekce podléhá
-   `requireProjectDefinitions` stejně jako `write` ze stránky.
-6. **Držitel `manage` vydává granty jen se schopnostmi, které má sám na
-   témže objektu, a nikdy `manage`.** `read`+`manage` tedy vydá jen `read`.
-   `manage` nemění vlastníka, nepřesouvá stránky a nevidí panely, které by
-   jinak neviděl.
-7. **Expirace je volitelná na grantu, povinná na veřejném odkazu.** Server
-   vyhodnocuje čas svými hodinami (`evaluator().Now()`). Prošlý grant se
-   ignoruje a při prvním dotyku se zapíše `page.grant_expired` s `expired_at`
-   (čas vypršení) a `observed_at` (čas zápisu); zapisuje se jednou, ne při
-   každém čtení. Přijímání `expires_at` a jeho vynucování jsou jedna dodávka.
-8. **Hromadná akce je dávka změn, každá změna má identitu.** `POST
-   grants:batch` zapíše pro každou stránku jednu z: `created`, `unchanged`,
-   `modified` (s předchozím `expires_at` a vydavatelem). Dávka a její journal
-   záznam vznikají v jedné transakci; jedna odmítnutá stránka odmítne celou
-   dávku. Vrácení dávky je operace nad konkrétními `change_id`: vyžaduje
-   **aktuální** oprávnění volajícího ke každé stránce, kontroluje, že grant
-   je stále ve stavu, který dávka zanechala (verze), a `modified` vrací na
-   předchozí hodnotu, `created` maže, `unchanged` nechává. Vydavatel bez
-   dnešního oprávnění dávku nevrátí.
-9. **Agent nikdy nezíská dosah implicitně.** Grant kolekce pro agenta je
-   jmenovitý; agent nedědí nic přes crew, ve které běží.
-10. **Efektivní přístup je serverový výpočet množiny cest.** Pro stránku a
-    subjekt vrací všechny platné cesty (`role`, `owner`, `panel_crew:<crew>`,
-    `grant:page:<change_id>`, `grant:collection:<change_id>`), ne jeden
-    důvod. Historie je samostatný dotaz nad journalem (členství, role,
-    granty, přesuny, expirace). Výpis nikdy nepojmenuje panel ani crew, které
-    volající nevidí (stejný neutrální jazyk jako `pageWithheldChangeMessage`).
-    Facet „sdíleno se mnou“ ukazuje jen cesty volajícího.
-11. **Grant nese svou autoritu a platí, jen dokud trvá.** Každý grant
-    zaznamená `authority`: `owner`, `role`, `manage:collection:<id>` nebo
-    `manage:page:<id>`. Při vyhodnocení (rozšíření dnešní kontroly vydavatele
-    v `loadPageGrantRecordsIn`) se ověří, že vydavatel autoritu **stále**
-    má; jinak se grant ignoruje a journaluje jako `page.grant_orphaned`.
-    `manage` se v první verzi **nedá delegovat**, takže řetězec má nejvýš
-    dva články: vlastník/role → držitel `manage` → příjemce. Přesun stránky
-    mimo kolekci, z jejíhož `manage` byl grant vydán, grant zneplatní.
-12. **Čtení kolekce je filtrované.** Kolekci otevře každý, kdo dosáhne na
-    aspoň jednu její stránku, a vidí jen stránky, na které dosáhne, a jejich
-    počet, ne celkový. Granty a journal kolekce vidí vlastnická crew, držitel
-    `manage` a admin; ti otevřou i prázdnou kolekci. Každá vazba (stránka ↔
-    kolekce, grant ↔ kolekce) ověřuje shodný `workspace_id`.
-
-## 6. Datový model a API (P1, po druhém kole oponentury)
+## 6. Datový model, API, CLI
 
 ```sql
-CREATE TABLE page_collections (
-  id            TEXT PRIMARY KEY,
-  workspace_id  TEXT NOT NULL REFERENCES workspaces(id),
-  slug          TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  owner_crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE RESTRICT,
-  grants_version INTEGER NOT NULL DEFAULT 0,   -- §5/2 potvrzení přesunu
-  created_at    TEXT NOT NULL, updated_at TEXT NOT NULL,
+CREATE TABLE page_folders (
+  id             TEXT PRIMARY KEY,
+  workspace_id   TEXT NOT NULL REFERENCES workspaces(id),
+  slug           TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  icon           TEXT,                       -- jméno z CREW_ICONS; NULL = výchozí "folder"
+  color          TEXT,                       -- jako crews.color
+  owner_crew_id  TEXT NOT NULL REFERENCES crews(id) ON DELETE RESTRICT,
+  grants_version INTEGER NOT NULL DEFAULT 0, -- §5/8
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE (workspace_id, slug)
 );
-ALTER TABLE pages ADD COLUMN collection_id TEXT REFERENCES page_collections(id) ON DELETE SET NULL;
-ALTER TABLE pages ADD COLUMN membership_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE pages ADD COLUMN folder_id TEXT REFERENCES page_folders(id) ON DELETE RESTRICT;
+ALTER TABLE pages ADD COLUMN pages_version INTEGER NOT NULL DEFAULT 0;   -- členství ve složce
 
--- Společný tvar pro granty stránky i kolekce (page_grants se rozšíří o tytéž sloupce).
-CREATE TABLE page_collection_grants (
-  change_id          TEXT PRIMARY KEY,                       -- §5/8 identita změny
-  collection_id      TEXT NOT NULL REFERENCES page_collections(id) ON DELETE CASCADE,
-  subject_type       TEXT NOT NULL CHECK (subject_type IN ('user','crew','agent')),
-  subject_id         TEXT NOT NULL,
-  level              TEXT NOT NULL CHECK (level IN ('read','write','manage')),  -- bez produce, §5/3
-  granted_by_user_id TEXT NOT NULL REFERENCES users(id),
-  authority          TEXT NOT NULL,                          -- §5/11
-  granted_at         TEXT NOT NULL,
-  expires_at         TEXT,
-  version            INTEGER NOT NULL DEFAULT 1,
-  batch_id           TEXT,
-  UNIQUE (collection_id, subject_type, subject_id, level)
+CREATE TABLE page_folder_grants (
+  change_id           TEXT PRIMARY KEY,
+  folder_id           TEXT NOT NULL REFERENCES page_folders(id) ON DELETE CASCADE,
+  subject_type        TEXT NOT NULL CHECK (subject_type IN ('user','crew','agent')),
+  subject_id          TEXT NOT NULL,
+  level               TEXT NOT NULL CHECK (level IN ('read','write','manage')),
+  granted_by_user_id  TEXT NOT NULL REFERENCES users(id),
+  authority           TEXT NOT NULL,          -- owner | role | manage:<change_id>
+  granted_at          TEXT NOT NULL,
+  expires_at          TEXT,                   -- P-F5; do té doby NULL vynuceno CHECKem
+  version             INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (folder_id, subject_type, subject_id, level)
 );
--- page_grants: přidat change_id, authority, expires_at, version, batch_id; level += 'manage'.
--- page_grant_changes(batch_id, change_id, outcome created|unchanged|modified, previous_json)
--- pro vrácení dávky (§5/8).
+-- page_grants: + change_id, authority, expires_at, version (stejný tvar).
+CREATE TABLE page_grant_changes (
+  change_id     TEXT NOT NULL,
+  batch_id      TEXT NOT NULL,
+  target        TEXT NOT NULL,               -- page:<id> | folder:<id>
+  op            TEXT NOT NULL CHECK (op IN ('created','unchanged','modified','reverted')),
+  previous_json TEXT,
+  actor_user_id TEXT NOT NULL,
+  at            TEXT NOT NULL,
+  PRIMARY KEY (batch_id, change_id)
+);
 ```
 
-Načtení kandidátů pro seznam (rozšíření `loadPageGrantRecordsIn`, ne
-`grantsFor` per stránka; test hlídá konstantní počet dotazů pro 80 stránek):
+`ON DELETE RESTRICT` na `pages.folder_id`: složku nelze smazat, dokud má
+stránky (§1/9), včetně těch, které volající nevidí.
 
-```sql
-SELECT p.id AS page_id, g.subject_type, g.subject_id, g.level,
-       g.granted_by_user_id, g.authority, g.expires_at, 'page' AS origin, g.change_id
-FROM pages p JOIN page_grants g ON g.page_id = p.id
-WHERE p.workspace_id = :ws
-UNION ALL
-SELECT p.id, g.subject_type, g.subject_id, g.level,
-       g.granted_by_user_id, g.authority, g.expires_at, 'collection', g.change_id
-FROM pages p
-JOIN page_collections c ON c.id = p.collection_id AND c.workspace_id = :ws
-JOIN page_collection_grants g ON g.collection_id = c.id
-WHERE p.workspace_id = :ws;
-```
+Vyhodnocení: `loadPageGrantRecordsIn` načte granty stránek a granty složek
+jedním `UNION ALL` (v2 §6), přidá kontrolu autority (§5/11) a expirace
+(§5/7); `pageReach` dostane novou cestu `folder:<slug>`; seznam zůstává na
+konstantním počtu dotazů (test z #2526 se rozšíří o složky).
 
-Nad kandidáty běží společná kontrola: expirace (§5/7), autorita vydavatele
-(§5/11), a teprve pak sjednocení. Výpis všech subjektů kolekce je stránkovaný.
-
-| Metoda a cesta | Kdo | CLI |
+| Metoda a cesta | Kdo (§4) | CLI |
 |---|---|---|
-| `GET/POST /pages/collections`, `GET/PATCH/DELETE /pages/collections/{slug}` | čtení podle §5/12; zápis admin, vlastnická crew (MANAGER+), `manage` | `page collection list/create/show/update/delete` |
-| `PUT/DELETE /pages/collections/{slug}/grants` (`read`, `write`, `manage`; `expires_at?`) | admin, vlastnická crew, `manage` podle §5/6 | `page collection grant/revoke` |
-| `POST /pages/collections/{slug}/pages` `{page, membership_version, grants_version}` | iniciuje vlastník stránky/admin; přijímá cíl podle §5/2 | `page collection add` |
-| `DELETE /pages/collections/{slug}/pages/{pageSlug}` | vlastník stránky nebo admin, bez souhlasu kolekce | `page collection remove` |
-| `POST /pages/grants:batch` `{pages, subject, level, expires_at?}` (max 100) | `mayAdministerGrants` pro každou stránku; vše nebo nic | `page grant --pages a,b,c` |
-| `POST /pages/grants/batches/{batch_id}:revert` | aktuální oprávnění ke každé dotčené stránce; verze musí sedět | `page grant revert-batch` |
-| `GET /pages/{slug}/access` (množina cest per subjekt) | admin, vlastník, `manage` | `page access <slug>` |
-| `GET /pages/{slug}/access/history` (journal) | totéž | `page access <slug> --history` |
-| `GET /pages/access?subject=user:petr` | admin; uživatel sám na sebe | `page access --subject` |
+| `GET/POST /pages/folders`; `GET/PATCH/DELETE /pages/folders/{slug}` | čtení filtrované; zápis vytvořit/přejmenovat/smazat | `page folder list/create/show/update/delete` |
+| `POST /pages/folders/{slug}/pages` `{page, pages_version, grants_version}` | přesun/přidání (obě autority) | `page folder add <folder> <page>` / `page move <page> --folder` |
+| `DELETE /pages/folders/{slug}/pages/{page}` `{pages_version}` | vlastník stránky/admin | `page folder remove` / `page move <page> --unfiled` |
+| `GET /pages/folders/{slug}/grants`; `PUT/DELETE …/grants` | §4 | `page folder grants/grant/revoke` |
+| `GET /pages/{slug}/access` (množina cest per subjekt), `…/access/history` | §4 | `page access <slug> [--history]` |
+| `GET /pages/access?subject=…` | admin; sám na sebe | `page access --subject` |
+| `POST /pages/folders/{slug}/pages:preview` `{page}` → dopad přesunu (kdo získá/ztratí) | kdo smí přesun iniciovat | `page move --dry-run` |
+| `POST /pages/grants:batch`, `POST /pages/grants/batches/{id}:revert` | §5/13 | `page grant --pages …`, `page grant revert-batch` |
 
-Události: `page.collection.updated` invaliduje seznam stránek u všech
-členů workspace; změna grantu kolekce se nesmí projevit jen na jedné
-stránce.
+Každý endpoint má CLI příkaz a akceptační test nad binárkou; dokumentace v
+`docs/api-reference/pages.mdx` a `docs/cli/page.mdx` jde ve stejném PR.
 
-## 7. Sidebar
+## 7. Konflikty a souběh
 
-**P0a — navigace, bez backendu (schváleno k implementaci)**
+- **Přesun vs. změna grantů cíle:** 409 `folder_grants_moved`, odpověď nese
+  nový dopad; UI ukáže a žádá znovu.
+- **Přesun vs. přesun:** `pages_version` stránky; druhý dostane 409.
+- **Smazání složky vs. přidání stránky:** `ON DELETE RESTRICT` + transakce;
+  smazání selže 409, nikoli sirotek.
+- **Odebrání `manage` vs. vydání odvozeného grantu:** grant nese
+  `authority: manage:<change_id>`; vydání v transakci ověří existenci a
+  platnost; odebrání po vydání grant zneplatní při dalším vyhodnocení.
+- **Hromadná dávka:** jedna transakce; jakákoli odmítnutá stránka → 403 s
+  výčtem, nic zapsáno.
+- **Expirace:** serverový čas; test s falešnými hodinami.
+- **Seznam a `page.updated`:** změna grantu složky vysílá
+  `page.folder.updated`; klient invaliduje seznam stránek, ne jednu stránku.
 
-- Sbalitelné skupiny podle vlastníka (`SidebarSection` s počtem): „Mine“
-  (stránky, které vlastním já), pak crew, jejichž jsem členem, pak ostatní
-  crew, nakonec „Owned by others“ pro osobní stránky jiných lidí, ke kterým
-  dosáhnu. Vlastník je v hlavičce skupiny, na řádku se neopakuje.
-- Stavová tečka a počet panelů na řádku zůstávají.
-- Hledání napříč skupinami: dokud je dotaz neprázdný, sbalené skupiny se
-  dočasně rozbalí na výsledky a po smazání dotazu se vrátí do uloženého
-  stavu. Skupina bez výsledku se skryje, ne vyprázdní.
-- Stav sbalení uložený per uživatel a workspace (`localStorage` s klíčem
-  `pages-rail:<workspace>:<user>`).
-- Aktivní stránka je vždy vidět: je-li ve sbalené skupině, skupina se při
-  výběru rozbalí; výběr a fokus přežijí přepnutí stránky a návrat z editoru
-  (stejný uzel, viz test „keeps the rail mounted“).
-- Klávesnice: šipky mezi řádky, Enter otevře, Left/Right sbalí/rozbalí
-  skupinu; vše dosažitelné bez myši.
-- Úzká obrazovka (360 px) a dlouhé názvy: řádek jednořádkový s `truncate`,
-  celý název v `title` a v hlavičce stránky; hlavička skupiny neláme.
-- Vše ze `sidebar-kit`; žádná nová komponenta.
+## 8. Akceptační scénáře (testy)
 
-Akceptace P0a: Vitest na řazení skupin, hledání ve sbalených, uložení
-stavu, klávesnici; Playwright na 360/768/1440 px bez horizontálního
-přetečení; „keeps the rail mounted“ zůstává zelený.
+Autorizace (Go, `internal/api`, každý s odmítnutou variantou):
+A1 MEMBER bez MANAGER+ nevytvoří složku (403). A2 Přejmenování držitelem
+`write` ano, držitelem `read` ne. A3 Smazání neprázdné složky 409 i pro
+admina; prázdné ano. A4 Přesun: vlastník stránky bez autority cíle 403 s
+větou; admin ano; vlastník stránky, který je MANAGER+ v cílové crew, ano.
+A5 Odebrání ze složky vlastníkem stránky bez souhlasu složky 200.
+A6 `manage` vydá `read` ano, `write` (které nemá) 403, `manage` 403.
+A7 Odebrání `manage` → odvozený grant zmizí z efektivního přístupu; nové
+vydání `manage` ho neoživí. A8 Stránka se sealed panelem sdílená přes
+složku: příjemce vidí stránku, panel zapečetěný, `GET /project` 403.
+A9 Čtení složky bez dosahu na žádnou stránku 404; s dosahem na jednu: jen
+ta jedna a count 1. A10 Efektivní přístup nepojmenuje panel cizí crew.
+A11 Přesun s zastaralou `grants_version` 409 a odpověď nese dopad.
+A12 Expirace: prošlý grant ignorován, journal jednou (P-F5).
+A13 Dávka: jedna odmítnutá stránka → nic zapsáno; vrácení `modified`
+obnoví předchozí hodnotu; vrácení bez dnešního oprávnění 403.
+A14 Seznam: konstantní počet dotazů se složkami (rozšíření testu z #2526).
 
-**P0b — serverový `reach` (malý backendový krok, nezávislý na kolekcích)**
+UI (Vitest + Playwright kde je server): U1 složky v railu s ikonkou, barvou
+a počtem; Nezařazené; hledání přes sbalené složky. U2 Přesun z klávesnice
+(menu, Enter) bez myši. U3 Dialog přesunu ukáže dopad a po 409 nový.
+U4 Sdílení: věta o panelech před potvrzením; tři checkboxy. U5 Access:
+tři bloky, zděděné jen ke čtení. U6 360/768/1440 px bez horizontálního
+přetečení; dlouhé názvy složek s `truncate` a `title`.
 
-- List API vrací u každé stránky `reach: ["owner" | "role" | "crew:<slug>" |
-  "panel_crew:<slug>" | "grant"]` pro **volajícího**. Nic o jiných lidech.
-- Facet „Shared with me“ = `reach` obsahuje jen `grant`.
-- Žádný dotaz navíc: `reach` se odvodí z toho, co `List` už načítá.
+Produktové měření: 4 z 5 lidí bez znalosti implementace vytvoří složku,
+přesunou do ní tři stránky a nasdílí ji crew do 90 s; 4 z 5 správně
+popíší, co se stane s panelem cizí crew.
 
-**P1 — s kolekcemi**
+## 9. Bezpečnostně neuzavřené body k cílené oponentuře (před P-F3)
 
-- Skupiny podle kolekce, „Unfiled“ pro stránky bez kolekce.
-- Výběr více řádků: checkbox viditelný trvale v režimu výběru (tlačítko
-  „Select“ v toolbaru), Shift-klik, klávesnice (Space); drag-and-drop jen
-  jako doplněk. Lišta akcí: Share, Move to collection, Export.
-- Share otevře stejný formulář jako Access sekce editoru, s výčtem stránek,
-  volitelnou expirací a náhledem „kdo nově dosáhne“ z §5/10.
-- Přesun ukáže před potvrzením dopad ze všech cest a nese verze z §5/2.
-- Access sekce: blok „Inherited from collection“ (jen ke čtení, s odkazem) a
-  „Effective access“ (§5/10).
+1. **Autorita jako `manage:<change_id>`** (§5/11): stačí to proti oživení
+   po odebrání a novém vydání? Je správně, že změna *rozsahu* `manage`
+   (např. z read+manage na write+manage) je nový `change_id` a odvozené
+   granty zaniknou?
+2. **`write` složky se nedědí na stránky** (§5/4): je to správná hranice,
+   nebo má `write` složky dávat `write` na stránky, které nemají vlastní
+   granty?
+3. **Přesun vyžaduje obě autority v jedné osobě** (§4): nebude to v praxi
+   znamenat, že přesouvá jen admin? Alternativa je požadavek ke schválení
+   (§12).
+4. **Filtrované čtení složky** (§5/12): unikne z počtu nebo z hledání
+   informace o nedostupných stránkách (např. rozdíl mezi „prázdná“ a „nic
+   pro tebe“)? Návrh: 404 pro složku bez dostupné stránky *a* bez grantu.
+5. **Dopad přesunu jako náhled** (S-4): endpoint `pages:preview` vrací
+   subjekty, které získají přístup; je to samo o sobě únik ACL cílové
+   složky vlastníkovi stránky, který její granty jinak číst nesmí?
+   Návrh: vrací jen počty a typy subjektů, jména jen tomu, kdo granty číst
+   smí.
+6. **`ON DELETE RESTRICT` na `pages.folder_id`** vs. smazání stránky
+   (kaskáda z `pages` je v pořádku) a erasure uživatele (převod stránky
+   složku nemění).
 
-## 8. Bezpečnostní hrany pro druhé kolo
+## 10. Dodávka v malých PR
 
-- Eskalace přes `manage`: `read`+`manage` vydá `write` → 403, nic se
-  nezapíše; `manage` nevydá `manage`.
-- Zánik autority (§5/11): test odebrání, expirace, přesunu; grant zmizí
-  z efektivního přístupu bez dalšího zásahu a journal to zapíše jednou.
-- Kolekce jako obcházení #2502: `write` z kolekce bez členství v crew
-  panelu → `GET /project` 403.
-- Přesun mění dosah: 409 při změně verzí; dopad ze všech cest; odebrání
-  z kolekce nikdy neblokuje kolekce.
-- Dávka: atomická; vrácení s aktuálním oprávněním a verzí; `modified` se
-  vrací na předchozí hodnotu, ne maže.
-- Expirace: serverový čas, test s falešnými hodinami; jednorázový journal.
-- Efektivní přístup a čtení kolekce neprozradí sealed panel ani cizí ACL.
-- Veřejné odkazy zůstávají na stránce; kolekce veřejný odkaz nemá.
-- Rate limit na `grants:batch` a `pages/access`; stránkování výpisů.
-- Konstantní počet dotazů pro seznam 80 stránek (test).
-
-## 9. Co záměrně nenavrhuji
-
-Deny granty; vnořené kolekce; skupiny uživatelů mimo crew; `produce` na
-kolekci; delegování `manage`; ABAC podmínky; automatické zařazování do
-kolekcí; veřejný odkaz na kolekci.
-
-## 10. Fáze a akceptace
-
-| Fáze | Obsah | Stav | Akceptace |
+| PR | Obsah | Autorizační sémantika nová? | Může začít |
 |---|---|---|---|
-| P0a | Sidebar: skupiny podle vlastníka, hledání ve sbalených, uložený stav, klávesnice, úzká obrazovka | **schváleno** | §7 P0a |
-| P0b | `reach` v list API, facet „Shared with me“ | schváleno, po P0a | žádný dotaz navíc; jen cesty volajícího |
-| P1 | Kolekce, dědění `read/write/manage`, autorita grantů, dávka s `change_id`, expirace s vynucováním, CLI | **druhé kolo oponentury** | Go testy S1, S3, S5, S6, S7, eskalace, atomická dávka, zánik autority, falešné hodiny; akceptační test CLI; mutace: odstranění JOINu kolekce shodí S1, odstranění kontroly autority shodí S7 |
-| P2 | Efektivní přístup (množina cest), historie z journalu, UI Access | po P1 | test, že výpis neprozradí sealed panel; konstantní počet dotazů |
+| **F1 Složky** | tabulka `page_folders`, `pages.folder_id`, `pages_version`; CRUD s ikonkou/barvou; přidat/odebrat/přesunout (obě autority, verze); `folder` v list API; rail se složkami, Nezařazené, kontextové menu, dialog přesunu **bez náhledu dopadu** (složka zatím nemá granty, dopad je nulový); CLI; docs | ne (jen §4 řádky bez grantů) | hned |
+| **F2 Efektivní přístup** | `GET /pages/{slug}/access`, `/access?subject`, Access sekce blok *Effective access* (cesty dnešních grantů, role, crew), CLI, konstantní dotazy; **žádné nové granty** | ne (jen čtení, §1/13) | hned, souběžně s F1 |
+| **F3 Sdílení složky** | `page_folder_grants` s autoritou, dědění `read`, `manage` bez delegace, S-5, S-6 *Inherited*, náhled dopadu v S-4, `folder:` v `reach` | **ano** | po oponentuře §9 |
+| **F4 Dávka** | `page_grant_changes`, `grants:batch`, `:revert`, hromadná lišta | ano | po F3 |
+| **F5 Expirace** | `expires_at` + vynucování + journal | ano | po F3 |
 
-Produktové měření: 4 z 5 lidí bez znalosti implementace najdou stránku ve
-sbalené skupině hledáním do 20 s (P0a); dají crew přístup ke třem stránkám
-najednou do 60 s a správně řeknou, co se stane se stránkou přidanou do
-kolekce zítra (P1).
+F1 a F2 jsou nezávislé a mohou běžet paralelně (F1 backend + F1 frontend +
+F2 backend). F3 sahá do `loadPageGrantRecordsIn` a čeká na §9.
 
-## 11. Otevřené otázky pro druhé kolo
+## 11. Co záměrně nenavrhuji
 
-1. Stačí `authority` jako řetězec, nebo má odkazovat na konkrétní
-   `change_id` grantu `manage`, ze kterého byl odvozen (přesnější zánik)?
-2. Má `page_grant_changes` žít v journalu, nebo ve vlastní tabulce, když
-   journal není určen ke zpětnému čtení pro autorizaci?
-3. Je pro P0b bezpečné vracet `panel_crew:<slug>` v `reach`, když název
-   crew vlastnící panel dnes sealed placeholder už nese?
-4. Jak se `manage` na kolekci chová k novým stránkám přidaným po vydání
-   grantu (dědí se na ně jeho `read`, ale má držitel `manage` právo je
-   sdílet dál)? Návrh: ano, protože §5/11 váže platnost na trvání `manage`,
-   ne na okamžik přidání.
-5. Potvrzení přesunu nese dvě verze; je to dost, nebo má nést i verzi
-   grantů zdrojové kolekce?
+Deny granty; vnořené složky; skupiny uživatelů mimo crew; `produce` na
+složce; delegování `manage`; dědění `write` na stránky (§9/2); objekt
+projekt (§1/15); veřejný odkaz na složku; automatické zařazování.
+
+## 12. Zbývající rozhodnutí
+
+1. Přesun jako požadavek ke schválení (iniciátor bez autority cíle vytvoří
+   žádost, správce cíle přijme) — ano/ne, a kdy.
+2. Ikona výchozí složky a zda „Nezařazené“ má vlastní ikonu.
+3. Zda `write` složky umí i mazat prázdnou složku (dnes ne).
+4. Zda facet „Group by: Owner“ zůstává po zavedení složek, nebo se skryje.
+5. Odpovědi na §9 od oponentury.
