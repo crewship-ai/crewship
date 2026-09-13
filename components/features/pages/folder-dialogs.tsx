@@ -10,11 +10,18 @@
  *    can go; a folder with pages the caller can see has its confirm disabled
  *    with the count, and a folder the server says is not empty — pages the
  *    caller cannot see count too — shows the server's own sentence.
- *  · `MoveToFolderDialog` — the target list, Unfiled included. The request
- *    carries the page's `pages_version` and the target's `grants_version`;
- *    a 409 re-reads both lists and says so, and the person confirms again
- *    against what is on screen now. No impact preview yet: a folder has no
- *    grants in F1, so a move changes nobody's reach.
+ *  · `MoveToFolderDialog` — the target list, Unfiled included, and under it
+ *    "After the move": who will reach the page once it is there (#2533). A
+ *    folder's permissions are inherited by every page in it, so a move is a
+ *    change of audience and the person is shown it before they confirm. A
+ *    manager of the target's owning crew is shown names, from the target's
+ *    ACL; anyone else the marker the folder row carries. The request carries
+ *    the page's `pages_version` and the target's `acl_version`; a 409
+ *    re-reads both lists AND the target's ACL — the block is regenerated —
+ *    and the person confirms again against what is on screen now. There is
+ *    no "restore sharing": moving back is another move, with its own preview.
+ *    With several subjects the same dialog files them through the batch
+ *    route, all or nothing, and a refusal names the page it stopped at.
  *
  * Every refusal renders IN the dialog, in the server's words, and changes
  * nothing typed (#1563 rules 2 and 3). The owner picker offers every crew
@@ -55,11 +62,14 @@ import type { PageFolderRef } from "@/hooks/use-pages"
 import {
   FOLDER_CONFLICT_SENTENCE,
   folderConflictOf,
+  refusedPageOf,
+  useFolderAcl,
   useFolderOwnerChoices,
   usePageFolderMutations,
   usePageFolders,
   type PageFolderView,
 } from "@/hooks/use-page-folders"
+import { MOVE_IMPACT_UNFILED, moveImpactFromAcl, moveImpactFromShared } from "@/lib/pages/folder-sharing"
 import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 const SELECT_CLASS = cn(
@@ -359,63 +369,120 @@ export interface MoveToFolderDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   subject: MoveSubject | null
+  /**
+   * Several pages at once. Given, the dialog files them all through the
+   * batch route — one transaction, all or nothing — and `subject` is
+   * ignored. Passed FRESH on every render, like `subject`.
+   */
+  subjects?: MoveSubject[] | null
   onMoved?: (target: PageFolderRef | null) => void
 }
 
-export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, onMoved }: MoveToFolderDialogProps) {
-  const folders = usePageFolders(workspaceId, open)
-  const { addPage, removePage } = usePageFolderMutations(workspaceId)
-  const busy = addPage.isPending || removePage.isPending
+const MIXED = Symbol("mixed")
 
-  const currentSlug = subject?.folder?.slug ?? null
+export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, subjects, onMoved }: MoveToFolderDialogProps) {
+  const folders = usePageFolders(workspaceId, open)
+  const { addPage, addPages, removePage } = usePageFolderMutations(workspaceId)
+  const busy = addPage.isPending || addPages.isPending || removePage.isPending
+
+  const bulk = subjects != null
+  const list = React.useMemo(() => (bulk ? subjects : subject ? [subject] : []), [bulk, subjects, subject])
+  const first = list[0] ?? null
+  // Where the subjects are now: one folder (or Unfiled) when they agree,
+  // MIXED when they do not — then nothing is marked current and any target
+  // is a change.
+  const currentSlug: string | null | typeof MIXED = list.every(
+    (s) => (s.folder?.slug ?? null) === (first?.folder?.slug ?? null),
+  )
+    ? (first?.folder?.slug ?? null)
+    : MIXED
   // The chosen target — a folder slug, or null for Unfiled. `undefined`
   // means nothing chosen yet, which starts as "where it is now".
   const [target, setTarget] = React.useState<string | null | undefined>(undefined)
   const [notice, setNotice] = React.useState<{ tone: "error" | "warn"; text: string; detail?: string } | null>(null)
+  const identity = list.map((s) => s.slug).join("\u0000")
   React.useEffect(() => {
     if (!open) return
     setTarget(undefined)
     setNotice(null)
-  }, [open, subject?.slug])
+  }, [open, identity])
 
-  const chosen = target === undefined ? currentSlug : target
-  const changed = chosen !== currentSlug
-  const submittable = subject !== null && changed && !busy && !folders.loading
+  const chosen: string | null | undefined = target === undefined ? (currentSlug === MIXED ? undefined : currentSlug) : target
+  const changed = chosen !== undefined && chosen !== currentSlug
+  const submittable = list.length > 0 && changed && !busy && !folders.loading
+  const targetFolder = typeof chosen === "string" ? (folders.folders.find((f) => f.slug === chosen) ?? null) : null
+
+  // "After the move" — read for the chosen target only, and only while a
+  // folder is chosen. The server's 200 or 403 decides whether the block
+  // carries names or the marker; nothing here guesses who manages what.
+  const targetAcl = useFolderAcl(workspaceId, typeof chosen === "string" ? chosen : null, open && typeof chosen === "string")
+  const impact: string | null =
+    chosen === undefined
+      ? null
+      : chosen === null
+        ? MOVE_IMPACT_UNFILED
+        : targetAcl.loading
+          ? null
+          : targetAcl.manages
+            ? moveImpactFromAcl(targetAcl.entries)
+            : moveImpactFromShared(targetFolder?.shared ?? "none")
+
+  const nameOf = (slug: string) => list.find((s) => s.slug === slug)?.name ?? slug
 
   const submit = async () => {
-    if (!subject || !submittable) return
+    if (!submittable || chosen === undefined) return
     setNotice(null)
     try {
       if (chosen === null) {
-        await removePage.mutateAsync({ folder: currentSlug!, page: subject.slug, pagesVersion: subject.pagesVersion })
+        // Out of a folder. There is no batch removal on the wire, so each
+        // page leaves on its own request, in order, and the first refusal
+        // stops the rest and names the page.
+        for (const s of list) {
+          if (!s.folder) continue
+          try {
+            await removePage.mutateAsync({ folder: s.folder.slug, page: s.slug, pagesVersion: s.pagesVersion })
+          } catch (error) {
+            throw new Error(`${s.name}: ${messageOf(error, "could not be removed from its folder.")}`)
+          }
+        }
         onMoved?.(null)
+      } else if (bulk) {
+        await addPages.mutateAsync({
+          folder: chosen,
+          pages: list.map((s) => ({ page: s.slug, pagesVersion: s.pagesVersion })),
+          aclVersion: targetFolder?.aclVersion ?? null,
+        })
+        onMoved?.(targetFolder ? { slug: targetFolder.slug, name: targetFolder.name, icon: targetFolder.icon, color: targetFolder.color } : null)
       } else {
-        const folder = folders.folders.find((f) => f.slug === chosen)
         await addPage.mutateAsync({
           folder: chosen,
-          page: subject.slug,
-          pagesVersion: subject.pagesVersion,
-          grantsVersion: folder?.grantsVersion ?? null,
+          page: list[0].slug,
+          pagesVersion: list[0].pagesVersion,
+          aclVersion: targetFolder?.aclVersion ?? null,
         })
-        onMoved?.(folder ? { slug: folder.slug, name: folder.name, icon: folder.icon, color: folder.color } : null)
+        onMoved?.(targetFolder ? { slug: targetFolder.slug, name: targetFolder.name, icon: targetFolder.icon, color: targetFolder.color } : null)
       }
       onOpenChange(false)
     } catch (error) {
       const conflict = folderConflictOf(error)
+      const page = refusedPageOf(error)
       if (conflict) {
-        // The person consented to a move as things were. Both lists are read
-        // again so what is on screen — the page's folder, the target's count,
-        // the versions the next confirm will send — is current, and then they
+        // The person consented to a move as things were — where the page
+        // was, AND who the target would show it to. Both lists and the
+        // target's permissions are read again so what is on screen — the
+        // page's folder, the target's count, the versions the next confirm
+        // will send, the "After the move" block — is current, and then they
         // are asked again. Never retried on their behalf.
-        await folders.reread()
+        await Promise.all([folders.reread(), targetAcl.reread()])
         setNotice({
           tone: "warn",
-          text: FOLDER_CONFLICT_SENTENCE,
+          text: page ? `${nameOf(page)}: ${FOLDER_CONFLICT_SENTENCE}` : FOLDER_CONFLICT_SENTENCE,
           detail: conflict.error !== FOLDER_CONFLICT_SENTENCE ? conflict.error : undefined,
         })
         return
       }
-      setNotice({ tone: "error", text: messageOf(error, "The page could not be moved.") })
+      const text = messageOf(error, list.length > 1 ? "The pages could not be moved." : "The page could not be moved.")
+      setNotice({ tone: "error", text: page ? `${nameOf(page)}: ${text}` : text })
     }
   }
 
@@ -429,12 +496,18 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, o
     <CreateSurface open={open} onOpenChange={onOpenChange} size="sm" onSubmit={() => void submit()}>
       <CreateSurfaceHeader
         concept="pages"
-        context={subject?.name}
+        context={list.length > 1 ? `${list.length} pages` : first?.name}
         title="Move to folder"
         description={
-          subject?.folder
-            ? `Now in ${subject.folder.name}. Choose where it goes, or Unfiled to take it out.`
-            : "Not in a folder yet. Choose where it goes."
+          list.length > 1
+            ? currentSlug === MIXED
+              ? "The pages are in different folders. Choose where they all go, or Unfiled to take them out."
+              : first?.folder
+                ? `All in ${first.folder.name}. Choose where they go, or Unfiled to take them out.`
+                : "None in a folder yet. Choose where they go."
+            : first?.folder
+              ? `Now in ${first.folder.name}. Choose where it goes, or Unfiled to take it out.`
+              : "Not in a folder yet. Choose where it goes."
         }
         onClose={() => onOpenChange(false)}
       />
@@ -488,6 +561,25 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, o
                 </button>
               )
             })}
+          </div>
+        )}
+
+        {/* Who will reach the page once it is there. Drawn for whatever is
+            chosen, the current folder included — the person may be looking
+            for exactly that — and redrawn after a 409 from the fresh ACL. */}
+        {!folders.error && !folders.loading && chosen !== undefined && (
+          <div data-slot="move-impact" className="mt-3 flex flex-col gap-1 rounded-md border border-border/50 bg-muted/20 px-3 py-2">
+            <span className="type-page-label text-muted-foreground-soft">After the move</span>
+            {impact === null ? (
+              <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Spinner className="h-3 w-3" />
+                Reading who will see it…
+              </p>
+            ) : (
+              <p className="text-xs leading-relaxed text-foreground/85">
+                {list.length > 1 ? `For all ${list.length} pages: ${impact}` : impact}
+              </p>
+            )}
           </div>
         )}
       </CreateSurfaceBody>

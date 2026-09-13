@@ -231,7 +231,7 @@ function mount(harness: Harness = {}) {
     }
     if (method === "PATCH") return harness.patch ?? jsonResponse(200, { slug: page?.slug })
     if (method === "GET" && url.startsWith("/api/v1/page-folders?")) {
-      return jsonResponse(200, { folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, grants_version: 2 }] })
+      return jsonResponse(200, { folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, acl_version: 2 }] })
     }
     return jsonResponse(404, { error: `unrouted ${method} ${url}` })
   })

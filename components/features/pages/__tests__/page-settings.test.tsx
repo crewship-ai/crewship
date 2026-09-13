@@ -472,6 +472,34 @@ describe("the card library", () => {
 // neither: the cards are reached through the editor's Access and History
 // sections, whose own tests live in components/features/pages/editor.
 
+// ── Everyone in this workspace (#2533) ─────────────────────────────────────
+
+describe("granting to everyone in this workspace", () => {
+  it("offers the workspace as a subject kind with no reference to type, read or write only, and sends no subject", async () => {
+    const { mockFetch } = mount(USER_OWNED)
+    await waitFor(() => expect(screen.getByLabelText("Subject kind")).toBeTruthy())
+
+    const kind = screen.getByLabelText("Subject kind") as HTMLSelectElement
+    expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["user", "crew", "agent", "Everyone in this workspace"])
+    // The form opens on produce; the workspace never produces, so the
+    // switch of kind moves the level to one it may hold.
+    expect((screen.getByLabelText("Level") as HTMLSelectElement).value).toBe("produce")
+    fireEvent.change(kind, { target: { value: "workspace" } })
+
+    expect(screen.queryByLabelText("Subject")).toBeNull()
+    const level = screen.getByLabelText("Level") as HTMLSelectElement
+    expect(Array.from(level.options).map((o) => o.value)).toEqual(["read", "write"])
+    expect(level.value).toBe("read")
+    expect(screen.queryByLabelText("Panels")).toBeNull()
+
+    fireEvent.change(level, { target: { value: "write" } })
+    fireEvent.click(screen.getByRole("button", { name: "Grant" }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PUT")).toBe(true))
+    const put = mockFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT")!
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ subject_type: "workspace", level: "write" })
+  })
+})
+
 describe("toPageGrant", () => {
   it("treats an unreadable verdict as inert, never as live", () => {
     // The server always sends `live`. If a build ever reads a row without

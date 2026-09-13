@@ -6,7 +6,7 @@
  *  · `PageRowMenu` sits at the end of a page row: *Move to folder…* and, when
  *    the page is in one, *Remove from folder*.
  *  · `FolderHeaderMenu` sits beside a folder's section header: *Rename or
- *    change icon…* and *Delete folder…*.
+ *    change icon…*, *Sharing…* (#2533) and *Delete folder…*.
  *
  * Both are Radix dropdowns from the shared kit, and both are reachable
  * without a pointer. The trigger is a real button in the row's tab order,
@@ -23,7 +23,7 @@
  */
 
 import * as React from "react"
-import { FolderInput, FolderMinus, MoreHorizontal, Pencil, Trash2 } from "lucide-react"
+import { FolderInput, FolderMinus, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react"
 
 import {
   DropdownMenu,
@@ -104,10 +104,12 @@ export function PageRowMenu({
 export interface FolderHeaderMenuProps {
   folderName: string
   onRename: () => void
+  /** Absent, the item is not drawn — a server without folder permissions. */
+  onShare?: () => void
   onDelete: () => void
 }
 
-export function FolderHeaderMenu({ folderName, onRename, onDelete }: FolderHeaderMenuProps) {
+export function FolderHeaderMenu({ folderName, onRename, onShare, onDelete }: FolderHeaderMenuProps) {
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -132,6 +134,12 @@ export function FolderHeaderMenu({ folderName, onRename, onDelete }: FolderHeade
           <Pencil aria-hidden />
           Rename or change icon…
         </DropdownMenuItem>
+        {onShare && (
+          <DropdownMenuItem onSelect={onShare}>
+            <Users aria-hidden />
+            Sharing…
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem variant="destructive" onSelect={onDelete}>
           <Trash2 aria-hidden />
           Delete folder…

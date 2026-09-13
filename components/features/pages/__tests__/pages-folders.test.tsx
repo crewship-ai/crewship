@@ -48,9 +48,9 @@ const OPS_REF = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
 const FLEET: WirePage = { id: "p1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", folder: OPS_REF, pages_version: 3, panels: [] }
 const NOTES: WirePage = { id: "p2", slug: "my-notes", name: "My notes", owner: "user/u1", folder: null, pages_version: 0, panels: [] }
 
-const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, grants_version: 5 }
-const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, grants_version: 1 }
-const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 2, grants_version: 1 }
+const OPS: WirePageFolder = { id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", owner_crew_name: "Lookout", page_count: 1, acl_version: 5 }
+const ARCHIVE: WirePageFolder = { id: "f2", slug: "archive", name: "Archive", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 0, acl_version: 1 }
+const BUSY: WirePageFolder = { id: "f3", slug: "busy", name: "Busy", icon: null, color: null, owner: "crew/finance", owner_crew_name: "Finance", page_count: 2, acl_version: 1 }
 
 function json(status: number, body: unknown): Response {
   return {
@@ -168,7 +168,7 @@ describe("moving a page (U2)", () => {
     expect(writes()[0]).toEqual({
       method: "POST",
       url: `/api/v1/page-folders/ops/pages?${WS}`,
-      body: { page: "my-notes", pages_version: 0, grants_version: 5 },
+      body: { page: "my-notes", pages_version: 0, acl_version: 5 },
     })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
@@ -184,7 +184,7 @@ describe("moving a page (U2)", () => {
           if (attempts === 1) {
             // Somebody else moved the page meanwhile: the list is now behind.
             version = 4
-            return json(409, { error: "pages_version is stale", conflict: "pages_version", pages_version: 4, grants_version: 5 })
+            return json(409, { error: "pages_version is stale", conflict: "pages_version", pages_version: 4, acl_version: 5 })
           }
           return json(200, { page: { ...NOTES, folder: OPS_REF, pages_version: 5 } })
         }
@@ -212,7 +212,7 @@ describe("moving a page (U2)", () => {
     expect(writes()).toHaveLength(1)
     fireEvent.click(within(dialog).getByRole("button", { name: "Move" }))
     await waitFor(() => expect(writes()).toHaveLength(2))
-    expect(writes()[1].body).toEqual({ page: "my-notes", pages_version: 4, grants_version: 5 })
+    expect(writes()[1].body).toEqual({ page: "my-notes", pages_version: 4, acl_version: 5 })
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
 
@@ -276,7 +276,7 @@ describe("New folder", () => {
     const { writes } = mount({
       answer: (c) =>
         c.method === "POST" && c.url.startsWith("/api/v1/page-folders?")
-          ? json(201, { id: "f9", slug: "runbooks", name: "Runbooks", icon: "rocket", color: "amber", owner: "crew/finance", page_count: 0, grants_version: 0 })
+          ? json(201, { id: "f9", slug: "runbooks", name: "Runbooks", icon: "rocket", color: "amber", owner: "crew/finance", page_count: 0, acl_version: 0 })
           : null,
     })
     await waitFor(() => expect(screen.getByRole("button", { name: "New folder" })).toBeTruthy())

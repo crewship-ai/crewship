@@ -469,7 +469,7 @@ describe("PagesRail 'Shared with me' facet", () => {
 import { toPageFolderView, type PageFolderView } from "@/hooks/use-page-folders"
 
 const folder = (over: Partial<Parameters<typeof toPageFolderView>[0]>): PageFolderView =>
-  toPageFolderView({ id: `f-${over.slug}`, owner: "crew/lookout", grants_version: 5, page_count: 0, ...over })!
+  toPageFolderView({ id: `f-${over.slug}`, owner: "crew/lookout", acl_version: 5, page_count: 0, ...over })!
 
 const LONG_NAME = "Finance quarterly reports and audits of the year 2026, including the appendices"
 

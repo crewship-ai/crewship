@@ -7,7 +7,9 @@
  * arrives with: people first, then the machines those people vouch for, then
  * the world. Every one of them is an existing card from
  * `components/features/pages/page-settings.tsx`; this section re-homes them,
- * it does not re-implement them.
+ * it does not re-implement them. After them, read-only, what the Page's
+ * FOLDER adds (`./section-access-folder.tsx`, #2533): a folder's permissions
+ * are inherited by every page in it, and they are changed on the folder.
  *
  * Producer tokens are here, and NOT in Data & actions, because minting a
  * webhook token is issuing a credential and a credential is a permission
@@ -54,6 +56,7 @@ import {
   pagePanelIDs,
 } from "@/components/features/pages/page-settings"
 
+import { FolderAccessCard } from "./section-access-folder"
 import type { EditorSectionProps } from "./section-props"
 
 /**
@@ -132,6 +135,12 @@ export function EditorAccessSection({
         canManage={canManage}
         manageRefusal={REFUSAL.links}
       />
+
+      {/* What the folder adds, read-only. Sits after the Page's own three
+          lists and before anything that computes the sum of them, so a
+          reader meets the inputs before the answer. Nothing when the Page
+          is in no folder. */}
+      <FolderAccessCard workspaceId={workspaceId} slug={slug} page={page} />
 
       <ExportCard workspaceId={workspaceId} slug={slug} />
 

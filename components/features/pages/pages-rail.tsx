@@ -29,7 +29,7 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { FolderPlus, Share2 } from "lucide-react"
+import { FolderPlus, Globe, ListChecks, Share2 } from "lucide-react"
 
 import { listRow } from "@/lib/motion"
 
@@ -62,6 +62,8 @@ import {
   type PageView,
 } from "@/hooks/use-pages"
 import type { PageFolderView } from "@/hooks/use-page-folders"
+import { SHARED_WITH_WORKSPACE_TITLE } from "@/lib/pages/folder-sharing"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PAGE_STATE_META, PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
@@ -98,7 +100,16 @@ export interface PagesRailProps {
   /** The folder verbs: the toolbar button and the header menu. */
   onCreateFolder?: () => void
   onEditFolder?: (slug: string) => void
+  /** Folder → Sharing (#2533). Absent, the menu has no such item. */
+  onShareFolder?: (slug: string) => void
   onDeleteFolder?: (slug: string) => void
+  /**
+   * Several pages at once (#2533). Present, the toolbar gains a Select mode:
+   * checkboxes on the rows, Space toggles the focused row, Shift+click takes
+   * a range, and Move to folder… hands the chosen pages over. The rail leaves
+   * Select mode as it does so; the dialog owns the rest.
+   */
+  onMovePages?: (pages: PageView[]) => void
 }
 
 // ── Saved view state (#2523, #2527) ─────────────────────────────────────────
@@ -219,7 +230,9 @@ export function PagesRail({
   onRemoveFromFolder,
   onCreateFolder,
   onEditFolder,
+  onShareFolder,
   onDeleteFolder,
+  onMovePages,
 }: PagesRailProps) {
   // Facet counts are computed against the WHOLE list, never the filtered view.
   // Counting the filtered view makes every unpicked option read 0 the moment
@@ -238,6 +251,7 @@ export function PagesRail({
   // Same rule for folders: the grouping choice and the folder verbs exist
   // only on a server that has folders.
   const foldersKnown = folders != null
+  const folderBySlug = React.useMemo(() => new Map((folders ?? []).map((f) => [f.slug, f])), [folders])
 
   const activeCount = pageFilterCount(filters)
   const ownerLabel = (ref: string) => owners.find((o) => o.ref === ref)?.label ?? ref
@@ -331,6 +345,47 @@ export function PagesRail({
   // each row so the list-level key handler can open it for the focused row.
   const [menuFor, setMenuFor] = React.useState<string | null>(null)
   const rowMenus = Boolean(onMovePage || onRemoveFromFolder)
+
+  // ── Select mode (#2533) ───────────────────────────────────────────────────
+  // A row in Select mode toggles instead of opening — click, Enter and Space
+  // all go through the row's own `onSelect`, so the keyboard gets it for
+  // free. Shift is read off the click on its way down (`onClickCapture`),
+  // because `onSelect` carries no event; the range runs in the order the rows
+  // are on screen, from the last row toggled to this one.
+  const selectable = foldersKnown && Boolean(onMovePages)
+  const [selecting, setSelecting] = React.useState(false)
+  const [selected, setSelected] = React.useState<ReadonlySet<string>>(() => new Set())
+  const anchor = React.useRef<string | null>(null)
+  const shiftHeld = React.useRef(false)
+  const visibleOrder = React.useMemo(() => groups.flatMap((g) => g.pages.map((p) => p.slug)), [groups])
+  const leaveSelectMode = () => {
+    setSelecting(false)
+    setSelected(new Set())
+    anchor.current = null
+  }
+  const toggleSelected = (slug: string, range: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      const from = anchor.current
+      if (range && from !== null && from !== slug) {
+        const a = visibleOrder.indexOf(from)
+        const b = visibleOrder.indexOf(slug)
+        if (a >= 0 && b >= 0) {
+          const on = prev.has(from)
+          for (const s of visibleOrder.slice(Math.min(a, b), Math.max(a, b) + 1)) {
+            if (on) next.add(s)
+            else next.delete(s)
+          }
+          return next
+        }
+      }
+      if (next.has(slug)) next.delete(slug)
+      else next.add(slug)
+      return next
+    })
+    anchor.current = slug
+  }
+  const chosenPages = React.useMemo(() => pages.filter((p) => selected.has(p.slug)), [pages, selected])
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   // One handler on the list, not one per row: the rows already answer Enter
@@ -509,6 +564,21 @@ export function PagesRail({
             <FolderPlus className="h-3.5 w-3.5" aria-hidden />
           </button>
         )}
+        {selectable && (
+          <button
+            type="button"
+            onClick={() => (selecting ? leaveSelectMode() : setSelecting(true))}
+            aria-label="Select pages"
+            aria-pressed={selecting}
+            title="Select several pages to move them together"
+            className={cn(
+              "kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.04] text-muted-foreground transition-colors hover:text-foreground",
+              selecting && "border-primary/40 bg-primary/15 text-primary-hover",
+            )}
+          >
+            <ListChecks className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        )}
         {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
 
@@ -543,6 +613,32 @@ export function PagesRail({
         )}
       </SidebarActiveChips>
 
+      {selecting && (
+        <div data-slot="pages-select-bar" className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
+          <span className="type-nav-sub min-w-0 flex-1 truncate text-muted-foreground" aria-live="polite">
+            {selected.size} selected
+          </span>
+          <button
+            type="button"
+            disabled={chosenPages.length === 0}
+            onClick={() => {
+              onMovePages?.(chosenPages)
+              leaveSelectMode()
+            }}
+            className="type-nav-sub rounded-md border border-border/60 px-2 py-0.5 text-foreground/80 transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-50"
+          >
+            Move to folder…
+          </button>
+          <button
+            type="button"
+            onClick={leaveSelectMode}
+            className="type-nav-sub rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 flex-col">
         <div
           ref={listRef}
@@ -573,6 +669,20 @@ export function PagesRail({
                     <FolderDot color={group.folder?.color} />
                     <FolderGlyph icon={group.folder?.icon} className="h-3 w-3 text-muted-foreground-soft" />
                     <span className="min-w-0 truncate">{group.label}</span>
+                    {/* The one sharing fact everyone may know: this folder is
+                        open to the whole workspace (#2533). Names are the
+                        manager's to see, in Sharing. */}
+                    {group.folder && folderBySlug.get(group.folder.slug)?.shared === "workspace" && (
+                      <span
+                        role="img"
+                        data-slot="folder-shared-marker"
+                        aria-label={SHARED_WITH_WORKSPACE_TITLE}
+                        title={SHARED_WITH_WORKSPACE_TITLE}
+                        className="inline-flex shrink-0 text-muted-foreground-soft"
+                      >
+                        <Globe className="h-3 w-3" aria-hidden />
+                      </span>
+                    )}
                   </span>
                 ) : (
                   group.label
@@ -588,10 +698,11 @@ export function PagesRail({
               // header shows when the pointer is over the folder.
               className="group/section"
               actions={
-                group.kind === "folder" && group.folder && (onEditFolder || onDeleteFolder) ? (
+                group.kind === "folder" && group.folder && (onEditFolder || onDeleteFolder || onShareFolder) ? (
                   <FolderHeaderMenu
                     folderName={group.label}
                     onRename={() => onEditFolder?.(group.folder!.slug)}
+                    onShare={onShareFolder ? () => onShareFolder(group.folder!.slug) : undefined}
                     onDelete={() => onDeleteFolder?.(group.folder!.slug)}
                   />
                 ) : undefined
@@ -616,8 +727,9 @@ export function PagesRail({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
+                      onClickCapture={selecting ? (e) => void (shiftHeld.current = e.shiftKey) : undefined}
                       onContextMenu={
-                        rowMenus
+                        rowMenus && !selecting
                           ? (e) => {
                               e.preventDefault()
                               setMenuFor(page.slug)
@@ -626,12 +738,28 @@ export function PagesRail({
                       }
                     >
                       <SidebarRow
-                        selected={selectedSlug === page.slug}
-                        onSelect={() => onSelectPage(page.slug)}
+                        selected={selecting ? selected.has(page.slug) : selectedSlug === page.slug}
+                        onSelect={() => {
+                          if (!selecting) return onSelectPage(page.slug)
+                          toggleSelected(page.slug, shiftHeld.current)
+                          shiftHeld.current = false
+                        }}
                         data-rail-row={group.key}
                         data-page-slug={page.slug}
+                        data-checked={selecting ? (selected.has(page.slug) ? "true" : "false") : undefined}
                         className="group/row"
                       >
+                        {selecting && (
+                          // Drawn, not driven: the row is the control (click,
+                          // Enter, Space), and a second control inside it that
+                          // also toggled would toggle twice on one click.
+                          <Checkbox
+                            checked={selected.has(page.slug)}
+                            tabIndex={-1}
+                            aria-hidden
+                            className="pointer-events-none"
+                          />
+                        )}
                         <Icon
                           className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
                           aria-hidden
@@ -651,7 +779,7 @@ export function PagesRail({
                             {page.tally.total}
                           </span>
                         )}
-                        {rowMenus && (
+                        {rowMenus && !selecting && (
                           <PageRowMenu
                             pageName={page.name}
                             inFolder={inFolder && Boolean(onRemoveFromFolder)}
