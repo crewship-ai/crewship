@@ -116,9 +116,10 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import {
-  PAGE_GRANT_LEVELS,
   PAGE_GRANT_LEVEL_MEANING,
   PAGE_SUBJECT_TYPES,
+  PAGE_SUBJECT_TYPE_LABEL,
+  pageGrantLevelsFor,
   pagePanelCount,
   toPageOwner,
   usePageGrantRevoke,
@@ -454,10 +455,13 @@ export function AccessCard({
             inertCount > 0 ? ` · ${inertCount} inert` : ""
           }`
 
+  const forWorkspace = subjectType === "workspace"
+  const levels = pageGrantLevelsFor(subjectType)
+
   const onIssue = (e: React.FormEvent) => {
     e.preventDefault()
-    const ref = subject.trim()
-    if (!ref) {
+    const ref = forWorkspace ? "" : subject.trim()
+    if (!ref && !forWorkspace) {
       // The server says this too; saying it here costs a round trip nobody
       // learns anything from.
       setWriteRefusal("Name the subject: an email for a user, a slug for a crew or an agent.")
@@ -559,32 +563,42 @@ export function AccessCard({
                 className={SELECT_CLASS}
                 value={subjectType}
                 onChange={(e) => {
-                  setSubjectType(e.target.value as PageSubjectType)
+                  const next = e.target.value as PageSubjectType
+                  setSubjectType(next)
+                  // The workspace never produces; a level the new kind may
+                  // not hold is not left standing in the select.
+                  if (!pageGrantLevelsFor(next).includes(level)) setLevel("read")
                   touch()
                 }}
               >
                 {PAGE_SUBJECT_TYPES.map((k) => (
                   <option key={k} value={k}>
-                    {k}
+                    {PAGE_SUBJECT_TYPE_LABEL[k]}
                   </option>
                 ))}
               </select>
 
-              <label className="sr-only" htmlFor="grant-subject">
-                Subject
-              </label>
-              <Input
-                id="grant-subject"
-                value={subject}
-                onChange={(e) => {
-                  setSubject(e.target.value)
-                  touch()
-                }}
-                placeholder={
-                  subjectType === "user" ? "ada@example.com" : subjectType === "crew" ? "lookout" : "watcher"
-                }
-                className="h-8 min-w-[10rem] flex-1 text-xs"
-              />
+              {/* Everyone in this workspace has no reference to type: the
+                  kind IS the subject. */}
+              {!forWorkspace && (
+                <>
+                  <label className="sr-only" htmlFor="grant-subject">
+                    Subject
+                  </label>
+                  <Input
+                    id="grant-subject"
+                    value={subject}
+                    onChange={(e) => {
+                      setSubject(e.target.value)
+                      touch()
+                    }}
+                    placeholder={
+                      subjectType === "user" ? "ada@example.com" : subjectType === "crew" ? "lookout" : "watcher"
+                    }
+                    className="h-8 min-w-[10rem] flex-1 text-xs"
+                  />
+                </>
+              )}
 
               <label className="sr-only" htmlFor="grant-level">
                 Level
@@ -598,7 +612,7 @@ export function AccessCard({
                   touch()
                 }}
               >
-                {PAGE_GRANT_LEVELS.map((l) => (
+                {levels.map((l) => (
                   <option key={l} value={l}>
                     {l}
                   </option>

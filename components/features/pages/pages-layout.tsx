@@ -68,6 +68,7 @@ import { usePageGrants } from "@/hooks/use-page-grants"
 import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
 import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
+import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
 import { toast } from "sonner"
 
 export interface PagesLayoutProps {
@@ -125,7 +126,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     | { kind: "create" }
     | { kind: "edit"; slug: string }
     | { kind: "delete"; slug: string }
+    | { kind: "share"; slug: string }
     | { kind: "move"; slug: string }
+    | { kind: "move-many"; slugs: string[] }
     | null
   >(null)
   const closeFolderDialog = React.useCallback(() => setFolderDialog(null), [])
@@ -135,6 +138,15 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
     const page = pages.find((p) => p.slug === folderDialog.slug)
     if (!page) return null
     return { slug: page.slug, name: page.name, folder: page.folder ?? null, pagesVersion: page.pagesVersion }
+  }, [folderDialog, pages])
+  // Several at once (#2533). Derived from the live list too, so a 409's
+  // re-read puts fresh versions into the next confirm for every page.
+  const moveSubjects = React.useMemo(() => {
+    if (folderDialog?.kind !== "move-many") return null
+    return folderDialog.slugs
+      .map((slug) => pages.find((p) => p.slug === slug))
+      .filter((p): p is (typeof pages)[number] => p !== undefined)
+      .map((p) => ({ slug: p.slug, name: p.name, folder: p.folder ?? null, pagesVersion: p.pagesVersion }))
   }, [folderDialog, pages])
 
   const removeFromFolder = React.useCallback(
@@ -390,7 +402,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onRemoveFromFolder={(page) => void removeFromFolder(page)}
               onCreateFolder={() => setFolderDialog({ kind: "create" })}
               onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
+              onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
               onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}
+              onMovePages={(list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) })}
             />
           )}
         </aside>
@@ -512,12 +526,34 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           folder={folderOf(folderDialog.slug)}
         />
       )}
+      {folderDialog?.kind === "share" && (
+        <FolderSharingDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          folder={folderOf(folderDialog.slug)}
+          // A reader who may not see the table is shown their own paths to
+          // the page that is open, when it is in this folder.
+          pageSlug={
+            selectedSlug && pages.find((p) => p.slug === selectedSlug)?.folder?.slug === folderDialog.slug ? selectedSlug : null
+          }
+        />
+      )}
       {folderDialog?.kind === "move" && (
         <MoveToFolderDialog
           workspaceId={workspaceId}
           open
           onOpenChange={(open) => !open && closeFolderDialog()}
           subject={moveSubject}
+        />
+      )}
+      {folderDialog?.kind === "move-many" && (
+        <MoveToFolderDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          subject={null}
+          subjects={moveSubjects}
         />
       )}
 

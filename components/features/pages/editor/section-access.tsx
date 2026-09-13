@@ -11,6 +11,9 @@
  * Effective access (`./section-access-effective.tsx`), the server's answer to
  * who actually gets in once the three above are combined with roles and
  * crew membership.
+ * it does not re-implement them. After them, read-only, what the Page's
+ * FOLDER adds (`./section-access-folder.tsx`, #2533): a folder's permissions
+ * are inherited by every page in it, and they are changed on the folder.
  *
  * Producer tokens are here, and NOT in Data & actions, because minting a
  * webhook token is issuing a credential and a credential is a permission
@@ -58,6 +61,7 @@ import {
 } from "@/components/features/pages/page-settings"
 
 import { EffectiveAccessCard } from "./section-access-effective"
+import { FolderAccessCard } from "./section-access-folder"
 import type { EditorSectionProps } from "./section-props"
 
 /**
@@ -137,6 +141,11 @@ export function EditorAccessSection({
         manageRefusal={REFUSAL.links}
       />
 
+      {/* What the folder adds, read-only. Sits after the Page's own three
+          lists and before anything that computes the sum of them, so a
+          reader meets the inputs before the answer. Nothing when the Page
+          is in no folder. */}
+      <FolderAccessCard workspaceId={workspaceId} slug={slug} page={page} />
       {/* The answer to the three cards above: who actually gets in, computed
           server-side from the same facts it enforces. Read-only, and shown
           to everyone the section is shown to — a reader the server refuses
