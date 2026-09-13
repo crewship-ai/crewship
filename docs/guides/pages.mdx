@@ -812,6 +812,40 @@ which is precisely what the sealed placeholder is designed not to disclose.
 Every dispatch is journalled with who clicked, which action, and which routine
 the server resolved it to.
 
+## Folders
+
+A **folder** is a named group of pages owned by one crew, with an icon from
+the same set crews use and an optional colour. One level only, and a page is
+in at most one folder; every page outside one sits under **Unfiled**.
+
+The Pages list groups by folder when the server has them: one section per
+folder you may read, its icon and colour in the header and beside them the
+number of its pages you can open — never the number that exist. A folder with
+nothing in it is still drawn, with its zero, because a folder that only
+appears once something is filed in it cannot be filed into. The filter panel
+offers **Group by: Folder | Owner**; Owner is the grouping described below,
+and the choice is remembered with the folds.
+
+Every row has a **⋯** menu — on hover, on focus, and on Shift+F10 or the
+ContextMenu key — with **Move to folder…** and, for a filed page, **Remove
+from folder**. The move dialog lists every folder and Unfiled; the same
+dialog opens from **Change…** on the Folder line of the editor's Content
+section. A move carries the page's membership version and the target
+folder's grant version, and the server refuses a stale one: if somebody else
+moved the page or changed the folder meanwhile, the dialog re-reads both,
+says *The folder or the page changed; try again*, and asks again — it never
+retries on your behalf.
+
+Who may do what: creating a folder takes a manager's standing in the owning
+crew or a workspace admin; renaming and recolouring the same, or a `write`
+grant on the folder once folders can be shared; moving a page in takes both
+the page's owner (or an admin) and the folder's authority at once — the
+refusal names who can; removing a page from a folder is the page owner's
+alone and never waits on the folder; deleting a folder is allowed only when
+it is empty, counting pages you cannot see, and the refusal says so. Folders
+carry no grants yet, so a move changes nobody's reach; when folder sharing
+lands, the move dialog will show the impact before you confirm.
+
 ## Permission model
 
 Permissions are per **panel**, not per page — this is the property most

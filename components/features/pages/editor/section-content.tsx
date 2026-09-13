@@ -73,6 +73,9 @@ import { PageEditor } from "@/components/features/pages/page-editor"
 // page-settings.tsx by another stream; this is the seam.
 import { PageFactsCard } from "@/components/features/pages/page-settings"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
+import { toPageFolderRef } from "@/hooks/use-pages"
+import { MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
+import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 // Content on an application Page opens the review of the agent's change.
 // S6 owns that surface; import it lazily so the ordinary panel Page never
@@ -472,6 +475,11 @@ function PageIdentityCard({
 
       <PageAddress slug={slug} />
 
+      {/* Where the Page is filed (#2527). Not a field of this form: a move is
+          its own write with its own fence, through the same dialog the rail
+          opens, so it is a line with a button rather than a select. */}
+      <PageFolderLine workspaceId={workspaceId} slug={slug} page={page} />
+
       {/* Derived facts — owner, panels, created, spec last changed. Read-only
           by nature: none of them is something this form writes. */}
       <PageFactsCard slug={slug} page={page} />
@@ -506,6 +514,64 @@ function PageIdentityCard({
         </Button>
       </div>
     </form>
+  )
+}
+
+/**
+ * "Folder: <icon> <name> · Change…" — or "Unfiled". Drawn only when the
+ * server says which folder the Page is in: a record without the field is an
+ * older server, and a line claiming "Unfiled" over it would be a claim the
+ * server never made. The subject is rebuilt from `page` on every render, so
+ * after the dialog's 409 re-read the version it sends is the current one.
+ */
+function PageFolderLine({
+  workspaceId,
+  slug,
+  page,
+}: {
+  workspaceId: string
+  slug: string
+  page: WirePageDetail | null
+}) {
+  const [moving, setMoving] = React.useState(false)
+  if (!page || page.folder === undefined) return null
+  const folder = toPageFolderRef(page.folder)
+  const pagesVersion =
+    typeof page.pages_version === "number" && Number.isFinite(page.pages_version) ? page.pages_version : null
+
+  return (
+    <div
+      data-slot="page-folder"
+      className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3"
+    >
+      <div className="min-w-0">
+        <span className="type-page-label text-muted-foreground-soft">Folder</span>
+        <p className="type-page-value flex items-center gap-1.5 text-foreground/85">
+          {folder ? (
+            <>
+              <FolderDot color={folder.color} />
+              <FolderGlyph icon={folder.icon} className="text-muted-foreground" />
+              <span className="min-w-0 truncate" title={folder.name}>
+                {folder.name}
+              </span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">Unfiled</span>
+          )}
+        </p>
+      </div>
+      <Button type="button" variant="outline" size="sm" className="coarse:min-h-11" onClick={() => setMoving(true)}>
+        Change…
+      </Button>
+      {moving && (
+        <MoveToFolderDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && setMoving(false)}
+          subject={{ slug, name: page.name?.trim() || slug, folder, pagesVersion }}
+        />
+      )}
+    </div>
   )
 }
 

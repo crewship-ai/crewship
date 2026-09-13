@@ -5,13 +5,15 @@
  *
  *   [icon rail]  [filter rail 280px]              [main]
  *   AppSidebar   SidebarToolbar / Search /        Overview · or a single page
- *                FilterButton / Collapse
+ *                FilterButton / New folder / Collapse
  *                ── STATUS ─────── All · Fresh · Stale · Failed · Never produced
  *                ── OWNER  ─────── per crew · Shared with me
- *                ── MINE ───────── the list, grouped by owner (#2523):
- *                ── <crew> ─────── Mine · crews I belong to · other crews ·
- *                ── OWNED BY OTHERS  Owned by others — each a collapsible
- *                                    section, the owner said once in its header
+ *                ── GROUP BY ───── Folder · Owner
+ *                ── <folder> ───── the list, grouped by FOLDER (#2527): one
+ *                ── <folder> ───── section per folder the caller may read,
+ *                ── UNFILED ────── icon and colour in the header, then Unfiled
+ *                                  — or by OWNER (#2523): Mine · crews I
+ *                                  belong to · other crews · Owned by others
  *
  * Every control here comes from `components/layout/sidebar-kit.tsx`. That is a
  * hard requirement, not a preference: #1776 is open on five surfaces that each
@@ -27,7 +29,7 @@
 
 import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
-import { Share2 } from "lucide-react"
+import { FolderPlus, Share2 } from "lucide-react"
 
 import { listRow } from "@/lib/motion"
 
@@ -47,6 +49,7 @@ import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { cn } from "@/lib/utils"
 import {
   EMPTY_PAGE_FILTERS,
+  groupPagesByFolder,
   groupPagesByOwner,
   hasReach,
   matchesPageFilters,
@@ -58,11 +61,22 @@ import {
   type PageGroup,
   type PageView,
 } from "@/hooks/use-pages"
+import type { PageFolderView } from "@/hooks/use-page-folders"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PAGE_STATE_META, PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
+import { FolderDot, FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { FolderHeaderMenu, PageRowMenu } from "@/components/features/pages/pages-rail-menus"
+
+export type PagesGroupBy = "folder" | "owner"
 
 export interface PagesRailProps {
   pages: PageView[]
+  /**
+   * Every folder the caller may read, empty ones included (#2527). `null` or
+   * absent means this server has no folders: the rail then groups by owner
+   * and offers no folder control at all, rather than one empty "Unfiled".
+   */
+  folders?: PageFolderView[] | null
   /** With `currentUserId`, the key the collapse state is saved under. */
   workspaceId: string
   /** `user/<id>` owner of the "Mine" group. Null while the session loads, or
@@ -78,37 +92,68 @@ export interface PagesRailProps {
    *  still renders in a context that has no authoring affordance. */
   onCreatePage?: () => void
   onToggleCollapse?: () => void
+  /** The row menu's two verbs. Absent, the menu is not drawn. */
+  onMovePage?: (page: PageView) => void
+  onRemoveFromFolder?: (page: PageView) => void
+  /** The folder verbs: the toolbar button and the header menu. */
+  onCreateFolder?: () => void
+  onEditFolder?: (slug: string) => void
+  onDeleteFolder?: (slug: string) => void
 }
 
-// ── Collapse state (#2523) ──────────────────────────────────────────────────
+// ── Saved view state (#2523, #2527) ─────────────────────────────────────────
 //
 // Saved per user AND per workspace: the same person folds different crews in
 // different workspaces, and two people on one browser must not share a fold.
 // Storage is treated as optional at every step — a private window, a full
 // quota, a policy that throws on access, or a value someone else wrote there
 // all have to leave the rail working with the default, which is "everything
-// open". Nothing here is worth an error boundary.
+// open, grouped by folder". Nothing here is worth an error boundary.
+//
+// One record holds both the folds and the grouping. It began as a bare array
+// of folded keys (#2523) and is read that way still; it is written as an
+// object now that there is a second thing to remember.
 
 export const collapseStorageKey = (workspaceId: string, userId: string | null | undefined) =>
   `pages-rail:${workspaceId}:${userId ?? "anonymous"}`
 
 const NONE_COLLAPSED: ReadonlySet<string> = new Set()
 
-function readCollapsed(key: string): ReadonlySet<string> {
+interface RailStore {
+  collapsed: ReadonlySet<string>
+  groupBy: PagesGroupBy
+}
+
+const DEFAULT_STORE: RailStore = { collapsed: NONE_COLLAPSED, groupBy: "folder" }
+
+function keysOf(value: unknown): ReadonlySet<string> {
+  if (!Array.isArray(value)) return NONE_COLLAPSED
+  return new Set(value.filter((k): k is string => typeof k === "string"))
+}
+
+function readStore(key: string): RailStore {
   try {
     const raw = globalThis.localStorage?.getItem(key)
-    if (!raw) return NONE_COLLAPSED
+    if (!raw) return DEFAULT_STORE
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return NONE_COLLAPSED
-    return new Set(parsed.filter((k): k is string => typeof k === "string"))
+    if (Array.isArray(parsed)) return { collapsed: keysOf(parsed), groupBy: "folder" }
+    if (!parsed || typeof parsed !== "object") return DEFAULT_STORE
+    const rec = parsed as { collapsed?: unknown; groupBy?: unknown }
+    return {
+      collapsed: keysOf(rec.collapsed),
+      groupBy: rec.groupBy === "owner" ? "owner" : "folder",
+    }
   } catch {
-    return NONE_COLLAPSED
+    return DEFAULT_STORE
   }
 }
 
-function writeCollapsed(key: string, collapsed: ReadonlySet<string>) {
+function writeStore(key: string, store: RailStore) {
   try {
-    globalThis.localStorage?.setItem(key, JSON.stringify(Array.from(collapsed)))
+    globalThis.localStorage?.setItem(
+      key,
+      JSON.stringify({ collapsed: Array.from(store.collapsed), groupBy: store.groupBy }),
+    )
   } catch {
     // Unsaveable is not unusable: the fold still holds for this mount.
   }
@@ -159,6 +204,7 @@ function Count({ n, dim = false }: { n: number; dim?: boolean }) {
 
 export function PagesRail({
   pages,
+  folders,
   workspaceId,
   currentUserId,
   search,
@@ -169,6 +215,11 @@ export function PagesRail({
   onSelectPage,
   onCreatePage,
   onToggleCollapse,
+  onMovePage,
+  onRemoveFromFolder,
+  onCreateFolder,
+  onEditFolder,
+  onDeleteFolder,
 }: PagesRailProps) {
   // Facet counts are computed against the WHOLE list, never the filtered view.
   // Counting the filtered view makes every unpicked option read 0 the moment
@@ -184,53 +235,79 @@ export function PagesRail({
   // A toggle that can never match anything is a dead switch, and today's
   // servers do not send `reach` yet.
   const reachKnown = React.useMemo(() => hasReach(pages), [pages])
+  // Same rule for folders: the grouping choice and the folder verbs exist
+  // only on a server that has folders.
+  const foldersKnown = folders != null
 
   const activeCount = pageFilterCount(filters)
   const ownerLabel = (ref: string) => owners.find((o) => o.ref === ref)?.label ?? ref
 
-  // ── Groups ────────────────────────────────────────────────────────────────
-  // Grouped from the DISPLAYED list, so a facet or a search narrows every
-  // group and a group it empties disappears rather than standing there with
-  // a zero. The header count is therefore "what is in it now".
-  const groups = React.useMemo(
-    () => groupPagesByOwner(displayed, currentUserId),
-    [displayed, currentUserId],
-  )
-
-  // ── Collapse state ────────────────────────────────────────────────────────
+  // ── View state ────────────────────────────────────────────────────────────
   // State is kept WITH the key it was read under. When the user or workspace
   // changes the stored value belongs to someone else, so it is dropped in the
   // same render rather than shown for a frame and then written back under
   // the new key — a persist effect keyed on the state alone would do exactly
   // that write.
   const storageKey = collapseStorageKey(workspaceId, currentUserId)
-  const [store, setStore] = React.useState(() => ({
-    key: storageKey,
-    collapsed: readCollapsed(storageKey),
-  }))
+  const [store, setStore] = React.useState(() => ({ key: storageKey, ...readStore(storageKey) }))
   React.useEffect(() => {
-    if (store.key !== storageKey) setStore({ key: storageKey, collapsed: readCollapsed(storageKey) })
+    if (store.key !== storageKey) setStore({ key: storageKey, ...readStore(storageKey) })
   }, [storageKey, store.key])
-  const collapsed = store.key === storageKey ? store.collapsed : NONE_COLLAPSED
+  const current: RailStore = store.key === storageKey ? store : DEFAULT_STORE
+  const collapsed = current.collapsed
+  const groupBy: PagesGroupBy = foldersKnown ? current.groupBy : "owner"
 
   const setCollapsed = React.useCallback(
     (key: string, fold: boolean) => {
       setStore((prev) => {
-        const base = prev.key === storageKey ? prev.collapsed : readCollapsed(storageKey)
-        if (base.has(key) === fold) return prev.key === storageKey ? prev : { key: storageKey, collapsed: base }
-        const next = new Set(base)
+        const base = prev.key === storageKey ? prev : { key: storageKey, ...readStore(storageKey) }
+        if (base.collapsed.has(key) === fold) return base
+        const next = new Set(base.collapsed)
         if (fold) next.add(key)
         else next.delete(key)
-        writeCollapsed(storageKey, next)
-        return { key: storageKey, collapsed: next }
+        const out = { ...base, collapsed: next }
+        writeStore(storageKey, out)
+        return out
       })
     },
     [storageKey],
   )
 
+  const setGroupBy = React.useCallback(
+    (next: PagesGroupBy) => {
+      setStore((prev) => {
+        const base = prev.key === storageKey ? prev : { key: storageKey, ...readStore(storageKey) }
+        if (base.groupBy === next) return base
+        const out = { ...base, groupBy: next }
+        writeStore(storageKey, out)
+        return out
+      })
+    },
+    [storageKey],
+  )
+
+  // ── Groups ────────────────────────────────────────────────────────────────
+  // Grouped from the DISPLAYED list, so a facet or a search narrows every
+  // group and a group it empties disappears rather than standing there with
+  // a zero. The header count is therefore "what is in it now" — except a
+  // folder with nothing in it on an UNNARROWED list, which is drawn with its
+  // zero: it is the person's own folder, and one that only appears once
+  // something is filed in it cannot be filed into.
+  const searching = search.trim() !== ""
+  const narrowing = searching || activeCount > 0
+  const groups = React.useMemo(() => {
+    if (groupBy === "folder") {
+      const all = groupPagesByFolder(displayed, folders ?? [])
+      return narrowing ? all.filter((g) => g.pages.length > 0) : all
+    }
+    return groupPagesByOwner(displayed, currentUserId)
+  }, [groupBy, displayed, folders, narrowing, currentUserId])
+
+  const countOf = (g: PageGroup) =>
+    g.kind === "folder" && !narrowing && g.pageCount !== undefined ? g.pageCount : g.pages.length
+
   // A search opens every group that has a match and hides the rest; the
   // saved fold is untouched and comes back the moment the query is cleared.
-  const searching = search.trim() !== ""
   const isOpen = (g: PageGroup) => searching || !collapsed.has(g.key)
 
   // The active page is always visible: selecting one inside a folded group
@@ -249,12 +326,19 @@ export function PagesRail({
     if (selectedSlug && activeGroupKey) setCollapsed(activeGroupKey, false)
   }, [selectedSlug, activeGroupKey, setCollapsed])
 
+  // ── Row menu ──────────────────────────────────────────────────────────────
+  // Which row's "⋯" menu is open, by page slug. Owned here rather than by
+  // each row so the list-level key handler can open it for the focused row.
+  const [menuFor, setMenuFor] = React.useState<string | null>(null)
+  const rowMenus = Boolean(onMovePage || onRemoveFromFolder)
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
   // One handler on the list, not one per row: the rows already answer Enter
   // and Space through `ListRow`, and a header is a native button. What the
   // list adds is movement — Up/Down/Home/End between whatever is on screen,
   // Left to fold the group the focus is in (landing on its header, so the
-  // focus never falls off a row that just vanished) and Right to unfold it.
+  // focus never falls off a row that just vanished) and Right to unfold it —
+  // and Shift+F10 or the ContextMenu key on a row, which opens its menu.
   const listRef = React.useRef<HTMLDivElement>(null)
   const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     const root = listRef.current
@@ -263,6 +347,14 @@ export function PagesRail({
     const groupKey = target.dataset.railHeader ?? target.dataset.railRow
     if (groupKey == null) return
 
+    if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+      const slug = target.dataset.pageSlug
+      if (rowMenus && slug) {
+        e.preventDefault()
+        setMenuFor(slug)
+      }
+      return
+    }
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
       const items = navigables(root)
       const i = items.indexOf(target)
@@ -383,7 +475,40 @@ export function PagesRail({
               </SidebarFacetOption>
             </SidebarFacet>
           )}
+
+          {/* A view choice, not a filter: it narrows nothing, so it is not
+              counted on the trigger and not cleared with the rest. The
+              facet's reset row IS the default state — Folder — and the one
+              option is the other grouping; picking it off returns to the
+              default, which is what the kit's reset row means. */}
+          {foldersKnown && (
+            <SidebarFacet
+              label="Group by"
+              resetLabel="Folder"
+              resetActive={groupBy === "folder"}
+              onReset={() => setGroupBy("folder")}
+            >
+              <SidebarFacetOption
+                active={groupBy === "owner"}
+                onToggle={() => setGroupBy(groupBy === "owner" ? "folder" : "owner")}
+              >
+                <CONCEPT_ICON.crews className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                <span className="truncate">Owner</span>
+              </SidebarFacetOption>
+            </SidebarFacet>
+          )}
         </SidebarFilterPopover>
+        {foldersKnown && onCreateFolder && (
+          <button
+            type="button"
+            onClick={onCreateFolder}
+            aria-label="New folder"
+            title="New folder"
+            className="kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.04] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <FolderPlus className="h-3.5 w-3.5" aria-hidden />
+          </button>
+        )}
         {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
       </SidebarToolbar>
 
@@ -440,13 +565,37 @@ export function PagesRail({
                 if (searching) return
                 setCollapsed(group.key, !collapsed.has(group.key))
               }}
-              label={group.label}
-              count={group.pages.length}
+              label={
+                group.kind === "folder" ? (
+                  // The folder's colour as a dot and its icon, before the
+                  // name. Both are the folder's, drawn once, in the header.
+                  <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+                    <FolderDot color={group.folder?.color} />
+                    <FolderGlyph icon={group.folder?.icon} className="h-3 w-3 text-muted-foreground-soft" />
+                    <span className="min-w-0 truncate">{group.label}</span>
+                  </span>
+                ) : (
+                  group.label
+                )
+              }
+              count={countOf(group)}
               // The header is the only place the owner is written, and a crew
-              // name has no upper bound; the kit truncates it so the count
-              // stays on the line. `title` carries the whole of it.
+              // or folder name has no upper bound; the kit truncates it so the
+              // count stays on the line. `title` carries the whole of it.
               headerClassName="min-w-0"
               headerProps={{ "data-rail-header": group.key, title: group.label }}
+              // The section is a hover group so the folder menu beside its
+              // header shows when the pointer is over the folder.
+              className="group/section"
+              actions={
+                group.kind === "folder" && group.folder && (onEditFolder || onDeleteFolder) ? (
+                  <FolderHeaderMenu
+                    folderName={group.label}
+                    onRename={() => onEditFolder?.(group.folder!.slug)}
+                    onDelete={() => onDeleteFolder?.(group.folder!.slug)}
+                  />
+                ) : undefined
+              }
             >
               {/* The rail is a FILTERED list: picking a facet above removes
                   rows, clearing it brings them back. Those are the two moments
@@ -458,6 +607,7 @@ export function PagesRail({
                 {group.pages.map((page) => {
                   const meta = page.state ? PAGE_STATE_META[page.state] : null
                   const Icon = meta?.icon ?? CONCEPT_ICON.pages
+                  const inFolder = Boolean(page.folder)
                   return (
                     <motion.div
                       key={page.id || page.slug}
@@ -466,11 +616,21 @@ export function PagesRail({
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
+                      onContextMenu={
+                        rowMenus
+                          ? (e) => {
+                              e.preventDefault()
+                              setMenuFor(page.slug)
+                            }
+                          : undefined
+                      }
                     >
                       <SidebarRow
                         selected={selectedSlug === page.slug}
                         onSelect={() => onSelectPage(page.slug)}
                         data-rail-row={group.key}
+                        data-page-slug={page.slug}
+                        className="group/row"
                       >
                         <Icon
                           className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
@@ -490,6 +650,16 @@ export function PagesRail({
                           <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-foreground">
                             {page.tally.total}
                           </span>
+                        )}
+                        {rowMenus && (
+                          <PageRowMenu
+                            pageName={page.name}
+                            inFolder={inFolder && Boolean(onRemoveFromFolder)}
+                            open={menuFor === page.slug}
+                            onOpenChange={(open) => setMenuFor(open ? page.slug : null)}
+                            onMove={() => onMovePage?.(page)}
+                            onRemoveFromFolder={() => onRemoveFromFolder?.(page)}
+                          />
                         )}
                       </SidebarRow>
                     </motion.div>
