@@ -41,7 +41,7 @@ function json(status: number, body: unknown): Response {
   } as unknown as Response
 }
 
-function mount(page: WirePageDetail, routes: { acl?: Response; me?: Response } = {}) {
+function mount(page: WirePageDetail, routes: { acl?: Response; me?: Response; folders?: Response } = {}) {
   const calls: string[] = []
   vi.stubGlobal(
     "fetch",
@@ -50,7 +50,7 @@ function mount(page: WirePageDetail, routes: { acl?: Response; me?: Response } =
       calls.push(`${(init?.method ?? "GET").toUpperCase()} ${url}`)
       if (/\/page-folders\/ops\/acl\?/.test(url)) return routes.acl ?? json(403, { error: "Only a manager of Lookout or a workspace admin can see who Ops is shared with." })
       if (/\/access\/me\?/.test(url)) return routes.me ?? json(200, { paths: ["crew:lookout", "folder:ops"] })
-      if (url.startsWith("/api/v1/page-folders?")) return json(200, FOLDERS)
+      if (url.startsWith("/api/v1/page-folders?")) return routes.folders ?? json(200, FOLDERS)
       return json(404, { error: `unrouted ${url}` })
     }),
   )
@@ -67,6 +67,17 @@ beforeEach(cleanup)
 afterEach(() => vi.unstubAllGlobals())
 
 describe("From folder", () => {
+  // Counter-review 2026-09-13, R2: the marker comes from the folder list, a
+  // read of its own. When that read failed or the folder is not in it, the
+  // card must say it could not tell — never "only the owning crew", which
+  // is a claim about privacy nobody made.
+  it("says sharing could not be determined when the folder list failed — never that the folder is private", async () => {
+    mount(FILED, { folders: json(500, { error: "boom" }) })
+    const card = await waitFor(() => document.querySelector('[data-slot="page-folder-access"]') as HTMLElement)
+    await waitFor(() => expect(card.querySelector('[data-slot="folder-sharing-marker"]')?.textContent).toBe("Sharing could not be determined"))
+    expect(card.textContent).not.toContain("Only the owning crew")
+  })
+
   it("is not drawn for a Page in no folder, and reads nothing", () => {
     const { calls } = mount({ ...FILED, folder: null })
     expect(document.querySelector('[data-slot="page-folder-access"]')).toBeNull()
@@ -86,7 +97,7 @@ describe("From folder", () => {
     const card = await waitFor(() => document.querySelector('[data-slot="page-folder-access"]') as HTMLElement)
     expect(card.textContent).toContain("From folder")
     expect(card.textContent).toContain("Ops")
-    await waitFor(() => expect(card.textContent).toContain("Visible to crew Support; bob@example.com can edit."))
+    await waitFor(() => expect(card.textContent).toContain("Through the folder: visible to crew Support; bob@example.com can edit."))
     expect(card.querySelectorAll('[data-slot="folder-acl-readonly"] > div')).toHaveLength(2)
     expect(card.textContent).toContain("Can view")
     expect(card.textContent).toContain("Can edit")

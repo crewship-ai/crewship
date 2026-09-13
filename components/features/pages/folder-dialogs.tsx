@@ -425,7 +425,7 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
           ? null
           : targetAcl.manages
             ? moveImpactFromAcl(targetAcl.entries)
-            : moveImpactFromShared(targetFolder?.shared ?? "none")
+            : moveImpactFromShared(targetFolder?.shared ?? "unknown")
 
   const nameOf = (slug: string) => list.find((s) => s.slug === slug)?.name ?? slug
 

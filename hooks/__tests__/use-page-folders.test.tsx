@@ -58,9 +58,9 @@ beforeEach(() => apiFetch.mockReset())
 describe("normalising", () => {
   it("reads a folder row tolerantly and clamps the count", () => {
     const view = toPageFolderView({ slug: "ops", name: " Ops ", icon: "", color: "amber", owner: "crew/lookout", page_count: -2, acl_version: 3 })!
-    expect(view).toMatchObject({ slug: "ops", name: "Ops", icon: null, color: "amber", ownerRef: "crew/lookout", ownerLabel: "lookout", pageCount: 0, aclVersion: 3, shared: "none" })
+    expect(view).toMatchObject({ slug: "ops", name: "Ops", icon: null, color: "amber", ownerRef: "crew/lookout", ownerLabel: "lookout", pageCount: 0, aclVersion: 3, shared: "unknown" })
     expect(toPageFolderView({ slug: "x", shared: "workspace" })!.shared).toBe("workspace")
-    expect(toPageFolderView({ slug: "x", shared: "bogus" })!.shared).toBe("none")
+    expect(toPageFolderView({ slug: "x", shared: "bogus" })!.shared).toBe("unknown")
     expect(toPageFolderView({ name: "no slug" })).toBeNull()
     expect(toPageFolderView({ slug: "x", owner_crew_name: "Lookout", owner: "crew/lookout" })!.ownerLabel).toBe("Lookout")
   })

@@ -63,7 +63,13 @@ export function FolderAccessCard({
     : acl.manages
       ? `${acl.entries.length} ${acl.entries.length === 1 ? "entry" : "entries"}`
       : acl.refusal !== null
-        ? folderSharingSentence(folder?.shared ?? "none").toLowerCase()
+        ? // The marker comes from the folder LIST, a separate read: while it is
+          // still loading, or when it failed or lacks this folder, the honest
+          // word is "unknown", never "only the owning crew" (counter-review
+          // 2026-09-13, R2).
+          folders.loading
+          ? "loading"
+          : folderSharingSentence(folder?.shared ?? "unknown").toLowerCase()
         : "could not read"
 
   return (
@@ -134,7 +140,7 @@ export function FolderAccessCard({
         {acl.refusal !== null && (
           <>
             <p data-slot="folder-sharing-marker" className="type-page-value text-foreground/85">
-              {folderSharingSentence(folder?.shared ?? "none")}
+              {folders.loading ? "Reading the folder's sharing…" : folderSharingSentence(folder?.shared ?? "unknown")}
             </p>
             <ControlRefusal>{acl.refusal}</ControlRefusal>
             <p data-slot="own-paths" className="type-page-meta text-muted-foreground">

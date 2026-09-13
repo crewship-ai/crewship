@@ -26,17 +26,24 @@
  * KINDS of subject apart — a folder shared with one person is not "shared
  * with a crew" (audit 2026-09-13, F1) — and never who.
  */
-export type FolderShared = "none" | "people" | "crews" | "people_and_crews" | "workspace"
+export type FolderShared = "none" | "people" | "crews" | "people_and_crews" | "workspace" | "unknown"
 
+/**
+ * `none` is only ever the server's own word. A value this build does not
+ * know — the pre-audit `crew`, a word from a newer server, a missing field —
+ * is `unknown`: the folder may well be shared, and "only the owning crew"
+ * would be a claim about privacy nobody made (counter-review 2026-09-13, R2).
+ */
 export function toFolderShared(value: unknown): FolderShared {
   switch (value) {
+    case "none":
     case "people":
     case "crews":
     case "people_and_crews":
     case "workspace":
       return value
     default:
-      return "none"
+      return "unknown"
   }
 }
 
@@ -72,10 +79,15 @@ export function folderSharingSentence(shared: FolderShared): string {
       return "Shared with named crews"
     case "people_and_crews":
       return "Shared with named people and crews"
-    default:
+    case "none":
       return "Only the owning crew and workspace admins"
+    default:
+      return SHARING_UNKNOWN
   }
 }
+
+/** The honest sentence when the marker could not be read: not a claim either way. */
+export const SHARING_UNKNOWN = "Sharing could not be determined"
 
 /** The sidebar marker's `title`, and the same words wherever the marker is drawn. */
 export const SHARED_WITH_WORKSPACE_TITLE = "Shared with everyone in this workspace"
@@ -94,10 +106,6 @@ export function joinNames(names: readonly string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
-function capitalise(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
 /**
  * "After the move", for a reader who may read the target's ACL. Built from
  * the entries, with names. Entries that can edit are listed as editors, not
@@ -111,10 +119,13 @@ export function moveImpactFromAcl(entries: readonly FolderAclEntry[]): string {
   // page's own grants, its owner and the crews owning its panels reach it
   // exactly as before the move, so "only" was false in both directions
   // (audit 2026-09-13, F2).
+  // Every branch ends with the same reminder: the names are what the folder
+  // ADDS, and the page's own access is untouched by the move (counter-review
+  // 2026-09-13, R1 — the first fix said so only for an empty ACL).
   if (viewers.length === 0 && editors.length === 0) return `${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`
-  if (editors.length === 0) return `Visible to ${joinNames(viewers)}.`
-  if (viewers.length === 0) return `${capitalise(joinNames(editors))} can view and edit.`
-  return `Visible to ${joinNames(viewers)}; ${joinNames(editors)} can edit.`
+  if (editors.length === 0) return `Through the folder: visible to ${joinNames(viewers)}. ${GRANTS_STAY}`
+  if (viewers.length === 0) return `Through the folder: ${joinNames(editors)} can view and edit. ${GRANTS_STAY}`
+  return `Through the folder: visible to ${joinNames(viewers)}; ${joinNames(editors)} can edit. ${GRANTS_STAY}`
 }
 
 export const FOLDER_ADDS_NOTHING = "The folder adds no sharing of its own."
@@ -131,8 +142,10 @@ export function moveImpactFromShared(shared: FolderShared): string {
       return `Through the folder, named crews can see it. ${GRANTS_STAY}`
     case "people_and_crews":
       return `Through the folder, named people and crews can see it. ${GRANTS_STAY}`
-    default:
+    case "none":
       return `${FOLDER_ADDS_NOTHING} ${GRANTS_STAY}`
+    default:
+      return `This folder's sharing could not be determined, so who else will see the page through it is not known. ${GRANTS_STAY}`
   }
 }
 
