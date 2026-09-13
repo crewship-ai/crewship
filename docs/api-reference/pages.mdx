@@ -50,7 +50,12 @@ validation.
 | PATCH | [`/api/v1/page-folders/{slug}`](#update-a-folder) | Rename a folder, change its icon or colour |
 | DELETE | [`/api/v1/page-folders/{slug}`](#delete-a-folder) | Delete an empty folder |
 | POST | [`/api/v1/page-folders/{slug}/pages`](#file-a-page-in-a-folder) | File a page in a folder (a move) |
+| POST | [`/api/v1/page-folders/{slug}/pages:batch`](#file-several-pages-in-a-folder) | File several pages in one all-or-nothing request |
 | DELETE | [`/api/v1/page-folders/{slug}/pages/{page}`](#remove-a-page-from-a-folder) | Take a page out of a folder |
+| GET | [`/api/v1/page-folders/{slug}/acl`](#read-a-folders-permissions) | Who a folder is shared with (managers only) |
+| PUT | [`/api/v1/page-folders/{slug}/acl`](#share-a-folder) | Share a folder with a user, a crew or everyone in the workspace |
+| DELETE | [`/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}`](#stop-sharing-a-folder) | Remove one entry from a folder's permissions |
+| GET | [`/api/v1/pages/{slug}/access/me`](#my-access-to-a-page) | The caller's own paths to a page |
 | GET | [`/api/v1/pages/{slug}/panels/{panelId}/actions`](#list-a-panels-actions) | The actions a panel declares |
 | POST | [`/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`](#dispatch-an-action) | Dispatch a declared action |
 | GET | [`/api/v1/pages/{slug}/versions`](#list-versions) | The page's structural history |
@@ -459,9 +464,9 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 
 | Field | Type | Description |
 |---|---|---|
-| `subject_type` | string | `user`, `crew`, or `agent`. |
-| `subject` | string | The subject's slug or id. |
-| `level` | string | `read`, `produce`, or `write`. |
+| `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
+| `subject` | string | The subject's slug or id. Omitted for `workspace`. |
+| `level` | string | `read`, `produce`, or `write`. The `workspace` subject carries `read` or `write` only; `produce` names a producer, and everyone is not one. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -495,7 +500,7 @@ and by members of the crews that own its panels.
 | Status | Condition |
 |---|---|
 | 200 | Issued, or updated in place if the subject already held one. |
-| 400 | Unknown `subject_type` or `level`, missing subject, or `panels` naming a panel the page does not have. |
+| 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
 | 403 | Not the owner and not an admin, or the caller is an agent rather than a human. |
 
@@ -510,9 +515,9 @@ DELETE /api/v1/pages/{slug}/grants
 **Authentication:** session cookie or CLI token. The page owner or a workspace
 ADMIN/OWNER.
 
-**Query parameters:** exactly one of `user`, `crew`, or `agent`, naming the
-subject to revoke. A revoke naming nobody answers **400** rather than reporting
-a success it did not perform.
+**Query parameters:** `subject_type` and `subject`, naming the subject to
+revoke; `subject_type=workspace` needs no `subject`. A revoke naming nobody
+answers **400** rather than reporting a success it did not perform.
 
 **Response 200:** `{"page": "fleet-201", "changed": 1}`.
 
@@ -533,32 +538,58 @@ a success it did not perform.
 A folder is a named group of pages owned by one crew, with an icon from the
 crew icon set and a colour from the crew palette — the same picker a crew uses.
 One level, a page in at most one folder; a page outside any folder is
-*unfiled*. Folders arrange and do not share: filing a page changes nobody's
-access to it, and every folder read is filtered to the pages the caller already
-reaches. `page_count` counts those, never the folder's true size.
+*unfiled*. Every folder read is filtered to the pages the caller reaches;
+`page_count` counts those, never the folder's true size.
+
+**A folder can be shared, and what it is shared with applies to every page in
+it right now.** A folder's permissions name a subject — a user, a crew, or
+everyone in the workspace — as *can view* or *can edit*, and they apply
+continuously to whatever is in the folder: filing a page in a shared folder
+shares it, taking it out unshares it. A page's own grants add to that and never
+take from it. *Can edit* implies *can view*; the server stores both and refuses
+a request that says otherwise. Neither ever opens a panel owned by another
+crew: a panel is sealed by its owning crew's membership whatever the folder
+says. Agents are never a folder subject; an agent reaches a page only by a
+grant on that page.
+
+An entry belongs to the folder, not to the person who set it: it stays until a
+manager changes it or the folder is deleted, and `set_by` is audit only. This
+is deliberately the opposite regime from a page grant, whose issuer's standing
+is re-checked at every use.
 
 Every page row and page document carries `folder` (`{slug, name, icon, color}`
 or `null`, always sent) and `pages_version`, which changes with every change to
 the page's folder membership. A move sends it back as a fence, together with
-the folder's `grants_version`; a stale fence is refused with **409** carrying
-`conflict` (`pages_version` or `grants_version`) and the current pair, so the
-client re-reads and confirms again rather than retrying blind.
+the folder's `acl_version`, which changes with every change to the folder's
+permissions; a stale fence is refused with **409** carrying `conflict`
+(`pages_version` or `acl_version`) and the current pair, so the client re-reads
+and confirms again rather than retrying blind. The 409 carries the target's
+permissions only to a caller who may read them; everyone else gets the versions
+and a sentence.
+
+Every folder document carries `shared` — `none`, `crew` (shared with named
+crews or people) or `workspace` — for readers who may not see the entries
+themselves.
 
 Who may do what:
 
 | Operation | Who |
 |---|---|
 | Create | A workspace ADMIN/OWNER, or a MANAGER (or higher) who belongs to the crew named as owner |
-| Rename, icon, colour | ADMIN/OWNER, or the owning crew's MANAGER+ |
+| Read the permissions | ADMIN/OWNER, or the owning crew's MANAGER+. Everyone else sees `shared` and their own paths (`GET …/access/me`) |
+| Set or remove an entry | ADMIN/OWNER, or the owning crew's MANAGER+ |
+| Rename, icon, colour | ADMIN/OWNER, the owning crew's MANAGER+, or a holder of *can edit* |
 | Delete | ADMIN/OWNER, or the owning crew's MANAGER+ — and only an empty folder, counting pages the caller cannot see |
-| File a page (move) | Both in one caller: the page's owner or an admin *initiates*, and an admin or the target folder's owning-crew MANAGER+ *accepts*. Lacking either is a 403 naming who can |
-| Remove a page | The page's owner or an admin; the folder is not consulted |
-| Read | Whoever reaches at least one page in it, the owning crew, or an admin. Nobody else, and "nobody else" is a 404 |
+| File a page (move) | Both in one caller: the page's owner or an admin *initiates*, and an admin, the target folder's owning-crew MANAGER+ or a holder of *can edit* on the target *accepts*. Lacking either is a 403 naming who can. *Can edit* alone never takes somebody else's page |
+| Remove a page | The page's owner, an admin, or a holder of *can edit* on the folder — the last deliberately: it withdraws the access everyone else inherited from the folder |
+| Edit a page inside | As for any page, plus a holder of *can edit*, subject to the same whole-document check as a page `write` grant |
+| Read | Whoever reaches at least one page in it, whoever the permissions name, the owning crew, or an admin. Nobody else, and "nobody else" is a 404 |
 
 Folder changes are journalled as `page.folder_changed`; moves and removals as
-`page.folder_membership_changed`. Folder create, rename and delete broadcast
-`page.folder.updated` (`{slug}`); a move or removal broadcasts the page's own
-`page.updated`.
+`page.folder_membership_changed`; permission changes as
+`page.folder_acl_changed`. Folder create, rename, delete and permission changes
+broadcast `page.folder.updated` (`{slug}`); a move or removal broadcasts the
+page's own `page.updated`.
 
 ---
 
@@ -586,7 +617,8 @@ GET /api/v1/page-folders
       "owner": "crew/ops",
       "owner_crew_name": "Operations",
       "page_count": 3,
-      "grants_version": 0,
+      "shared": "none",
+      "acl_version": 0,
       "created_at": "2026-09-13T06:00:00Z",
       "updated_at": "2026-09-13T06:00:00Z"
     }
@@ -655,8 +687,9 @@ GET /api/v1/page-folders/{slug}
 
 **Path parameters:** `slug`. No request body.
 
-**Authentication:** session cookie or CLI token. The owning crew, an admin, or
-anyone who reaches at least one page in the folder.
+**Authentication:** session cookie or CLI token. The owning crew, an admin,
+anyone the folder's permissions name, or anyone who reaches at least one page
+in the folder.
 
 **Response 200:** the folder, plus `pages` — the pages in it the caller
 reaches, as [index rows](#list-pages). `page_count` is their number.
@@ -697,7 +730,7 @@ at creation.
 | 200 | Updated. |
 | 400 | Nothing to change, an empty name, an icon or colour outside the set, or `slug`/`owner` in the body. |
 | 401 | No session or token. |
-| 403 | Not an admin and not the owning crew's MANAGER+. |
+| 403 | Not an admin, not the owning crew's MANAGER+, and not a holder of *can edit*. |
 | 404 | No such folder, or none the caller may read. |
 
 ---
@@ -733,23 +766,24 @@ POST /api/v1/page-folders/{slug}/pages
 
 Files a page in this folder, moving it out of whichever folder it was in. The
 caller must hold **both** authorities: the page's owner or an admin initiates,
-and an admin or this folder's owning-crew MANAGER (or higher) accepts. A
-caller lacking either is refused with a message naming who can. Filing changes
-nobody's access to the page.
+and an admin, this folder's owning-crew MANAGER (or higher), or a holder of
+*can edit* on this folder accepts. A caller lacking either is refused with a
+message naming who can. Filing a page in a shared folder shares it with
+whoever the folder is shared with.
 
 **Authentication:** session cookie or CLI token.
 
 **Request body:**
 
 ```json
-{ "page": "fleet-201", "pages_version": 3, "grants_version": 0 }
+{ "page": "fleet-201", "pages_version": 3, "acl_version": 0 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `page` | string | The slug of the page to file here. |
 | `pages_version` | integer | The page's `pages_version` as last read. Required. |
-| `grants_version` | integer | The folder's `grants_version` as last read. Required. |
+| `acl_version` | integer | The folder's `acl_version` as last read. Required. |
 
 **Response 200:** `{"page": …}` — the page's index row as the listing now
 renders it, with its new `folder` and bumped `pages_version`. Filing a page
@@ -762,9 +796,9 @@ where it already is changes nothing and bumps nothing.
 | 200 | Filed. |
 | 400 | No page named, or a fence missing. |
 | 401 | No session or token. |
-| 403 | The caller may not move the page (not its owner, not an admin), or may not file it here (not an admin, not the owning crew's MANAGER+). The message says which. |
+| 403 | The caller may not move the page (not its owner, not an admin), or may not file it here (not an admin, not the owning crew's MANAGER+, no *can edit*). The message says which. |
 | 404 | No such folder, or no such page — or a page the caller cannot reach. |
-| 409 | A fence is stale: `{"error", "conflict": "pages_version" \| "grants_version", "pages_version", "grants_version"}` with the current pair. |
+| 409 | A fence is stale: `{"error", "conflict": "pages_version" \| "acl_version", "page", "pages_version", "acl_version"}` with the current pair. When `conflict` is `acl_version` and the caller may read the folder's permissions, `acl` carries the current entries; otherwise the sentence says to look at the preview again. |
 
 ---
 
@@ -774,9 +808,10 @@ where it already is changes nothing and bumps nothing.
 DELETE /api/v1/page-folders/{slug}/pages/{page}
 ```
 
-Takes the page out of this folder; it becomes unfiled. The page's owner or an
-admin, and nobody else — the folder is not consulted. Taking your page back
-never waits for anyone.
+Takes the page out of this folder; it becomes unfiled. The page's owner, an
+admin, or a holder of *can edit* on the folder — the last deliberately, since
+taking a page out withdraws the access everyone else inherited from the
+folder. Taking your own page back never waits for anyone.
 
 **Authentication:** session cookie or CLI token.
 
@@ -784,6 +819,8 @@ never waits for anyone.
 read. Required.
 
 **Response 200:** `{"page": …}` — the page's index row, `folder` now `null`.
+A *can edit* holder who reached the page only through the folder gets the row
+with an empty `reach`: the removal took their own path away.
 
 **Statuses:**
 
@@ -792,9 +829,185 @@ read. Required.
 | 200 | Removed. |
 | 400 | No `pages_version`. |
 | 401 | No session or token. |
-| 403 | Not the page's owner and not an admin. |
+| 403 | Not the page's owner, not an admin, and not a holder of *can edit*. |
 | 404 | No such folder, or no such page — or a page the caller cannot reach. |
 | 409 | The fence is stale, or the page is not in this folder (the client's view of it is): `conflict` is `pages_version` and the current pair is returned. |
+
+---
+
+## File several pages in a folder
+
+```
+POST /api/v1/page-folders/{slug}/pages:batch
+```
+
+Files several pages in this folder in **one transaction**. Every page is
+checked on its own — reach, ownership, its `pages_version` — under the same
+rules as a single move, and a single refusal writes nothing and names the page.
+
+**Authentication:** session cookie or CLI token. As for a single move, for
+every page.
+
+**Request body:**
+
+```json
+{ "pages": [ { "page": "fleet-201", "pages_version": 3 }, { "page": "fleet-202", "pages_version": 0 } ], "acl_version": 2 }
+```
+
+**Response 200:** `{"pages": [...], "acl_version"}` — the moved pages' index
+rows.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Every page filed. |
+| 400 | No pages, a page without `pages_version`, a page listed twice, or no `acl_version`. |
+| 401 | No session or token. |
+| 403 | The caller may not file into this folder, or does not own one of the pages; the message names it and says nothing was moved. |
+| 404 | No such folder, or a page the caller cannot reach. |
+| 409 | The folder's `acl_version` is stale, or one page's `pages_version` is; `page` names it. Nothing was written. |
+
+---
+
+## Read a folder's permissions
+
+```
+GET /api/v1/page-folders/{slug}/acl
+```
+
+**Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER, or
+the owning crew's MANAGER (or higher). Everyone else who can see the folder
+gets **403** with the rule; the folder's `shared` label and
+[`…/access/me`](#my-access-to-a-page) are theirs.
+
+**Response 200:**
+
+```json
+{
+  "folder": "ops-board",
+  "acl": [
+    { "subject_type": "crew", "subject_id": "crew_01…", "label": "support", "can_read": true, "can_write": false,
+      "set_by": "ada@example.com", "set_by_user_id": "user_01…", "set_at": "2026-09-13T09:00:00Z" },
+    { "subject_type": "workspace", "subject_id": "", "label": "workspace", "can_read": true, "can_write": false,
+      "set_by": "", "set_by_user_id": "", "set_at": "2026-09-13T09:01:00Z" }
+  ],
+  "acl_version": 2
+}
+```
+
+`can_read` is always true. `set_by` is empty once the setter's account is
+gone; the entry stays. The owning crew and admins are not listed: they hold the
+folder without an entry.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Found. |
+| 401 | No session or token. |
+| 403 | Not an admin and not the owning crew's MANAGER+. |
+| 404 | No such folder, or none the caller may read. |
+
+---
+
+## Share a folder
+
+```
+PUT /api/v1/page-folders/{slug}/acl
+```
+
+Sets one entry: *can view*, or *can view and edit*. PUT because the row is
+identified by `(folder, subject)` and repeating the request is the same state.
+Bumps `acl_version`, so a move confirmed against the previous permissions is
+refused.
+
+**Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER, or
+the owning crew's MANAGER (or higher).
+
+**Request body:**
+
+```json
+{ "subject_type": "crew", "subject_id": "support", "can_write": true }
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `subject_type` | string | `user`, `crew`, or `workspace`. `agent` is refused. |
+| `subject_id` | string | A user by id or email (a member of this workspace), a crew by id or slug. Omitted for `workspace`. |
+| `can_read` | boolean | Optional; may only be `true`. `false` is refused: there is no *can edit* without *can view* — delete the entry instead. |
+| `can_write` | boolean | *Can edit*: rename the folder, edit the pages inside, take pages out. Defaults to `false`. |
+
+**Response 200:** the [permissions document](#read-a-folders-permissions)
+after the change, plus `entry`, the row that was set.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Set. |
+| 400 | An agent, an unknown `subject_type`, a subject that does not resolve, or `can_read: false`. |
+| 401 | No session or token. |
+| 403 | Not an admin and not the owning crew's MANAGER+. |
+| 404 | No such folder, or none the caller may read. |
+
+---
+
+## Stop sharing a folder
+
+```
+DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}
+```
+
+Removes one entry and bumps `acl_version`. A user or crew is matched by the
+stored id or by the reference a person types (an email, a slug), so an entry
+for somebody who has since left can still be removed. The workspace subject has
+no id: its path is `…/acl/workspace/workspace`.
+
+**Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER, or
+the owning crew's MANAGER (or higher). No request body.
+
+**Response 204**, no body.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 204 | Removed. |
+| 400 | An agent or an unknown `subject_type`. |
+| 401 | No session or token. |
+| 403 | Not an admin and not the owning crew's MANAGER+. |
+| 404 | No such folder, or no such entry. |
+
+---
+
+## My access to a page
+
+```
+GET /api/v1/pages/{slug}/access/me
+```
+
+The caller's own paths to the page, in the vocabulary of the index's `reach`
+(`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`),
+plus the page's folder and its `shared` label when it is filed. Anyone who can
+open the page may ask; the answer describes them and nobody else.
+
+**Authentication:** session cookie or CLI token.
+
+**Response 200:**
+
+```json
+{ "page": "fleet-201", "subject_type": "user", "subject_id": "user_01…", "label": "ada@example.com",
+  "paths": ["folder:ops-board", "grant"], "folder": "ops-board", "shared": "crew" }
+```
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Found. `paths` is never empty. |
+| 401 | No session or token. |
+| 404 | No such page, or one the caller cannot reach. |
 
 ---
 

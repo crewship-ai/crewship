@@ -82,10 +82,24 @@ func (f *foldersFixture) call(t *testing.T, method, path, userID, role, body str
 	case len(parts) == 2 && parts[1] == "pages" && method == "POST":
 		req.SetPathValue("slug", parts[0])
 		f.h.AddFolderPage(rr, req)
+	case len(parts) == 2 && parts[1] == "pages:batch" && method == "POST":
+		req.SetPathValue("slug", parts[0])
+		f.h.BatchMoveFolderPages(rr, req)
 	case len(parts) == 3 && parts[1] == "pages" && method == "DELETE":
 		req.SetPathValue("slug", parts[0])
 		req.SetPathValue("page", parts[2])
 		f.h.RemoveFolderPage(rr, req)
+	case len(parts) == 2 && parts[1] == "acl" && method == "GET":
+		req.SetPathValue("slug", parts[0])
+		f.h.GetFolderACL(rr, req)
+	case len(parts) == 2 && parts[1] == "acl" && method == "PUT":
+		req.SetPathValue("slug", parts[0])
+		f.h.PutFolderACL(rr, req)
+	case len(parts) == 4 && parts[1] == "acl" && method == "DELETE":
+		req.SetPathValue("slug", parts[0])
+		req.SetPathValue("subject_type", parts[2])
+		req.SetPathValue("subject_id", parts[3])
+		f.h.DeleteFolderACL(rr, req)
 	default:
 		t.Fatalf("no handler for %s %s", method, path)
 	}
@@ -114,10 +128,10 @@ func (f *foldersFixture) file(t *testing.T, folder, page string) map[string]any 
 }
 
 // moveBody is the add/move request with the CURRENT fences, read as the
-// admin: the page's pages_version and the folder's grants_version.
+// admin: the page's pages_version and the folder's acl_version.
 func (f *foldersFixture) moveBody(t *testing.T, folder, page string) string {
 	t.Helper()
-	return fmt.Sprintf(`{"page":%q,"pages_version":%d,"grants_version":%d}`, page, f.pagesVersion(t, page), f.grantsVersion(t, folder))
+	return fmt.Sprintf(`{"page":%q,"pages_version":%d,"acl_version":%d}`, page, f.pagesVersion(t, page), f.aclVersion(t, folder))
 }
 
 func (f *foldersFixture) pagesVersion(t *testing.T, page string) int64 {
@@ -129,11 +143,11 @@ func (f *foldersFixture) pagesVersion(t *testing.T, page string) int64 {
 	return v
 }
 
-func (f *foldersFixture) grantsVersion(t *testing.T, folder string) int64 {
+func (f *foldersFixture) aclVersion(t *testing.T, folder string) int64 {
 	t.Helper()
 	var v int64
-	if err := f.h.db.QueryRow(`SELECT grants_version FROM page_folders WHERE workspace_id = ? AND slug = ?`, f.wsID, folder).Scan(&v); err != nil {
-		t.Fatalf("grants_version of %s: %v", folder, err)
+	if err := f.h.db.QueryRow(`SELECT acl_version FROM page_folders WHERE workspace_id = ? AND slug = ?`, f.wsID, folder).Scan(&v); err != nil {
+		t.Fatalf("acl_version of %s: %v", folder, err)
 	}
 	return v
 }
@@ -204,7 +218,7 @@ func TestPageFolders_CreateNeedsAManagerOfTheOwningCrewOrAnAdmin(t *testing.T) {
 	// count zero, the journal and the folder's shape.
 	doc := decodeFoldersJSON(t, f.call(t, "GET", "/api/v1/page-folders/engine-ops", "mia", "MANAGER", ""))
 	for k, want := range map[string]any{"slug": "engine-ops", "name": "Engine ops", "icon": "rocket", "color": "amber",
-		"owner": "crew/engine", "owner_crew_name": "Engine", "page_count": float64(0), "grants_version": float64(0)} {
+		"owner": "crew/engine", "owner_crew_name": "Engine", "page_count": float64(0), "acl_version": float64(0), "shared": "none"} {
 		if doc[k] != want {
 			t.Errorf("folder %s = %v, want %v", k, doc[k], want)
 		}
@@ -373,7 +387,7 @@ func TestPageFolders_MoveNeedsBothAuthoritiesInOneCaller(t *testing.T) {
 		}
 		rr := f.call(t, "DELETE", "/api/v1/page-folders/engine-two/pages/fleet-201", "mia", "MANAGER",
 			fmt.Sprintf(`{"pages_version":%d}`, f.pagesVersion(t, "fleet-201")))
-		expectStatus(t, rr, http.StatusForbidden, "the folder has no say")
+		expectStatus(t, rr, http.StatusForbidden, "nobody else has a say")
 		rr = f.call(t, "DELETE", "/api/v1/page-folders/engine-two/pages/fleet-201", "alice", "MEMBER",
 			fmt.Sprintf(`{"pages_version":%d}`, f.pagesVersion(t, "fleet-201")))
 		expectStatus(t, rr, http.StatusOK, `"folder":null`, `"pages_version":3`)
@@ -390,7 +404,7 @@ func TestPageFolders_MoveNeedsBothAuthoritiesInOneCaller(t *testing.T) {
 func TestPageFolders_StaleFencesAre409WithTheCurrentPair(t *testing.T) {
 	f := newFoldersFixture(t)
 	f.createFolder(t, "engine-ops", "Engine ops", "crew/engine")
-	if _, err := f.h.db.Exec(`UPDATE page_folders SET grants_version = 4 WHERE slug = 'engine-ops'`); err != nil {
+	if _, err := f.h.db.Exec(`UPDATE page_folders SET acl_version = 4 WHERE slug = 'engine-ops'`); err != nil {
 		t.Fatal(err)
 	}
 	f.file(t, "engine-ops", "fleet-201") // pages_version → 1
@@ -400,11 +414,12 @@ func TestPageFolders_StaleFencesAre409WithTheCurrentPair(t *testing.T) {
 		status   int
 		conflict string
 	}{
-		{"a stale pages_version", `{"page":"fleet-201","pages_version":0,"grants_version":4}`, http.StatusConflict, "pages_version"},
-		{"a stale grants_version", `{"page":"fleet-201","pages_version":1,"grants_version":3}`, http.StatusConflict, "grants_version"},
-		{"both stale names the page's first", `{"page":"fleet-201","pages_version":9,"grants_version":9}`, http.StatusConflict, "pages_version"},
+		{"a stale pages_version", `{"page":"fleet-201","pages_version":0,"acl_version":4}`, http.StatusConflict, "pages_version"},
+		{"a stale acl_version", `{"page":"fleet-201","pages_version":1,"acl_version":3}`, http.StatusConflict, "acl_version"},
+		{"both stale names the page's first", `{"page":"fleet-201","pages_version":9,"acl_version":9}`, http.StatusConflict, "pages_version"},
 		{"a missing fence is a 400, never a guess", `{"page":"fleet-201","pages_version":1}`, http.StatusBadRequest, ""},
-		{"the current pair goes through", `{"page":"fleet-201","pages_version":1,"grants_version":4}`, http.StatusOK, ""},
+		{"the old field name is a missing fence too", `{"page":"fleet-201","pages_version":1,"grants_version":4}`, http.StatusBadRequest, ""},
+		{"the current pair goes through", `{"page":"fleet-201","pages_version":1,"acl_version":4}`, http.StatusOK, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -414,14 +429,14 @@ func TestPageFolders_StaleFencesAre409WithTheCurrentPair(t *testing.T) {
 				return
 			}
 			doc := decodeFoldersJSON(t, rr)
-			if doc["conflict"] != tc.conflict || doc["pages_version"] != float64(1) || doc["grants_version"] != float64(4) {
-				t.Errorf("409 body = %v, want conflict %q with pages_version 1 and grants_version 4", doc, tc.conflict)
+			if doc["conflict"] != tc.conflict || doc["pages_version"] != float64(1) || doc["acl_version"] != float64(4) {
+				t.Errorf("409 body = %v, want conflict %q with pages_version 1 and acl_version 4", doc, tc.conflict)
 			}
 		})
 	}
 	t.Run("a removal with a stale fence", func(t *testing.T) {
 		rr := f.call(t, "DELETE", "/api/v1/page-folders/engine-ops/pages/fleet-201", "erin", "ADMIN", `{"pages_version":0}`)
-		expectStatus(t, rr, http.StatusConflict, `"conflict":"pages_version"`, `"grants_version":4`)
+		expectStatus(t, rr, http.StatusConflict, `"conflict":"pages_version"`, `"acl_version":4`)
 		rr = f.call(t, "DELETE", "/api/v1/page-folders/engine-ops/pages/fleet-201", "erin", "ADMIN", `{}`)
 		expectStatus(t, rr, http.StatusBadRequest, "pages_version is required")
 	})

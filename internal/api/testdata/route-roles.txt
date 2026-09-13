@@ -57,6 +57,7 @@ DELETE /api/v1/notification-channels/{id} roleInline
 DELETE /api/v1/notification-channels/{id}/agents/{agentId} roleInline
 DELETE /api/v1/notification-templates roleManage
 DELETE /api/v1/page-folders/{slug} roleCreate
+DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id} roleCreate
 DELETE /api/v1/page-folders/{slug}/pages/{page} roleSelf
 DELETE /api/v1/pages/{slug} roleSelf
 DELETE /api/v1/pages/{slug}/grants roleSelf
@@ -114,7 +115,7 @@ PATCH /api/v1/labels/{labelId} roleManage
 PATCH /api/v1/milestones/{milestoneId} roleCreate
 PATCH /api/v1/notification-channels/{id} roleInline
 PATCH /api/v1/notification-providers/{provider} roleManage
-PATCH /api/v1/page-folders/{slug} roleCreate
+PATCH /api/v1/page-folders/{slug} roleSelf
 PATCH /api/v1/pages/{slug} roleSelf
 PATCH /api/v1/projects/{projectId} roleCreate
 PATCH /api/v1/recurring-issues/{recurringId} roleCreate
@@ -267,7 +268,8 @@ POST /api/v1/onboarding/proposals/{id}/apply roleCreate
 POST /api/v1/onboarding/setup roleSelf
 POST /api/v1/onboarding/setup-agent/start roleSelf
 POST /api/v1/page-folders roleCreate
-POST /api/v1/page-folders/{slug}/pages roleCreate
+POST /api/v1/page-folders/{slug}/pages roleSelf
+POST /api/v1/page-folders/{slug}/pages:batch roleSelf
 POST /api/v1/pages roleInline
 POST /api/v1/pages/import roleInline
 POST /api/v1/pages/maintenance roleManage
@@ -356,6 +358,7 @@ PUT /api/v1/integrations/composio/settings roleManage
 PUT /api/v1/me/notification-prefs roleSelf
 PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
+PUT /api/v1/page-folders/{slug}/acl roleCreate
 PUT /api/v1/pages/{slug}/grants roleSelf
 PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
 PUT /api/v1/pages/{slug}/project roleSelf

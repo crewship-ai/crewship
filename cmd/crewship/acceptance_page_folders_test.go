@@ -135,6 +135,76 @@ func TestAcceptance_PageFoldersLifecycle(t *testing.T) {
 	}
 	must("page", "folder", "add", "ops-board", "health")
 	must("page", "folder", "remove", "ops-board", "health")
+
+	// Sharing (#2533): share with everyone, read it back, see the label on
+	// the folder, the caller's own paths, a batch move, and unshare.
+	var acl struct {
+		ACLVersion int64 `json:"acl_version"`
+		ACL        []struct {
+			SubjectType string `json:"subject_type"`
+			CanWrite    bool   `json:"can_write"`
+			SetBy       string `json:"set_by"`
+		}
+	}
+	if err := json.Unmarshal([]byte(must("page", "folder", "share", "ops-board", "workspace", "--view")), &acl); err != nil {
+		t.Fatal(err)
+	}
+	if acl.ACLVersion != 1 || len(acl.ACL) != 1 || acl.ACL[0].SubjectType != "workspace" || acl.ACL[0].CanWrite || acl.ACL[0].SetBy != "folders@example.invalid" {
+		t.Fatalf("share: %+v", acl)
+	}
+	if out, err := run("page", "folder", "share", "ops-board", "agent:watcher", "--view"); err == nil || !strings.Contains(out, "agent") {
+		t.Fatalf("sharing with an agent was accepted: %v %s", err, out)
+	}
+	var shown struct {
+		Shared     string
+		ACLVersion int64 `json:"acl_version"`
+	}
+	if err := json.Unmarshal([]byte(must("page", "folder", "show", "ops-board")), &shown); err != nil {
+		t.Fatal(err)
+	}
+	if shown.Shared != "workspace" || shown.ACLVersion != 1 {
+		t.Fatalf("show after share: %+v", shown)
+	}
+	secondPage := filepath.Join(t.TempDir(), "second.yaml")
+	if err := os.WriteFile(secondPage, []byte(strings.ReplaceAll(pageYAML, "health", "health-2")), 0600); err != nil {
+		t.Fatal(err)
+	}
+	must("page", "create", "--file", secondPage)
+	var moved struct {
+		Pages      []struct{ Slug string }
+		ACLVersion int64 `json:"acl_version"`
+	}
+	if err := json.Unmarshal([]byte(must("page", "move", "health", "health-2", "--folder", "ops-board")), &moved); err != nil {
+		t.Fatal(err)
+	}
+	if len(moved.Pages) != 2 || moved.ACLVersion != 1 {
+		t.Fatalf("batch move: %+v", moved)
+	}
+	var access struct {
+		Paths  []string
+		Folder string
+		Shared string
+	}
+	if err := json.Unmarshal([]byte(must("page", "access", "health", "--me")), &access); err != nil {
+		t.Fatal(err)
+	}
+	if len(access.Paths) == 0 || access.Paths[0] != "owner" || access.Folder != "ops-board" || access.Shared != "workspace" {
+		t.Fatalf("access --me: %+v", access)
+	}
+	must("page", "folder", "unshare", "ops-board", "workspace")
+	if err := json.Unmarshal([]byte(must("page", "folder", "acl", "ops-board")), &acl); err != nil {
+		t.Fatal(err)
+	}
+	if acl.ACLVersion != 2 || len(acl.ACL) != 0 {
+		t.Fatalf("acl after unshare: %+v", acl)
+	}
+	must("page", "grant", "health", "--workspace", "--level", "read")
+	if out, err := run("page", "grant", "health", "--workspace", "--level", "produce"); err == nil || !strings.Contains(out, "produce") {
+		t.Fatalf("a produce grant to the workspace was accepted: %v %s", err, out)
+	}
+	must("page", "revoke", "health", "--workspace")
+	must("page", "move", "health", "health-2", "--unfiled")
+	must("page", "delete", "health-2", "--yes")
 	must("page", "folder", "delete", "ops-board", "--yes")
 	if err := json.Unmarshal([]byte(must("page", "folder", "list")), &list); err != nil {
 		t.Fatal(err)

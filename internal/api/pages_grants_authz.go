@@ -76,6 +76,11 @@ const (
 	pageSubjectUser  = "user"
 	pageSubjectCrew  = "crew"
 	pageSubjectAgent = "agent"
+	// pageSubjectWorkspace is "everyone in this workspace" — every current
+	// human member, never an agent (#2533 §3/1, §3/14). Its subject_id is
+	// always "". On a page grant it may carry read or write, never produce:
+	// produce names a producer, and "everyone" is not one.
+	pageSubjectWorkspace = "workspace"
 )
 
 func validPageGrantLevel(level string) bool {
@@ -88,10 +93,17 @@ func validPageGrantLevel(level string) bool {
 
 func validPageSubjectType(kind string) bool {
 	switch kind {
-	case pageSubjectUser, pageSubjectCrew, pageSubjectAgent:
+	case pageSubjectUser, pageSubjectCrew, pageSubjectAgent, pageSubjectWorkspace:
 		return true
 	}
 	return false
+}
+
+// workspaceSubjectLevelAllowed is the schema's CHECK on the workspace subject
+// in Go, so the handler answers 400 in a sentence rather than a constraint
+// violation: read or write, never produce.
+func workspaceSubjectLevelAllowed(level string) bool {
+	return level == pageGrantRead || level == pageGrantWrite
 }
 
 // pageGrantRecord is one page_grants row PLUS the use-time verdict on its
@@ -359,6 +371,11 @@ func pageViewerGrantMatch(viewer *pageViewer) func(pageGrantRecord) bool {
 			return g.SubjectID == viewer.UserID
 		case pageSubjectCrew:
 			return viewer.Crews[g.SubjectID]
+		case pageSubjectWorkspace:
+			// Every human member of the workspace. An agent's viewer
+			// (agentViewer) has no user and no role, so it never matches —
+			// a container in the crew is not "everyone here".
+			return viewer.isWorkspaceMember()
 		default:
 			return false
 		}

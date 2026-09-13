@@ -294,11 +294,13 @@ var requiredQueryParametersInSpec = []string{
 	"DELETE /api/v1/feedback ?message_id",
 	"DELETE /api/v1/feedback ?signal",
 	"DELETE /api/v1/notification-templates ?category",
-	// Verified against PageHandler.DeleteGrant (internal/api/pages_grants.go:307):
-	// a revoke naming nobody answers 400 rather than reporting success while
-	// withdrawing nothing, which is how an operator would come to believe an
-	// agent's access was gone. Pinned by TestPageGrants_RevokeWithoutASubjectIs400.
-	"DELETE /api/v1/pages/{slug}/grants ?subject",
+	// DELETE /api/v1/pages/{slug}/grants ?subject is deliberately NOT here
+	// since #2533: the workspace subject (`subject_type=workspace`) has no
+	// subject of its own, so the parameter is required for three subject
+	// kinds and absent for the fourth, and the spec cannot say that. A
+	// revoke naming nobody for a user, crew or agent still answers 400
+	// rather than reporting success while withdrawing nothing — pinned by
+	// TestPageGrants_RevokeWithoutASubjectIs400.
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",
