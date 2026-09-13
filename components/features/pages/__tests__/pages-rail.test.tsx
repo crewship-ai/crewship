@@ -221,6 +221,9 @@ describe("PagesRail groups", () => {
 
   const collapsedInStorage = (keys: string[]) =>
     storage.getItem.mockImplementation((k: string) => (k === STORAGE_KEY ? JSON.stringify(keys) : null))
+  // What a fold writes back. The record grew a second field with #2527 (the
+  // grouping choice); the folds are still the same keys, in the same order.
+  const saved = (keys: string[]) => JSON.stringify({ collapsed: keys, groupBy: "folder" })
 
   it("orders the groups Mine, my crews, other crews A→Z, Owned by others — and counts each", () => {
     renderRail({ pages: GROUPED })
@@ -253,11 +256,11 @@ describe("PagesRail groups", () => {
 
     fireEvent.click(groupHeader("lookout"))
     expect(screen.queryByText("Flotila .201")).toBeNull()
-    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, JSON.stringify(["crew/finance", "crew/lookout"]))
+    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, saved(["crew/finance", "crew/lookout"]))
 
     fireEvent.click(groupHeader("finance"))
     expect(screen.getByText("Nightly close")).toBeTruthy()
-    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, JSON.stringify(["crew/lookout"]))
+    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, saved(["crew/lookout"]))
   })
 
   it("defaults to everything expanded when storage is empty, throws or holds junk", () => {
@@ -305,7 +308,7 @@ describe("PagesRail groups", () => {
     rerender(<PagesRail {...railProps({ pages: GROUPED, selectedSlug: "nightly-close" })} />)
     expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
     expect(rowOf("Nightly close").getAttribute("aria-pressed")).toBe("true")
-    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, JSON.stringify([]))
+    expect(storage.setItem).toHaveBeenLastCalledWith(STORAGE_KEY, saved([]))
 
     // The person may still fold it afterwards; the selection does not pin it open.
     fireEvent.click(groupHeader("finance"))
@@ -451,5 +454,252 @@ describe("PagesRail 'Shared with me' facet", () => {
     openPanel()
     fireEvent.click(within(panel()!).getByRole("button", { name: /^clear/i }))
     expect(onFiltersChange).toHaveBeenCalledWith(EMPTY_PAGE_FILTERS)
+  })
+})
+
+// ── folders (#2527) ─────────────────────────────────────────────────────────
+//
+// On a server that has folders the rail groups by FOLDER: one section per
+// folder the caller may read — with its icon, its colour as a dot and the
+// server's count — then Unfiled last. An empty folder is drawn with its zero
+// on an unnarrowed list, because it is the person's own folder and one that
+// only appears once something is in it cannot be filed into. Everything
+// #2523 built (folds, search-through, keyboard, "Shared with me") holds.
+
+import { toPageFolderView, type PageFolderView } from "@/hooks/use-page-folders"
+
+const folder = (over: Partial<Parameters<typeof toPageFolderView>[0]>): PageFolderView =>
+  toPageFolderView({ id: `f-${over.slug}`, owner: "crew/lookout", grants_version: 5, page_count: 0, ...over })!
+
+const LONG_NAME = "Finance quarterly reports and audits of the year 2026, including the appendices"
+
+const FOLDERS: PageFolderView[] = [
+  folder({ slug: "ops", name: "Ops", icon: "rocket", color: "amber", page_count: 2 }),
+  folder({ slug: "archive", name: "Archive", icon: null, color: null, page_count: 0 }),
+  folder({ slug: "finance-2026", name: LONG_NAME, icon: "banknote", color: "emerald", page_count: 1 }),
+]
+
+const OPS = { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }
+
+const FILED = [
+  toPageView({ id: "f1", slug: "fleet-201", name: "Flotila .201", owner: "crew/lookout", reach: ["crew:lookout"], folder: OPS, pages_version: 3, panels: [] }),
+  toPageView({ id: "f2", slug: "nightly-close", name: "Nightly close", owner: "crew/finance", reach: ["role"], folder: OPS, pages_version: 1, panels: [] }),
+  toPageView({ id: "f3", slug: "q-report", name: "Quarter report", owner: "crew/finance", reach: ["role"], folder: { slug: "finance-2026", name: LONG_NAME, icon: "banknote", color: "emerald" }, pages_version: 2, panels: [] }),
+  toPageView({ id: "f4", slug: "my-notes", name: "My notes", owner: `user/${ME}`, reach: ["owner"], folder: null, pages_version: 0, panels: [] }),
+]
+
+describe("PagesRail folders", () => {
+  const storage = globalThis.localStorage as unknown as {
+    getItem: ReturnType<typeof vi.fn>
+    setItem: ReturnType<typeof vi.fn>
+  }
+
+  beforeEach(() => {
+    cleanup()
+    storage.getItem.mockReset()
+    storage.setItem.mockReset()
+    storage.getItem.mockImplementation(() => null)
+  })
+
+  const stored = (record: unknown) =>
+    storage.getItem.mockImplementation((k: string) => (k === STORAGE_KEY ? JSON.stringify(record) : null))
+
+  const folderProps = (over: Partial<React.ComponentProps<typeof PagesRail>> = {}) => ({
+    pages: FILED,
+    folders: FOLDERS,
+    onMovePage: vi.fn(),
+    onRemoveFromFolder: vi.fn(),
+    onCreateFolder: vi.fn(),
+    onEditFolder: vi.fn(),
+    onDeleteFolder: vi.fn(),
+    ...over,
+  })
+
+  it("groups by folder A→Z with icon, colour dot and the server's count, then Unfiled last — an empty folder included (U1)", () => {
+    renderRail(folderProps())
+    expect(groupHeaders().map((h) => h.textContent)).toEqual([
+      "Archive0",
+      `${LONG_NAME}1`,
+      "Ops2",
+      "Unfiled1",
+    ])
+    const ops = groupHeader("Ops")
+    // The colour is a dot, drawn inline from the palette — never a class
+    // that means "blue" for every colour the registry does not know.
+    const dot = ops.querySelector<HTMLElement>("[data-slot='folder-dot']")
+    expect(dot).toBeTruthy()
+    expect(dot!.style.backgroundColor).not.toBe("")
+    // The icon is the crew-icon glyph; an SVG in the header, before the name.
+    expect(ops.querySelector("svg")).toBeTruthy()
+    // No colour, no dot — "no colour" and "blue" must not look the same.
+    expect(groupHeader("Archive").querySelector("[data-slot='folder-dot']")).toBeNull()
+    // The owner is not said on a folder row: the group is the folder.
+    expect(rowOf("Flotila .201").textContent).not.toMatch(/lookout/)
+  })
+
+  it("truncates a long folder name and keeps the whole of it in `title` (U6)", () => {
+    renderRail(folderProps())
+    const header = groupHeader(LONG_NAME)
+    expect(header.getAttribute("title")).toBe(LONG_NAME)
+    const name = Array.from(header.querySelectorAll("span")).find((s) => s.textContent === LONG_NAME)
+    expect(name?.className).toContain("truncate")
+  })
+
+  it("hides an empty folder while a search or a facet narrows the list, and shows it again after", () => {
+    const { rerender } = renderRail(folderProps({ search: "night" }))
+    expect(groupHeaders().map((h) => h.textContent)).toEqual(["Ops1"])
+
+    rerender(<PagesRail {...railProps(folderProps({ filters: { states: [], owners: ["crew/finance"], shared: false } }))} />)
+    expect(groupHeaders().map((h) => h.textContent)).toEqual([`${LONG_NAME}1`, "Ops1"])
+
+    rerender(<PagesRail {...railProps(folderProps())} />)
+    expect(groupHeaders()).toHaveLength(4)
+  })
+
+  it("opens a folded folder to its matches while searching, without writing the fold (U1)", () => {
+    stored({ collapsed: ["folder/ops"], groupBy: "folder" })
+    const { rerender } = renderRail(folderProps())
+    expect(groupHeader("Ops").getAttribute("aria-expanded")).toBe("false")
+    expect(screen.queryByText("Nightly close")).toBeNull()
+
+    rerender(<PagesRail {...railProps(folderProps({ search: "night" }))} />)
+    expect(groupHeader("Ops").getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getByText("Nightly close")).toBeTruthy()
+    expect(storage.setItem).not.toHaveBeenCalled()
+
+    rerender(<PagesRail {...railProps(folderProps({ search: "" }))} />)
+    expect(groupHeader("Ops").getAttribute("aria-expanded")).toBe("false")
+  })
+
+  it("finds a page by its folder's name", () => {
+    renderRail(folderProps({ search: "ops" }))
+    expect(screen.getByText("Flotila .201")).toBeTruthy()
+    expect(screen.getByText("Nightly close")).toBeTruthy()
+    expect(screen.queryByText("My notes")).toBeNull()
+  })
+
+  it("reads a record saved before the grouping existed as folds, grouped by folder", () => {
+    stored(["folder/ops"])
+    renderRail(folderProps())
+    expect(groupHeader("Ops").getAttribute("aria-expanded")).toBe("false")
+    expect(groupHeader("Archive").getAttribute("aria-expanded")).toBe("true")
+  })
+
+  it("offers Group by: Folder | Owner in the filter panel, switches, and remembers it", () => {
+    renderRail(folderProps())
+    openPanel()
+    const p = panel()!
+    expect(within(p).getByRole("button", { name: "Folder" }).getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(within(p).getByRole("button", { name: /^Owner/ }))
+
+    // The rail is now #2523's grouping — Mine, my crews, other crews A→Z.
+    expect(groupHeaders().map((h) => h.textContent)).toEqual(["Mine1", "lookout1", "finance2"])
+    expect(storage.setItem).toHaveBeenLastCalledWith(
+      STORAGE_KEY,
+      JSON.stringify({ collapsed: [], groupBy: "owner" }),
+    )
+    // A view choice is not a filter: nothing to count, nothing to clear.
+    expect(screen.getByRole("button", { name: /^Filter/ }).textContent).not.toMatch(/\d/)
+    // The panel stays open, as after any pick.
+    expect(panel()).toBeTruthy()
+
+    cleanup()
+    stored({ collapsed: [], groupBy: "owner" })
+    renderRail(folderProps())
+    expect(groupHeaders().map((h) => h.textContent)).toEqual(["Mine1", "lookout1", "finance2"])
+  })
+
+  it("offers no folder control at all on a server without folders", () => {
+    renderRail({ pages: GROUPED, folders: null, onCreateFolder: vi.fn(), onMovePage: vi.fn() })
+    expect(screen.queryByRole("button", { name: "New folder" })).toBeNull()
+    openPanel()
+    expect(within(panel()!).queryByRole("button", { name: "Folder" })).toBeNull()
+    // Grouped by owner, as before folders existed.
+    expect(groupHeaders()[0].textContent).toBe("Mine1")
+  })
+
+  it("opens the row menu with Shift+F10 and moves through it with Enter alone (U2)", () => {
+    const props = folderProps()
+    const { onSelectPage } = renderRail(props)
+    const row = rowOf("Flotila .201")
+    act(() => row.focus())
+
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true })
+    const move = screen.getByRole("menuitem", { name: /move to folder/i })
+    expect(move).toBeTruthy()
+    // In a folder, so the second verb is offered too.
+    expect(screen.getByRole("menuitem", { name: /remove from folder/i })).toBeTruthy()
+
+    fireEvent.keyDown(move, { key: "Enter" })
+    expect(props.onMovePage).toHaveBeenCalledWith(expect.objectContaining({ slug: "fleet-201", pagesVersion: 3 }))
+    // Opening the menu and choosing an item never opened the page.
+    expect(onSelectPage).not.toHaveBeenCalled()
+  })
+
+  it("offers no 'Remove from folder' on an unfiled page", () => {
+    renderRail(folderProps())
+    const row = rowOf("My notes")
+    act(() => row.focus())
+    fireEvent.keyDown(row, { key: "ContextMenu" })
+    expect(screen.getByRole("menuitem", { name: /move to folder/i })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: /remove from folder/i })).toBeNull()
+  })
+
+  it("puts the ⋯ button in the row's tab order, and it never selects the page (U3)", () => {
+    const props = folderProps()
+    const { onSelectPage } = renderRail(props)
+    const button = screen.getByRole("button", { name: "Actions for Nightly close" })
+    expect(button.tabIndex).toBe(0)
+    fireEvent.click(button)
+    expect(onSelectPage).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(button, { key: "ArrowDown" })
+    fireEvent.click(screen.getByRole("menuitem", { name: /remove from folder/i }))
+    expect(props.onRemoveFromFolder).toHaveBeenCalledWith(expect.objectContaining({ slug: "nightly-close", pagesVersion: 1 }))
+    expect(onSelectPage).not.toHaveBeenCalled()
+  })
+
+  it("offers New folder in the toolbar, and rename / delete on a folder's header", () => {
+    const props = folderProps()
+    renderRail(props)
+    fireEvent.click(screen.getByRole("button", { name: "New folder" }))
+    expect(props.onCreateFolder).toHaveBeenCalled()
+
+    const menu = screen.getByRole("button", { name: "Actions for folder Ops" })
+    fireEvent.keyDown(menu, { key: "ArrowDown" })
+    fireEvent.click(screen.getByRole("menuitem", { name: /rename or change icon/i }))
+    expect(props.onEditFolder).toHaveBeenCalledWith("ops")
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" })
+    fireEvent.click(screen.getByRole("menuitem", { name: /delete folder/i }))
+    expect(props.onDeleteFolder).toHaveBeenCalledWith("ops")
+  })
+
+  it("keeps the tree walk: arrows visit folder headers and rows, Left folds a folder", () => {
+    renderRail(folderProps())
+    const first = rowOf("Quarter report")
+    act(() => first.focus())
+    fireEvent.keyDown(first, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(groupHeader(LONG_NAME))
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" })
+    expect(document.activeElement).toBe(groupHeader("Archive"))
+    fireEvent.keyDown(document.activeElement!, { key: "End" })
+    expect(document.activeElement).toBe(rowOf("My notes"))
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" })
+    expect(document.activeElement).toBe(groupHeader("Unfiled"))
+    expect(screen.queryByText("My notes")).toBeNull()
+    expect(storage.setItem).toHaveBeenLastCalledWith(
+      STORAGE_KEY,
+      JSON.stringify({ collapsed: ["unfiled"], groupBy: "folder" }),
+    )
+  })
+
+  it("still keeps the focused row across a selection with folders on", () => {
+    const { rerender } = renderRail(folderProps())
+    const row = rowOf("Flotila .201")
+    act(() => row.focus())
+    rerender(<PagesRail {...railProps(folderProps({ selectedSlug: "fleet-201" }))} />)
+    expect(document.activeElement).toBe(row)
+    expect(rowOf("Flotila .201")).toBe(row)
   })
 })

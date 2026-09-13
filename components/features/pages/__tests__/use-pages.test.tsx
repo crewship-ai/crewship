@@ -16,7 +16,9 @@ import { renderHook, waitFor, act } from "@testing-library/react"
 import {
   EMPTY_PAGE_FILTERS,
   crewMembershipFromReach,
+  groupPagesByFolder,
   groupPagesByOwner,
+  hasFolders,
   hasReach,
   matchesPageFilters,
   normalizePage,
@@ -457,5 +459,65 @@ describe("usePages / usePage", () => {
     const other = renderHook(() => usePage("ws-1", "boom"), { wrapper: makeWrapper(qc) })
     await waitFor(() => expect(other.result.current.error).not.toBeNull())
     expect(other.result.current.notFound).toBe(false)
+  })
+})
+
+
+// ── folders (#2527) ─────────────────────────────────────────────────────────
+
+describe("folders on the wire", () => {
+  it("tells 'no folder' from 'this server does not say', and reads the reference", () => {
+    expect(toPageView({ slug: "a" }).folder).toBeUndefined()
+    expect(toPageView({ slug: "a", folder: null }).folder).toBeNull()
+    expect(toPageView({ slug: "a", folder: { slug: "ops", name: " Ops ", icon: "", color: "amber" } }).folder).toEqual({
+      slug: "ops",
+      name: "Ops",
+      icon: null,
+      color: "amber",
+    })
+    // A reference without a slug names nothing.
+    expect(toPageView({ slug: "a", folder: { name: "Ops" } }).folder).toBeNull()
+    expect(toPageView({ slug: "a", pages_version: 3 }).pagesVersion).toBe(3)
+    expect(toPageView({ slug: "a", pages_version: null }).pagesVersion).toBeNull()
+  })
+
+  it("knows folders only when every row carries the field", () => {
+    expect(hasFolders([toPageView({ slug: "a", folder: null })])).toBe(true)
+    expect(hasFolders([toPageView({ slug: "a", folder: null }), toPageView({ slug: "b" })])).toBe(false)
+    expect(hasFolders([])).toBe(false)
+  })
+
+  it("matches a search against the folder's name", () => {
+    const filed = toPageView({ slug: "a", name: "Fleet", folder: { slug: "ops", name: "Ops" } })
+    expect(matchesPageFilters(filed, EMPTY_PAGE_FILTERS, "ops")).toBe(true)
+    expect(matchesPageFilters(filed, EMPTY_PAGE_FILTERS, "finance")).toBe(false)
+  })
+})
+
+describe("groupPagesByFolder", () => {
+  const ops = { slug: "ops", name: "Ops", icon: "rocket", color: "amber", pageCount: 2 }
+  const archive = { slug: "archive", name: "Archive", icon: null, color: null, pageCount: 0 }
+  const pages = [
+    toPageView({ id: "1", slug: "a", name: "A", folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" } }),
+    toPageView({ id: "2", slug: "b", name: "B", folder: null }),
+    toPageView({ id: "3", slug: "c", name: "C", folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" } }),
+    // In a folder the folder list does not carry — the two reads raced.
+    toPageView({ id: "4", slug: "d", name: "D", folder: { slug: "zed", name: "Zed", icon: null, color: null } }),
+  ]
+
+  it("orders folders A→Z, keeps an empty one, builds a missing one from the row, and puts Unfiled last", () => {
+    const groups = groupPagesByFolder(pages, [ops, archive])
+    expect(groups.map((g) => [g.key, g.kind, g.label, g.pages.map((p) => p.slug), g.pageCount])).toEqual([
+      ["folder/archive", "folder", "Archive", [], 0],
+      ["folder/ops", "folder", "Ops", ["a", "c"], 2],
+      ["folder/zed", "folder", "Zed", ["d"], undefined],
+      ["unfiled", "unfiled", "Unfiled", ["b"], undefined],
+    ])
+    expect(groups[1].folder).toEqual({ slug: "ops", name: "Ops", icon: "rocket", color: "amber" })
+  })
+
+  it("draws no Unfiled when nothing is unfiled, and no group at all for an empty list without folders", () => {
+    expect(groupPagesByFolder(pages.filter((p) => p.folder), [ops]).map((g) => g.key)).toEqual(["folder/ops", "folder/zed"])
+    expect(groupPagesByFolder([], [])).toEqual([])
   })
 })

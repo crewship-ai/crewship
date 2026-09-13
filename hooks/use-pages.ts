@@ -174,6 +174,28 @@ export interface WirePage {
    *  today has not necessarily received data today. */
   last_produced_at?: string | null
   updated_at?: string | null
+  /**
+   * The folder this page is filed in, or null (#2527). Absent on a server
+   * that predates folders — and an absent field is not an empty folder: the
+   * rail reads `folder === undefined` on every row as "this server does not
+   * say", and groups by owner instead.
+   */
+  folder?: WirePageFolderRef | null
+  /**
+   * The page's membership version — bumped on every move in or out of a
+   * folder. A move sends it back and the server refuses a stale one with a
+   * 409, so two people cannot both file the same page on the strength of a
+   * list neither has refreshed.
+   */
+  pages_version?: number | null
+}
+
+/** The folder as it rides on a page row: enough to draw the header, no more. */
+export interface WirePageFolderRef {
+  slug?: string | null
+  name?: string | null
+  icon?: string | null
+  color?: string | null
 }
 
 // ── Normalising ────────────────────────────────────────────────────────────
@@ -456,6 +478,34 @@ export interface PageView {
   /** Newest payload across the page, in the sense of §4 — not the spec's mtime. */
   lastProducedAt: Date | null
   updatedAt: Date | null
+  /**
+   * The folder the page is filed in; null when unfiled; `undefined` when the
+   * server sent no `folder` field at all — an older server, not an empty
+   * folder, and the rail tells the two apart (#2527).
+   */
+  folder: PageFolderRef | null | undefined
+  /** The membership version a move must send back, or null when unknown. */
+  pagesVersion: number | null
+}
+
+/** A folder reference as every Pages surface consumes it (#2527). */
+export interface PageFolderRef {
+  slug: string
+  name: string
+  icon: string | null
+  color: string | null
+}
+
+export function toPageFolderRef(raw: WirePageFolderRef | null | undefined): PageFolderRef | null {
+  if (!raw || typeof raw !== "object") return null
+  const slug = trimmed(raw.slug)
+  if (!slug) return null
+  return {
+    slug,
+    name: trimmed(raw.name) ?? slug,
+    icon: trimmed(raw.icon),
+    color: trimmed(raw.color),
+  }
 }
 
 function toDate(value: unknown): Date | null {
@@ -560,6 +610,11 @@ export function toPageView(raw: WirePage): PageView {
     state,
     lastProducedAt: newest,
     updatedAt: toDate(raw.updated_at),
+    folder: raw.folder === undefined ? undefined : toPageFolderRef(raw.folder),
+    pagesVersion:
+      typeof raw.pages_version === "number" && Number.isFinite(raw.pages_version)
+        ? raw.pages_version
+        : null,
   }
 }
 
@@ -690,7 +745,9 @@ export function matchesPageFilters(
 ): boolean {
   const q = search.trim().toLowerCase()
   if (q) {
-    const hay = [page.name, page.slug, page.description ?? "", page.ownerLabel ?? ""]
+    // The folder's name is in the haystack too: "ops" finds every page filed
+    // under Ops, and the rail opens that folder to them (#2527).
+    const hay = [page.name, page.slug, page.description ?? "", page.ownerLabel ?? "", page.folder?.name ?? ""]
       .join(" ")
       .toLowerCase()
     if (!hay.includes(q)) return false
@@ -737,10 +794,11 @@ export function ownerFacets(pages: readonly PageView[]): OwnerFacet[] {
 
 // ── Grouping by owner (#2523, collections analysis §7 P0a) ─────────────────
 
-export type PageGroupKind = "mine" | "crew" | "others" | "unowned"
+export type PageGroupKind = "mine" | "crew" | "others" | "unowned" | "folder" | "unfiled"
 
 export interface PageGroup {
-  /** `mine`, `crew/<slug>`, `others` or `unowned` — the collapse-state key. */
+  /** `mine`, `crew/<slug>`, `others`, `unowned`, `folder/<slug>` or `unfiled`
+   *  — the collapse-state key. */
   key: string
   kind: PageGroupKind
   /** What the section header prints. */
@@ -748,6 +806,14 @@ export interface PageGroup {
   /** Set on a crew group when the caller's reach says they belong to it. */
   member: boolean
   pages: PageView[]
+  /** On a `folder` group: the folder itself, for its icon and colour. */
+  folder?: PageFolderRef
+  /**
+   * On a `folder` group: how many of its pages the caller reaches, as the
+   * SERVER counts them. Undefined when the folder is known only from a page
+   * row, which happens while the folder list is still loading.
+   */
+  pageCount?: number
 }
 
 const CREW_PREFIX = "crew/"
@@ -826,6 +892,76 @@ export function groupPagesByOwner(
     out.push({ key: "others", kind: "others", label: "Owned by others", member: false, pages: others })
   if (unowned.length)
     out.push({ key: "unowned", kind: "unowned", label: "Unowned", member: false, pages: unowned })
+  return out
+}
+
+// ── Grouping by folder (#2527, collections analysis §3 S-1) ────────────────
+
+/** What the folder grouping needs to know about a folder the caller may read. */
+export interface PageFolderLike extends PageFolderRef {
+  pageCount: number
+}
+
+export const UNFILED_GROUP_KEY = "unfiled"
+
+export function folderGroupKey(slug: string): string {
+  return `folder/${slug}`
+}
+
+/** True when the server describes folders at all: every row carries the field,
+ *  null or not. One row without it is an older server, and the rail must not
+ *  draw a single "Unfiled" section over a list that was never filed. */
+export function hasFolders(pages: readonly PageView[]): boolean {
+  return pages.length > 0 && pages.every((p) => p.folder !== undefined)
+}
+
+/**
+ * One group per folder, A→Z by name, then Unfiled last for the pages that
+ * are in none. Every folder the caller may read is a group, INCLUDING one
+ * with no page in it — those are the person's own folders, and a folder that
+ * only appears once something is filed in it cannot be filed into. Unfiled is
+ * drawn only when something is in it. A page whose folder is not in the
+ * folder list (the list is still loading, or the two reads raced) still gets
+ * its group, built from the reference on the row.
+ */
+export function groupPagesByFolder(
+  pages: readonly PageView[],
+  folders: readonly PageFolderLike[],
+): PageGroup[] {
+  const groups = new Map<string, PageGroup>()
+  for (const f of folders) {
+    groups.set(f.slug, {
+      key: folderGroupKey(f.slug),
+      kind: "folder",
+      label: f.name,
+      member: false,
+      pages: [],
+      folder: { slug: f.slug, name: f.name, icon: f.icon, color: f.color },
+      pageCount: f.pageCount,
+    })
+  }
+  const unfiled: PageView[] = []
+  for (const p of pages) {
+    const ref = p.folder ?? null
+    if (!ref) {
+      unfiled.push(p)
+      continue
+    }
+    const cur = groups.get(ref.slug)
+    if (cur) cur.pages.push(p)
+    else
+      groups.set(ref.slug, {
+        key: folderGroupKey(ref.slug),
+        kind: "folder",
+        label: ref.name,
+        member: false,
+        pages: [p],
+        folder: ref,
+      })
+  }
+  const out = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  if (unfiled.length)
+    out.push({ key: UNFILED_GROUP_KEY, kind: "unfiled", label: "Unfiled", member: false, pages: unfiled })
   return out
 }
 

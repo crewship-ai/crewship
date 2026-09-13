@@ -230,6 +230,9 @@ function mount(harness: Harness = {}) {
       return harness.probe ?? jsonResponse(404, { error: "page has no project draft" })
     }
     if (method === "PATCH") return harness.patch ?? jsonResponse(200, { slug: page?.slug })
+    if (method === "GET" && url.startsWith("/api/v1/pages/folders?")) {
+      return jsonResponse(200, { folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, grants_version: 2 }] })
+    }
     return jsonResponse(404, { error: `unrouted ${method} ${url}` })
   })
   vi.stubGlobal("fetch", mockFetch)
@@ -703,5 +706,39 @@ describe("a failed detail read", () => {
     expect(panelRows()).toHaveLength(0)
     // The absence must not read as a fact about the Page.
     expect(document.body.textContent).not.toMatch(/declares no panels/)
+  })
+})
+
+
+// ── Folder (#2527) ─────────────────────────────────────────────────────────
+
+describe("where the Page is filed", () => {
+  it("says the folder with its icon, and Change… opens the move dialog for this Page", async () => {
+    const { calls } = mount({ page: { ...PANEL_PAGE, folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }, pages_version: 3 } })
+    const line = document.querySelector("[data-slot='page-folder']")!
+    expect(line.textContent).toContain("Folder")
+    expect(line.textContent).toContain("Ops")
+    expect(line.querySelector("[data-slot='folder-dot']")).toBeTruthy()
+    // Nothing is fetched to draw the line: the folder rides on the record.
+    expect(calls.filter((c) => c.url.startsWith("/api/v1/pages/folders"))).toHaveLength(0)
+
+    fireEvent.click(within(line as HTMLElement).getByRole("button", { name: "Change…" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("Move to folder")).toBeTruthy()
+    expect(within(dialog).getByText("Fleet overview")).toBeTruthy()
+    // The current folder is preselected, so the primary waits for a change.
+    const ops = await within(dialog).findByRole("radio", { name: /^Ops/ })
+    expect(ops.getAttribute("aria-checked")).toBe("true")
+    expect(within(dialog).getByRole("button", { name: "Move" })).toBeDisabled()
+  })
+
+  it("says Unfiled when the Page is in no folder", () => {
+    mount({ page: { ...PANEL_PAGE, folder: null, pages_version: 0 } })
+    expect(document.querySelector("[data-slot='page-folder']")!.textContent).toContain("Unfiled")
+  })
+
+  it("draws no folder line at all when the server does not say", () => {
+    mount({ page: PANEL_PAGE })
+    expect(document.querySelector("[data-slot='page-folder']")).toBeNull()
   })
 })
