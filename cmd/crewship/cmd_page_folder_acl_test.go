@@ -212,9 +212,12 @@ func TestPageCLI_AccessMePrintsTheServersPaths(t *testing.T) {
 			t.Errorf("output lacks %q: %s", want, out)
 		}
 	}
+	// Without --me the same command is the owner's listing (page access,
+	// #2528); --me asks one question about one page and refuses a --subject
+	// beside it, locally, before anything reaches the server.
 	stub.ResetCalls()
-	if _, err := runPageAccessCLI(t, "page", "access", "fleet-201"); err == nil || !strings.Contains(err.Error(), "--me") {
-		t.Errorf("without --me: err = %v", err)
+	if _, err := runPageAccessCLI(t, "page", "access", "fleet-201", "--me", "--subject", "user:ada@example.com"); err == nil || !strings.Contains(err.Error(), "--me") {
+		t.Errorf("--me with --subject: err = %v", err)
 	}
 	if len(stub.Calls()) != 0 {
 		t.Error("a refused invocation reached the server")

@@ -268,6 +268,45 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded."},
 	})
 
+	// ── Effective access (pages-collections-access-analysis §5/10, F2) ─────
+	//
+	// A rendering of the model above, read-only: every path is one of
+	// pageReach's, with the grant arm spelled out per level. The anonymous
+	// row — subject_id `withheld`, no label, one `panel_crew:withheld` path —
+	// stands for every crew the caller cannot see, so the listing never says
+	// which crew owns a panel the caller may not read.
+	accessPath := map[string]any{"type": "string",
+		"description": "One path: `owner`, `role`, `crew:<slug>` (member of the owning crew), `panel_crew:<slug>` (member of a crew owning a panel), `grant:page:<level>` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:<its slug>` that it owns a panel; an agent reaches only through `grant:page:<level>`."}
+	accessSubject := obj(map[string]any{
+		"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+		"subject_id":   map[string]any{"type": "string", "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see."},
+		"label":        map[string]any{"type": "string", "description": "An email, a crew slug or an agent slug. Absent on the withheld row."},
+		"paths":        arr(accessPath),
+	})
+	accessResponse := obj(map[string]any{
+		"page":     str(),
+		"subjects": arr(accessSubject),
+		"next_cursor": map[string]any{"type": "string",
+			"description": "Present when more rows follow; pass it back as `cursor`. Opaque."},
+	})
+	accessResponse["required"] = []string{"page", "subjects"}
+	accessSubject["required"] = []string{"subject_type", "subject_id", "paths"}
+	subjectAccessResponse := obj(map[string]any{
+		"subject": obj(map[string]any{
+			"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+			"subject_id":   str(),
+			"label":        str(),
+		}),
+		"pages": arr(obj(map[string]any{
+			"slug":  str(),
+			"name":  str(),
+			"paths": arr(accessPath),
+		})),
+		"next_cursor": map[string]any{"type": "string",
+			"description": "Present when more rows follow; pass it back as `cursor`. Opaque."},
+	})
+	subjectAccessResponse["required"] = []string{"subject", "pages"}
+
 	// ── Versions and rollback (§10b.1) ──────────────────────────────────────
 	version := obj(map[string]any{
 		"seq": integer(), "created_at": timeString(),
@@ -419,6 +458,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: grantsResponse,
 		},
 		"DELETE /api/v1/pages/{slug}/grants": {Response: grantsResponse},
+		"GET /api/v1/pages/{slug}/access":    {Response: accessResponse},
+		"GET /api/v1/pages/access":           {Response: subjectAccessResponse},
 
 		// Folders (#2527). Reads are filtered to what the caller reaches
 		// (§5/12); the two membership writes carry version fences (§5/8).

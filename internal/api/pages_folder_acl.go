@@ -627,8 +627,12 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(viewer.Role, "manage") {
-			replyError(w, http.StatusForbidden, fmt.Sprintf(
-				"moving page %q is initiated by its owner or a workspace admin; you are neither, so nothing was moved", rec.Slug))
+			// The page is named as a field as well as in the sentence: a client
+			// moving several pages has to point at the one that was refused.
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": fmt.Sprintf("moving page %q is initiated by its owner or a workspace admin; you are neither, so nothing was moved", rec.Slug),
+				"page":  rec.Slug,
+			})
 			return
 		}
 		if rec.PagesVersion != *item.PagesVersion {

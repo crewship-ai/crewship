@@ -83223,6 +83223,221 @@
         ]
       }
     },
+    "/api/v1/pages/access": {
+      "get": {
+        "operationId": "get_api_v1_pages_access",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subject_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "next_cursor": {
+                      "description": "Present when more rows follow; pass it back as `cursor`. Opaque.",
+                      "type": "string"
+                    },
+                    "pages": {
+                      "items": {
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "paths": {
+                            "items": {
+                              "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "slug": {
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "subject": {
+                      "properties": {
+                        "label": {
+                          "type": "string"
+                        },
+                        "subject_id": {
+                          "type": "string"
+                        },
+                        "subject_type": {
+                          "enum": [
+                            "user",
+                            "crew",
+                            "agent"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "subject",
+                    "pages"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
     "/api/v1/pages/import": {
       "post": {
         "operationId": "post_api_v1_pages_import",
@@ -85005,6 +85220,211 @@
               }
             },
             "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
+    "/api/v1/pages/{slug}/access": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "next_cursor": {
+                      "description": "Present when more rows follow; pass it back as `cursor`. Opaque.",
+                      "type": "string"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "subjects": {
+                      "items": {
+                        "properties": {
+                          "label": {
+                            "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
+                            "type": "string"
+                          },
+                          "paths": {
+                            "items": {
+                              "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "subject_id": {
+                            "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
+                            "type": "string"
+                          },
+                          "subject_type": {
+                            "enum": [
+                              "user",
+                              "crew",
+                              "agent"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "subject_type",
+                          "subject_id",
+                          "paths"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "page",
+                    "subjects"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "security": [
