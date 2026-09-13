@@ -159,3 +159,76 @@ func TestPipelineWebhooks_Fire_SameKeyDifferentBodyIsConflict(t *testing.T) {
 		t.Errorf("delivery rows = %d, want 1 — the original record must be kept", n)
 	}
 }
+
+// TestPipelineWebhooks_Fire_ThrottledRedeliveryAnswersTheOriginalReceipt: the
+// per-token rate gate used to run BEFORE the receipt lookup, so a sender
+// retrying a delivery we had already accepted was told 429 "rate limit
+// exceeded" instead of being handed the receipt it already owned. §5 is the
+// other way round: a duplicate of accepted work is never refused for fullness;
+// only NEW work is. The same-id-different-body conflict and the unavailable
+// ledger keep their own answers under throttling too — a 409 must not become a
+// 429, and a broken lookup must not be reported as "you are sending too fast".
+func TestPipelineWebhooks_Fire_ThrottledRedeliveryAnswersTheOriginalReceipt(t *testing.T) {
+	h, token, secret, _ := routineAcceptanceRig(t)
+	// One delivery per minute: the first accepted fire consumes the whole
+	// budget, so every request after it meets a closed gate.
+	if _, err := h.db.Exec(`UPDATE pipeline_webhooks SET rate_limit_per_min = 1`); err != nil {
+		t.Fatalf("pin the rate limit: %v", err)
+	}
+
+	firstRR := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-throttled")
+	if firstRR.Code != 202 {
+		t.Fatalf("first status = %d, want 202; body=%s", firstRR.Code, firstRR.Body.String())
+	}
+	var first map[string]any
+	_ = json.Unmarshal(firstRR.Body.Bytes(), &first)
+	h.WaitWebhookDispatches()
+
+	// The gate is closed for new work — and stays closed.
+	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"other"}`, "evt-new-under-throttle"); rr.Code != 429 {
+		t.Fatalf("new delivery under throttle status = %d, want 429; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Same id, same body: the receipt the sender already holds, no second run.
+	dupRR := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-throttled")
+	if dupRR.Code != 202 {
+		t.Fatalf("throttled redelivery status = %d, want 202 with the original receipt; body=%s", dupRR.Code, dupRR.Body.String())
+	}
+	var dup map[string]any
+	_ = json.Unmarshal(dupRR.Body.Bytes(), &dup)
+	if dup["deduped"] != true || dup["run_id"] != first["run_id"] || dup["delivery_id"] != first["delivery_id"] {
+		t.Errorf("throttled redelivery = %v, want DEDUPED with run %v / delivery %v", dup, first["run_id"], first["delivery_id"])
+	}
+
+	// Same id, different body: a conflict, throttled or not.
+	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"DIFFERENT"}`, "evt-throttled"); rr.Code != 409 {
+		t.Errorf("throttled conflicting body status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+
+	// A bad signature learns nothing from the receipt ledger, throttled or not.
+	req := httptest.NewRequest("POST", "/api/v1/webhooks/"+token, strings.NewReader(`{"event":"deploy"}`))
+	req.SetPathValue("token", token)
+	req.Header.Set("X-Crewship-Signature", covPSWSign("wrong-secret", `{"event":"deploy"}`))
+	req.Header.Set("Idempotency-Key", "evt-throttled")
+	rr := httptest.NewRecorder()
+	h.FireWebhook(rr, req)
+	if rr.Code != 401 || strings.Contains(rr.Body.String(), first["run_id"].(string)) {
+		t.Errorf("unauthenticated redelivery = %d %s, want 401 without the receipt", rr.Code, rr.Body.String())
+	}
+
+	var runs int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM routine_webhook_receipts`).Scan(&runs); err != nil {
+		t.Fatalf("count receipts: %v", err)
+	}
+	if runs != 1 {
+		t.Errorf("receipts = %d, want 1 — nothing above may have accepted a second delivery", runs)
+	}
+
+	// An unavailable ledger is 503, not a guessed duplicate and not a 429.
+	if _, err := h.db.Exec(`ALTER TABLE routine_webhook_receipts RENAME TO routine_webhook_receipts_gone`); err != nil {
+		t.Fatalf("take the ledger away: %v", err)
+	}
+	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-throttled"); rr.Code != 503 {
+		t.Errorf("throttled redelivery with the ledger unavailable status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+}

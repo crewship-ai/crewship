@@ -26,6 +26,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **A routine webhook redelivery is answered with its receipt even while the endpoint is throttled.** The per-token rate gate ran before the receipt lookup, so a sender retrying a delivery Crewship had already accepted was told `429 rate limit exceeded` about work that was sitting in the ledger — and a sender that believed that gave up on an event we already held. The lookup now runs right after signature verification and before every capacity check: a duplicate returns the original `run_id`, the same identifier with a different body is `409 delivery_conflict`, and an unreadable ledger is `503`, throttled or not. New deliveries are still refused when the limit is exhausted.
 - Host memory mutations require a run capability matching the acting workspace, agent and requested run; a token for another live run of the same agent can no longer authorize the write.
 
 - Graceful dispatcher shutdown no longer invents a user cancellation. Each supervisor settles its own attempt; ambiguous interrupted work remains available for operator reconciliation.
