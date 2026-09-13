@@ -397,7 +397,7 @@ export function RunningNow({
                     transition={{ type: "spring", stiffness: 360, damping: 34 }}
                   >
                     <MotionLink href={`/activity?run=${encodeURIComponent(run.id)}`}>
-                      <div className="group grid grid-cols-2 items-center gap-2 rounded-md border-b border-border/50 px-2 py-3 last:border-0 hover:bg-foreground/[0.025]">
+                      <div className="group grid grid-cols-2 items-center gap-2 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025]">
                         <span className="flex min-w-0 items-center gap-2.5">
                           <LiveDot tone={waiting ? "warn" : "success"} />
                           <span className="min-w-0">
@@ -463,7 +463,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
         <div className="flex flex-col">
           {upcoming.map((schedule) => (
             <MotionLink key={schedule.id} href={`/routines?routine=${encodeURIComponent(schedule.target_pipeline_slug || "")}`}>
-              <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2.5 last:border-0 hover:bg-foreground/[0.025]">
+              <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2 last:border-0 hover:bg-foreground/[0.025]">
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-purple/20 bg-purple/10 text-purple-hover">
                   <CalendarClock className="h-3.5 w-3.5" />
                 </span>
@@ -581,35 +581,33 @@ export function OutcomeKpis({
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((card, index) => {
         const Icon = card.icon
         const series = "series" in card ? card.series : undefined
         return (
           <motion.div
             key={card.label}
-            whileHover={reduce ? undefined : { y: -3 }}
+            whileHover={reduce ? undefined : { y: -2 }}
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="group rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-border"
+            className="group flex items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5 transition-colors hover:border-border"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-label font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</div>
-                <div className="mt-2 flex items-end gap-3">
-                  <span className="text-[28px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
-                  {series && series.length > 1 && <Sparkline values={series} color="#1E7BFE" width={84} height={26} className="mb-0.5 opacity-80" />}
-                </div>
+            <motion.span
+              initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
+              animate={{ opacity: 1, rotate: 0, scale: 1 }}
+              transition={{ delay: reduce ? 0 : index * 0.06 + 0.18, type: "spring", stiffness: 360, damping: 25 }}
+              className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border", card.tone)}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </motion.span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className="text-[20px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
+                <span className="truncate text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
               </div>
-              <motion.span
-                initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
-                animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                transition={{ delay: reduce ? 0 : index * 0.06 + 0.18, type: "spring", stiffness: 360, damping: 25 }}
-                className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", card.tone)}
-              >
-                <Icon className="h-4 w-4" />
-              </motion.span>
+              <div className="mt-0.5 truncate text-label text-muted-foreground">{card.detail}</div>
             </div>
-            <div className="mt-2 text-label text-muted-foreground">{card.detail}</div>
+            {series && series.length > 1 && <Sparkline values={series} color="#1E7BFE" width={64} height={20} className="shrink-0 opacity-80" />}
           </motion.div>
         )
       })}
