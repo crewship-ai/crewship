@@ -321,7 +321,10 @@ function folderAclRoute(workspaceId: string, slug: string): string {
  * segment is not a segment, so the type alone addresses it.
  */
 function folderAclEntryRoute(workspaceId: string, slug: string, subjectType: FolderAclSubjectType, subjectId: string): string {
-  const tail = subjectType === "workspace" ? "" : `/${encodeURIComponent(subjectId)}`
+  // The server's route is `/acl/{subject_type}/{subject_id}` and a path
+  // segment cannot be empty, so the workspace row is addressed as
+  // `/acl/workspace/workspace` (PR #2535).
+  const tail = subjectType === "workspace" ? "/workspace" : `/${encodeURIComponent(subjectId)}`
   return `${FOLDERS}/${encodeURIComponent(slug)}/acl/${subjectType}${tail}${ws(workspaceId)}`
 }
 

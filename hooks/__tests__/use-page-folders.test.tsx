@@ -297,7 +297,8 @@ describe("useFolderAclMutations", () => {
     await result.current.unset.mutateAsync({ subjectType: "user", subjectId: "u 1" })
     expect(lastCall()).toEqual({ url: "/api/v1/page-folders/ops/acl/user/u%201?workspace_id=ws-1", method: "DELETE", body: null })
     await result.current.unset.mutateAsync({ subjectType: "workspace", subjectId: "" })
-    expect(lastCall().url).toBe("/api/v1/page-folders/ops/acl/workspace?workspace_id=ws-1")
+    // A path segment cannot be empty, so the workspace row is `/workspace/workspace`.
+    expect(lastCall().url).toBe("/api/v1/page-folders/ops/acl/workspace/workspace?workspace_id=ws-1")
   })
 
   it("keeps the server's sentence on a refusal", async () => {

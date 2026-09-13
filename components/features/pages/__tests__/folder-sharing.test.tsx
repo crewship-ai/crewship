@@ -222,7 +222,7 @@ describe("Folder → Sharing, for a manager (U1)", () => {
 
     fireEvent.click(within(dialog).getByRole("switch", { name: "Everyone in this workspace" }))
     await waitFor(() => expect(writes()).toHaveLength(5))
-    expect(writes()[4]).toEqual({ method: "DELETE", url: `/api/v1/page-folders/ops/acl/workspace?${WS}`, body: null })
+    expect(writes()[4]).toEqual({ method: "DELETE", url: `/api/v1/page-folders/ops/acl/workspace/workspace?${WS}`, body: null })
   })
 
   it("renders a refused write in the dialog, in the server's words, and keeps what was typed", async () => {
