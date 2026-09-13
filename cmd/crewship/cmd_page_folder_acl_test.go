@@ -201,13 +201,13 @@ func TestPageCLI_GrantWorkspaceTravelsWithoutASubject(t *testing.T) {
 func TestPageCLI_AccessMePrintsTheServersPaths(t *testing.T) {
 	stub := pageStub(t)
 	stub.OnGet("/api/v1/pages/fleet-201/access/me", func(_ *http.Request, _ []byte) (int, []byte, string) {
-		return http.StatusOK, []byte(`{"page":"fleet-201","subject_type":"user","subject_id":"u1","label":"ada@example.com","paths":["folder:ops-board","grant"],"folder":"ops-board","shared":"crew"}`), "application/json"
+		return http.StatusOK, []byte(`{"page":"fleet-201","subject_type":"user","subject_id":"u1","label":"ada@example.com","paths":["folder:ops-board","grant"],"folder":"ops-board","shared":"people"}`), "application/json"
 	})
 	out, err := runPageAccessCLI(t, "page", "access", "fleet-201", "--me")
 	if err != nil {
 		t.Fatalf("access --me: %v\n%s", err, out)
 	}
-	for _, want := range []string{"ada@example.com reaches page fleet-201 by: folder:ops-board, grant", "In folder ops-board (shared: crew)"} {
+	for _, want := range []string{"ada@example.com reaches page fleet-201 by: folder:ops-board, grant", "In folder ops-board (shared: people)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q: %s", want, out)
 		}

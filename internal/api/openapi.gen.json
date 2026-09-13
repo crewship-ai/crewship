@@ -79508,10 +79508,12 @@
                             "type": "integer"
                           },
                           "shared": {
-                            "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                            "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                             "enum": [
                               "none",
-                              "crew",
+                              "people",
+                              "crews",
+                              "people_and_crews",
                               "workspace"
                             ],
                             "type": "string"
@@ -79713,10 +79715,12 @@
                       "type": "integer"
                     },
                     "shared": {
-                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
                         "none",
-                        "crew",
+                        "people",
+                        "crews",
+                        "people_and_crews",
                         "workspace"
                       ],
                       "type": "string"
@@ -79788,10 +79792,12 @@
                       "type": "integer"
                     },
                     "shared": {
-                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
                         "none",
-                        "crew",
+                        "people",
+                        "crews",
+                        "people_and_crews",
                         "workspace"
                       ],
                       "type": "string"
@@ -80263,10 +80269,12 @@
                       "type": "integer"
                     },
                     "shared": {
-                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
                         "none",
-                        "crew",
+                        "people",
+                        "crews",
+                        "people_and_crews",
                         "workspace"
                       ],
                       "type": "string"
@@ -80481,10 +80489,12 @@
                       "type": "integer"
                     },
                     "shared": {
-                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
                       "enum": [
                         "none",
-                        "crew",
+                        "people",
+                        "crews",
+                        "people_and_crews",
                         "workspace"
                       ],
                       "type": "string"
@@ -85492,7 +85502,9 @@
                       "description": "The folder's sharing label; absent when unfiled.",
                       "enum": [
                         "none",
-                        "crew",
+                        "people",
+                        "crews",
+                        "people_and_crews",
                         "workspace"
                       ],
                       "type": "string"

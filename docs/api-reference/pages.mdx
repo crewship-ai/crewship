@@ -571,9 +571,10 @@ and confirms again rather than retrying blind. The 409 carries the target's
 permissions only to a caller who may read them; everyone else gets the versions
 and a sentence.
 
-Every folder document carries `shared` — `none`, `crew` (shared with named
-crews or people) or `workspace` — for readers who may not see the entries
-themselves.
+Every folder document carries `shared` — `none`, `people` (shared with named
+people), `crews` (shared with named crews), `people_and_crews` (both) or
+`workspace` — for readers who may not see the entries themselves. The label
+never names anyone.
 
 Who may do what:
 

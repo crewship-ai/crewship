@@ -115,8 +115,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"owner_crew_name": str(),
 		"page_count": map[string]any{"type": "integer",
 			"description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size."},
-		"shared": map[string]any{"type": "string", "enum": []string{"none", "crew", "workspace"},
-			"description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate."},
+		"shared": map[string]any{"type": "string", "enum": []string{"none", "people", "crews", "people_and_crews", "workspace"},
+			"description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate."},
 		"acl_version": map[string]any{"type": "integer",
 			"description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale."},
 		"created_at": timeString(), "updated_at": timeString(),
@@ -153,7 +153,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"paths": map[string]any{"type": "array", "items": str(),
 			"description": "The CALLER's paths to the page, in the index's vocabulary and order: `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`. Never empty — no path is the 404."},
 		"folder": map[string]any{"type": "string", "description": "The slug of the folder the page is in; absent when unfiled."},
-		"shared": map[string]any{"type": "string", "enum": []string{"none", "crew", "workspace"}, "description": "The folder's sharing label; absent when unfiled."},
+		"shared": map[string]any{"type": "string", "enum": []string{"none", "people", "crews", "people_and_crews", "workspace"}, "description": "The folder's sharing label; absent when unfiled."},
 	})
 	accessMe["required"] = []string{"page", "subject_type", "subject_id", "label", "paths"}
 
