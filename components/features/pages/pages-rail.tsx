@@ -240,9 +240,14 @@ export function PagesRail({
     () => (selectedSlug ? groups.find((g) => g.pages.some((p) => p.slug === selectedSlug))?.key ?? null : null),
     [groups, selectedSlug],
   )
+  // Keyed on the SELECTION, not on the group it lands in: opening page A,
+  // folding its group and then choosing page B from the same group changes
+  // no group key, and an effect that watched only the key left B hidden
+  // (validation 2026-09-13). `selectedSlug` is in the list so every
+  // selection re-runs it, even when the group is the one already open.
   React.useEffect(() => {
-    if (activeGroupKey) setCollapsed(activeGroupKey, false)
-  }, [activeGroupKey, setCollapsed])
+    if (selectedSlug && activeGroupKey) setCollapsed(activeGroupKey, false)
+  }, [selectedSlug, activeGroupKey, setCollapsed])
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   // One handler on the list, not one per row: the rows already answer Enter
@@ -272,13 +277,15 @@ export function PagesRail({
     }
     if (e.key === "ArrowLeft") {
       e.preventDefault()
-      setCollapsed(groupKey, true)
+      // Folding is off while searching (see the header's onToggle); the
+      // focus move to the header still happens, it is navigation.
+      if (!searching) setCollapsed(groupKey, true)
       if (target.dataset.railRow != null) focusHeader(root, groupKey)
       return
     }
     if (e.key === "ArrowRight") {
       e.preventDefault()
-      setCollapsed(groupKey, false)
+      if (!searching) setCollapsed(groupKey, false)
     }
   }
 
@@ -422,7 +429,17 @@ export function PagesRail({
               key={group.key}
               collapsible
               collapsed={!isOpen(group)}
-              onToggle={() => setCollapsed(group.key, !collapsed.has(group.key))}
+              // While a search is open every group with a match is shown
+              // open, so a fold here would change nothing on screen and
+              // still be written to storage — a change the person would
+              // only see after clearing the search (validation 2026-09-13).
+              // The header stays a button, for focus and the tree walk, but
+              // it folds nothing until the search is gone; Left/Right in
+              // the keyboard handler follow the same rule.
+              onToggle={() => {
+                if (searching) return
+                setCollapsed(group.key, !collapsed.has(group.key))
+              }}
               label={group.label}
               count={group.pages.length}
               // The header is the only place the owner is written, and a crew

@@ -312,6 +312,46 @@ describe("PagesRail groups", () => {
     expect(screen.queryByText("Nightly close")).toBeNull()
   })
 
+  // Validation 2026-09-13, finding 1: the unfold watched the GROUP of the
+  // selection, so picking a second page in a group that was folded after the
+  // first one left the new selection hidden.
+  it("opens the group again when a second page from the same folded group is selected", () => {
+    const FINANCE_TWICE = [
+      ...GROUPED,
+      toPageView({ id: "g6", slug: "quarter-close", name: "Quarter close", owner: "crew/finance", reach: ["role"], panels: [] }),
+    ]
+    const { rerender } = renderRail({ pages: FINANCE_TWICE, selectedSlug: "nightly-close" })
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+
+    fireEvent.click(groupHeader("finance"))
+    expect(screen.queryByText("Quarter close")).toBeNull()
+
+    rerender(<PagesRail {...railProps({ pages: FINANCE_TWICE, selectedSlug: "quarter-close" })} />)
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+    expect(rowOf("Quarter close").getAttribute("aria-pressed")).toBe("true")
+  })
+
+  // Validation 2026-09-13, finding 2: with a search open every matching
+  // group is shown open, so a header click changed nothing on screen but
+  // still wrote a fold to storage that surfaced only after the search was
+  // cleared. Folding is off while searching; the header stays focusable.
+  it("does not fold or save a fold while a search is open", () => {
+    storage.setItem.mockClear()
+    const { rerender } = renderRail({ pages: GROUPED, search: "close" })
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+
+    fireEvent.click(groupHeader("finance"))
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getByText("Nightly close")).toBeTruthy()
+    fireEvent.keyDown(groupHeader("finance"), { key: "ArrowLeft" })
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+    expect(storage.setItem).not.toHaveBeenCalled()
+
+    // Clearing the search shows the fold state that was saved before it: none.
+    rerender(<PagesRail {...railProps({ pages: GROUPED, search: "" })} />)
+    expect(groupHeader("finance").getAttribute("aria-expanded")).toBe("true")
+  })
+
   it("keeps the focused row across a selection (the rail is one node, not a rebuild)", () => {
     const { rerender } = renderRail({ pages: GROUPED })
     const row = rowOf("Flotila .201")
