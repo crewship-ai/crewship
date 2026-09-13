@@ -83,6 +83,17 @@ subject is an admin's, except that anyone may ask about themselves.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		subject := strings.TrimSpace(mustFlagString(cmd, "subject"))
+		// `--me` is the one question anyone who can see the page may ask:
+		// their own paths (page access/me, #2533). The listing below is the
+		// owner's and the administrator's.
+		if me, _ := cmd.Flags().GetBool("me"); me {
+			if len(args) != 1 || subject != "" {
+				return cli.WithExitCode(errors.New(
+					"--me takes exactly one page and no --subject: crewship page access <slug> --me"),
+					cli.ExitValidation)
+			}
+			return runPageAccessMe(args[0])
+		}
 		switch {
 		case len(args) == 1 && subject != "":
 			return cli.WithExitCode(errors.New(
@@ -205,6 +216,7 @@ func pageAccessMoreHint(format, cursor string) {
 func init() {
 	pageAccessCmd.Flags().String("subject", "",
 		"Ask what this subject reaches instead of who reaches a page: user:<email or id>, crew:<slug> or agent:<slug>")
+	pageAccessCmd.Flags().Bool("me", false, "Print only your own paths to the page (anyone who can see it may ask)")
 	pageAccessCmd.Flags().Int("limit", 0, "Rows per page (server default 100, at most 1000)")
 	pageAccessCmd.Flags().String("cursor", "", "Continue a listing from the cursor a previous page printed")
 	pageCmd.AddCommand(pageAccessCmd)

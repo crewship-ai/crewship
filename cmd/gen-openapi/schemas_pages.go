@@ -115,12 +115,47 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"owner_crew_name": str(),
 		"page_count": map[string]any{"type": "integer",
 			"description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size."},
-		"grants_version": map[string]any{"type": "integer",
-			"description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence."},
+		"shared": map[string]any{"type": "string", "enum": []string{"none", "crew", "workspace"},
+			"description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate."},
+		"acl_version": map[string]any{"type": "integer",
+			"description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale."},
 		"created_at": timeString(), "updated_at": timeString(),
 	})
 	folder["required"] = []string{"id", "slug", "name", "icon", "color", "owner", "owner_crew_name",
-		"page_count", "grants_version", "created_at", "updated_at"}
+		"page_count", "shared", "acl_version", "created_at", "updated_at"}
+
+	// Inherited permissions (#2533, pages_folder_acl.go).
+	folderACLEntry := obj(map[string]any{
+		"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "workspace"},
+			"description": "Never `agent`: an agent reaches a page only by a grant on that page."},
+		"subject_id": map[string]any{"type": "string", "description": "The stored id; empty for the workspace subject."},
+		"label":      map[string]any{"type": "string", "description": "The reference a person recognises: an email, a crew slug, or `workspace`."},
+		"can_read":   map[string]any{"type": "boolean", "description": "Always true: an entry exists (can view) or exists with can_write (can view and edit)."},
+		"can_write":  boolean(),
+		"set_by": map[string]any{"type": "string",
+			"description": "Who set the entry, as an email; empty once that account is gone. Audit only — the entry belongs to the folder and outlives its setter."},
+		"set_by_user_id": str(),
+		"set_at":         timeString(),
+	})
+	folderACLEntry["required"] = []string{"subject_type", "subject_id", "label", "can_read", "can_write", "set_by", "set_by_user_id", "set_at"}
+	folderACL := obj(map[string]any{
+		"folder":      str(),
+		"acl":         arr(folderACLEntry),
+		"acl_version": integer(),
+		"entry":       folderACLEntry,
+	})
+	folderACL["required"] = []string{"folder", "acl", "acl_version"}
+	accessMe := obj(map[string]any{
+		"page":         str(),
+		"subject_type": map[string]any{"type": "string", "enum": []string{"user"}},
+		"subject_id":   str(),
+		"label":        str(),
+		"paths": map[string]any{"type": "array", "items": str(),
+			"description": "The CALLER's paths to the page, in the index's vocabulary and order: `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`. Never empty — no path is the 404."},
+		"folder": map[string]any{"type": "string", "description": "The slug of the folder the page is in; absent when unfiled."},
+		"shared": map[string]any{"type": "string", "enum": []string{"none", "crew", "workspace"}, "description": "The folder's sharing label; absent when unfiled."},
+	})
+	accessMe["required"] = []string{"page", "subject_type", "subject_id", "label", "paths"}
 
 	page := obj(map[string]any{
 		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
@@ -151,7 +186,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"created_at": timeString(), "updated_at": timeString(),
 		"folder": folderOnPage["folder"], "pages_version": folderOnPage["pages_version"],
 		"reach": map[string]any{"type": "array", "items": str(),
-			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
+			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:<slug>` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
 	})
 
 	folderShow := mergeProps(folder, map[string]any{
@@ -163,6 +198,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	folderList["required"] = []string{"folders"}
 	folderPage := obj(map[string]any{"page": pageRow})
 	folderPage["required"] = []string{"page"}
+	folderPages := obj(map[string]any{"pages": arr(pageRow), "acl_version": integer()})
+	folderPages["required"] = []string{"pages", "acl_version"}
 
 	// The write half carries three fields the read half does not echo to an
 	// ordinary reader: the sensor (§5, §4 rule 4) and the refresh trigger
@@ -455,13 +492,40 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		},
 		"POST /api/v1/page-folders/{slug}/pages": {
 			Request: obj(map[string]any{
-				"page":           map[string]any{"type": "string", "description": "The slug of the page to file here; it leaves any other folder it was in."},
-				"pages_version":  map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},
-				"grants_version": map[string]any{"type": "integer", "description": "The folder's grants_version as last read. Required."},
+				"page":          map[string]any{"type": "string", "description": "The slug of the page to file here; it leaves any other folder it was in."},
+				"pages_version": map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},
+				"acl_version":   map[string]any{"type": "integer", "description": "The folder's acl_version as last read. Required."},
 			}),
 			RequestRequired: true,
 			Response:        folderPage,
 		},
+		"POST /api/v1/page-folders/{slug}/pages:batch": {
+			Request: obj(map[string]any{
+				"pages": map[string]any{"type": "array", "items": obj(map[string]any{
+					"page":          str(),
+					"pages_version": map[string]any{"type": "integer", "description": "That page's pages_version as last read. Required."},
+				}), "description": "The pages to file here. One transaction: every page is checked on its own, and one refusal moves nothing and names the page."},
+				"acl_version": map[string]any{"type": "integer", "description": "The folder's acl_version as last read. Required."},
+			}),
+			RequestRequired: true,
+			Response:        folderPages,
+		},
+		"GET /api/v1/page-folders/{slug}/acl": {Response: folderACL},
+		"PUT /api/v1/page-folders/{slug}/acl": {
+			Request: obj(map[string]any{
+				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "workspace"}, "description": "`agent` is refused with 400."},
+				"subject_id":   map[string]any{"type": "string", "description": "A user by id or email, a crew by id or slug; omitted for `workspace`."},
+				"can_read":     map[string]any{"type": "boolean", "description": "May be omitted or true. `false` is refused with 400: there is no can edit without can view; delete the entry instead."},
+				"can_write":    map[string]any{"type": "boolean", "description": "Can edit: rename the folder, edit the pages inside, take pages out. Defaults to false (can view)."},
+			}),
+			RequestRequired: true,
+			Response:        folderACL,
+		},
+		"DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}": {
+			// 204, no body. The workspace subject is `workspace/workspace`.
+			Response: obj(map[string]any{}),
+		},
+		"GET /api/v1/pages/{slug}/access/me": {Response: accessMe},
 		"DELETE /api/v1/page-folders/{slug}/pages/{page}": {
 			Request: obj(map[string]any{
 				"pages_version": map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},

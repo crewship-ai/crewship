@@ -12,6 +12,7 @@ package main
 //	crewship page grant  fleet-201 --agent watcher --level produce --panels sluzby,zatizeni
 //	crewship page grant  fleet-201 --crew  lookout --level read
 //	crewship page grant  fleet-201 --user  ada@example.com --level write
+//	crewship page grant  fleet-201 --workspace --level read
 //	crewship page revoke fleet-201 --agent watcher
 //	crewship page grants fleet-201
 //
@@ -85,6 +86,11 @@ var pageGrantCmd = &cobra.Command{
   crewship page grant fleet-201 --agent watcher --level produce --panels sluzby
   crewship page grant fleet-201 --crew lookout --level read
   crewship page grant fleet-201 --user ada@example.com --level write
+  crewship page grant fleet-201 --workspace --level read
+
+--workspace grants to every current member of the workspace (never to an
+agent), and carries read or write only: produce names a producer, and
+everyone is not one.
 
 Two rules the server enforces and this command cannot talk it out of:
 
@@ -177,7 +183,9 @@ incident, and having to name each of three grants is how one gets missed.`,
 		}
 		q := url.Values{}
 		q.Set("subject_type", subjectType)
-		q.Set("subject", subject)
+		if subject != "" {
+			q.Set("subject", subject)
+		}
 		if level != "" {
 			q.Set("level", level)
 		}
@@ -206,7 +214,11 @@ incident, and having to name each of three grants is how one gets missed.`,
 		if level != "" {
 			what = level
 		}
-		fmt.Printf("Revoked %s on %s from %s/%s.\n", what, args[0], subjectType, subject)
+		who := subjectType + "/" + subject
+		if subjectType == "workspace" {
+			who = "everyone in the workspace"
+		}
+		fmt.Printf("Revoked %s on %s from %s.\n", what, args[0], who)
 		return nil
 	},
 }
@@ -288,19 +300,23 @@ func pageGrantStatus(g pageGrantJSON) string {
 // on one command line is an operator who meant two commands, and picking one
 // of them silently is how the other grant never gets issued.
 func pageGrantSubjectFromFlags(cmd *cobra.Command) (subjectType, subject string, err error) {
-	found := make([]string, 0, 3)
+	found := make([]string, 0, 4)
 	for _, kind := range []string{"user", "crew", "agent"} {
 		if ref := strings.TrimSpace(mustFlagString(cmd, kind)); ref != "" {
 			found = append(found, kind)
 			subjectType, subject = kind, ref
 		}
 	}
+	if everyone, _ := cmd.Flags().GetBool("workspace"); everyone {
+		found = append(found, "workspace")
+		subjectType, subject = "workspace", ""
+	}
 	switch len(found) {
 	case 1:
 		return subjectType, subject, nil
 	case 0:
 		return "", "", cli.WithExitCode(errors.New(
-			"name the subject: --user <email>, --crew <slug> or --agent <slug>"), cli.ExitValidation)
+			"name the subject: --user <email>, --crew <slug>, --agent <slug> or --workspace"), cli.ExitValidation)
 	default:
 		return "", "", cli.WithExitCode(fmt.Errorf(
 			"--%s and --%s were both given; a grant has exactly one subject, so run one command per subject",
@@ -332,6 +348,7 @@ func init() {
 		c.Flags().String("user", "", "Subject: a workspace member, by email or id")
 		c.Flags().String("crew", "", "Subject: a crew, by slug or id")
 		c.Flags().String("agent", "", "Subject: an agent, by slug or id")
+		c.Flags().Bool("workspace", false, "Subject: everyone in the workspace (read or write only, never produce)")
 	}
 	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "produce" or "write"`)
 	pageGrantCmd.Flags().StringSlice("panels", nil,

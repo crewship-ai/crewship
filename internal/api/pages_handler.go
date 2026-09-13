@@ -328,7 +328,7 @@ type pageListWire struct {
 	CreatedAt      string         `json:"created_at"`
 	UpdatedAt      string         `json:"updated_at"`
 	// Reach names the paths by which the CALLER reaches this page — `owner`,
-	// `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant`, in that order
+	// `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`, in that order
 	// (pageReach, pages_authz.go). It is never empty and never omitted: a row
 	// is in the index because the caller reaches it somehow, and a client
 	// reading a missing key could not tell "reached, reason unsent" from "this
@@ -480,6 +480,10 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 type pageIndex struct {
 	rows    []pageIndexRow
 	folders map[string]*pageFolderRecord
+	// acl is every folder's permission entries, keyed by folder id, loaded
+	// once (loadFolderACLIn) — the folder arm of reach and the `shared`
+	// label are decided from it in memory.
+	acl map[string][]pageFolderACLRecord
 }
 
 type pageIndexRow struct {
@@ -545,8 +549,12 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 	if err != nil {
 		return nil, err
 	}
+	acl, err := h.loadFolderACLIn(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
 
-	out := &pageIndex{folders: folders, rows: make([]pageIndexRow, 0, len(records))}
+	out := &pageIndex{folders: folders, acl: acl, rows: make([]pageIndexRow, 0, len(records))}
 	for i := range records {
 		rec := records[i]
 		panels := panelsByPage[rec.ID]
@@ -560,9 +568,13 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 			}
 		}
 		reach := h.pageReach(&rec, ownerCrewSlug, panels, viewer,
+			folderReachSlug(&rec, folders, acl, viewer),
 			anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)))
 		if len(reach) == 0 {
-			continue
+			if !scope.keepUnreached {
+				continue
+			}
+			reach = []string{}
 		}
 		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach})
 	}
@@ -1155,14 +1167,25 @@ type pageScope struct {
 	// to it; empty means "the workspace's grants", which is what the index
 	// wants anyway.
 	page string
+	// keepUnreached keeps a row the viewer reaches by no path, with an empty
+	// reach. Only the answer to a removal wants it (pages_folders.go): a `w`
+	// holder taking a foreign page out of the folder has just taken their own
+	// path away, and the row they get back says so rather than 404.
+	keepUnreached bool
 }
 
-func pageOnly(pageID string) pageScope { return pageScope{"p.id = ?", []any{pageID}, pageID} }
+func pageOnly(pageID string) pageScope { return pageScope{"p.id = ?", []any{pageID}, pageID, false} }
+
+// pageOnlyEvenUnreached is pageOnly for the one caller that renders a row the
+// viewer may no longer reach.
+func pageOnlyEvenUnreached(pageID string) pageScope {
+	return pageScope{"p.id = ?", []any{pageID}, pageID, true}
+}
 func pagesInWorkspace(wsID string) pageScope {
-	return pageScope{"p.workspace_id = ?", []any{wsID}, ""}
+	return pageScope{"p.workspace_id = ?", []any{wsID}, "", false}
 }
 func pagesInFolder(folderID string) pageScope {
-	return pageScope{"p.folder_id = ?", []any{folderID}, ""}
+	return pageScope{"p.folder_id = ?", []any{folderID}, "", false}
 }
 
 // loadPanelsIn is loadPanels over a scope, keyed by page id. A page with no

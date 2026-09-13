@@ -79474,6 +79474,10 @@
                     "folders": {
                       "items": {
                         "properties": {
+                          "acl_version": {
+                            "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
+                            "type": "integer"
+                          },
                           "color": {
                             "description": "A crew palette key, or empty.",
                             "type": "string"
@@ -79481,10 +79485,6 @@
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
-                          },
-                          "grants_version": {
-                            "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
-                            "type": "integer"
                           },
                           "icon": {
                             "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
@@ -79507,6 +79507,15 @@
                             "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                             "type": "integer"
                           },
+                          "shared": {
+                            "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                            "enum": [
+                              "none",
+                              "crew",
+                              "workspace"
+                            ],
+                            "type": "string"
+                          },
                           "slug": {
                             "type": "string"
                           },
@@ -79524,7 +79533,8 @@
                           "owner",
                           "owner_crew_name",
                           "page_count",
-                          "grants_version",
+                          "shared",
+                          "acl_version",
                           "created_at",
                           "updated_at"
                         ],
@@ -79669,6 +79679,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "acl_version": {
+                      "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -79676,10 +79690,6 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
-                    },
-                    "grants_version": {
-                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
-                      "type": "integer"
                     },
                     "icon": {
                       "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
@@ -79702,6 +79712,15 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "shared": {
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "enum": [
+                        "none",
+                        "crew",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    },
                     "slug": {
                       "type": "string"
                     },
@@ -79719,7 +79738,8 @@
                     "owner",
                     "owner_crew_name",
                     "page_count",
-                    "grants_version",
+                    "shared",
+                    "acl_version",
                     "created_at",
                     "updated_at"
                   ],
@@ -79734,6 +79754,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "acl_version": {
+                      "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -79741,10 +79765,6 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
-                    },
-                    "grants_version": {
-                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
-                      "type": "integer"
                     },
                     "icon": {
                       "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
@@ -79767,6 +79787,15 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "shared": {
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "enum": [
+                        "none",
+                        "crew",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    },
                     "slug": {
                       "type": "string"
                     },
@@ -79784,7 +79813,8 @@
                     "owner",
                     "owner_crew_name",
                     "page_count",
-                    "grants_version",
+                    "shared",
+                    "acl_version",
                     "created_at",
                     "updated_at"
                   ],
@@ -80170,7 +80200,7 @@
                           "type": "integer"
                         },
                         "reach": {
-                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
                           "items": {
                             "type": "string"
                           },
@@ -80199,6 +80229,10 @@
                     "type": "array"
                   },
                   "properties": {
+                    "acl_version": {
+                      "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -80206,10 +80240,6 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
-                    },
-                    "grants_version": {
-                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
-                      "type": "integer"
                     },
                     "icon": {
                       "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
@@ -80232,6 +80262,15 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "shared": {
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "enum": [
+                        "none",
+                        "crew",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    },
                     "slug": {
                       "type": "string"
                     },
@@ -80249,7 +80288,8 @@
                     "owner",
                     "owner_crew_name",
                     "page_count",
-                    "grants_version",
+                    "shared",
+                    "acl_version",
                     "created_at",
                     "updated_at",
                     "pages"
@@ -80407,6 +80447,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "acl_version": {
+                      "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "A crew palette key, or empty.",
                       "type": "string"
@@ -80414,10 +80458,6 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
-                    },
-                    "grants_version": {
-                      "description": "Changes with every change to the folder's grants (none exist yet). A move carries it as its second fence.",
-                      "type": "integer"
                     },
                     "icon": {
                       "description": "A crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty.",
@@ -80440,6 +80480,15 @@
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
                     },
+                    "shared": {
+                      "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `crew` (shared with named crews or people), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",
+                      "enum": [
+                        "none",
+                        "crew",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    },
                     "slug": {
                       "type": "string"
                     },
@@ -80457,7 +80506,8 @@
                     "owner",
                     "owner_crew_name",
                     "page_count",
-                    "grants_version",
+                    "shared",
+                    "acl_version",
                     "created_at",
                     "updated_at"
                   ],
@@ -80592,6 +80642,709 @@
         ]
       }
     },
+    "/api/v1/page-folders/{slug}/acl": {
+      "get": {
+        "operationId": "get_api_v1_page-folders_slug_acl",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "acl": {
+                      "items": {
+                        "properties": {
+                          "can_read": {
+                            "description": "Always true: an entry exists (can view) or exists with can_write (can view and edit).",
+                            "type": "boolean"
+                          },
+                          "can_write": {
+                            "type": "boolean"
+                          },
+                          "label": {
+                            "description": "The reference a person recognises: an email, a crew slug, or `workspace`.",
+                            "type": "string"
+                          },
+                          "set_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "set_by": {
+                            "description": "Who set the entry, as an email; empty once that account is gone. Audit only — the entry belongs to the folder and outlives its setter.",
+                            "type": "string"
+                          },
+                          "set_by_user_id": {
+                            "type": "string"
+                          },
+                          "subject_id": {
+                            "description": "The stored id; empty for the workspace subject.",
+                            "type": "string"
+                          },
+                          "subject_type": {
+                            "description": "Never `agent`: an agent reaches a page only by a grant on that page.",
+                            "enum": [
+                              "user",
+                              "crew",
+                              "workspace"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "subject_type",
+                          "subject_id",
+                          "label",
+                          "can_read",
+                          "can_write",
+                          "set_by",
+                          "set_by_user_id",
+                          "set_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "acl_version": {
+                      "type": "integer"
+                    },
+                    "entry": {
+                      "properties": {
+                        "can_read": {
+                          "description": "Always true: an entry exists (can view) or exists with can_write (can view and edit).",
+                          "type": "boolean"
+                        },
+                        "can_write": {
+                          "type": "boolean"
+                        },
+                        "label": {
+                          "description": "The reference a person recognises: an email, a crew slug, or `workspace`.",
+                          "type": "string"
+                        },
+                        "set_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "set_by": {
+                          "description": "Who set the entry, as an email; empty once that account is gone. Audit only — the entry belongs to the folder and outlives its setter.",
+                          "type": "string"
+                        },
+                        "set_by_user_id": {
+                          "type": "string"
+                        },
+                        "subject_id": {
+                          "description": "The stored id; empty for the workspace subject.",
+                          "type": "string"
+                        },
+                        "subject_type": {
+                          "description": "Never `agent`: an agent reaches a page only by a grant on that page.",
+                          "enum": [
+                            "user",
+                            "crew",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "subject_type",
+                        "subject_id",
+                        "label",
+                        "can_read",
+                        "can_write",
+                        "set_by",
+                        "set_by_user_id",
+                        "set_at"
+                      ],
+                      "type": "object"
+                    },
+                    "folder": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "acl",
+                    "acl_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_page-folders_slug_acl",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "can_read": {
+                    "description": "May be omitted or true. `false` is refused with 400: there is no can edit without can view; delete the entry instead.",
+                    "type": "boolean"
+                  },
+                  "can_write": {
+                    "description": "Can edit: rename the folder, edit the pages inside, take pages out. Defaults to false (can view).",
+                    "type": "boolean"
+                  },
+                  "subject_id": {
+                    "description": "A user by id or email, a crew by id or slug; omitted for `workspace`.",
+                    "type": "string"
+                  },
+                  "subject_type": {
+                    "description": "`agent` is refused with 400.",
+                    "enum": [
+                      "user",
+                      "crew",
+                      "workspace"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "acl": {
+                      "items": {
+                        "properties": {
+                          "can_read": {
+                            "description": "Always true: an entry exists (can view) or exists with can_write (can view and edit).",
+                            "type": "boolean"
+                          },
+                          "can_write": {
+                            "type": "boolean"
+                          },
+                          "label": {
+                            "description": "The reference a person recognises: an email, a crew slug, or `workspace`.",
+                            "type": "string"
+                          },
+                          "set_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "set_by": {
+                            "description": "Who set the entry, as an email; empty once that account is gone. Audit only — the entry belongs to the folder and outlives its setter.",
+                            "type": "string"
+                          },
+                          "set_by_user_id": {
+                            "type": "string"
+                          },
+                          "subject_id": {
+                            "description": "The stored id; empty for the workspace subject.",
+                            "type": "string"
+                          },
+                          "subject_type": {
+                            "description": "Never `agent`: an agent reaches a page only by a grant on that page.",
+                            "enum": [
+                              "user",
+                              "crew",
+                              "workspace"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "subject_type",
+                          "subject_id",
+                          "label",
+                          "can_read",
+                          "can_write",
+                          "set_by",
+                          "set_by_user_id",
+                          "set_at"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "acl_version": {
+                      "type": "integer"
+                    },
+                    "entry": {
+                      "properties": {
+                        "can_read": {
+                          "description": "Always true: an entry exists (can view) or exists with can_write (can view and edit).",
+                          "type": "boolean"
+                        },
+                        "can_write": {
+                          "type": "boolean"
+                        },
+                        "label": {
+                          "description": "The reference a person recognises: an email, a crew slug, or `workspace`.",
+                          "type": "string"
+                        },
+                        "set_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
+                        "set_by": {
+                          "description": "Who set the entry, as an email; empty once that account is gone. Audit only — the entry belongs to the folder and outlives its setter.",
+                          "type": "string"
+                        },
+                        "set_by_user_id": {
+                          "type": "string"
+                        },
+                        "subject_id": {
+                          "description": "The stored id; empty for the workspace subject.",
+                          "type": "string"
+                        },
+                        "subject_type": {
+                          "description": "Never `agent`: an agent reaches a page only by a grant on that page.",
+                          "enum": [
+                            "user",
+                            "crew",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "subject_type",
+                        "subject_id",
+                        "label",
+                        "can_read",
+                        "can_write",
+                        "set_by",
+                        "set_by_user_id",
+                        "set_at"
+                      ],
+                      "type": "object"
+                    },
+                    "folder": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "folder",
+                    "acl",
+                    "acl_version"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
+    "/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}": {
+      "delete": {
+        "operationId": "delete_api_v1_page-folders_slug_acl_subject_type_subject_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subject_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subject_type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
     "/api/v1/page-folders/{slug}/pages": {
       "post": {
         "operationId": "post_api_v1_page-folders_slug_pages",
@@ -80610,8 +81363,8 @@
             "application/json": {
               "schema": {
                 "properties": {
-                  "grants_version": {
-                    "description": "The folder's grants_version as last read. Required.",
+                  "acl_version": {
+                    "description": "The folder's acl_version as last read. Required.",
                     "type": "integer"
                   },
                   "page": {
@@ -80724,7 +81477,7 @@
                           "type": "integer"
                         },
                         "reach": {
-                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
                           "items": {
                             "type": "string"
                           },
@@ -81019,7 +81772,7 @@
                           "type": "integer"
                         },
                         "reach": {
-                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
                           "items": {
                             "type": "string"
                           },
@@ -81048,6 +81801,332 @@
                   },
                   "required": [
                     "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "page-folders"
+        ]
+      }
+    },
+    "/api/v1/page-folders/{slug}/pages:batch": {
+      "post": {
+        "operationId": "post_api_v1_page-folders_slug_pages:batch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "acl_version": {
+                    "description": "The folder's acl_version as last read. Required.",
+                    "type": "integer"
+                  },
+                  "pages": {
+                    "description": "The pages to file here. One transaction: every page is checked on its own, and one refusal moves nothing and names the page.",
+                    "items": {
+                      "properties": {
+                        "page": {
+                          "type": "string"
+                        },
+                        "pages_version": {
+                          "description": "That page's pages_version as last read. Required.",
+                          "type": "integer"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "acl_version": {
+                      "type": "integer"
+                    },
+                    "pages": {
+                      "items": {
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "folder": {
+                            "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "color": {
+                                    "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                    "type": "string"
+                                  },
+                                  "icon": {
+                                    "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "slug": {
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "has_application": {
+                            "type": "boolean"
+                          },
+                          "has_project": {
+                            "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "last_produced_at": {
+                            "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "string"
+                          },
+                          "owner_crew_slug": {
+                            "type": "string"
+                          },
+                          "pages_version": {
+                            "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                            "type": "integer"
+                          },
+                          "panel_count": {
+                            "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                            "type": "integer"
+                          },
+                          "panel_states": {
+                            "properties": {
+                              "failed": {
+                                "type": "integer"
+                              },
+                              "fresh": {
+                                "type": "integer"
+                              },
+                              "never_produced": {
+                                "type": "integer"
+                              },
+                              "stale": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "publication_version": {
+                            "type": "integer"
+                          },
+                          "reach": {
+                            "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "description": "The page's worst panel.",
+                            "enum": [
+                              "fresh",
+                              "stale",
+                              "failed",
+                              "never_produced"
+                            ],
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "pages",
+                    "acl_version"
                   ],
                   "type": "object"
                 }
@@ -81402,7 +82481,7 @@
                         "type": "integer"
                       },
                       "reach": {
-                        "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                        "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
                         "items": {
                           "type": "string"
                         },
@@ -84364,6 +85443,190 @@
         ]
       }
     },
+    "/api/v1/pages/{slug}/access/me": {
+      "get": {
+        "operationId": "get_api_v1_pages_slug_access_me",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "folder": {
+                      "description": "The slug of the folder the page is in; absent when unfiled.",
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "paths": {
+                      "description": "The CALLER's paths to the page, in the index's vocabulary and order: `owner`, `role`, `crew:\u003cslug\u003e`, `panel_crew:\u003cslug\u003e`, `folder:\u003cslug\u003e`, `grant`. Never empty — no path is the 404.",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "shared": {
+                      "description": "The folder's sharing label; absent when unfiled.",
+                      "enum": [
+                        "none",
+                        "crew",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    },
+                    "subject_id": {
+                      "type": "string"
+                    },
+                    "subject_type": {
+                      "enum": [
+                        "user"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "page",
+                    "subject_type",
+                    "subject_id",
+                    "label",
+                    "paths"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "pages"
+        ]
+      }
+    },
     "/api/v1/pages/{slug}/application": {
       "get": {
         "operationId": "get_api_v1_pages_slug_application",
@@ -85697,9 +86960,8 @@
           {
             "in": "query",
             "name": "subject",
-            "required": true,
+            "required": false,
             "schema": {
-              "minLength": 1,
               "type": "string"
             }
           },

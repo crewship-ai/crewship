@@ -47,8 +47,9 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
+| `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
 | `access <slug>` | Who reaches a page, and by which paths |
 | `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
@@ -60,6 +61,12 @@ exception in the other direction: it prints YAML unless you ask for
 | `folder add <folder> <page>` | File a page in a folder |
 | `folder remove <folder> <page>` | Take a page out of a folder |
 | `move <page> --folder <slug>\|--unfiled` | Move a page into a folder, or out of the one it is in |
+| `folder acl <slug>` | Who a folder is shared with (owning crew's managers and admins only) |
+| `folder share <slug> <subject> --view\|--edit` | Share a folder with a user, a crew or everyone in the workspace |
+| `folder unshare <slug> <subject>` | Stop sharing a folder with a subject |
+| `move <page>... --folder <slug>\|--unfiled` | Move pages into a folder, or out of the ones they are in |
+| `access <slug>` | Who reaches a page, and by which paths |
+| `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
 | `webhook create <slug> --panel <id>` | Mint a URL that lets something outside the workspace write one panel |
 | `webhook list <slug>` | List a page's webhook tokens and say which still work |
 | `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
@@ -653,6 +660,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--user <email>` | Grant to a human user |
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
+| `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
 | `--level <read\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
@@ -678,8 +686,8 @@ crewship page revoke fleet-201 --agent devops-bot
 
 Removes a grant, journalled as `page.grant_removed`.
 
-`revoke` takes the same three subject flags as `grant` — `--user`, `--crew`,
-`--agent` — plus an optional `--level`. Omit the level and every level that
+`revoke` takes the same subject flags as `grant` — `--user`, `--crew`,
+`--agent`, `--workspace` — plus an optional `--level`. Omit the level and every level that
 subject holds is withdrawn at once.
 
 <Note>
@@ -706,46 +714,26 @@ Lists every grant on the page: subject type, subject, level, and (for
 ---
 
 ## `crewship page access`
+## `crewship page access <slug> --me`
 
 ```bash
-crewship page access fleet-201
-crewship page access --subject user:ada@example.com
-crewship page access --subject crew:lookout
-crewship page access --subject agent:watcher
+crewship page access fleet-201 --me
 ```
-
-One command, two questions, one per invocation. With a slug it answers *who
-reaches this page* — every user, crew and agent, each with the paths that
-carry it. With `--subject` it answers the reverse: *which pages does this
-subject reach*, and how. Both are read-only renderings of what the server
-already enforces; no grant is issued or implied, and an inert grant is not a
-path.
 
 | Flag | Description |
 |---|---|
-| `--subject <kind>:<ref>` | Ask about a subject instead of a page: `user:<email or id>`, `crew:<slug>` or `agent:<slug>`. Exclusive with the slug. |
-| `--limit <n>` | Rows per page. The server defaults to 100 and caps at 1000. |
-| `--cursor <cursor>` | Continue from the cursor the previous page printed. Opaque. |
+| `--me` | Ask about yourself. Required: this command answers about you, and who else reaches a page is `page folder acl` and `page grants`. |
 
-A path is one of the server's own words, printed verbatim:
+Prints the paths by which you reach the page, in the API's own words —
+`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`
+— the same words `page list` prints in its `REACH` column. When the page is in
+a folder, the folder's slug and its sharing label (`none`, `crew`,
+`workspace`) are printed too: the label, never the names. Anyone who can open
+the page may ask; a page you cannot reach is a 404.
 
-| Path | Meaning |
-|---|---|
-| `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
-| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
-| `crew:<slug>` | A member of the crew that owns the page. |
-| `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
-| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
-| `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
+Backed by the page's own-access endpoint (`GET …/access/me`).
 
-```
-SUBJECT              KIND   PATHS
-ada@example.com      user   owner
-bob@example.com      user   panel_crew:ops, grant:page:read
-ops                  crew   panel_crew:ops
-watcher              agent  grant:page:produce
-(withheld)           crew   panel_crew:withheld
-```
+---
 
 Reading a page's access takes the same right as reading its grants: the
 page's owner, or a workspace ADMIN/OWNER. Asking about a subject is an
@@ -760,9 +748,17 @@ subject), the rows with their `paths`, and `next_cursor` when more follow.
 A folder is a named group of pages owned by one crew, with an icon from the
 crew icon set and a colour from the crew palette — the same picker a crew uses.
 One level, a page in at most one folder; a page outside any folder is
-*unfiled*. Folders arrange and do not share: filing a page in one changes
-nobody's access to it, and a folder shows you only the pages in it you already
-reach.
+*unfiled*. A folder shows you only the pages in it you reach.
+
+A folder can be shared — with a person, a crew, or everyone in the workspace —
+and what it is shared with applies to every page in it right now: filing a page
+in a shared folder shares it, taking it out unshares it. *Can view* opens the
+pages; *can edit* also renames the folder, edits the pages inside and takes
+pages out of it. A panel owned by another crew stays sealed whatever the folder
+says, and a folder is never shared with an agent. Only the owning crew's
+managers and workspace admins see or change a folder's sharing; everyone else
+sees a label (`none`, `crew`, `workspace`) in `folder list` and `folder show`,
+and their own access in [`page access --me`](#crewship-page-access-slug-me).
 
 Every folder command is backed by the [folder endpoints](/api-reference/pages#folders).
 
@@ -851,8 +847,62 @@ crewship page folder remove ops-board fleet-201
 ```
 
 The same as `crewship page move fleet-201 --unfiled`, naming the folder
-explicitly. The page's owner or a workspace admin may; the folder is not
-consulted.
+explicitly. The page's owner, a workspace admin, or somebody the folder's
+sharing lets edit it may — the last on purpose: taking a page out withdraws
+the access everyone else inherited from the folder. Taking your own page back
+never waits for anyone.
+
+### `crewship page folder acl <slug>`
+
+```bash
+crewship page folder acl ops-board
+```
+
+Who the folder is shared with: each subject, *can view* or *can view and
+edit*, who set it and when, and the folder's `acl_version`. Only a workspace
+admin or a MANAGER (or higher) of the owning crew may read this; everyone else
+sees the sharing label in `folder show` and their own access in
+[`page access --me`](#crewship-page-access-slug-me). The owning crew and
+admins are not listed: they hold the folder without an entry.
+
+### `crewship page folder share <slug> <subject>`
+
+```bash
+crewship page folder share ops-board user:ada@example.com --view
+crewship page folder share ops-board crew:support --edit
+crewship page folder share ops-board workspace --view
+```
+
+| Flag | Description |
+|---|---|
+| `--view` | Can open the folder and the pages in it. |
+| `--edit` | Can also rename the folder, edit the pages inside, and take pages out of it. Includes `--view`. |
+
+Exactly one of the two. A subject is `user:<email or id>`, `crew:<slug>`, or
+the word `workspace` for every current member. Never an agent: an agent
+reaches a page only by `page grant --agent` on that page, and the command
+refuses `agent:` before any request.
+
+Sharing applies to every page in the folder now or later. *Can edit* never
+opens a panel owned by another crew, moves a page elsewhere, deletes the
+folder or changes its sharing — and it can take pages out, which withdraws the
+access everyone else inherited. Only a workspace admin or a MANAGER (or
+higher) of the owning crew may run this. The entry belongs to the folder and
+stays when whoever set it leaves. Repeating the command is the same state, not
+a second entry.
+
+### `crewship page folder unshare <slug> <subject>`
+
+```bash
+crewship page folder unshare ops-board crew:support
+crewship page folder unshare ops-board workspace
+```
+
+Removes one entry, with the same subject spelling as `share`. A user who has
+since left is removed by the id or email `folder acl` prints. Only a workspace
+admin or a MANAGER (or higher) of the owning crew may run this.
+
+Sharing changes are journalled as `page.folder_acl_changed`.
 
 ---
 
@@ -860,31 +910,88 @@ consulted.
 
 ```bash
 crewship page move fleet-201 --folder ops-board
+crewship page move fleet-201 fleet-202 fleet-203 --folder ops-board
 crewship page move fleet-201 --unfiled
 ```
 
 | Flag | Description |
 |---|---|
-| `--folder <slug>` | File the page in this folder, moving it out of any other. |
-| `--unfiled` | Take the page out of whichever folder it is in. The folder is read from the page, so you name none. |
+| `--folder <slug>` | File the pages in this folder, moving them out of any other. Several pages are one all-or-nothing request. |
+| `--unfiled` | Take each page out of whichever folder it is in. The folder is read from the page, so you name none. |
 
-Exactly one of the two. Moving changes nobody's access to the page.
+Exactly one of the two. Moving a page into a shared folder shares it with
+whoever the folder is shared with; moving it out unshares it.
 
 **Who may.** Filing needs both halves of the authority in one caller: you
 initiate as the page's owner or a workspace admin, and the folder accepts you
-as an admin or a MANAGER (or higher) of its owning crew. Lacking either, the
-refusal names who can. Unfiling is the page owner's or an admin's alone —
-taking your page back never waits for anyone.
+as an admin, a MANAGER (or higher) of its owning crew, or somebody its sharing
+lets edit it. Lacking either, the refusal names who can; *can edit* alone
+never takes somebody else's page. Unfiling is the page owner's, an admin's, or
+a *can edit* holder's — taking your own page back never waits for anyone.
 
-**The fences.** The command reads the page's `pages_version` and the folder's
-`grants_version` right before it writes and sends exactly what it read. A
-**409** therefore means somebody else moved the page, or changed the folder,
-between that read and the write; the error prints the current pair — look
-again and re-run. There is deliberately no flag to type a fence by hand: a
+**Several pages.** With more than one page and `--folder`, the command sends
+one request: every page is checked on its own, one refusal moves nothing, and
+the error names the page.
+
+**The fences.** The command reads each page's `pages_version` and the folder's
+`acl_version` right before it writes and sends exactly what it read. A
+**409** therefore means somebody else moved a page, or changed the folder's
+sharing, between that read and the write; the error prints the current pair —
+look again and re-run. There is deliberately no flag to type a fence by hand: a
 fence you typed says nothing about what you saw.
 
 Moves and removals are journalled as `page.folder_membership_changed`; the
 folder's own changes as `page.folder_changed`.
+## `crewship page access`
+
+```bash
+crewship page access fleet-201
+crewship page access --subject user:ada@example.com
+crewship page access --subject crew:lookout
+crewship page access --subject agent:watcher
+```
+
+One command, two questions, one per invocation. With a slug it answers *who
+reaches this page* — every user, crew and agent, each with the paths that
+carry it. With `--subject` it answers the reverse: *which pages does this
+subject reach*, and how. Both are read-only renderings of what the server
+already enforces; no grant is issued or implied, and an inert grant is not a
+path.
+
+| Flag | Description |
+|---|---|
+| `--subject <kind>:<ref>` | Ask about a subject instead of a page: `user:<email or id>`, `crew:<slug>` or `agent:<slug>`. Exclusive with the slug. |
+| `--limit <n>` | Rows per page. The server defaults to 100 and caps at 1000. |
+| `--cursor <cursor>` | Continue from the cursor the previous page printed. Opaque. |
+
+A path is one of the server's own words, printed verbatim:
+
+| Path | Meaning |
+|---|---|
+| `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
+| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
+| `crew:<slug>` | A member of the crew that owns the page. |
+| `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
+| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
+| `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
+
+```
+SUBJECT              KIND   PATHS
+ada@example.com      user   owner
+bob@example.com      user   panel_crew:ops, grant:page:read
+ops                  crew   panel_crew:ops
+watcher              agent  grant:page:produce
+(withheld)           crew   panel_crew:withheld
+```
+
+Reading a page's access takes the same right as reading its grants: the
+page's owner, or a workspace ADMIN/OWNER. Asking about a subject is an
+administrator's, except that anyone may ask about themselves
+(`--subject user:<your email>`). Every other caller is refused with the
+server's sentence and a non-zero exit.
+
+`--format json` prints the server's document unchanged — the page (or the
+subject), the rows with their `paths`, and `next_cursor` when more follow.
 
 ---
 

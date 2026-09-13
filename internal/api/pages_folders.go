@@ -5,36 +5,44 @@ package api
 //
 // A folder is a named group of pages owned by ONE crew, with an icon and a
 // colour from the crew's own picker. One level, a page in at most one folder;
-// pages outside any folder are "unfiled". Folders carry no grants yet — that
-// is F3 — so in this PR a move changes nobody's access, and every rule below
-// is a rule about who may arrange, never about who may read.
+// pages outside any folder are "unfiled". Since F3′ (#2533,
+// pages_folder_acl.go) a folder also carries permissions that apply to every
+// page in it right now, so a move is a sharing decision as well as an
+// arrangement, and the rules below name the `w` holder where the ACL gives
+// them a say.
 //
-// Who may do what (§4), the whole table, because the refusals below quote it:
+// Who may do what (§4 of both documents), the whole table, because the
+// refusals below quote it:
 //
 //	create            admin; a workspace MANAGER+ who is a member of the crew
 //	                  named as owner — the crew owns the folder from birth.
-//	rename/icon/colour admin; the owning crew's MANAGER+.
+//	rename/icon/colour admin; the owning crew's MANAGER+; a holder of `w`.
 //	delete            admin; the owning crew's MANAGER+ — and ONLY when empty,
 //	                  counting pages the caller cannot see (§1/9). The
 //	                  database says the same thing (ON DELETE RESTRICT).
 //	add / move a page two authorities in one caller: the page's owner or an
-//	                  admin INITIATES, and an admin or the target folder's
-//	                  owning-crew MANAGER+ ACCEPTS. Lacking either is a 403
-//	                  that names who can.
-//	remove a page     the page's owner or an admin. Never the folder: taking
-//	                  your page back does not wait for anyone (§1/9).
-//	read a folder     whoever reaches at least one page in it, the owning
-//	                  crew, or an admin — and they see only the pages they
-//	                  reach and a count of those (§5/12). A folder the caller
-//	                  reaches nothing in is a 404, the same posture canSeePage
-//	                  takes for a page: the folder listing must not be an
-//	                  oracle for what other people have filed.
+//	                  admin INITIATES, and an admin, the target folder's
+//	                  owning-crew MANAGER+ or a holder of `w` on the target
+//	                  ACCEPTS. Lacking either is a 403 that names who can;
+//	                  `w` on the target never takes somebody else's page.
+//	remove a page     the page's owner, an admin, or a holder of `w` on the
+//	                  folder — the last on purpose (§3/7): it withdraws the
+//	                  access everyone else inherited from the folder, and
+//	                  the right's description says so.
+//	read a folder     whoever reaches at least one page in it, whoever the
+//	                  ACL names, the owning crew, or an admin — and they see
+//	                  only the pages they reach and a count of those (§5/12).
+//	                  A folder the caller reaches nothing in is a 404, the
+//	                  same posture canSeePage takes for a page: the folder
+//	                  listing must not be an oracle for what other people
+//	                  have filed.
 //
-// Two version fences (§5/8): `pages_version` on the page changes with every
-// change to its folder membership, `grants_version` on the folder with every
-// change to its grants (none yet). A move carries both and a stale one is a
+// Two version fences (§5/8, §3/8): `pages_version` on the page changes with
+// every change to its folder membership, `acl_version` on the folder with
+// every change to its permissions. A move carries both and a stale one is a
 // 409 that returns the current pair, so the client re-reads instead of
-// applying a decision made against a folder that has since changed. A
+// applying a decision made against a folder that has since changed — and the
+// 409 carries the target's ACL only to a caller who may read it (§3/10). A
 // removal carries only the page's.
 //
 // A workspace MANAGER is "MANAGER+" here in canRole's create/update tier
@@ -92,7 +100,7 @@ type pageFolderRecord struct {
 	OwnerCrewID   string
 	OwnerCrewSlug string
 	OwnerCrewName string
-	GrantsVersion int64
+	ACLVersion    int64
 	CreatedAt     string
 	UpdatedAt     string
 }
@@ -117,7 +125,9 @@ func (f *pageFolderRecord) ref() *pageFolderRef {
 
 // pageFolderWire is one folder as the folder endpoints send it. PageCount is
 // the number of pages in it the CALLER reaches (§5/12) — the same number of
-// rows Show would return — never the folder's true size.
+// rows Show would return — never the folder's true size. Shared is the
+// no-names sharing label every reader gets (`none`, `crew`, `workspace`;
+// #2533 §3/10); the ACL itself is behind GET …/acl and its gate.
 type pageFolderWire struct {
 	ID            string `json:"id"`
 	Slug          string `json:"slug"`
@@ -127,16 +137,17 @@ type pageFolderWire struct {
 	Owner         string `json:"owner"`
 	OwnerCrewName string `json:"owner_crew_name"`
 	PageCount     int    `json:"page_count"`
-	GrantsVersion int64  `json:"grants_version"`
+	Shared        string `json:"shared"`
+	ACLVersion    int64  `json:"acl_version"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
 }
 
-func (f *pageFolderRecord) wire(pageCount int) pageFolderWire {
+func (f *pageFolderRecord) wire(pageCount int, acl []pageFolderACLRecord) pageFolderWire {
 	return pageFolderWire{
 		ID: f.ID, Slug: f.Slug, Name: f.Name, Icon: f.Icon, Color: f.Color,
 		Owner: "crew/" + f.OwnerCrewSlug, OwnerCrewName: f.OwnerCrewName,
-		PageCount: pageCount, GrantsVersion: f.GrantsVersion,
+		PageCount: pageCount, Shared: folderSharedLabel(acl), ACLVersion: f.ACLVersion,
 		CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
 	}
 }
@@ -160,9 +171,9 @@ type pageFolderWriteRequest struct {
 // pointers so an omitted one is a 400 rather than a zero that happens to
 // match a page that has never moved.
 type pageFolderMoveRequest struct {
-	Page          string `json:"page"`
-	PagesVersion  *int64 `json:"pages_version"`
-	GrantsVersion *int64 `json:"grants_version"`
+	Page         string `json:"page"`
+	PagesVersion *int64 `json:"pages_version"`
+	ACLVersion   *int64 `json:"acl_version"`
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
@@ -170,14 +181,14 @@ type pageFolderMoveRequest struct {
 const pageFolderSelect = `
 	SELECT f.id, f.slug, f.name, COALESCE(f.icon, ''), COALESCE(f.color, ''),
 	       f.owner_crew_id, COALESCE(c.slug, f.owner_crew_id), COALESCE(c.name, ''),
-	       f.grants_version, f.created_at, f.updated_at
+	       f.acl_version, f.created_at, f.updated_at
 	FROM page_folders f LEFT JOIN crews c ON c.id = f.owner_crew_id`
 
 func scanPageFolder(row interface{ Scan(...any) error }) (*pageFolderRecord, error) {
 	var f pageFolderRecord
 	if err := row.Scan(&f.ID, &f.Slug, &f.Name, &f.Icon, &f.Color,
 		&f.OwnerCrewID, &f.OwnerCrewSlug, &f.OwnerCrewName,
-		&f.GrantsVersion, &f.CreatedAt, &f.UpdatedAt); err != nil {
+		&f.ACLVersion, &f.CreatedAt, &f.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &f, nil
@@ -248,9 +259,10 @@ func sortedFolders(folders map[string]*pageFolderRecord) []*pageFolderRecord {
 // ── Standing ───────────────────────────────────────────────────────────────
 
 // folderStanding answers "may this viewer read the folder regardless of what
-// is in it": an admin, or a member of the owning crew.
-func folderStanding(viewer *pageViewer, f *pageFolderRecord) bool {
-	return canRole(viewer.Role, "manage") || viewer.Crews[f.OwnerCrewID]
+// is in it": an admin, a member of the owning crew, or a subject the folder's
+// ACL names (#2533 §3/2: `r` sees the folder, empty or not).
+func folderStanding(viewer *pageViewer, f *pageFolderRecord, acl []pageFolderACLRecord) bool {
+	return canRole(viewer.Role, "manage") || viewer.Crews[f.OwnerCrewID] || folderACLReach(acl, viewer).read
 }
 
 // mayAdministerFolder answers rename, delete and — as the ACCEPTING half of a
@@ -268,17 +280,36 @@ func folderAdminRefusal(verb string, f *pageFolderRecord) string {
 		verb, f.Slug, f.OwnerCrewSlug)
 }
 
+// folderArrangeRefusal is folderAdminRefusal plus the third party the ACL can
+// name.
+func folderArrangeRefusal(verb string, f *pageFolderRecord) string {
+	return folderAdminRefusal(verb, f) + ", or somebody the folder's permissions let edit it"
+}
+
+// folderAcceptRefusal is the sentence a page owner gets when the target does
+// not accept them (§3/7): who can, and that their own half was not the problem.
+func folderAcceptRefusal(f *pageFolderRecord) string {
+	return fmt.Sprintf(
+		"folder %q accepts a page from a workspace admin, from a MANAGER (or higher) who belongs to crew/%s, its owning crew, or from somebody its permissions let edit it; you may move the page, but not into this folder",
+		f.Slug, f.OwnerCrewSlug)
+}
+
 // folderVisibleTo decides 404 versus 403 for a caller refused a write: a
-// folder the caller could not read either answers as if it did not exist.
-func (h *PageHandler) folderVisibleTo(ctx context.Context, wsID string, viewer *pageViewer, f *pageFolderRecord) (bool, error) {
-	if folderStanding(viewer, f) {
-		return true, nil
+// folder the caller could not read either answers as if it did not exist. It
+// returns the folder's ACL, which every caller goes on to need.
+func (h *PageHandler) folderVisibleTo(ctx context.Context, wsID string, viewer *pageViewer, f *pageFolderRecord) (bool, []pageFolderACLRecord, error) {
+	acl, err := h.loadFolderACL(ctx, f.ID)
+	if err != nil {
+		return false, nil, err
+	}
+	if folderStanding(viewer, f, acl) {
+		return true, acl, nil
 	}
 	index, err := h.loadPageIndex(ctx, wsID, viewer, pagesInFolder(f.ID))
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return len(index.rows) > 0, nil
+	return len(index.rows) > 0, acl, nil
 }
 
 // folderOnPath loads the folder named on the path; a missing one is a 404.
@@ -302,22 +333,22 @@ func (h *PageHandler) folderOnPath(w http.ResponseWriter, r *http.Request, wsID 
 // endpoints do NOT: a page owner filing their page is told who accepts it
 // (§4's sentence) rather than that the folder does not exist, and an owner
 // taking a page back has, by definition, reached it.
-func (h *PageHandler) folderOrNotFound(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer) (*pageFolderRecord, bool) {
+func (h *PageHandler) folderOrNotFound(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer) (*pageFolderRecord, []pageFolderACLRecord, bool) {
 	f, ok := h.folderOnPath(w, r, wsID)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	slug := f.Slug
-	visible, err := h.folderVisibleTo(r.Context(), wsID, viewer, f)
+	visible, acl, err := h.folderVisibleTo(r.Context(), wsID, viewer, f)
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve page folder reach", err)
-		return nil, false
+		return nil, nil, false
 	}
 	if !visible {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
-		return nil, false
+		return nil, nil, false
 	}
-	return f, true
+	return f, acl, true
 }
 
 func (h *PageHandler) folderViewer(w http.ResponseWriter, r *http.Request) (*AuthUser, string, *pageViewer, bool) {
@@ -359,10 +390,10 @@ func (h *PageHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]pageFolderWire, 0, len(index.folders))
 	for _, f := range sortedFolders(index.folders) {
-		if counts[f.ID] == 0 && !folderStanding(viewer, f) {
+		if counts[f.ID] == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 			continue
 		}
-		out = append(out, f.wire(counts[f.ID]))
+		out = append(out, f.wire(counts[f.ID], index.acl[f.ID]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"folders": out})
 }
@@ -389,11 +420,11 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page folder pages", err)
 		return
 	}
-	if len(index.rows) == 0 && !folderStanding(viewer, f) {
+	if len(index.rows) == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
 		return
 	}
-	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows)), Pages: make([]pageListWire, 0, len(index.rows))}
+	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID]), Pages: make([]pageListWire, 0, len(index.rows))}
 	for i := range index.rows {
 		out.Pages = append(out.Pages, h.pageListRow(&index.rows[i], index.folders, viewer))
 	}
@@ -466,7 +497,7 @@ func (h *PageHandler) CreateFolder(w http.ResponseWriter, r *http.Request) {
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 	if _, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO page_folders (id, workspace_id, slug, name, icon, color, owner_crew_id, grants_version, created_at, updated_at)
+		INSERT INTO page_folders (id, workspace_id, slug, name, icon, color, owner_crew_id, acl_version, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, 0, ?, ?)`,
 		id, wsID, slug, name, icon, color, crewID, now, now); err != nil {
 		if isUniqueViolation(err) {
@@ -480,24 +511,27 @@ func (h *PageHandler) CreateFolder(w http.ResponseWriter, r *http.Request) {
 		OwnerCrewID: crewID, OwnerCrewSlug: ref, OwnerCrewName: crewName, CreatedAt: now, UpdatedAt: now}
 	h.journalFolderChange(r.Context(), wsID, user, f, "created", nil)
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
-	writeJSON(w, http.StatusCreated, f.wire(0))
+	// Option (c): a new folder has no ACL entry; the owning crew and admins
+	// reach it, and "everyone in the workspace" is switched on explicitly.
+	writeJSON(w, http.StatusCreated, f.wire(0, nil))
 }
 
 // ── 4. Update — PATCH /api/v1/page-folders/{slug} ──────────────────────────
 
 // UpdateFolder changes the name, icon or colour. An empty string clears the
-// icon or the colour; an omitted field is left alone.
+// icon or the colour; an omitted field is left alone. A manager or a holder
+// of `w` (§4).
 func (h *PageHandler) UpdateFolder(w http.ResponseWriter, r *http.Request) {
 	user, wsID, viewer, ok := h.folderViewer(w, r)
 	if !ok {
 		return
 	}
-	f, ok := h.folderOrNotFound(w, r, wsID, viewer)
+	f, acl, ok := h.folderOrNotFound(w, r, wsID, viewer)
 	if !ok {
 		return
 	}
-	if !mayAdministerFolder(viewer, f) {
-		replyError(w, http.StatusForbidden, folderAdminRefusal("changing", f))
+	if !mayArrangeFolder(viewer, f, acl) {
+		replyError(w, http.StatusForbidden, folderArrangeRefusal("changing", f))
 		return
 	}
 	req, ok := h.decodeFolderWrite(w, r)
@@ -559,7 +593,7 @@ func (h *PageHandler) UpdateFolder(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "count page folder pages", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, f.wire(len(index.rows)))
+	writeJSON(w, http.StatusOK, f.wire(len(index.rows), acl))
 }
 
 // ── 5. Delete — DELETE /api/v1/page-folders/{slug} ─────────────────────────
@@ -569,10 +603,11 @@ func (h *PageHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	f, ok := h.folderOrNotFound(w, r, wsID, viewer)
+	f, _, ok := h.folderOrNotFound(w, r, wsID, viewer)
 	if !ok {
 		return
 	}
+	// A `w` holder may arrange the folder, not end it (§3/7).
 	if !mayAdministerFolder(viewer, f) {
 		replyError(w, http.StatusForbidden, folderAdminRefusal("deleting", f))
 		return
@@ -628,36 +663,40 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "page is required: the slug of the page to file here")
 		return
 	}
-	if req.PagesVersion == nil || req.GrantsVersion == nil {
+	if req.PagesVersion == nil || req.ACLVersion == nil {
 		replyError(w, http.StatusBadRequest,
-			"pages_version and grants_version are required: a move is confirmed against the page and the folder as you last read them")
+			"pages_version and acl_version are required: a move is confirmed against the page and the folder's permissions as you last read them")
 		return
 	}
 	rec, ok := h.folderPageOrNotFound(w, r, wsID, viewer, strings.TrimSpace(req.Page))
 	if !ok {
 		return
 	}
+	acl, err := h.loadFolderACL(r.Context(), f.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folder permissions", err)
+		return
+	}
 	// Both authorities, in the order a person would ask: may you move this
-	// page at all, and may you put it here.
+	// page at all, and may you put it here. `w` on the target answers only
+	// the second (§3/7): it never takes somebody else's page.
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(viewer.Role, "manage") {
 		replyError(w, http.StatusForbidden, fmt.Sprintf(
 			"moving page %q is initiated by its owner or a workspace admin; you are neither", rec.Slug))
 		return
 	}
-	if !mayAdministerFolder(viewer, f) {
-		replyError(w, http.StatusForbidden, fmt.Sprintf(
-			"folder %q accepts a page from a workspace admin, or from a MANAGER (or higher) who belongs to crew/%s, its owning crew; you may move the page, but not into this folder",
-			f.Slug, f.OwnerCrewSlug))
+	if !mayArrangeFolder(viewer, f, acl) {
+		replyError(w, http.StatusForbidden, folderAcceptRefusal(f))
 		return
 	}
-	if conflict := h.folderFenceConflict(rec, f, *req.PagesVersion, *req.GrantsVersion); conflict != "" {
-		writeFolderFenceConflict(w, rec, f, conflict)
+	if conflict := folderFenceConflict(rec, f, *req.PagesVersion, *req.ACLVersion); conflict != "" {
+		h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, conflict)
 		return
 	}
 	if rec.FolderID == f.ID {
 		// Already here. Nothing changed, so nothing bumps and nothing is
 		// journalled; the row is still the answer.
-		h.replyFolderPage(w, r, wsID, viewer, rec)
+		h.replyFolderPage(w, r, wsID, viewer, rec, false)
 		return
 	}
 	from := ""
@@ -666,34 +705,35 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 			from = prev.Slug
 		}
 	}
-	res, err := h.db.ExecContext(r.Context(), `
-		UPDATE pages SET folder_id = ?, pages_version = pages_version + 1
-		WHERE id = ? AND pages_version = ?`, f.ID, rec.ID, rec.PagesVersion)
+	// Fenced on BOTH versions in the one statement (folderMoveStatement), so
+	// an ACL change that lands between the check above and this write makes
+	// the write miss, rather than filing the page under permissions the
+	// caller never saw (§3/12).
+	res, err := h.db.ExecContext(r.Context(), folderMoveStatement, f.ID, rec.ID, rec.PagesVersion, f.ID, f.ACLVersion)
 	if err != nil {
 		replyInternalError(w, h.logger, "move page into folder", err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		// Raced by another move between the read and the write: the fence
-		// moved under us. Re-read and say so, the same way a stale request
-		// is told.
-		if fresh, err := h.loadPage(r.Context(), wsID, rec.Slug); err == nil {
-			rec = fresh
-		}
-		writeFolderFenceConflict(w, rec, f, "pages_version")
+		// Raced between the read and the write: one of the fences moved
+		// under us. Re-read and say which, the same way a stale request is
+		// told.
+		h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, "")
 		return
 	}
 	rec.FolderID = f.ID
 	rec.PagesVersion++
 	h.journalFolderMembership(r.Context(), wsID, user, rec, "moved", from, f.Slug)
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
-	h.replyFolderPage(w, r, wsID, viewer, rec)
+	h.replyFolderPage(w, r, wsID, viewer, rec, false)
 }
 
 // ── 7. Remove — DELETE /api/v1/page-folders/{slug}/pages/{page} ────────────
 
-// RemoveFolderPage takes a page out of this folder. The page's owner or an
-// admin, and nobody else — the folder is not consulted (§1/9).
+// RemoveFolderPage takes a page out of this folder. The page's owner, an
+// admin, or a holder of `w` on the folder (§3/7) — the last deliberately:
+// removing a page withdraws the access everyone else inherited from the
+// folder, and "can edit" says so where it is granted.
 func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	user, wsID, viewer, ok := h.folderViewer(w, r)
 	if !ok {
@@ -715,15 +755,20 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(viewer.Role, "manage") {
+	acl, err := h.loadFolderACL(r.Context(), f.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folder permissions", err)
+		return
+	}
+	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(viewer.Role, "manage") && !folderACLReach(acl, viewer).write {
 		replyError(w, http.StatusForbidden, fmt.Sprintf(
-			"removing page %q from its folder is the page owner's or a workspace admin's to do; the folder has no say and neither does anyone else", rec.Slug))
+			"removing page %q from its folder is the page owner's, a workspace admin's, or somebody the folder's permissions let edit it; nobody else has a say", rec.Slug))
 		return
 	}
 	if rec.PagesVersion != *req.PagesVersion || rec.FolderID != f.ID {
 		// A page that is not in this folder is a page the client's view of
 		// has gone stale, which is what the fence exists to say.
-		writeFolderFenceConflict(w, rec, f, "pages_version")
+		h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, "pages_version")
 		return
 	}
 	res, err := h.db.ExecContext(r.Context(), `
@@ -734,17 +779,17 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		if fresh, err := h.loadPage(r.Context(), wsID, rec.Slug); err == nil {
-			rec = fresh
-		}
-		writeFolderFenceConflict(w, rec, f, "pages_version")
+		h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, "pages_version")
 		return
 	}
 	rec.FolderID = ""
 	rec.PagesVersion++
 	h.journalFolderMembership(r.Context(), wsID, user, rec, "removed", f.Slug, "")
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
-	h.replyFolderPage(w, r, wsID, viewer, rec)
+	// A `w` holder who just removed a page they reached only through the
+	// folder no longer reaches it: the row comes back with an empty reach,
+	// which is the honest answer to their own action, not a 404.
+	h.replyFolderPage(w, r, wsID, viewer, rec, true)
 }
 
 // ── Shared pieces ──────────────────────────────────────────────────────────
@@ -779,44 +824,87 @@ func (h *PageHandler) folderPageOrNotFound(w http.ResponseWriter, r *http.Reques
 }
 
 // folderFenceConflict names the first stale fence, or "" when both hold.
-func (h *PageHandler) folderFenceConflict(rec *pageRecord, f *pageFolderRecord, pagesVersion, grantsVersion int64) string {
+func folderFenceConflict(rec *pageRecord, f *pageFolderRecord, pagesVersion, aclVersion int64) string {
 	if rec.PagesVersion != pagesVersion {
 		return "pages_version"
 	}
-	if f.GrantsVersion != grantsVersion {
-		return "grants_version"
+	if f.ACLVersion != aclVersion {
+		return "acl_version"
 	}
 	return ""
 }
 
 // writeFolderFenceConflict is the 409 a stale fence gets: which fence, and
 // the CURRENT pair, so the client re-reads and asks again rather than
-// retrying blind.
-func writeFolderFenceConflict(w http.ResponseWriter, rec *pageRecord, f *pageFolderRecord, conflict string) {
-	what := "the page's folder membership"
-	if conflict == "grants_version" {
-		what = "the folder's grants"
+// retrying blind. With conflict "" (a fenced UPDATE that missed) both are
+// re-read and the first stale one is named; rec may be nil when the folder's
+// fence alone is in question.
+//
+// The target's ACL rides along ONLY for a caller who may read it (§3/8,
+// §3/10). Everybody else gets the versions and a sentence: the 409 must not
+// be the way a page owner learns who a folder is shared with.
+func (h *PageHandler) writeFolderFenceConflict(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer,
+	rec *pageRecord, f *pageFolderRecord, acl []pageFolderACLRecord, conflict string) {
+	if fresh, err := h.loadFolder(r.Context(), wsID, f.Slug); err == nil {
+		if fresh.ACLVersion != f.ACLVersion {
+			// The ACL moved under us: what we hold is stale, so re-read it.
+			if entries, err := h.loadFolderACL(r.Context(), fresh.ID); err == nil {
+				acl = entries
+			}
+		}
+		f = fresh
 	}
-	writeJSON(w, http.StatusConflict, map[string]any{
-		"error":          fmt.Sprintf("%s changed since you read it; re-read and confirm again (%s is stale)", what, conflict),
-		"conflict":       conflict,
-		"pages_version":  rec.PagesVersion,
-		"grants_version": f.GrantsVersion,
-	})
+	var pagesVersion int64
+	if rec != nil {
+		if fresh, err := h.loadPage(r.Context(), wsID, rec.Slug); err == nil {
+			if conflict == "" && fresh.PagesVersion != rec.PagesVersion {
+				conflict = "pages_version"
+			}
+			rec = fresh
+		}
+		pagesVersion = rec.PagesVersion
+	}
+	if conflict == "" {
+		conflict = "acl_version"
+	}
+	body := map[string]any{
+		"conflict":    conflict,
+		"acl_version": f.ACLVersion,
+	}
+	if rec != nil {
+		body["page"] = rec.Slug
+		body["pages_version"] = pagesVersion
+	}
+	switch {
+	case conflict == "acl_version" && mayAdministerFolder(viewer, f):
+		body["error"] = fmt.Sprintf("the permissions of folder %q changed since you read them; re-read and confirm again (acl_version is stale)", f.Slug)
+		body["acl"] = h.folderACLDocument(r.Context(), wsID, f, acl, nil).ACL
+	case conflict == "acl_version":
+		body["error"] = fmt.Sprintf("the permissions of folder %q changed since you read them; look at the preview again and confirm (acl_version is stale)", f.Slug)
+	default:
+		body["error"] = "the page's folder membership changed since you read it; re-read and confirm again (pages_version is stale)"
+	}
+	writeJSON(w, http.StatusConflict, body)
 }
 
 // replyFolderPage answers a move or removal with the page's index row, as
-// the listing would now render it for this caller.
-func (h *PageHandler) replyFolderPage(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer, rec *pageRecord) {
-	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pageOnly(rec.ID))
+// the listing would now render it for this caller. evenUnreached keeps the
+// row when the caller's own action took their path away (a removal by a `w`
+// holder); a move never narrows the mover's own reach, so it passes false.
+func (h *PageHandler) replyFolderPage(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer, rec *pageRecord, evenUnreached bool) {
+	scope := pageOnly(rec.ID)
+	if evenUnreached {
+		scope = pageOnlyEvenUnreached(rec.ID)
+	}
+	index, err := h.loadPageIndex(r.Context(), wsID, viewer, scope)
 	if err != nil {
 		replyInternalError(w, h.logger, "render moved page", err)
 		return
 	}
 	if len(index.rows) == 0 {
-		// Reach was checked before the write and a move changes no access,
-		// so this is unreachable in practice; the 404 keeps the invariant
-		// rather than inventing a row.
+		// Reach was checked before the write and a move never narrows the
+		// mover's reach, so this is unreachable in practice; the 404 keeps
+		// the invariant rather than inventing a row.
 		replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", rec.Slug))
 		return
 	}

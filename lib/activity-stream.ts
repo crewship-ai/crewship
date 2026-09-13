@@ -251,6 +251,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "page.grant_removed",
       "page.folder_changed",
       "page.folder_membership_changed",
+      "page.folder_acl_changed",
       "page.panel.stale",
       "page.panel.recovered",
       "page.wake.fired",

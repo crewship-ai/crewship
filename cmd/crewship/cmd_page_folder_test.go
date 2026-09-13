@@ -51,7 +51,7 @@ func runPageFolderCLI(t *testing.T, args ...string) (string, error) {
 func pageFolderStubFolder(slug string, grants int64, count int) []byte {
 	return []byte(`{"id":"fld_1","slug":"` + slug + `","name":"Ops board","icon":"rocket","color":"amber",
 		"owner":"crew/ops","owner_crew_name":"Operations","page_count":` + strconv.Itoa(count) + `,
-		"grants_version":` + strconv.FormatInt(grants, 10) + `,"created_at":"2026-09-13T06:00:00Z","updated_at":"2026-09-13T06:00:00Z","pages":[]}`)
+		"shared":"none","acl_version":` + strconv.FormatInt(grants, 10) + `,"created_at":"2026-09-13T06:00:00Z","updated_at":"2026-09-13T06:00:00Z","pages":[]}`)
 }
 
 func TestPageFolderCLI_CreateSendsSlugNameOwnerIconAndColor(t *testing.T) {
@@ -107,7 +107,7 @@ func TestPageFolderCLI_AddReadsBothFencesThenWrites(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: %v\n%s", args, err, out)
 		}
-		if body["page"] != "fleet-201" || body["pages_version"] != float64(3) || body["grants_version"] != float64(2) {
+		if body["page"] != "fleet-201" || body["pages_version"] != float64(3) || body["acl_version"] != float64(2) {
 			t.Errorf("%v sent %v, want page fleet-201 with the fences it read (3, 2)", args, body)
 		}
 		calls := stub.Calls()
@@ -228,13 +228,13 @@ func TestPageFolderCLI_ConflictRendersTheCurrentPair(t *testing.T) {
 		return http.StatusOK, pageFolderStubFolder("ops-board", 2, 0), "application/json"
 	})
 	stub.OnPost("/api/v1/page-folders/ops-board/pages", func(_ *http.Request, _ []byte) (int, []byte, string) {
-		return http.StatusConflict, []byte(`{"error":"the page's folder membership changed since you read it","conflict":"pages_version","pages_version":4,"grants_version":2}`), "application/json"
+		return http.StatusConflict, []byte(`{"error":"the page's folder membership changed since you read it","conflict":"pages_version","pages_version":4,"acl_version":2}`), "application/json"
 	})
 	_, err := runPageFolderCLI(t, "page", "move", "fleet-201", "--folder", "ops-board")
 	if err == nil {
 		t.Fatal("a 409 did not surface as an error")
 	}
-	for _, want := range []string{"changed since you read it", "pages_version 4", "grants_version 2", "re-run"} {
+	for _, want := range []string{"changed since you read it", "pages_version 4", "acl_version 2", "re-run"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("conflict error lacks %q: %v", want, err)
 		}

@@ -184,16 +184,23 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 
 	if !validPageSubjectType(req.SubjectType) {
 		replyError(w, http.StatusBadRequest,
-			`subject_type must be "user", "crew" or "agent" (§7.1b: three subject kinds, and an agent is named, never implied)`)
+			`subject_type must be "user", "crew", "agent" or "workspace" (§7.1b: an agent is named, never implied; "workspace" is everyone here)`)
 		return
 	}
-	if req.Subject == "" {
+	if req.Subject == "" && req.SubjectType != pageSubjectWorkspace {
 		replyError(w, http.StatusBadRequest, "subject is required: the user, crew or agent the grant is for")
 		return
 	}
 	if !validPageGrantLevel(req.Level) {
 		replyError(w, http.StatusBadRequest,
 			`level must be "read", "produce" or "write" (§7.1b: three verbs — see the page, push into named panels, edit the spec)`)
+		return
+	}
+	// The workspace subject reads or writes, never produces (#2533 §3/14):
+	// produce names a producer, and "everyone in the workspace" is not one.
+	if req.SubjectType == pageSubjectWorkspace && !workspaceSubjectLevelAllowed(req.Level) {
+		replyError(w, http.StatusBadRequest,
+			`a grant to everyone in the workspace carries "read" or "write", never "produce": a producer is one named subject, and everyone is not one`)
 		return
 	}
 	panels := trimPageGrantPanels(req.Panels)
@@ -300,10 +307,10 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 
 	if !validPageSubjectType(subjectType) {
 		replyError(w, http.StatusBadRequest,
-			`subject_type must be "user", "crew" or "agent"`)
+			`subject_type must be "user", "crew", "agent" or "workspace"`)
 		return
 	}
-	if subject == "" {
+	if subject == "" && subjectType != pageSubjectWorkspace {
 		replyError(w, http.StatusBadRequest, "subject is required: the user, crew or agent to revoke")
 		return
 	}
@@ -351,7 +358,7 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		if g.SubjectType != subjectType {
 			continue
 		}
-		if !grantRowMatchesSubject(g, subjectID, subject) {
+		if g.SubjectType != pageSubjectWorkspace && !grantRowMatchesSubject(g, subjectID, subject) {
 			continue
 		}
 		if level != "" && g.Level != level {
@@ -481,6 +488,10 @@ func (h *PageHandler) pagePanelIDs(ctx context.Context, wsID string, rec *pageRe
 func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request, wsID, subjectType, ref string) (id, label string, ok bool) {
 	var err error
 	switch subjectType {
+	case pageSubjectWorkspace:
+		// Everyone in this workspace: no row to resolve, an empty id by
+		// definition, and the label is the word itself.
+		return "", pageSubjectWorkspace, true
 	case pageSubjectUser:
 		err = h.db.QueryRowContext(r.Context(), `
 			SELECT u.id, u.email
@@ -511,7 +522,7 @@ func (h *PageHandler) resolveGrantSubject(w http.ResponseWriter, r *http.Request
 			return "", "", false
 		}
 	default:
-		replyError(w, http.StatusBadRequest, `subject_type must be "user", "crew" or "agent"`)
+		replyError(w, http.StatusBadRequest, `subject_type must be "user", "crew", "agent" or "workspace"`)
 		return "", "", false
 	}
 	if err != nil {
@@ -529,6 +540,8 @@ func (h *PageHandler) grantSubjectLabel(ctx context.Context, wsID, subjectType, 
 	var label string
 	var err error
 	switch subjectType {
+	case pageSubjectWorkspace:
+		return pageSubjectWorkspace
 	case pageSubjectUser:
 		err = h.db.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ?`, subjectID).Scan(&label)
 	case pageSubjectCrew:
@@ -624,6 +637,8 @@ func (h *PageHandler) journalGrantChange(ctx context.Context, entryType journal.
 // revoking one needs the fallback.
 func (h *PageHandler) resolveGrantSubjectQuietly(ctx context.Context, wsID, subjectType, ref string) (id, label string, err error) {
 	switch subjectType {
+	case pageSubjectWorkspace:
+		return "", pageSubjectWorkspace, nil
 	case pageSubjectUser:
 		// lower(...) on both sides, matching the ISSUING path exactly. users.email
 		// carries no COLLATE NOCASE, so a grant issued as `Alice@Example.com`

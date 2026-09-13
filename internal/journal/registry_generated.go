@@ -102,8 +102,9 @@ var AllEntryTypes = []EntryType{
 	EntryNotificationFailed,
 	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:43:7
 	EntryPageActionDispatched,
-	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:67:2
-	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:71:2
+	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:83:7
+	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:75:2
+	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:79:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:793:2

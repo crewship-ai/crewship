@@ -161,7 +161,19 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subjects := h.pageAccessSubjects(rec, ws, panels, grants, viewer)
+	// Two more statements, constant in the member count: the page's folder
+	// and that folder's permissions are the `folder:<slug>` arm (#2533).
+	folders, err := h.loadFoldersIn(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folders", err)
+		return
+	}
+	folderACL, err := h.loadFolderACLIn(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folder permissions", err)
+		return
+	}
+	subjects := h.pageAccessSubjects(rec, ws, panels, grants, folders, folderACL, viewer)
 
 	// Keyset over the fixed order: the cursor names the last row sent, and
 	// the next call resumes after it. Recomputing the whole set on each page
@@ -257,6 +269,18 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page grants", err)
 		return
 	}
+	// Folders and their ACL, once for the workspace: the `folder:<slug>` arm
+	// of pageReach (#2533) is a path like any other and has to appear here.
+	folders, err := h.loadFoldersIn(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folders", err)
+		return
+	}
+	folderACL, err := h.loadFolderACLIn(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load folder permissions", err)
+		return
+	}
 
 	// The subject's standing, per kind: a user's is the same viewer the index
 	// builds for them (role from the membership, crews from crew_members); a
@@ -283,7 +307,8 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 		var paths []string
 		switch subjectType {
 		case pageSubjectUser:
-			paths = h.pageAccessUserPaths(rec, ownerCrewSlug, panelsByPage[rec.ID], viewer, grantsByPage[rec.ID])
+			paths = h.pageAccessUserPaths(rec, ownerCrewSlug, panelsByPage[rec.ID], viewer,
+				folderReachSlug(rec, folders, folderACL, viewer), grantsByPage[rec.ID])
 		case pageSubjectCrew:
 			paths = pageAccessCrewPaths(rec, subjectID, label, panelsByPage[rec.ID], grantsByPage[rec.ID])
 		default:
@@ -329,8 +354,8 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 // disagree about ownership, role or crews, and the live grants that name the
 // user or one of their crews follow in the level vocabulary's order.
 func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord,
-	viewer *pageViewer, grants []pageGrantRecord) []string {
-	paths := h.pageReach(rec, ownerCrewSlug, panels, viewer, false)
+	viewer *pageViewer, folderSlug string, grants []pageGrantRecord) []string {
+	paths := h.pageReach(rec, ownerCrewSlug, panels, viewer, folderSlug, false)
 	return append(paths, pageAccessGrantPaths(grants, pageViewerGrantMatch(viewer))...)
 }
 
@@ -484,7 +509,8 @@ func (h *PageHandler) accessRows(ctx context.Context, query string, args []any, 
 // then the one anonymous row for the crews the caller cannot see. It costs no
 // statement.
 func (h *PageHandler) pageAccessSubjects(rec *pageRecord, ws *pageAccessWorkspace, panels []*panelRecord,
-	grants []pageGrantRecord, caller *pageViewer) []pageAccessSubjectWire {
+	grants []pageGrantRecord, folders map[string]*pageFolderRecord, folderACL map[string][]pageFolderACLRecord,
+	caller *pageViewer) []pageAccessSubjectWire {
 	ownerCrewSlug := ""
 	if rec.OwnerCrewID != "" {
 		ownerCrewSlug = rec.OwnerCrewID
@@ -523,7 +549,8 @@ func (h *PageHandler) pageAccessSubjects(rec *pageRecord, ws *pageAccessWorkspac
 		for _, crewID := range ws.CrewsOf[m.ID] {
 			viewer.Crews[crewID] = true
 		}
-		paths := withhold(h.pageAccessUserPaths(rec, ownerCrewSlug, panels, viewer, grants))
+		paths := withhold(h.pageAccessUserPaths(rec, ownerCrewSlug, panels, viewer,
+			folderReachSlug(rec, folders, folderACL, viewer), grants))
 		if len(paths) == 0 {
 			continue
 		}
