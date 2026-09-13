@@ -648,8 +648,21 @@ deploy_staleness() {
       return 0
     fi
   fi
-  if [[ -f "$binary" ]]; then
-    binary_epoch=$(stat -c %Y "$binary" 2>/dev/null || echo 0)
+  # `binary` may be a /proc/<pid>/exe link. Follow it with stat -L so the
+  # mtime is the executing inode's, and read the link's text: once the file
+  # on disk has been replaced the kernel appends " (deleted)", which means the
+  # process is running code that no longer exists on disk — stale by
+  # definition, whatever the timestamps say.
+  # -L before -e: a /proc exe link to a replaced file is a dangling symlink,
+  # and -e alone would step over exactly the case that matters.
+  if [[ -L "$binary" || -e "$binary" ]]; then
+    local target
+    target=$(readlink "$binary" 2>/dev/null || echo "$binary")
+    if [[ "$target" == *" (deleted)" ]]; then
+      echo "the running binary was replaced on disk after it started (${target% (deleted)})"
+      return 0
+    fi
+    binary_epoch=$(stat -L -c %Y "$binary" 2>/dev/null || echo 0)
     commit_epoch=$(git -C "$project" log -1 --format=%ct 2>/dev/null || echo 0)
     if (( commit_epoch > binary_epoch )); then
       echo "the running binary was built before HEAD was committed ($(date -d "@$commit_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$commit_epoch"))"
@@ -686,10 +699,15 @@ cmd_status() {
     # The binary to judge is whatever is actually listening on the Go port,
     # not the one this script would build: a slot whose unit was overridden
     # to run another launcher (dev3's pages-demo.conf) still answers here.
+    # Handed as the /proc link itself, not its readlink: once the file on
+    # disk has been replaced the process keeps running the OLD inode and
+    # readlink answers "<path> (deleted)", which no `-f` test will find — the
+    # exact case a STALE line exists for. stat -L on the link reaches the
+    # inode that is actually executing (validation 2026-09-13).
     local stale running_bin="/tmp/crewship${S}-dev" listening_pid=""
     listening_pid=$(ss -ltnpH "sport = :$GO_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
     if [[ -n "$listening_pid" ]] && [[ -e "/proc/$listening_pid/exe" ]]; then
-      running_bin=$(readlink -f "/proc/$listening_pid/exe" 2>/dev/null || echo "$running_bin")
+      running_bin="/proc/$listening_pid/exe"
     fi
     if stale=$(deploy_staleness "$PROJECT_DIR" "$running_bin"); then :; fi
     if [[ -n "$stale" ]]; then

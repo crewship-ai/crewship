@@ -187,6 +187,22 @@ touch -d '+1 minute' "$STALE_DIR/bin"
 git -C "$STALE_DIR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
 out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "$stale_snippet" | bash 2>/dev/null)
 if [[ "$out" == *"web/out/ was built from ${HEAD1:0:8}"* ]]; then pass "names the HEAD web/out was built from when the repo moved on"; else fail "stale marker not reported: '$out'"; fi
+# Validation 2026-09-13: after the file on disk is replaced the process keeps
+# running the old inode; /proc/<pid>/exe then reads "<path> (deleted)" and a
+# `-f` test on that string finds nothing. The check has to look at the link.
+printf '%s\n' "$(git -C "$STALE_DIR" rev-parse HEAD)" > "$STALE_DIR/.web-build-marker"
+# rm first: the earlier steps left a non-executable stand-in at this path,
+# and cp onto it would keep that mode and the exec would fail silently.
+rm -f "$STALE_DIR/bin"
+cp "$(command -v sleep)" "$STALE_DIR/bin"
+"$STALE_DIR/bin" 30 &
+RUNNER=$!
+sleep 0.2
+cp "$(command -v sleep)" "$STALE_DIR/bin.new" && mv -f "$STALE_DIR/bin.new" "$STALE_DIR/bin"
+out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "deploy_staleness '$STALE_DIR' '/proc/$RUNNER/exe'" | bash 2>/dev/null)
+if [[ "$out" == *"replaced on disk"* ]]; then pass "names a running binary whose file was replaced (proc exe reads deleted)"; else fail "replaced binary not reported: '$out'"; fi
+kill "$RUNNER" 2>/dev/null || true
+wait "$RUNNER" 2>/dev/null || true
 rm -rf "$STALE_DIR"
 
 # Guard the whole class of bug, not just the one instance of it.
