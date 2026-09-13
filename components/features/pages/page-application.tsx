@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react"
 import type { WirePage } from "@/hooks/use-pages"
 import { usePageApplication, type PageApplication } from "@/hooks/use-page-application"
 import { PagePreviewFrame } from "./page-preview"
@@ -55,11 +55,17 @@ export function PageApplicationView({ workspaceId, slug, page, fallback, panels 
   // Reported from an effect so the header's switch can never disagree with
   // what this view is rendering, and cleared on unmount so leaving the Page
   // does not leave a switch behind for a Page that is no longer on screen.
+  // A layout effect, not a passive one: the header's switch is drawn from
+  // this value by the parent, and a passive effect would let the browser
+  // paint one frame with the frame gone and the switch still offered (or the
+  // reverse) before the parent heard about it. useLayoutEffect runs in the
+  // same commit, before paint, so the switch and the surface it controls
+  // never disagree on screen (validation 2026-09-13).
   const reportable = browserSupported && !versionMismatch && available
-  useEffect(() => {
+  useLayoutEffect(() => {
     onAvailableChange?.(reportable)
   }, [onAvailableChange, reportable])
-  useEffect(() => () => onAvailableChange?.(false), [onAvailableChange])
+  useLayoutEffect(() => () => onAvailableChange?.(false), [onAvailableChange])
   if (!browserSupported) return <>{hasApplication && <p role="status" className="px-4 text-sm">{pageBrowserRequirement}</p>}{fallback}</>
   if (versionMismatch) return <><p role="status" className="px-4 text-sm">Application versions are not synchronized. Showing panels until they agree.</p>{fallback}</>
   if (hasApplication && !query.isError && (query.isPending || (query.data?.publication && !opened))) return <div role="status" className="flex min-h-0 flex-1 items-center justify-center text-sm" style={{ backgroundColor: theme.background, color: theme.muted }}>Loading application…</div>
