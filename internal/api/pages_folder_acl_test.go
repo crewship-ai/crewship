@@ -172,7 +172,7 @@ func TestPageFolderACL_WriteHolderArrangesAndEditsButNeverMovesDeletesOrShares(t
 	})
 	t.Run("a `w` holder renames the folder (A2)", func(t *testing.T) {
 		rr := f.call(t, "PATCH", "/api/v1/page-folders/engine-ops", "frank", "MEMBER", `{"name":"Frank's board","icon":"chart"}`)
-		expectStatus(t, rr, http.StatusOK, `"name":"Frank's board"`, `"shared":"crew"`)
+		expectStatus(t, rr, http.StatusOK, `"name":"Frank's board"`, `"shared":"people_and_crews"`)
 		rr = f.call(t, "PATCH", "/api/v1/page-folders/engine-ops", "mel", "MEMBER", `{"name":"Mel's"}`)
 		expectStatus(t, rr, http.StatusForbidden, "let edit it")
 	})
@@ -616,7 +616,7 @@ func TestPageAccessMe_IsTheCallersOwnPathsAndNothingElse(t *testing.T) {
 				got = append(got, p.(string))
 			}
 			if !reflect.DeepEqual(got, tc.paths) || doc["subject_id"] != tc.user || doc["label"] != tc.user+"@example.com" ||
-				doc["folder"] != "engine-ops" || doc["shared"] != "crew" {
+				doc["folder"] != "engine-ops" || doc["shared"] != "people" {
 				t.Errorf("access/me = %v, want paths %v for %s", doc, tc.paths, tc.user)
 			}
 			for key := range doc {

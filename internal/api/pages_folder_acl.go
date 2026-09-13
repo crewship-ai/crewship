@@ -50,7 +50,7 @@ package api
 //	                         says so
 //	edit a page inside       as before, plus a `w` holder (with #2502)
 //	see the sharing label    whoever sees the folder: `shared` is
-//	                         none|crew|workspace and carries no names
+//	                         none|people|crews|people_and_crews|workspace and carries no names
 //
 // Everyone who is not a manager sees only that label and their own effective
 // paths (GET /pages/{slug}/access/me). Not even a 409 on a move returns the
@@ -83,12 +83,18 @@ import (
 const entryPageFolderACLChanged journal.EntryType = "page.folder_acl_changed"
 
 // The sharing labels a folder carries for callers who may not read its ACL
-// (§3/10). "crew" means "shared with named crews or people" — the label says
+// (§3/10). "people", "crews" and "people_and_crews" tell the kinds apart — the label says
 // that somebody outside the owning crew reaches the folder, not who.
 const (
-	pageFolderSharedNone      = "none"
-	pageFolderSharedCrew      = "crew"
-	pageFolderSharedWorkspace = "workspace"
+	pageFolderSharedNone = "none"
+	// Named subjects, told apart: a folder shared with one person is not
+	// "shared with a crew", and a reader deciding whether to file a page
+	// there needs the true audience (audit 2026-09-13, F1). Names stay with
+	// the managers; the label only says which kinds of subject there are.
+	pageFolderSharedPeople         = "people"
+	pageFolderSharedCrews          = "crews"
+	pageFolderSharedPeopleAndCrews = "people_and_crews"
+	pageFolderSharedWorkspace      = "workspace"
 )
 
 // ── Records and wire ───────────────────────────────────────────────────────
@@ -205,7 +211,13 @@ type folderACLVerdict struct {
 // subject kind here (the CHECK), and "everyone in the workspace" is people.
 func folderACLReach(entries []pageFolderACLRecord, viewer *pageViewer) folderACLVerdict {
 	var v folderACLVerdict
-	if viewer == nil {
+	// A folder's ACL is for people (§3/1 of the folder-permissions design):
+	// an agent reaches a page only through a grant that names it. The
+	// agent's viewer carries its crew so that canSeePanel can answer for the
+	// crew's own panels, and without this guard a `crew:` entry on a folder
+	// would hand that same container the folder's read and write (audit
+	// 2026-09-13, F3). Human standing is a workspace role; an agent has none.
+	if viewer == nil || !viewer.isWorkspaceMember() {
 		return v
 	}
 	for _, e := range entries {
@@ -258,14 +270,26 @@ func folderReachSlug(rec *pageRecord, folders map[string]*pageFolderRecord, acl 
 
 // folderSharedLabel is the no-names rendering of an ACL (§3/10).
 func folderSharedLabel(entries []pageFolderACLRecord) string {
-	label := pageFolderSharedNone
+	people, crews := false, false
 	for _, e := range entries {
-		if e.SubjectType == pageSubjectWorkspace {
+		switch e.SubjectType {
+		case pageSubjectWorkspace:
 			return pageFolderSharedWorkspace
+		case pageSubjectUser:
+			people = true
+		case pageSubjectCrew:
+			crews = true
 		}
-		label = pageFolderSharedCrew
 	}
-	return label
+	switch {
+	case people && crews:
+		return pageFolderSharedPeopleAndCrews
+	case people:
+		return pageFolderSharedPeople
+	case crews:
+		return pageFolderSharedCrews
+	}
+	return pageFolderSharedNone
 }
 
 // mayArrangeFolder answers rename/icon/colour, removal of a page, and the
