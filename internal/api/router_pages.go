@@ -90,6 +90,13 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/grants", authed(wsCtx(http.HandlerFunc(p.ListGrants))))
+	// Effective access (pages_access.go) — read-only renderings of the
+	// model above. The literal /pages/access wins over /pages/{slug} in the
+	// mux by specificity, so a page cannot be slugged "access".
+	// openapi: query limit:integer cursor:string; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
+	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)

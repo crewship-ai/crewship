@@ -44,6 +44,8 @@ validation.
 | GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
 | PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
 | DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
+| GET | [`/api/v1/pages/{slug}/access`](#who-reaches-a-page) | Who reaches a page, and by which paths |
+| GET | [`/api/v1/pages/access`](#what-a-subject-reaches) | Which pages one user, crew or agent reaches |
 | GET | [`/api/v1/pages/{slug}/panels/{panelId}/actions`](#list-a-panels-actions) | The actions a panel declares |
 | POST | [`/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`](#dispatch-an-action) | Dispatch a declared action |
 | GET | [`/api/v1/pages/{slug}/versions`](#list-versions) | The page's structural history |
@@ -518,6 +520,121 @@ a success it did not perform.
 | 401 | No session or token. |
 | 403 | Not the owner and not an admin. |
 | 404 | No such page. |
+
+---
+
+## Who reaches a page
+
+```
+GET /api/v1/pages/{slug}/access
+```
+
+**Path parameters:** `slug`. **Query parameters:** `workspace_id` when the
+caller's context supplies none; `limit` (default 100, at most 1000); `cursor`
+from a previous page. No request body.
+
+**Authentication:** session cookie or CLI token. The page owner or a workspace
+ADMIN/OWNER — the same right as [List grants](#list-grants), because this
+answer contains everything the ACL does and more.
+
+**Response 200:**
+
+```json
+{
+  "page": "fleet-201",
+  "subjects": [
+    {"subject_type": "user", "subject_id": "usr_01H...", "label": "ada@example.com", "paths": ["owner"]},
+    {"subject_type": "user", "subject_id": "usr_02H...", "label": "bob@example.com", "paths": ["panel_crew:ops", "grant:page:read"]},
+    {"subject_type": "crew", "subject_id": "crew_01H...", "label": "ops", "paths": ["panel_crew:ops"]},
+    {"subject_type": "agent", "subject_id": "agt_01H...", "label": "watcher", "paths": ["grant:page:produce"]},
+    {"subject_type": "crew", "subject_id": "withheld", "paths": ["panel_crew:withheld"]}
+  ],
+  "next_cursor": "djE6..."
+}
+```
+
+Every subject that reaches the page, with the paths that carry it, computed
+on the server from the same facts it enforces — the workspace roles, the
+owner, the crews that own panels, and the live grants. It is a report of
+today's model, not a new one: nothing here decides anything, and an inert
+grant is not a path.
+
+`paths` uses the same vocabulary as the list's `reach`, with the grant arm
+spelled out per level:
+
+| Value | Meaning |
+|---|---|
+| `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
+| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
+| `crew:<slug>` | A member of the crew that owns the page. |
+| `panel_crew:<slug>` | A member of a crew that owns a panel — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
+| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
+| `panel_crew:withheld` | A crew the caller cannot see owns a panel. See below. |
+
+Rows are ordered users by email, then crews by slug, then agents by slug,
+then the withheld row; `next_cursor` is present when more follow and is
+passed back as `cursor`.
+
+**What is withheld, and why.** A page owner is not necessarily a member of
+every crew that owns a panel on their page, and §7.1 rule 2 keeps such a
+panel — and the crew behind it — sealed from them. This listing holds to the
+same line: every path through a crew the caller cannot see is collected on
+ONE anonymous row (`subject_id` is `withheld`, there is no `label`) and
+appears on no named row. Attaching `panel_crew:withheld` to a named user or
+crew would say which crew owns the hidden panel, one intersection at a time.
+An administrator sees every crew named.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | `limit` is not a positive integer, or `cursor` is not one this endpoint issued. |
+| 401 | No session or token. |
+| 403 | Not the owner and not an admin. A grant of any level is not enough. |
+| 404 | No such page. |
+
+---
+
+## What a subject reaches
+
+```
+GET /api/v1/pages/access
+```
+
+**Query parameters:** `subject` (required) — `user:<email or id>`,
+`crew:<slug>` or `agent:<slug>`; or `subject_type` (`user`, `crew`, `agent`)
+with a bare `subject`. `workspace_id` when the caller's context supplies none;
+`limit` and `cursor` as above. No request body.
+
+**Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER may
+ask about anyone; any member may ask about themselves and nobody else.
+
+**Response 200:**
+
+```json
+{
+  "subject": {"subject_type": "user", "subject_id": "usr_02H...", "label": "bob@example.com"},
+  "pages": [
+    {"slug": "fleet-201", "name": "Flotila .201", "paths": ["panel_crew:ops", "grant:page:read"]},
+    {"slug": "ops-board", "name": "Ops board", "paths": ["crew:ops"]}
+  ]
+}
+```
+
+Pages the subject does not reach are absent, not listed with an empty set —
+the same posture the list takes. Rows are ordered by slug; `next_cursor` is
+present when more follow.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Listed. |
+| 400 | No `subject`, or a kind that is not `user`, `crew` or `agent`. |
+| 401 | No session or token. |
+| 403 | A member asking about anyone but themselves — including an email that resolves to nobody, so the refusal cannot be used to test membership. |
+| 404 | An administrator asked about a subject that does not exist in this workspace. |
 
 ---
 
