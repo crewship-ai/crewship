@@ -779,8 +779,30 @@ func (h *WebhookHandler) runWebhookAgent(
 	payload webhook.WebhookPayload,
 	releaseSlot func(),
 	started func(),
-	located ...func(orchestrator.RunLocation),
+	launch ...webhookLaunchGate,
 ) error {
+	// gate asks the attempt's launch state before each step that leads to an
+	// agent. A stop recorded before the step is taken means the step is
+	// skipped and the run ends as "stopped before the agent existed" — a
+	// before-agent failure the dispatcher can confirm as cancelled (when a
+	// user asked) or retry (after a shutdown), never reconciliation for an
+	// agent that never was.
+	gate := func(step string) error {
+		for _, g := range launch {
+			if g != nil {
+				if err := g.Enter(step); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := gate("crew container start"); err != nil {
+		if releaseSlot != nil {
+			releaseSlot()
+		}
+		return err
+	}
 	// 2. Create a chat session for THIS DELIVERY.
 	//
 	// Sharing a chat id across deliveries would mix their conversation streams.
@@ -812,6 +834,12 @@ func (h *WebhookHandler) runWebhookAgent(
 		if releaseSlot != nil {
 			releaseSlot()
 		}
+		if stopErr := gate("run record"); stopErr != nil {
+			// The start failed because the stop cancelled its context. Say
+			// which, so the reason on the ledger is the stop and not a
+			// container fault.
+			return stopErr
+		}
 		// The delivery and its work item are already committed, so nothing is
 		// lost here and nothing is deleted: the ledger never forgets a delivery
 		// on failure (that is the whole difference from the reservation this
@@ -833,6 +861,17 @@ func (h *WebhookHandler) runWebhookAgent(
 		// name, so a retry converges on one container rather than making a
 		// second.
 		return fmt.Errorf("%w: crew runtime did not start: %w", errWebhookBeforeAgent, err)
+	}
+
+	// The container is up. A stop that arrived while it was starting closes
+	// the gate HERE, before a run record exists and before any agent does:
+	// the previous shape had no such check, so a cancel confirmed during a
+	// cold start was followed by a launch nobody could stop.
+	if err := gate("run record"); err != nil {
+		if releaseSlot != nil {
+			releaseSlot()
+		}
+		return err
 	}
 
 	// 4. Create run record. Reuses the runID minted (and idempotency-
@@ -982,10 +1021,21 @@ func (h *WebhookHandler) runWebhookAgent(
 			// Defer release so the guard is freed even if RunAgent
 			// panics. Matches assignments.go and query_handler.go.
 			defer guardRelease()
-			for _, observe := range located {
-				observe(orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID})
+			// The launch: the identity is recorded under the gate's lock, and
+			// a stop that beat us here refuses it. After this line Stop and
+			// Alive go to the provider's probes at this location.
+			location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
+			for _, g := range launch {
+				if g != nil {
+					err = g.Launch(location)
+					if err != nil {
+						break
+					}
+				}
 			}
-			err = h.orch.RunAgent(runCtx, req, handler)
+			if err == nil {
+				err = h.orch.RunAgent(runCtx, req, handler)
+			}
 		}
 
 		exitCode := 0

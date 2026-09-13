@@ -1267,3 +1267,31 @@ executor's 24-hour key aged the same way); a migrated legacy-shaped receipt
 still deduplicates and conflicts; both legacy signature profiles are recorded
 and a fresh-timestamp redelivery is still a duplicate; the sweeper LOOP sweeps
 on start; and a source guard pins that `cmd_start` runs it.
+## 2026-09-13 — cancel during container start (fix/cancel-during-container-start)
+
+Branch off `feat/durable-work-parallelism`, independent of the two routine PRs.
+The webhook runtime kept a launch location only from the moment before
+`RunAgent`, so a cancel during `crewstart` (the longest part of a cold start)
+had no runtime to probe: `Stop`/`Alive` errored, the grace period expired and
+the work was parked — and a container start that completed afterwards launched
+the agent behind the parked cancel. The runtime now holds a per-attempt launch
+state from `Run`'s entry: `Stop` before launch records the stop under the
+launch lock, cancels the preparation's context and answers "stopped" as a fact;
+`runWebhookAgent` asks the gate before the container start, before the run
+record and at launch, and refuses with a before-agent error once a stop was
+recorded. Settle then reads the user's cancel request → `cancelled`; without
+one (shutdown) Classify says retryable → `retry_wait`. After launch nothing
+changes: the provider's probe at the recorded location decides, and the run's
+context is deliberately not cancelled there (a cut stream would return early
+while the CLI carried on).
+
+Deterministic tests over the real HTTP cancel route and the production
+orchestrator's probes with a fake container transport: the container start
+blocks until the run's context is cancelled and then completes anyway (gate
+must refuse) or aborts (shutdown). Both are red on the previous runtime
+(overlay: `needs_reconciliation` in both cases) and green on this branch.
+Residual, stated: between `Launch` recording the location and the tmux session
+existing, a stop's kill probe can answer ABSENT and the turn then runs to
+completion; settle's probe finds it gone and records `cancelled` for work that
+in fact completed. That window is inside `orchestrator.RunAgent`'s preflight
+and is not closed here.
