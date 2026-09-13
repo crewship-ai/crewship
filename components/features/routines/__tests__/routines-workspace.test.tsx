@@ -157,6 +157,23 @@ describe("<RoutinesWorkspace> — the one list", () => {
     expect(screen.queryByRole("button", { name: "Never run" })).not.toBeInTheDocument()
   })
 
+  it("blames the explorer's filters when any facet, not only status, empties the list", () => {
+    h.runs = []
+    h.schedules = []
+    h.automations = []
+    render(
+      <RoutinesWorkspace
+        workspaceId="ws"
+        routines={rows}
+        loading={false}
+        error={null}
+        onSelect={vi.fn()}
+        filters={{ ...filters, invocations: "popular" }}
+      />,
+    )
+    expect(screen.getByText(/No routines match the explorer's filters/)).toBeVisible()
+  })
+
   it("says what the empty list means instead of leaving a pane", () => {
     h.runs = []
     h.schedules = []

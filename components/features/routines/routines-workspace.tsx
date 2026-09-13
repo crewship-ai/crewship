@@ -134,6 +134,11 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   }, [schedules])
 
   const visible = props.routines
+  // Any explorer facet can empty the list, not only the status bucket.
+  const narrowed =
+    !!search ||
+    (!!filters &&
+      (filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId !== null))
   const displayed = visible.filter(
     (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search),
   )
@@ -319,7 +324,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                     text={
                       props.loading
                         ? "Loading routines…"
-                        : search || (filters && filters.status !== "all")
+                        : narrowed
                           ? "No routines match the explorer's filters."
                           : "No routines yet. Create one with New routine, or import a bundle."
                     }
