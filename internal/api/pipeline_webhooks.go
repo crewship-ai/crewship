@@ -877,9 +877,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	dispatchCtx := h.webhookDispatchContext()
 	h.webhookDispatchWG.Add(1)
 	finish := beginBackgroundWork()
+	barrier := h.webhookDispatchBarrier
 	go func() {
 		defer finish()
 		defer h.webhookDispatchWG.Done()
+		if barrier != nil {
+			<-barrier
+		}
 		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
 			PipelineID: wh.TargetPipelineID,
 			// Honour the pin: a webhook with target_pipeline_version

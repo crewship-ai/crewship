@@ -101,3 +101,29 @@ func TestRoutineReceiptDedupExpiry_IsThirtyDaysFromAcceptance(t *testing.T) {
 		t.Fatalf("expiry = %s after acceptance, want 30 days", got.Sub(at))
 	}
 }
+
+// The production loop, not only the helper: started the way cmd_start starts
+// it, the sweeper's immediate first pass removes an expired receipt.
+func TestStartRoutineReceiptRetentionSweeper_SweepsOnStart(t *testing.T) {
+	db := testutil.MigratedSQLDB(t)
+	seedRoutineReceipt(t, db, "expired-at-boot", tsformat.Format(time.Now().Add(-time.Hour)))
+	seedRoutineReceipt(t, db, "live-at-boot", tsformat.Format(time.Now().Add(time.Hour)))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		StartRoutineReceiptRetentionSweeper(ctx, db, nil, time.Hour)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := routineReceiptIDs(t, db); fmt.Sprint(got) == "[live-at-boot]" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if got := routineReceiptIDs(t, db); fmt.Sprint(got) != "[live-at-boot]" {
+		t.Fatalf("after the sweeper's first pass receipts = %v, want only the live one", got)
+	}
+}

@@ -94,7 +94,7 @@ id is only unique within a webhook, so --source-id on its own is refused.`,
 			for _, rcpt := range page.Items {
 				status := workDeref(rcpt.RunStatus)
 				if status == "" {
-					status = "(no run row)"
+					status = "(run record not available)"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					workShortID(f, rcpt.ID), rcpt.WebhookID, rcpt.SourceDeliveryID,
@@ -135,7 +135,7 @@ The payload is not returned; inspect the run with 'crewship routine logs <run-id
 		return f.AutoHuman(rcpt, func() {
 			status := workDeref(rcpt.RunStatus)
 			if status == "" {
-				status = "(no run row — the dispatch failed before the engine wrote one)"
+				status = "(run record not available)"
 			}
 			f.Detail([][]string{
 				{"ID", rcpt.ID},

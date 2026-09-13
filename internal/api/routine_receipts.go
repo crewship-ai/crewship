@@ -12,9 +12,12 @@ package api
 // answered without a re-send.
 //
 // The run is the real pipeline run, not an invented work id. `run_status` is
-// read from pipeline_runs at request time and is null when no run row exists
-// (a dispatch that failed before the engine wrote one), which is the honest
-// answer rather than an empty string that reads like a status.
+// read from pipeline_runs at request time and is null when no run record is
+// available. The receipt is written and the 202 sent BEFORE execution starts,
+// so an absent record can mean "not started yet" as easily as "failed before
+// a record was written" or "retained away"; the absence carries no reason,
+// and neither does the response — null is the honest answer rather than an
+// empty string that reads like a status or a cause nobody established.
 //
 // Like /webhook-deliveries, nothing here returns the payload. `body_sha256`
 // and `body_bytes` identify it without publishing whatever the sender put
@@ -58,8 +61,9 @@ type routineReceiptView struct {
 	// RunID is the pipeline run this delivery produced, and the id a
 	// redelivery inside the dedup window is answered with.
 	RunID string `json:"run_id"`
-	// RunStatus is the run's current status, or null when pipeline_runs has
-	// no row for it.
+	// RunStatus is the run's current status, or null when no run record is
+	// available (not started yet, failed before a record, or retained away —
+	// the absence does not say which).
 	RunStatus *string `json:"run_status"`
 
 	ReceivedAt     string `json:"received_at"`

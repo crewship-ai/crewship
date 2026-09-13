@@ -219,7 +219,7 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 				"description": "The pipeline run this delivery produced, and the id a redelivery inside the dedup window is answered with."},
 			"run_status": func() map[string]any {
 				m := nullable(str())
-				m["description"] = "The run's current status, or null when pipeline_runs holds no row for it (a dispatch that failed before the engine wrote one)."
+				m["description"] = "The run's current status, or null when no run record is available. The receipt is written before execution starts, so an absent record may mean the run has not started yet, failed before a record was written, or was retained away; the absence does not say which."
 				return m
 			}(),
 			"received_at": dateTime(),

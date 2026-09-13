@@ -11654,7 +11654,7 @@
             "type": "string"
           },
           "run_status": {
-            "description": "The run's current status, or null when pipeline_runs holds no row for it (a dispatch that failed before the engine wrote one).",
+            "description": "The run's current status, or null when no run record is available. The receipt is written before execution starts, so an absent record may mean the run has not started yet, failed before a record was written, or was retained away; the absence does not say which.",
             "nullable": true,
             "type": "string"
           },

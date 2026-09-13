@@ -1250,4 +1250,20 @@ daily from `cmd_start` and deletes expired receipts in bounded batches, after
 which the same identifier is new work again — the contract's answer, stated in
 the docs rather than implied. Not done here: durable pipeline dispatch
 recovery (routine execution stays direct), and the agent-webhook ledger's own
-retention sweeper (`work.Store.Sweep`) is still unscheduled.
+retention sweeper (`work.Store.Sweep`) is still unscheduled — routine
+retention is not system retention, and that item stays open on its own.
+
+After the independent review (P2): the CLI said an absent run record meant
+"the dispatch failed before the engine wrote one", which the absence cannot
+establish — the receipt and the 202 exist before execution starts, so the run
+may simply not have begun, or its record may have been retained away. The
+CLI, API description, handler comments and docs now say "run record not
+available" and nothing more; a handler test holds execution on a barrier
+before the executor is entered and reads the receipt (null status), then
+releases it and reads the run's real status. Whole-flow tests added over the
+production handler: redelivery inside the window → same receipt/run; the real
+sweeper at day 31 → the same identity accepted again as new work (the
+executor's 24-hour key aged the same way); a migrated legacy-shaped receipt
+still deduplicates and conflicts; both legacy signature profiles are recorded
+and a fresh-timestamp redelivery is still a duplicate; the sweeper LOOP sweeps
+on start; and a source guard pins that `cmd_start` runs it.

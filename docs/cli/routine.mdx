@@ -1621,8 +1621,11 @@ sender's delivery id is only unique within a webhook.
 
 **Output columns:** ID, WEBHOOK, SOURCE ID, RUN, RUN STATUS, RECEIVED, DEDUP UNTIL
 
-RUN STATUS reads `(no run row)` when the dispatch failed before the engine
-wrote a run — the CLI never invents a status. A receipt deduplicates
+RUN STATUS reads `(run record not available)` when there is no run record to
+read: the run may not have started yet (the receipt is written before
+execution starts), may have failed before a record was written, or its record
+may have been removed by run retention. The absence does not say which, and
+the CLI does not guess. A receipt deduplicates
 redeliveries for 30 days from acceptance; a daily sweeper removes it after
 that, and the same identifier then runs again.
 

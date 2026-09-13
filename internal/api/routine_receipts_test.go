@@ -153,3 +153,66 @@ func TestRoutineReceipts_ListGetFenceAndPaginate(t *testing.T) {
 		t.Errorf("page 2 starts at %q, not after cursor %q", second.Items[0].ID, *first.NextCursor)
 	}
 }
+
+// The receipt exists from the 202; the run record only once the executor
+// starts. Read in that window the receipt names its run with a null status —
+// no reason attached, because the absence has none — and read again once the
+// run exists it carries the run's real status.
+func TestRoutineReceipts_RunStatusIsNullBeforeTheRunRecordAndRealAfter(t *testing.T) {
+	h, token, secret, wsID := routineAcceptanceRig(t)
+	barrier := make(chan struct{})
+	h.webhookDispatchBarrier = barrier
+
+	rr := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-rcpt-pending")
+	if rr.Code != 202 {
+		t.Fatalf("fire status = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	var accepted map[string]any
+	decodeJSON(t, rr, &accepted)
+	receiptID, _ := accepted["delivery_id"].(string)
+	runID, _ := accepted["run_id"].(string)
+
+	receipts := NewRoutineReceiptsHandler(h.db, quietLogger())
+	read := func() routineReceiptView {
+		t.Helper()
+		req := workReq(t, "GET", "/routine-webhook-receipts/"+receiptID, "", "reader", wsID, "MEMBER")
+		req.SetPathValue("receiptId", receiptID)
+		rec := httptest.NewRecorder()
+		receipts.Get(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("get = %d %s", rec.Code, rec.Body.String())
+		}
+		var v routineReceiptView
+		decodeJSON(t, rec, &v)
+		return v
+	}
+
+	// Execution is held before the executor is entered: the receipt is
+	// readable, the run is named, and there is no record to report on.
+	before := read()
+	if before.RunID != runID {
+		t.Fatalf("run_id = %q, want %q", before.RunID, runID)
+	}
+	if before.RunStatus != nil {
+		t.Fatalf("run_status = %q before the run record exists, want null", *before.RunStatus)
+	}
+	if n := countWebhookRows(t, h.db, `SELECT COUNT(*) FROM pipeline_runs WHERE id = '`+runID+`'`); n != 0 {
+		t.Fatalf("the barrier did not hold: %d run records exist", n)
+	}
+
+	// Release the run. The erroring runner fails it; the record now exists
+	// and the receipt reports its real status rather than a guess.
+	close(barrier)
+	h.WaitWebhookDispatches()
+	after := read()
+	if after.RunStatus == nil {
+		t.Fatal("run_status still null after the run record was written")
+	}
+	var recorded string
+	if err := h.db.QueryRow(`SELECT status FROM pipeline_runs WHERE id = ?`, runID).Scan(&recorded); err != nil {
+		t.Fatalf("read the run record: %v", err)
+	}
+	if *after.RunStatus != recorded {
+		t.Fatalf("run_status = %q, want the record's %q", *after.RunStatus, recorded)
+	}
+}
