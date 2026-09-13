@@ -220,6 +220,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// secret rotating only when the caller explicitly opts in.
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.UpdateWebhook)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
+	// Routine webhook receipts — what a routine delivery leaves behind:
+	// its identity, the body's fingerprint and the run it produced. Read
+	// only; the raw payload is never returned.
+	receipts := NewRoutineReceiptsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts", authed(wsCtx(http.HandlerFunc(receipts.List))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts/{receiptId}", authed(wsCtx(http.HandlerFunc(receipts.Get))))
 	// Public dispatch — no `authed` wrapper. The token in the path
 	// is the auth surface; signing_secret + HMAC layered on top.
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)

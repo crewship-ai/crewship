@@ -1605,6 +1605,44 @@ The explicit `--json` flag is a deprecated alias for `--format json`.
 
 A version-pinned webhook shows the pin in the ROUTINE column as `slug@vN`. LAST STATUS is `COMPLETED` | `FAILED` | `DEDUPED` | `WAITING` (`WAITING` = the dispatched run parked on an approval gate — healthy, resumes on approval).
 
+### `webhooks receipts list`
+
+```bash
+crewship routine webhooks receipts list
+crewship routine webhooks receipts list --webhook pwh_123
+crewship routine webhooks receipts list --webhook pwh_123 --source-id evt-8f4c1a2e
+```
+
+Read the receipts routine deliveries leave behind — no work item, only the
+identity, the body fingerprint and the pipeline run. Paginated at 100 rows.
+Passing `--webhook` together with `--source-id` asks "did you receive this one"
+and answers with zero or one row; `--source-id` on its own is refused because a
+sender's delivery id is only unique within a webhook.
+
+**Output columns:** ID, WEBHOOK, SOURCE ID, RUN, RUN STATUS, RECEIVED, DEDUP UNTIL
+
+RUN STATUS reads `(no run row)` when the dispatch failed before the engine
+wrote a run — the CLI never invents a status. A receipt deduplicates
+redeliveries for 30 days from acceptance; a daily sweeper removes it after
+that, and the same identifier then runs again.
+
+| Flag | Required | Description |
+|------|:---:|-------------|
+| `--webhook` | | Only receipts accepted by this webhook id |
+| `--source-id` | | The sender's delivery id; requires `--webhook` and answers with zero or one row |
+| `--after` | | Cursor from a previous page's `next_cursor` |
+
+### `webhooks receipts get <receipt-id>`
+
+```bash
+crewship routine webhooks receipts get crcp0000000000000
+```
+
+One receipt: webhook, source delivery id, signature profile, body fingerprint
+and size, the pipeline run and its current status, and until when a redelivery
+is deduplicated. The payload is not returned; inspect the run with
+`crewship routine logs <run-id>`.
+
 ### `webhooks create`
 
 ```bash
