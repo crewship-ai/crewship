@@ -50,6 +50,8 @@ exception in the other direction: it prints YAML unless you ask for
 | `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `grants <slug>` | List a page's grants |
+| `access <slug>` | Who reaches a page, and by which paths |
+| `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
 | `webhook create <slug> --panel <id>` | Mint a URL that lets something outside the workspace write one panel |
 | `webhook list <slug>` | List a page's webhook tokens and say which still work |
 | `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
@@ -692,6 +694,59 @@ crewship page grants fleet-201
 
 Lists every grant on the page: subject type, subject, level, and (for
 `produce`) which panels it covers.
+
+---
+
+## `crewship page access`
+
+```bash
+crewship page access fleet-201
+crewship page access --subject user:ada@example.com
+crewship page access --subject crew:lookout
+crewship page access --subject agent:watcher
+```
+
+One command, two questions, one per invocation. With a slug it answers *who
+reaches this page* — every user, crew and agent, each with the paths that
+carry it. With `--subject` it answers the reverse: *which pages does this
+subject reach*, and how. Both are read-only renderings of what the server
+already enforces; no grant is issued or implied, and an inert grant is not a
+path.
+
+| Flag | Description |
+|---|---|
+| `--subject <kind>:<ref>` | Ask about a subject instead of a page: `user:<email or id>`, `crew:<slug>` or `agent:<slug>`. Exclusive with the slug. |
+| `--limit <n>` | Rows per page. The server defaults to 100 and caps at 1000. |
+| `--cursor <cursor>` | Continue from the cursor the previous page printed. Opaque. |
+
+A path is one of the server's own words, printed verbatim:
+
+| Path | Meaning |
+|---|---|
+| `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
+| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
+| `crew:<slug>` | A member of the crew that owns the page. |
+| `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
+| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
+| `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
+
+```
+SUBJECT              KIND   PATHS
+ada@example.com      user   owner
+bob@example.com      user   panel_crew:ops, grant:page:read
+ops                  crew   panel_crew:ops
+watcher              agent  grant:page:produce
+(withheld)           crew   panel_crew:withheld
+```
+
+Reading a page's access takes the same right as reading its grants: the
+page's owner, or a workspace ADMIN/OWNER. Asking about a subject is an
+administrator's, except that anyone may ask about themselves
+(`--subject user:<your email>`). Every other caller is refused with the
+server's sentence and a non-zero exit.
+
+`--format json` prints the server's document unchanged — the page (or the
+subject), the rows with their `paths`, and `next_cursor` when more follow.
 
 ---
 

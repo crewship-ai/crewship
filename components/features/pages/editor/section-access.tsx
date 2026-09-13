@@ -7,7 +7,10 @@
  * arrives with: people first, then the machines those people vouch for, then
  * the world. Every one of them is an existing card from
  * `components/features/pages/page-settings.tsx`; this section re-homes them,
- * it does not re-implement them.
+ * it does not re-implement them. A fourth, read-only card follows them —
+ * Effective access (`./section-access-effective.tsx`), the server's answer to
+ * who actually gets in once the three above are combined with roles and
+ * crew membership.
  *
  * Producer tokens are here, and NOT in Data & actions, because minting a
  * webhook token is issuing a credential and a credential is a permission
@@ -54,6 +57,7 @@ import {
   pagePanelIDs,
 } from "@/components/features/pages/page-settings"
 
+import { EffectiveAccessCard } from "./section-access-effective"
 import type { EditorSectionProps } from "./section-props"
 
 /**
@@ -132,6 +136,12 @@ export function EditorAccessSection({
         canManage={canManage}
         manageRefusal={REFUSAL.links}
       />
+
+      {/* The answer to the three cards above: who actually gets in, computed
+          server-side from the same facts it enforces. Read-only, and shown
+          to everyone the section is shown to — a reader the server refuses
+          sees its refusal in the card, never a section with a card missing. */}
+      <EffectiveAccessCard workspaceId={workspaceId} slug={slug} />
 
       <ExportCard workspaceId={workspaceId} slug={slug} />
 

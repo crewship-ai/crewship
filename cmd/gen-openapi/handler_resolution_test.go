@@ -299,6 +299,10 @@ var requiredQueryParametersInSpec = []string{
 	// withdrawing nothing, which is how an operator would come to believe an
 	// agent's access was gone. Pinned by TestPageGrants_RevokeWithoutASubjectIs400.
 	"DELETE /api/v1/pages/{slug}/grants ?subject",
+	// Verified against PageHandler.SubjectAccess (internal/api/pages_access.go):
+	// the subject is the question, and a request without one is 400. Pinned by
+	// TestPageSubjectAccess_AnswersAdminsAboutAnyoneAndMembersAboutThemselves.
+	"GET /api/v1/pages/access ?subject",
 	"GET /api/v1/admin/backups/download ?path",
 	"GET /api/v1/admin/backups/inspect ?path",
 	"GET /api/v1/admin/backups/verify ?path",
