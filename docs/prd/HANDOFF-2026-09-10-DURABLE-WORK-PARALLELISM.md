@@ -1294,22 +1294,39 @@ Second independent review (2026-09-13, `review-2026-09-13-independent/`)
 reproduced the residual window this entry first only disclosed: with the
 location recorded and `RunAgent` still in its preflight, the stop's kill probe
 answered ABSENT, the dispatcher took that as a confirmed stop, and the preflight
-then created the agent behind a `cancelled` ledger row. The runtime now has
-three launch phases. Pending (location recorded, process unconfirmed): `Stop`
-cancels the creation's context, sends the kill probe, and answers "not
-confirmed" whatever the probe says; `Alive` treats absent as an error, present
-as confirmation (so a silent CLI is still recorded running). Settled (process
-confirmed, or `Run` returned so nothing can be created): the provider's probe
-decides, and after `Run` returned without a confirmation an absent process is
-"never existed" only if no `exec.command` journal entry carries the run id —
-otherwise it is an unknown outcome and reconciliation. `settle` records
-`succeeded` when the run reports success even if a cancel was requested: a
-cancel delivered after completion cancelled nothing. Tests: cancel and
-shutdown at the pending-creation barrier (production probes, absent fake
-transport, real HTTP cancel route), completion racing a cancel, the reviewer's
-own reproducer; pre-fix runtime and dispatcher under an overlay fail all but
-the shutdown case (which parked before too). Not proven: a creation that
-ignores its context and outlives `RunAgent`'s return without ever being
-probed present — the journal check is what stands between that and a false
-`cancelled`, and it is a check of the orchestrator's own emission order, not
-of the process.
+then created the agent behind a `cancelled` ledger row. The first repair
+(8d588855) leaned on the `exec.command` journal row to tell "never requested"
+from "requested and gone". The third review (2026-09-14,
+`review-2026-09-14-independent/`) showed that row is queued telemetry emitted
+with its result ignored: before a flush the runtime said "no exec", after the
+flush "unknown" — the same situation judged two ways.
+
+The protocol now (this head): `orchestrator.AgentRunRequest.ExecGate` is
+asked synchronously immediately before `container.Exec`, with nothing external
+between the answer and the creation; a refusal returns
+`orchestrator.ErrExecRefused` and creates nothing. The webhook runtime's launch
+state implements the gate: a recorded stop refuses it, and an admitted creation
+is first written durably as work-attempt runtime phase `requested`
+(`work.Store.MarkRuntimeRequested`, under the full binding; a failed write
+refuses the creation). Phases: preparing/declared (no request yet — a stop is a
+fact, no probe needed, cancel → `cancelled`, shutdown → `retry_wait`);
+requested (a process may exist — kill probe sent, answer "not confirmed", an
+absent probe is an error); settled (confirmed or `Run` returned — the probe
+decides, except that a requested-and-never-confirmed process that is absent is
+an unknown outcome and stays in `needs_reconciliation`, holding its slot).
+`Defer` refuses a requested attempt, `StartRunning` confirms it, recovery parks
+it. The journal is never consulted. `dispatch.settle` records `succeeded` when
+the run reports success even if a cancel was requested.
+
+Regressions (production probes, absent fake transport, real HTTP cancel route,
+real dispatcher and SQLite): cancel before the gate with a preflight that
+ignores its context (gate refuses, 0 launches, phase stays `starting`);
+shutdown before the gate (`retry_wait`); admitted creation with the
+exec.command entry still queued and with its emission failing — cancel and
+shutdown each → `needs_reconciliation`, slot held; completion after an admitted
+creation → `succeeded`; a gate whose durable write fails refuses. Mutants that
+trust the probe after admission, or whose gate ignores a recorded stop, fail
+these tests. The reviewer's `review_journal_absence_test.go` constructs a
+launch state by hand (location + returned, no gate); under this protocol that
+state cannot arise, so the equivalent is the queued/failed-journal pair above,
+driven through the protocol.

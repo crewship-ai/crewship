@@ -412,3 +412,68 @@ func TestStartRunning_RequiresAStartIntent(t *testing.T) {
 		t.Errorf("state = %q, want running", it.State)
 	}
 }
+
+// The creation request is the last durable word before a process exists. It
+// moves a starting attempt to `requested` under the full binding, refuses
+// anything else, and every later operation treats `requested` as "a runtime
+// may exist": StartRunning confirms it, Defer refuses to give it back, and
+// recovery parks it.
+func TestMarkRuntimeRequested_IsTheDurableCreationBoundary(t *testing.T) {
+	store, db, _ := newTestStore(t)
+	r := accept(t, store, db, AcceptRequest{WorkspaceID: "ws1", Source: SourceWebhook, Class: ClassBackground, AgentID: "a"})
+	c, err := store.Claim(context.Background(), ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkRuntimeRequested(context.Background(), r.WorkID, c.RunID, c.Generation); !errors.Is(err, ErrNotBound) {
+		t.Fatalf("requested from a planned attempt = %v, want ErrNotBound — a start intent must come first", err)
+	}
+	if err := store.MarkStarting(context.Background(), r.WorkID, c.RunID, c.Generation, "loc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkRuntimeRequested(context.Background(), r.WorkID, c.RunID, c.Generation+1); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("requested with a stale generation = %v, want ErrStaleGeneration", err)
+	}
+	if err := store.MarkRuntimeRequested(context.Background(), r.WorkID, c.RunID, c.Generation); err != nil {
+		t.Fatalf("requested from starting: %v", err)
+	}
+	var phase string
+	if err := db.QueryRow(`SELECT runtime_phase FROM work_attempts WHERE run_id = ?`, c.RunID).Scan(&phase); err != nil {
+		t.Fatal(err)
+	}
+	if phase != "requested" {
+		t.Fatalf("phase = %q, want requested", phase)
+	}
+	if err := store.MarkRuntimeRequested(context.Background(), r.WorkID, c.RunID, c.Generation); !errors.Is(err, ErrNotBound) {
+		t.Fatalf("a second request = %v, want ErrNotBound — the boundary is crossed once", err)
+	}
+	if err := store.Defer(context.Background(), r.WorkID, c.RunID, c.Generation, time.Now(), "held"); !errors.Is(err, ErrNotBound) {
+		t.Fatalf("deferring a requested attempt = %v, want ErrNotBound — a process may exist", err)
+	}
+	if err := store.StartRunning(context.Background(), r.WorkID, c.RunID, c.Generation, "loc"); err != nil {
+		t.Fatalf("confirming a requested attempt: %v", err)
+	}
+}
+
+func TestRecovery_ParksARequestedAttempt(t *testing.T) {
+	store, db, clock := newTestStore(t)
+	r := accept(t, store, db, AcceptRequest{WorkspaceID: "ws1", Source: SourceWebhook, Class: ClassBackground, AgentID: "a"})
+	c, err := store.Claim(context.Background(), ClaimOptions{LeaseOwner: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkStarting(context.Background(), r.WorkID, c.RunID, c.Generation, "loc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkRuntimeRequested(context.Background(), r.WorkID, c.RunID, c.Generation); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(LeaseDuration + time.Second)
+	out, err := store.RecoverExpiredLeases(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Reconciliation) != 1 || len(out.Requeued) != 0 {
+		t.Fatalf("recovery = %+v, want the requested attempt parked, not requeued", out)
+	}
+}

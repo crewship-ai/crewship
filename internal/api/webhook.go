@@ -1033,6 +1033,24 @@ func (h *WebhookHandler) runWebhookAgent(
 					}
 				}
 			}
+			// The creation boundary: the orchestrator asks this synchronously
+			// immediately before creating the exec. A stop recorded before
+			// that moment refuses the creation; a creation admitted here is
+			// recorded durably on the attempt before it happens.
+			if err == nil && len(launch) > 0 {
+				gates := launch
+				req.ExecGate = func(ctx context.Context) error {
+					for _, g := range gates {
+						if g == nil {
+							continue
+						}
+						if gerr := g.RequestCreation(ctx); gerr != nil {
+							return gerr
+						}
+					}
+					return nil
+				}
+			}
 			if err == nil {
 				err = h.orch.RunAgent(runCtx, req, handler)
 			}

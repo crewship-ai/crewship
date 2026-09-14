@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"regexp"
@@ -41,7 +42,26 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`)
 
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.
+// ErrExecRefused is returned by RunAgent when the request's ExecGate refused
+// the creation. No exec was created; nothing the agent could have done has
+// happened. Callers that classify failures may treat it as before-agent.
+var ErrExecRefused = errors.New("agent exec refused at the creation gate; no process was created")
+
 type AgentRunRequest struct {
+	// ExecGate, when set, is asked SYNCHRONOUSLY immediately before the
+	// agent's exec is created, and nothing external happens between its
+	// answer and the creation. It is the authoritative "a process is about
+	// to be requested" boundary: an error refuses the creation — no exec is
+	// created, RunAgent returns ErrExecRefused wrapping it — and a nil answer
+	// means the caller has durably recorded that a process was requested.
+	//
+	// It exists because telemetry is not a protocol. The exec.command journal
+	// entry is emitted asynchronously and its failure is ignored, so "no
+	// journal row" never meant "no creation was attempted"; a caller that
+	// needs to know whether a process could exist needs to be told at the
+	// boundary, not to look for evidence afterwards.
+	ExecGate func(ctx context.Context) error
+
 	AgentID   string
 	AgentSlug string
 	AgentRole string // AGENT, LEAD
