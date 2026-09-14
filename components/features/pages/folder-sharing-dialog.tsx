@@ -20,8 +20,8 @@
  *    vocabulary this product has.
  *
  *  · **Everyone else** gets the marker the folder row already carries —
- *    "Shared with a crew", "Shared with everyone in this workspace", "Only
- *    the owning crew" — the server's own refusal sentence at the control,
+ *    "Shared with named crews", "Shared with everyone in this workspace",
+ *    "Only the owning crew" — the server's own refusal sentence at the control,
  *    and, when a page in the folder is open, their own paths to it. Names
  *    are the manager's to see; the fact that the folder is shared is not.
  *
@@ -245,15 +245,20 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, p
             <p className="text-xs leading-relaxed text-muted-foreground">{FOLDER_ACL_SENTENCE}</p>
 
             <div role="table" aria-label="Who reaches this folder" className="flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
-              {/* The owning crew: always edits, never removed. A fixed word, not a
-                  disabled control — a disabled control says "later, maybe". */}
+              {/* The owning crew: its managers administer the folder and this
+                  table, and that is never an entry to remove — a fixed word,
+                  not a disabled control, which would say "later, maybe". It is
+                  not "Can edit": the server hands a member of the owning crew
+                  no path to the pages inside (they see the folder, and the
+                  pages only through their own reach), and a row saying the
+                  crew edits every page here would be read as exactly that. */}
               <div role="row" data-slot="acl-owner" className="flex min-h-10 flex-wrap items-center gap-2 px-2.5 py-2">
                 <SubjectKind type="owner" />
                 <span role="cell" className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={folder?.ownerLabel ?? undefined}>
                   {folder?.ownerLabel ?? folder?.ownerRef ?? "Owning crew"}
                 </span>
-                <span role="cell" className="type-page-meta shrink-0 text-muted-foreground" title="The owning crew always edits its folder.">
-                  Can edit · owner
+                <span role="cell" className="type-page-meta shrink-0 text-muted-foreground" title="This crew's managers administer the folder and its sharing. Being in the crew does not by itself open the pages in it.">
+                  Managers administer · owner
                 </span>
               </div>
 

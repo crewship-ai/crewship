@@ -730,7 +730,12 @@ export function useFolderAclMutations(workspaceId: string | null | undefined, sl
         }),
       })
       const body = await judge(res, "share folder")
-      return body && typeof body === "object" ? toFolderAclEntry(body as WireFolderAclEntry) : null
+      // PUT answers the whole ACL document with the written row under
+      // `entry`, not the row alone; reading the envelope as a row yielded
+      // null. The dialog refetches after settling, so nothing drew from it,
+      // but a caller that does gets the row it wrote.
+      const entry = body && typeof body === "object" ? (body as { entry?: WireFolderAclEntry | null }).entry : null
+      return entry && typeof entry === "object" ? toFolderAclEntry(entry) : null
     },
     onSettled: settle,
   })
