@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -59,11 +60,15 @@ func inBandStreamMock(slug, stream string) *mockContainer {
 
 // runInBandCase drives one RunAgent invocation against the given adapter and
 // stream, and returns the persisted terminal run status plus RunAgent's error.
-func runInBandCase(t *testing.T, adapter, stream string) (string, error) {
+func runInBandCase(t *testing.T, adapter, stream string, exitCodes ...int) (string, error) {
 	t.Helper()
 	const slug = "test-agent"
 	state := newMemState()
-	o := New(inBandStreamMock(slug, stream), state, slog.Default())
+	container := &terminalExitContainer{mockContainer: inBandStreamMock(slug, stream)}
+	if len(exitCodes) > 0 {
+		container.exitCode = exitCodes[0]
+	}
+	o := New(container, state, slog.Default())
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
@@ -317,4 +322,57 @@ func TestRunAgent_ToolLevelError_KeepsRunCompleted(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Production regression: Claude reports error_max_turns AND exits 1.
+// The old exit-code-first branch discarded the actionable terminal cause.
+func TestRunAgent_InBandMaxTurnsWithExitOne(t *testing.T) {
+	status, err := runInBandCase(t, "CLAUDE_CODE",
+		`{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":50}`+"\n", 1)
+	if status != "error" || !errors.Is(err, ErrAgentInBandFailure) {
+		t.Fatalf("status=%q error=%v; want typed in-band failure", status, err)
+	}
+	if !strings.Contains(err.Error(), "50 turns") {
+		t.Fatalf("lost terminal cause: %v", err)
+	}
+}
+
+func TestRunAgent_JournalsTerminalCauseBeyondRawCapture(t *testing.T) {
+	const slug = "test-agent"
+	stream := strings.Repeat(`{"type":"system","subtype":"noise"}`+"\n", 1000) +
+		`{"type":"result","subtype":"error_max_turns","is_error":true,"num_turns":50}` + "\n"
+	container := &terminalExitContainer{mockContainer: inBandStreamMock(slug, stream), exitCode: 1}
+	o := New(container, newMemState(), slog.Default())
+	rec := &chunkRecorder{}
+	o.SetJournal(rec)
+	_ = o.RunAgent(context.Background(), AgentRunRequest{
+		AgentID: "a1", AgentSlug: slug, ChatID: "s1", ContainerID: "c1",
+		CLIAdapter: "CLAUDE_CODE", UserMessage: "test", TimeoutSecs: 30,
+	}, nil)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, entry := range rec.entries {
+		if entry.Type == "exec.command" && entry.Payload["in_band_error"] == true {
+			if entry.Payload["error_subtype"] != "error_max_turns" || entry.Payload["num_turns"] != 50 {
+				t.Fatalf("lost terminal metadata: %v", entry.Payload)
+			}
+			if message, _ := entry.Payload["error_message"].(string); !strings.Contains(message, "50 turns") {
+				t.Fatalf("lost actionable message: %v", entry.Payload)
+			}
+			return
+		}
+	}
+	t.Fatal("missing terminal exec diagnostic")
+}
+
+type terminalExitContainer struct {
+	*mockContainer
+	exitCode int
+}
+
+func (c *terminalExitContainer) ExecInspect(ctx context.Context, id string) (bool, int, error) {
+	if id == "exec-agent" {
+		return false, c.exitCode, nil
+	}
+	return c.mockContainer.ExecInspect(ctx, id)
 }

@@ -806,6 +806,15 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// An exit-0 run the agent itself called failed must not read as a clean
 		// exec in Crow's Nest just because the process was polite about it.
 		endPayload["in_band_error"] = true
+		// Persist terminal diagnostics separately from the bounded raw-output
+		// prefix: a long run's final result is outside that prefix.
+		diagnosticScrub := scrubber.New()
+		diagnosticScrub.AddSecretValues(secretValues...)
+		endPayload["error_subtype"] = diagnosticScrub.Scrub(inBand.subtype)
+		endPayload["num_turns"] = inBand.turns
+		if cause := inBand.Err(); cause != nil {
+			endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
+		}
 	}
 	o.emitExecEnd(ctx, req, result.ExecID, journalCmd, endSeverity,
 		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
@@ -826,7 +835,13 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 
 	status := "completed"
 	var execErr error
-	if exitCode != 0 {
+	if inBandErr := inBand.Err(); inBandErr != nil {
+		// A terminal CLI event names the cause even when the process also
+		// exits non-zero (Claude's turn cap exits 1). Prefer its typed error
+		// over a generic adapter exit so callers retain the failure class.
+		status = "error"
+		execErr = inBandErr
+	} else if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
 		// Typed error (not just a rendered sentence) so a caller like
@@ -850,18 +865,6 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 		scrubbedOutput := outScrub.Scrub(strings.TrimSpace(rawOutput))
 		execErr = newAdapterExecError(req.CLIAdapter, binary, exitCode, scrubbedOutput)
-	} else if inBandErr := inBand.Err(); inBandErr != nil {
-		// Exit 0, but the CLI's own terminal event said the turn failed. Same
-		// treatment as a non-zero exit: the run is an error and the chat gets a
-		// visible message, so a mission/routine step does not carry on with an
-		// empty answer while the user sees a green run.
-		status = "error"
-		o.logger.Warn("agent reported an in-band failure despite exit 0",
-			"agent_id", req.AgentID,
-			"adapter", req.CLIAdapter,
-			"subtype", inBand.subtype,
-		)
-		execErr = inBandErr
 	}
 	o.failRun(ctx, req, runState.ID, status)
 
