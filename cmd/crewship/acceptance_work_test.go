@@ -112,6 +112,14 @@ func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string 
 		VALUES ('dlv-ignored-01',?,'ep-acc','agent','github','src-ignored','','sha-ping',12,'ping','','key-1',
 		'ignored','ping is not an event','',?,?)`, workAcceptanceWorkspaceID, now, now)
 
+	// One routine webhook receipt: no work item behind it, a run id that
+	// names no pipeline_runs row, so the CLI has to say the record is not
+	// available rather than invent a status or a reason.
+	mustExec(`INSERT INTO routine_webhook_receipts (id, workspace_id, endpoint_id, source_delivery_id, body_sha256, run_id,
+		received_at, dedup_expires_at, body_bytes, profile)
+		VALUES ('rcpt-acc-00001', ?, 'pwh-acc', 'src-routine-1', 'sha-routine', 'run-routine-1', ?, ?, 42, 'legacy-routine-hmac')`,
+		workAcceptanceWorkspaceID, now, tsformat.Format(time.Now().UTC().Add(30*24*time.Hour)))
+
 	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", logger)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -398,5 +406,60 @@ func TestAcceptance_WorkResolve_RecordsEvidenceAndReleasesReconciliation(t *test
 	}
 	if out, err := runWorkCLI(t, cfg, args...); err == nil {
 		t.Fatalf("already resolved item accepted again: %s", out)
+	}
+}
+
+// Routine deliveries leave receipts, not work items. The CLI reads them by
+// identity, pages them, and says plainly when the run they name has no row —
+// it never invents a status and never prints a payload it does not hold.
+func TestAcceptance_RoutineWebhookReceipts_ReadByIdentityWithoutInventingARun(t *testing.T) {
+	cfgPath := startWorkAcceptanceServer(t)
+
+	listOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "list")
+	if err != nil {
+		t.Fatalf("routine webhooks receipts list failed: %v\n%s", err, listOut)
+	}
+	for _, want := range []string{"rcpt-acc-00001", "pwh-acc", "src-routine-1", "run-routine-1", "(run record not available)"} {
+		if !strings.Contains(listOut, want) {
+			t.Fatalf("the receipt list is missing %q:\n%s", want, listOut)
+		}
+	}
+
+	lookupOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "list", "--webhook", "pwh-acc", "--source-id", "src-routine-1")
+	if err != nil {
+		t.Fatalf("identity lookup failed: %v\n%s", err, lookupOut)
+	}
+	if !strings.Contains(lookupOut, "rcpt-acc-00001") {
+		t.Fatalf("the identity lookup did not find the receipt:\n%s", lookupOut)
+	}
+	missOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "list", "--webhook", "pwh-acc", "--source-id", "never-sent")
+	if err != nil {
+		t.Fatalf("identity miss failed: %v\n%s", err, missOut)
+	}
+	if strings.Contains(missOut, "rcpt-acc-00001") || !strings.Contains(missOut, "(no receipts)") {
+		t.Fatalf("an unknown identity must answer with an empty page:\n%s", missOut)
+	}
+	if badOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "list", "--source-id", "src-routine-1"); err == nil {
+		t.Fatalf("expected --source-id without --webhook to fail, got:\n%s", badOut)
+	}
+
+	getOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "get", "rcpt-acc-00001")
+	if err != nil {
+		t.Fatalf("routine webhooks receipts get failed: %v\n%s", err, getOut)
+	}
+	for _, want := range []string{"run-routine-1", "run record not available", "sha-routine (42 bytes)", "legacy-routine-hmac"} {
+		if !strings.Contains(getOut, want) {
+			t.Fatalf("the receipt detail is missing %q:\n%s", want, getOut)
+		}
+	}
+	if strings.Contains(getOut, "dispatch failed") || strings.Contains(getOut, "not started") {
+		t.Fatalf("the CLI invented a reason for an absent run record:\n%s", getOut)
+	}
+	if strings.Contains(getOut, "work_id") || strings.Contains(getOut, "wk-") {
+		t.Fatalf("a routine receipt must not advertise a work item:\n%s", getOut)
+	}
+
+	if unknownOut, err := runWorkCLI(t, cfgPath, "routine", "webhooks", "receipts", "get", "rcpt-does-not-exist"); err == nil {
+		t.Fatalf("expected an unknown receipt to fail, got:\n%s", unknownOut)
 	}
 }

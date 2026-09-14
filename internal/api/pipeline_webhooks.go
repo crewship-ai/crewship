@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/webhook"
 	"github.com/crewship-ai/crewship/internal/work"
 )
@@ -826,7 +827,7 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// makes the executor journal under the same id.
 	runID := pipeline.NewRunID()
 
-	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, bodySHA)
+	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, bodySHA, len(body))
 	if acceptErr != nil {
 		switch {
 		case errors.Is(acceptErr, work.ErrDeliveryConflict):
@@ -876,9 +877,13 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	dispatchCtx := h.webhookDispatchContext()
 	h.webhookDispatchWG.Add(1)
 	finish := beginBackgroundWork()
+	barrier := h.webhookDispatchBarrier
 	go func() {
 		defer finish()
 		defer h.webhookDispatchWG.Done()
+		if barrier != nil {
+			<-barrier
+		}
 		res, runErr := exec.Run(dispatchCtx, pipeline.RunInput{
 			PipelineID: wh.TargetPipelineID,
 			// Honour the pin: a webhook with target_pipeline_version
@@ -1010,18 +1015,36 @@ func (h *PipelineHandler) answerRoutineDuplicate(w http.ResponseWriter, r *http.
 	})
 }
 
+// routineDeliveryProfile records which of the two legacy routine signature
+// shapes the request presented. §12 forbids converting an endpoint's
+// signature behaviour without an explicit configuration change, so this only
+// writes down what verified the request; it never chooses.
+func routineDeliveryProfile(r *http.Request) string {
+	if r.Header.Get("X-Crewship-Timestamp") != "" {
+		return "legacy-routine-ts-hmac"
+	}
+	return "legacy-routine-hmac"
+}
+
 func (h *PipelineHandler) acceptRoutineDelivery(
-	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID, bodySHA string,
+	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID, bodySHA string, bodyBytes int,
 ) (routineReceipt, error) {
 	receipt := routineReceipt{DeliveryID: generateCUID(), RunID: runID}
+	receivedAt := time.Now().UTC()
 	acceptor := &mainHandleAcceptor{db: h.db, budget: work.DefaultAcceptanceBudget}
 	err := acceptor.Do(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
 		// Acquire the SQLite writer before the lookup, so concurrent arrivals
-		// cannot both reserve the same delivery.
+		// cannot both reserve the same delivery. The receipt carries its own
+		// age and expiry: §6 keeps it for at least 30 days, and the retention
+		// sweeper removes it after that — from then on the same identifier is
+		// new work again.
 		res, err := tx.ExecContext(ctx, `INSERT INTO routine_webhook_receipts
-   (id, workspace_id, endpoint_id, source_delivery_id, body_sha256, run_id)
-   VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, endpoint_id, source_delivery_id) DO NOTHING`,
-			receipt.DeliveryID, wh.WorkspaceID, wh.ID, sourceDeliveryID, bodySHA, runID)
+   (id, workspace_id, endpoint_id, source_delivery_id, body_sha256, run_id,
+    received_at, dedup_expires_at, body_bytes, profile)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, endpoint_id, source_delivery_id) DO NOTHING`,
+			receipt.DeliveryID, wh.WorkspaceID, wh.ID, sourceDeliveryID, bodySHA, runID,
+			tsformat.Format(receivedAt), tsformat.Format(pipeline.RoutineReceiptDedupExpiry(receivedAt)),
+			bodyBytes, routineDeliveryProfile(r))
 		if err != nil {
 			return err
 		}

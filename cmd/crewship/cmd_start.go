@@ -1092,6 +1092,13 @@ var startCmd = &cobra.Command{
 				// this. Defaults to 90 days; see
 				// internal/harbormaster/retention.go.
 				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				// Routine webhook receipts — the dedup record a routine
+				// delivery leaves behind. §6 keeps it for 30 days from
+				// acceptance; after that the same identifier is new work
+				// again, and this is the sweeper that makes it so. See
+				// internal/pipeline/webhook_receipts.go.
+				go pipeline.StartRoutineReceiptRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.

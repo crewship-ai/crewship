@@ -392,6 +392,15 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		d.park(ctx, a, "cancel state could not be checked while settling: "+err.Error())
 		return
 	}
+	// A run that reports success completed. A cancel that was requested but
+	// arrived after the work was done did not cancel anything, and recording
+	// `cancelled` over a finished turn would be false in the one direction
+	// that matters — the effects happened. The cancel is noted in the reason;
+	// the state is the truth.
+	if requested && runErr == nil {
+		d.finish(ctx, a, work.StateSucceeded, "completed; a cancel was requested but the run had already finished")
+		return
+	}
 	if requested {
 		alive, err := d.runtime.Alive(ctx, live.locator)
 		switch {

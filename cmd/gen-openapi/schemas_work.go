@@ -205,6 +205,32 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"items":       map[string]any{"type": "array", "items": ref("WebhookDelivery"), "maxItems": 100},
 			"next_cursor": nullable(str()),
 		}, "items", "next_cursor"),
+		"RoutineWebhookReceipt": object(map[string]any{
+			"id":           str(),
+			"workspace_id": str(),
+			"webhook_id": map[string]any{"type": "string",
+				"description": "The routine webhook that accepted the delivery. Identity is (workspace, webhook, source delivery id) and never the signature."},
+			"source_delivery_id": str(),
+			"profile": map[string]any{"type": "string",
+				"description": "The legacy routine signature shape the request presented — recorded, never inferred at read time."},
+			"body_sha256": str(),
+			"body_bytes":  integer(),
+			"run_id": map[string]any{"type": "string",
+				"description": "The pipeline run this delivery produced, and the id a redelivery inside the dedup window is answered with."},
+			"run_status": func() map[string]any {
+				m := nullable(str())
+				m["description"] = "The run's current status, or null when no run record is available. The receipt is written before execution starts, so an absent record may mean the run has not started yet, failed before a record was written, or was retained away; the absence does not say which."
+				return m
+			}(),
+			"received_at": dateTime(),
+			"dedup_expires_at": map[string]any{"type": "string", "format": "date-time",
+				"description": "Until when a redelivery of this identifier returns the original run. After it the receipt is removed and the same identifier is new work."},
+		}, "id", "workspace_id", "webhook_id", "source_delivery_id", "profile",
+			"body_sha256", "body_bytes", "run_id", "run_status", "received_at", "dedup_expires_at"),
+		"RoutineWebhookReceiptPage": object(map[string]any{
+			"items":       map[string]any{"type": "array", "items": ref("RoutineWebhookReceipt"), "maxItems": 100},
+			"next_cursor": nullable(str()),
+		}, "items", "next_cursor"),
 	}
 	// Neither POST accepts anything beyond what is named. A silently-ignored
 	// `target_revision` typo would run the replay against the wrong revision
@@ -216,13 +242,15 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	components["WorkResolveRequest"].(map[string]any)["additionalProperties"] = false
 
 	routes := map[string]DomainSchema{
-		"GET /api/v1/workspaces/{workspaceId}/work-items":                       {Response: ref("WorkItemPage")},
-		"GET /api/v1/workspaces/{workspaceId}/work-items/{workItemId}":          {Response: ref("WorkItemDetail")},
-		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel":  {Request: ref("WorkCancelRequest"), Response: ref("WorkCancelResponse")},
-		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve": {Request: ref("WorkResolveRequest"), Response: ref("WorkItem")},
-		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay":  {Request: ref("WorkReplayRequest"), Response: ref("WorkItem"), SuccessStatuses: []string{"201"}},
-		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries":               {Response: ref("WebhookDeliveryPage")},
-		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}":  {Response: ref("WebhookDelivery")},
+		"GET /api/v1/workspaces/{workspaceId}/work-items":                           {Response: ref("WorkItemPage")},
+		"GET /api/v1/workspaces/{workspaceId}/work-items/{workItemId}":              {Response: ref("WorkItemDetail")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel":      {Request: ref("WorkCancelRequest"), Response: ref("WorkCancelResponse")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve":     {Request: ref("WorkResolveRequest"), Response: ref("WorkItem")},
+		"POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay":      {Request: ref("WorkReplayRequest"), Response: ref("WorkItem"), SuccessStatuses: []string{"201"}},
+		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries":                   {Response: ref("WebhookDeliveryPage")},
+		"GET /api/v1/workspaces/{workspaceId}/webhook-deliveries/{deliveryId}":      {Response: ref("WebhookDelivery")},
+		"GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts":             {Response: ref("RoutineWebhookReceiptPage")},
+		"GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts/{receiptId}": {Response: ref("RoutineWebhookReceipt")},
 	}
 	return routes, components
 }

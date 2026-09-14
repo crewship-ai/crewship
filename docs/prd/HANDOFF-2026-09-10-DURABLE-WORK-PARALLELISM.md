@@ -1216,3 +1216,117 @@ The complete release gaps remain open: shared admission for every producer,
 agent-facing R6 namespace/retry/MCP integration, R7 LLM proxy revocation,
 mailbox, real Claude T06/T07, and T14 power/OS crash evidence. Chat and webhook
 for the same agent may still overlap. No PR merge or deployment occurred.
+
+
+## 2026-09-13 — follow-ups after the second external review
+
+Two separate PRs, stacked on `feat/durable-work-parallelism` because
+`routine_webhook_receipts` only exists there; each is to be retargeted to
+`main` once #2490 lands. Neither is a claim about the parallel profile.
+
+### Throttled routine redelivery (fix/routine-redelivery-throttle)
+
+The per-token rate gate on the routine webhook route ran before the receipt
+lookup, so a redelivery of accepted work under throttling was answered
+`429`. The lookup now runs right after signature verification and before the
+rate gate and every other capacity pre-check: duplicate → `202 DEDUPED` with
+the original run, different body → `409`, unreadable ledger → `503`, new work
+under an exhausted limit → still `429`, bad signature → `401` before any
+lookup. The acceptance transaction still owns the atomic reservation. Red test
+first (real handler, real SQLite); restoring the old handler under an overlay
+fails it the same way; the entire `internal/api` package passed after the fix.
+
+### Routine receipts: read surface and retention (feat/routine-receipts-retention)
+
+`routine_webhook_receipts` gains `received_at`, `dedup_expires_at`,
+`body_bytes` and `profile` (append-only migration; rows without an age are
+dated from the migration and get the full window from there). Two read routes,
+`GET …/routine-webhook-receipts` and `…/{receiptId}`, and
+`crewship routine webhooks receipts list|get` expose identity, body
+fingerprint, the real `run_id` and its `run_status` (null when no run row
+exists), fenced to the workspace and paged at 100. The dedup window is 30 days
+from acceptance (§6); `pipeline.StartRoutineReceiptRetentionSweeper` runs
+daily from `cmd_start` and deletes expired receipts in bounded batches, after
+which the same identifier is new work again — the contract's answer, stated in
+the docs rather than implied. Not done here: durable pipeline dispatch
+recovery (routine execution stays direct), and the agent-webhook ledger's own
+retention sweeper (`work.Store.Sweep`) is still unscheduled — routine
+retention is not system retention, and that item stays open on its own.
+
+After the independent review (P2): the CLI said an absent run record meant
+"the dispatch failed before the engine wrote one", which the absence cannot
+establish — the receipt and the 202 exist before execution starts, so the run
+may simply not have begun, or its record may have been retained away. The
+CLI, API description, handler comments and docs now say "run record not
+available" and nothing more; a handler test holds execution on a barrier
+before the executor is entered and reads the receipt (null status), then
+releases it and reads the run's real status. Whole-flow tests added over the
+production handler: redelivery inside the window → same receipt/run; the real
+sweeper at day 31 → the same identity accepted again as new work (the
+executor's 24-hour key aged the same way); a migrated legacy-shaped receipt
+still deduplicates and conflicts; both legacy signature profiles are recorded
+and a fresh-timestamp redelivery is still a duplicate; the sweeper LOOP sweeps
+on start; and a source guard pins that `cmd_start` runs it.
+## 2026-09-13 — cancel during container start (fix/cancel-during-container-start)
+
+Branch off `feat/durable-work-parallelism`, independent of the two routine PRs.
+The webhook runtime kept a launch location only from the moment before
+`RunAgent`, so a cancel during `crewstart` (the longest part of a cold start)
+had no runtime to probe: `Stop`/`Alive` errored, the grace period expired and
+the work was parked — and a container start that completed afterwards launched
+the agent behind the parked cancel. The runtime now holds a per-attempt launch
+state from `Run`'s entry: `Stop` before launch records the stop under the
+launch lock, cancels the preparation's context and answers "stopped" as a fact;
+`runWebhookAgent` asks the gate before the container start, before the run
+record and at launch, and refuses with a before-agent error once a stop was
+recorded. Settle then reads the user's cancel request → `cancelled`; without
+one (shutdown) Classify says retryable → `retry_wait`. After launch nothing
+changes: the provider's probe at the recorded location decides, and the run's
+context is deliberately not cancelled there (a cut stream would return early
+while the CLI carried on).
+
+Deterministic tests over the real HTTP cancel route and the production
+orchestrator's probes with a fake container transport: the container start
+blocks until the run's context is cancelled and then completes anyway (gate
+must refuse) or aborts (shutdown). Both are red on the previous runtime
+(overlay: `needs_reconciliation` in both cases) and green on this branch.
+Second independent review (2026-09-13, `review-2026-09-13-independent/`)
+reproduced the residual window this entry first only disclosed: with the
+location recorded and `RunAgent` still in its preflight, the stop's kill probe
+answered ABSENT, the dispatcher took that as a confirmed stop, and the preflight
+then created the agent behind a `cancelled` ledger row. The first repair
+(8d588855) leaned on the `exec.command` journal row to tell "never requested"
+from "requested and gone". The third review (2026-09-14,
+`review-2026-09-14-independent/`) showed that row is queued telemetry emitted
+with its result ignored: before a flush the runtime said "no exec", after the
+flush "unknown" — the same situation judged two ways.
+
+The protocol now (this head): `orchestrator.AgentRunRequest.ExecGate` is
+asked synchronously immediately before `container.Exec`, with nothing external
+between the answer and the creation; a refusal returns
+`orchestrator.ErrExecRefused` and creates nothing. The webhook runtime's launch
+state implements the gate: a recorded stop refuses it, and an admitted creation
+is first written durably as work-attempt runtime phase `requested`
+(`work.Store.MarkRuntimeRequested`, under the full binding; a failed write
+refuses the creation). Phases: preparing/declared (no request yet — a stop is a
+fact, no probe needed, cancel → `cancelled`, shutdown → `retry_wait`);
+requested (a process may exist — kill probe sent, answer "not confirmed", an
+absent probe is an error); settled (confirmed or `Run` returned — the probe
+decides, except that a requested-and-never-confirmed process that is absent is
+an unknown outcome and stays in `needs_reconciliation`, holding its slot).
+`Defer` refuses a requested attempt, `StartRunning` confirms it, recovery parks
+it. The journal is never consulted. `dispatch.settle` records `succeeded` when
+the run reports success even if a cancel was requested.
+
+Regressions (production probes, absent fake transport, real HTTP cancel route,
+real dispatcher and SQLite): cancel before the gate with a preflight that
+ignores its context (gate refuses, 0 launches, phase stays `starting`);
+shutdown before the gate (`retry_wait`); admitted creation with the
+exec.command entry still queued and with its emission failing — cancel and
+shutdown each → `needs_reconciliation`, slot held; completion after an admitted
+creation → `succeeded`; a gate whose durable write fails refuses. Mutants that
+trust the probe after admission, or whose gate ignores a recorded stop, fail
+these tests. The reviewer's `review_journal_absence_test.go` constructs a
+launch state by hand (location + returned, no gate); under this protocol that
+state cannot arise, so the equivalent is the queued/failed-journal pair above,
+driven through the protocol.
