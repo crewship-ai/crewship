@@ -23,7 +23,8 @@ beforeEach(() => {
 function handle() {
   render(
     <BottomPanel
-      context={{ workspaceId: "ws-1", crewId: "crew-1" } as never}
+      workspaceId="ws-1"
+      context={{ kind: "crew", crewId: "crew-1", crewSlug: "crew-1" }}
       initialOpen
     />,
   )

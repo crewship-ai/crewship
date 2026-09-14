@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, cleanup, act } from "@testing-library/react"
 
 import { IssuesListView } from "../issues-list-view"
-import type { Mission } from "@/lib/types"
+import type { Mission } from "@/lib/types/mission"
 
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER", can: () => true }) }))
 // The row's density preference is server-backed; the layout question here does
