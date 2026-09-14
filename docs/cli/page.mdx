@@ -727,8 +727,8 @@ crewship page access fleet-201 --me
 Prints the paths by which you reach the page, in the API's own words —
 `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`
 — the same words `page list` prints in its `REACH` column. When the page is in
-a folder, the folder's slug and its sharing label (`none`, `crew`,
-`workspace`) are printed too: the label, never the names. Anyone who can open
+a folder, the folder's slug and its sharing label (`none`, `people`, `crews`,
+`people_and_crews`, `workspace`) are printed too: the label, never the names. Anyone who can open
 the page may ask; a page you cannot reach is a 404.
 
 Backed by the page's own-access endpoint (`GET …/access/me`).
@@ -757,7 +757,7 @@ pages; *can edit* also renames the folder, edits the pages inside and takes
 pages out of it. A panel owned by another crew stays sealed whatever the folder
 says, and a folder is never shared with an agent. Only the owning crew's
 managers and workspace admins see or change a folder's sharing; everyone else
-sees a label (`none`, `crew`, `workspace`) in `folder list` and `folder show`,
+sees a label (`none`, `people`, `crews`, `people_and_crews`, `workspace`) in `folder list` and `folder show`,
 and their own access in [`page access --me`](#crewship-page-access-slug-me).
 
 Every folder command is backed by the [folder endpoints](/api-reference/pages#folders).

@@ -160,7 +160,7 @@ unshares it. "Can view" opens the pages; "can edit" also renames the folder,
 edits the pages inside and takes pages out of it. A panel owned by another
 crew stays sealed whatever the folder says. Only the owning crew's managers
 and workspace admins see or change a folder's sharing; everyone else sees a
-label (none, crew, workspace) and their own access ("page access --me").`,
+label (none, people, crews, people_and_crews, workspace) and their own access ("page access --me").`,
 }
 
 // ── list ───────────────────────────────────────────────────────────────────

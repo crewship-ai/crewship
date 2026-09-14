@@ -539,10 +539,20 @@ func (h *PageHandler) DeleteFolderACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(r.Context(),
+	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM page_folder_acl WHERE folder_id = ? AND subject_type = ? AND subject_id = ?`,
-		f.ID, found.SubjectType, found.SubjectID); err != nil {
+		f.ID, found.SubjectType, found.SubjectID)
+	if err != nil {
 		replyInternalError(w, h.logger, "remove folder permission", err)
+		return
+	}
+	// The entry was matched against a read taken before this transaction.
+	// Two unshares racing on the same entry both find it, and only one
+	// deletes it: the other must not bump acl_version, journal a removal
+	// that did not happen, or answer 204 for it. It answers what a second
+	// look would have: the entry is gone.
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q has no permission entry for %s/%s", f.Slug, subjectType, ref))
 		return
 	}
 	if err := bumpFolderACLVersion(r.Context(), tx, f, now); err != nil {
