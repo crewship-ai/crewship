@@ -186,10 +186,11 @@ describe("the /pages shell offers the third door", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled())
     fireEvent.click(screen.getByRole("button", { name: /^edit$/i }))
     expect(await screen.findByTestId("section-content")).toBeTruthy()
-    // Access is reachable on exactly the Page the old gate locked out of it.
-    // The rail button carries its one-line summary in its name too.
-    fireEvent.click(screen.getByRole("button", { name: /^Access/ }))
+    // Access is reachable on exactly the Page the old gate locked out of it —
+    // on screen at once, as its own landmark, now that the sections are cards
+    // on one page rather than a rail of four screens.
     expect(await screen.findByTestId("section-access")).toBeTruthy()
+    expect(screen.getByRole("region", { name: "Access" })).toBeTruthy()
   })
 
   it("names the New page button in the empty rail, not only the CLI", async () => {

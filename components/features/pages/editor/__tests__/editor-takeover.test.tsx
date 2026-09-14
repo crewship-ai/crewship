@@ -24,16 +24,18 @@ vi.mock("@/components/features/pages/editor/section-history", () => ({
 import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
 import { useEditorRoute } from "@/components/features/pages/editor/use-editor-route"
 import { derivePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
-import { EDITOR_SECTION_LABEL, EDITOR_SECTION_SUMMARY, EDITOR_SECTIONS } from "@/lib/pages/editor-contract"
+import { EDITOR_SECTION_LABEL, EDITOR_SECTIONS } from "@/lib/pages/editor-contract"
 import type { WirePageDetail } from "@/hooks/use-page-grants"
 
 /**
  * #2515: Edit hands the whole content column to the editor. What that has to
  * mean on screen, stated as tests rather than as a screenshot:
  *
- *  · the rail lists every section with one line under its name, and marks
- *    the open one — a row of tabs said where you were and nothing about the
- *    other three;
+ *  · every section is on the page at once, as a landmark named for it, laid
+ *    out the way an issue is — the rail of four that showed one at a time
+ *    read as a settings wizard beside the rest of the product;
+ *  · the address still names a section, and naming one hands focus to it
+ *    without hiding the other three;
  *  · the header says how to get back and what viewers see meanwhile, because
  *    the first question after the screen changes under you is whether
  *    anything you touch here is already live.
@@ -53,14 +55,22 @@ function Harness({ detail }: { detail: WirePageDetail }) {
   }, [nav])
   if (nav.mode !== "edit") return <p>viewing</p>
   return (
-    <PageEditorShell
-      workspaceId="ws-1"
-      slug="operations-lab"
-      page={detail}
-      loading={false}
-      capabilities={derivePageCapabilities(detail)}
-      navigation={nav}
-    />
+    <>
+      {/* Stands in for the in-editor links that move between sections —
+          "Manage producer access", "Data & actions" — which the mocked
+          sections do not draw. */}
+      <button type="button" onClick={() => nav.setSection("access")}>
+        go to access
+      </button>
+      <PageEditorShell
+        workspaceId="ws-1"
+        slug="operations-lab"
+        page={detail}
+        loading={false}
+        capabilities={derivePageCapabilities(detail)}
+        navigation={nav}
+      />
+    </>
   )
 }
 
@@ -70,25 +80,38 @@ describe("the editor as a mode over the whole page", () => {
     window.history.replaceState(null, "", "/pages/operations-lab")
   })
 
-  it("lists every section in the rail with its one-line summary, and marks the open one", () => {
+  it("lays every section out at once, each a landmark named for it, under the Page's own header", () => {
     render(<Harness detail={page({})} />)
-    const rail = screen.getByRole("navigation", { name: "Editor sections" })
     for (const id of EDITOR_SECTIONS) {
-      const button = within(rail).getByRole("button", { name: new RegExp(EDITOR_SECTION_LABEL[id]) })
-      expect(button.textContent).toContain(EDITOR_SECTION_SUMMARY[id])
+      const frame = screen.getByRole("region", { name: EDITOR_SECTION_LABEL[id] })
+      expect(within(frame).getByTestId(`section-${id}`)).toBeTruthy()
     }
-    expect(within(rail).getByRole("button", { name: /Content/ }).getAttribute("aria-current")).toBe("page")
-    expect(within(rail).getByRole("button", { name: /Access/ }).getAttribute("aria-current")).toBeNull()
+    // No second rail: the Pages list on the left is the one rail every
+    // surface shares, and the sections are cards, not screens.
+    expect(screen.queryByRole("navigation", { name: "Editor sections" })).toBeNull()
+    // The header is the issue header: the name first, the state as pills,
+    // the way back top-right — and the Properties card beside the sections.
+    const header = screen.getByTestId("page-editor-header")
+    expect(within(header).getByRole("heading", { name: "Operations Lab" })).toBeTruthy()
+    expect(header.textContent).toContain("0 panels")
+    expect(screen.getByTestId("page-properties")).toBeTruthy()
   })
 
-  it("opens the section the rail names and moves the mark with it", () => {
+  it("hands focus to the section the address names, and keeps the other three on screen", () => {
     render(<Harness detail={page({})} />)
-    const rail = screen.getByRole("navigation", { name: "Editor sections" })
-    fireEvent.click(within(rail).getByRole("button", { name: /Access/ }))
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Operations Lab" }))
+    fireEvent.click(screen.getByRole("button", { name: "go to access" }))
+    expect(window.location.search).toContain("section=access")
+    expect(document.activeElement).toBe(screen.getByRole("region", { name: "Access" }))
+    expect(screen.getByTestId("section-content")).toBeTruthy()
     expect(screen.getByTestId("section-access")).toBeTruthy()
-    expect(screen.queryByTestId("section-content")).toBeNull()
-    expect(within(rail).getByRole("button", { name: /Access/ }).getAttribute("aria-current")).toBe("page")
-    expect(screen.getByText(/Editing Access/)).toBeTruthy()
+  })
+
+  it("names the application as a pill, with its publication", () => {
+    render(<Harness detail={page({ has_application: true, has_project: true, publication_version: 4 } as Partial<WirePageDetail>)} />)
+    const header = screen.getByTestId("page-editor-header")
+    expect(header.textContent).toContain("Custom application")
+    expect(header.textContent).toContain("Publication 4")
   })
 
   it("says that viewers keep the live publication while an application Page is edited", () => {

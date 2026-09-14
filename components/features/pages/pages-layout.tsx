@@ -359,25 +359,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
-        {/* The list stays MOUNTED. Replacing it with the editor's sections was
-            the first draft's riskiest idea and the review's U05: the promise
-            that a list restores its scroll and filters afterwards is the
-            promise that breaks. While editing it steps off-screen instead
-            (#2515): still in the DOM at its full width, so its scroll
-            position and its filter state are exactly where they were on
-            return — `display: none` would have reset the scroll — but out of
-            layout, out of the tab order and out of the accessibility tree,
-            so the editor has the whole width and nobody can tab into a list
-            they cannot see. */}
+        {/* The list stays MOUNTED and on screen while editing. Replacing it
+            with the editor's sections was the first draft's riskiest idea and
+            the review's U05: the promise that a list restores its scroll and
+            filters afterwards is the promise that breaks. #2515 then slid it
+            off-screen to give a second, section-only rail the width; that
+            rail is gone — the sections are cards on one page, laid out like
+            an issue — and the Pages list is the one rail every surface
+            shares, so it stays exactly where it is. Choosing another Page
+            here goes through the same unsaved-work question as Back does. */}
         <aside
-          inert={editing}
-          aria-hidden={editing || undefined}
-          data-editing={editing || undefined}
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
             isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
-            editing && "pointer-events-none absolute inset-y-0 left-0 -translate-x-full opacity-0",
           )}
         >
           {collapsed ? (

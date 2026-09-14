@@ -20,7 +20,7 @@
  * no overlay, no escape key of its own. The cards are deliberately still
  * exported one at a time, because they no longer travel together:
  *
- *   · `PageFactsCard`, `PanelVersionsCard`      → Content and History
+ *   · `PanelVersionsCard`                        → History
  *   · `AccessCard`, `WebhooksCard`, `SharingCard`, `ExportCard`, `DangerCard`
  *                                                → Access
  *
@@ -71,16 +71,19 @@ import * as React from "react"
 import { stringify as stringifyYaml } from "yaml"
 import {
   AlertTriangle,
+  Bot,
+  Building2,
   Copy,
   Download,
   Globe,
   History,
-  Info,
   KeyRound,
   Loader2,
   Plus,
   Trash2,
   Undo2,
+  User,
+  Users,
   Webhook,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -95,7 +98,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -110,7 +112,7 @@ import {
   type WirePublicLink,
   type WireWebhook,
 } from "@/hooks/use-page-sharing"
-import { SectionCard } from "@/components/ui/section-card"
+import { DetailCard, EntityChip, FieldLabel, Pill, type DetailTone } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/layout/empty-state"
 import { formatDateTime } from "@/lib/time"
@@ -120,8 +122,6 @@ import {
   PAGE_SUBJECT_TYPES,
   PAGE_SUBJECT_TYPE_LABEL,
   pageGrantLevelsFor,
-  pagePanelCount,
-  toPageOwner,
   usePageGrantRevoke,
   usePageGrantWrite,
   usePageGrants,
@@ -139,51 +139,11 @@ import {
 // "Small icon + uppercase tracked label on the left, right-aligned muted status
 // word. The right-hand word is always the ANSWER, never a repeat of the label."
 //
-// The two sizes that used to be written out here are `.type-page-label` and
-// `.type-page-meta` from the Pages register (`app/globals.css`). §9b.2 says
-// what the idiom IS; the register says how big it is, once.
-
-export function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <span className="type-page-label inline-flex items-center gap-1.5 text-foreground/70">
-      <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />
-      {children}
-    </span>
-  )
-}
-
-export function CardAnswer({ children }: { children: React.ReactNode }) {
-  return <span className="type-page-meta text-muted-foreground">{children}</span>
-}
-
-/** One label/answer line. Same idiom, one row deep. */
-export function Fact({
-  label,
-  mono,
-  children,
-}: {
-  label: string
-  mono?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      data-slot="page-fact"
-      data-fact={label.toLowerCase()}
-      className="flex items-baseline justify-between gap-4 border-b border-border/40 py-2 last:border-b-0"
-    >
-      <span className="type-page-label shrink-0 text-muted-foreground-soft">
-        {label}
-      </span>
-      <span
-        data-slot="fact-value"
-        className={cn("min-w-0 text-right text-xs text-muted-foreground", mono && "font-mono")}
-      >
-        {children}
-      </span>
-    </div>
-  )
-}
+// The cards below say that with `DetailCard` from `ui/detail` — the title
+// band is the label, `subtitle` is the answer — so the issue detail and the
+// Pages editor are one design instead of two that rhyme. The pre-kit spelling
+// (`CardLabel`, `CardAnswer`, a `Fact` row) is gone with the "General" table
+// it existed for; the facts are a `StatStrip` under the editor's header now.
 
 /**
  * The server's refusal, in its own words.
@@ -270,6 +230,30 @@ function when(iso: string | null | undefined): string {
  */
 type RevokeTarget = { kind: "one"; grant: PageGrant } | { kind: "all"; subject: PageGrant; levels: number }
 
+/**
+ * One glyph per subject kind, so a row's chip says what the subject IS before
+ * its name is read. Exported for the sibling cards that list subjects
+ * (Effective access, From folder) — three copies of "user → User" is three
+ * places for a fourth kind to be missing.
+ */
+export const PAGE_SUBJECT_ICON: Record<PageSubjectType, React.ComponentType<{ className?: string }>> = {
+  user: User,
+  crew: Users,
+  agent: Bot,
+  workspace: Building2,
+}
+
+export function pageSubjectIcon(kind: string): React.ComponentType<{ className?: string }> | undefined {
+  return (PAGE_SUBJECT_ICON as Record<string, React.ComponentType<{ className?: string }>>)[kind]
+}
+
+/**
+ * The level as a pill tone. Three verbs, three tints — `read` is the neutral
+ * one because it is the floor, not because it does nothing (see rule 3 in
+ * the file comment).
+ */
+const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", write: "blue", produce: "purple" }
+
 export function GrantRow({
   grant,
   onRevoke,
@@ -302,19 +286,20 @@ export function GrantRow({
       )}
     >
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 font-mono leading-none">
-          {grant.subjectType}
-        </Badge>
-        <span className="min-w-0 truncate text-xs font-medium text-foreground" title={grant.subject}>
-          {grant.subject}
-        </span>
-        <Badge
-          variant="secondary"
-          className="h-4 shrink-0 px-1.5 leading-none"
+        {/* The subject as a chip: kind as the glyph and the muted note, the
+            reference as the label. A workspace grant has no reference — the
+            kind IS the subject — so the chip says who that is. */}
+        <EntityChip
+          icon={pageSubjectIcon(grant.subjectType)}
+          label={grant.subject || (grant.subjectType === "workspace" ? PAGE_SUBJECT_TYPE_LABEL.workspace : DASH)}
+          note={grant.subjectType}
+        />
+        <span
+          className="shrink-0"
           title={PAGE_GRANT_LEVEL_MEANING[grant.level as PageGrantLevel] ?? grant.level}
         >
-          {grant.level}
-        </Badge>
+          <Pill tone={LEVEL_TONE[grant.level as PageGrantLevel] ?? "default"}>{grant.level}</Pill>
+        </span>
         <div className="flex-1" />
         {!readOnly && (
           <Button
@@ -392,12 +377,13 @@ export function AccessCard({
   title = "Access",
   canManage = true,
   manageRefusal,
+  footer,
 }: {
   workspaceId: string
   slug: string
   panelIDs: string[]
   /** Re-titled by the section that mounts it — "People and crews" in Access. */
-  title?: React.ReactNode
+  title?: string
   /**
    * `PageCapabilities.mayManageAccess`. False hides the WRITES and nothing
    * else: the grant list is what tells a reader who reaches this page, and it
@@ -405,6 +391,12 @@ export function AccessCard({
    */
   canManage?: boolean
   manageRefusal?: string
+  /**
+   * The one muted line under the card — what a grant means in practice. The
+   * section that mounts it supplies it, because the sentence is about the
+   * section's save model (`SaveEffect`), not about this card alone.
+   */
+  footer?: React.ReactNode
 }) {
   const { grants, inertCount, loading, refusal, error } = usePageGrants(workspaceId, slug)
 
@@ -484,17 +476,13 @@ export function AccessCard({
   }
 
   return (
-    <SectionCard
-      title={<CardLabel icon={KeyRound}>{title}</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-    >
+    <DetailCard title={title} icon={KeyRound} subtitle={answer} footer={footer}>
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s grants…
           </div>
@@ -554,10 +542,13 @@ export function AccessCard({
             the server, whose sentence lands in the banner above. */}
         {!refusal && canManage && (
           <form onSubmit={onIssue} className="flex flex-col gap-2 rounded-md border border-border/50 p-2.5">
+            {/* The labels are for assistive technology and `getByLabelText`;
+                the row reads as one sentence (kind · who · level · Grant) and
+                a visible label per control would break it into four. */}
             <div className="flex flex-wrap items-center gap-2">
-              <label className="sr-only" htmlFor="grant-subject-type">
+              <FieldLabel className="sr-only" htmlFor="grant-subject-type">
                 Subject kind
-              </label>
+              </FieldLabel>
               <select
                 id="grant-subject-type"
                 className={SELECT_CLASS}
@@ -582,9 +573,9 @@ export function AccessCard({
                   kind IS the subject. */}
               {!forWorkspace && (
                 <>
-                  <label className="sr-only" htmlFor="grant-subject">
+                  <FieldLabel className="sr-only" htmlFor="grant-subject">
                     Subject
-                  </label>
+                  </FieldLabel>
                   <Input
                     id="grant-subject"
                     value={subject}
@@ -600,9 +591,9 @@ export function AccessCard({
                 </>
               )}
 
-              <label className="sr-only" htmlFor="grant-level">
+              <FieldLabel className="sr-only" htmlFor="grant-level">
                 Level
-              </label>
+              </FieldLabel>
               <select
                 id="grant-level"
                 className={SELECT_CLASS}
@@ -630,9 +621,9 @@ export function AccessCard({
                 400, so the field is not offered where it would be a lie. */}
             {level === "produce" && (
               <div className="flex flex-col gap-1">
-                <label className="sr-only" htmlFor="grant-panels">
+                <FieldLabel className="sr-only" htmlFor="grant-panels">
                   Panels
-                </label>
+                </FieldLabel>
                 <Input
                   id="grant-panels"
                   value={panels}
@@ -713,7 +704,7 @@ export function AccessCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -751,9 +742,9 @@ export function VersionRow({
         </span>
       </div>
       {version.current ? (
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 leading-none">
+        <Pill tone="success" className="shrink-0">
           current
-        </Badge>
+        </Pill>
       ) : (
         <Button
           size="sm"
@@ -774,76 +765,6 @@ export function VersionRow({
   )
 }
 
-/**
- * What this page IS — its facts, and none of its history.
- *
- * Half of the old `GeneralCard`. The two halves are split because they are now
- * asked about in different places: the facts belong beside the panels in
- * Content, where somebody is looking at the thing they describe, and the
- * version log belongs in History next to the two *application* histories it
- * must never be mistaken for.
- */
-export function PageFactsCard({
-  slug,
-  page,
-  title = "General",
-}: {
-  slug: string
-  page: WirePageDetail | null
-  title?: React.ReactNode
-}) {
-  const owner = toPageOwner(page)
-  const panelCount = pagePanelCount(page)
-
-  return (
-    <SectionCard
-      title={<CardLabel icon={Info}>{title}</CardLabel>}
-      actions={
-        <CardAnswer>
-          {panelCount} {panelCount === 1 ? "panel" : "panels"}
-        </CardAnswer>
-      }
-      className="gap-4 py-4"
-    >
-      <div data-slot="page-general" className="flex flex-col">
-        {/* §7.1 rule 1: owner_user_id XOR owner_crew_id. Which arc it is
-            changes what "the owner" means — a crew-owned page survives the
-            person leaving — so the kind is printed, never trimmed off. */}
-        <Fact label="Owner">
-          {owner ? (
-            <>
-              <span className="text-muted-foreground-soft">{owner.kind}</span>{" "}
-              <span className="text-foreground/85">{owner.label}</span>
-            </>
-          ) : (
-            DASH
-          )}
-        </Fact>
-        <Fact label="Slug" mono>
-          {slug}
-        </Fact>
-        <Fact label="Description">{dashed(page?.description)}</Fact>
-        <Fact label="Panels">{panelCount}</Fact>
-        <Fact label="Created">{when(page?.created_at)}</Fact>
-        {/* §10 defines updated_at as the SPEC's mtime — when the
-            arrangement last changed, not when data last arrived. */}
-        <Fact label="Spec changed">{when(page?.updated_at)}</Fact>
-      </div>
-    </SectionCard>
-  )
-}
-
-/**
- * Panel definition versions — the first of History's three restores.
- *
- * It is the only one of the three that writes the LIVE page, and the confirm
- * says so in its own words rather than sharing a sentence with the other two.
- * The independent review's finding was that one "restore" spanning three
- * different effects is a lie the reader cannot detect: restoring a panel
- * version changes what everyone sees now, restoring an application revision
- * changes only a draft, and publishing a retained version moves the counter
- * forward. Three dialogs, three sentences, no shared wording.
- */
 export function PanelVersionsCard({
   workspaceId,
   slug,
@@ -851,7 +772,7 @@ export function PanelVersionsCard({
 }: {
   workspaceId: string
   slug: string
-  title?: React.ReactNode
+  title?: string
 }) {
   const { versions, loading, refusal, error } = usePageVersions(workspaceId, slug)
 
@@ -873,36 +794,35 @@ export function PanelVersionsCard({
   })
 
   return (
-    <SectionCard
-      title={<CardLabel icon={History}>{title}</CardLabel>}
-      actions={
-        <CardAnswer>
-          {refusal
-            ? "not yours to read"
-            : loading
-              ? "loading"
-              : versions.length === 0
-                ? "no versions"
-                : `${versions.length} retained`}
-        </CardAnswer>
+    <DetailCard
+      title={title}
+      icon={History}
+      subtitle={
+        refusal
+          ? "not yours to read"
+          : loading
+            ? "loading"
+            : versions.length === 0
+              ? "no versions"
+              : `${versions.length} retained`
       }
-      className="gap-4 py-4"
-    >
-      <div className="flex flex-col gap-2">
-        {/* The effect, stated before the list rather than only in the confirm:
-            somebody scanning History has to be able to tell these rows from
-            the application rows below without opening a dialog. */}
-        <p className="type-page-meta text-muted-foreground">
+      // The effect, stated on the card rather than only in the confirm:
+      // somebody scanning History has to be able to tell these rows from the
+      // application rows below without opening a dialog.
+      footer={
+        <>
           Restoring a panel version writes the <strong>live</strong> definition immediately. A panel
           whose shape changed loses its data and waits for the next push.
-        </p>
-
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
         {rollbackRefusal && <Refusal>{rollbackRefusal}</Refusal>}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-3 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading the version log…
           </div>
@@ -963,7 +883,7 @@ export function PanelVersionsCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1045,16 +965,8 @@ export function LinkRow({
       <div className="min-w-0 flex-1">
         <div className="type-page-value flex flex-wrap items-center gap-1.5">
           <span className="type-page-stamp text-foreground/90">{link.id}</span>
-          {link.has_password && (
-            <Badge variant="outline" className="type-page-label h-4 px-1">
-              password
-            </Badge>
-          )}
-          {link.show_provenance ? (
-            <Badge variant="outline" className="type-page-label h-4 px-1">
-              provenance shown
-            </Badge>
-          ) : null}
+          {link.has_password && <Pill>password</Pill>}
+          {link.show_provenance ? <Pill>provenance shown</Pill> : null}
         </div>
         <div className="type-page-meta text-muted-foreground">
           {link.live ? `Expires ${when(link.expires_at)}` : `Withdrawn ${when(link.revoked_at)}`}
@@ -1147,30 +1059,31 @@ export function SharingCard({
       : `${liveCount} live link${liveCount === 1 ? "" : "s"}`
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Globe}>Public links</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-    >
-      <div className="flex flex-col gap-3">
-        {/* What a link actually exposes, said before anybody mints one. The
-            two halves are separate facts and both get misread: a link serves
-            the panels that declare `public: true` and nothing else, and
-            PUBLISHING a custom application is a different act entirely — the
-            public DTO carries panels, never the application artifact. */}
-        <p className="type-page-meta text-muted-foreground">
+    <DetailCard
+      title="Public links"
+      icon={Globe}
+      subtitle={answer}
+      // What a link actually exposes, on the card itself. The two halves are
+      // separate facts and both get misread: a link serves the panels that
+      // declare `public: true` and nothing else, and PUBLISHING a custom
+      // application is a different act entirely — the public DTO carries
+      // panels, never the application artifact.
+      footer={
+        <>
           A public link exposes the <strong>panels marked public</strong> on this Page, to anyone
           holding the link. Publishing a custom application is not the same thing: it does not put
           the application outside this workspace, and a public link never serves it.
-        </p>
-
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
         {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
         {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s links…
           </div>
@@ -1280,7 +1193,7 @@ export function SharingCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1327,7 +1240,7 @@ export function WebhooksCard({
   slug: string
   panelIDs: string[]
   /** "Producer tokens" in the editor's Access section. */
-  title?: React.ReactNode
+  title?: string
   /** `PageCapabilities.mayManageAccess`. Minting is issuing a credential. */
   canManage?: boolean
   manageRefusal?: string
@@ -1371,26 +1284,28 @@ export function WebhooksCard({
   const answer = loading ? "…" : liveCount === 0 ? "none" : `${liveCount} not revoked`
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Webhook}>{title}</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-    >
-      <div className="flex flex-col gap-3">
-        {/* The two truths, above the list they are about. */}
-        <p data-slot="token-truths" className="type-page-meta text-muted-foreground">
+    <DetailCard
+      title={title}
+      icon={Webhook}
+      subtitle={answer}
+      // The two truths, on the card the list is in. Not a tooltip: this is
+      // the sentence that changes what an admin thinks they must police.
+      footer={
+        <span data-slot="token-truths">
           Each token is bound to <strong>one panel</strong> and writes nothing else. A token
           carries no authority of its own — the server rechecks the issuer&rsquo;s rights on every
           write, so revoking the issuer&rsquo;s grant narrows the token immediately.
-        </p>
-
+        </span>
+      }
+    >
+      <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
         {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
         {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s tokens…
           </div>
@@ -1417,20 +1332,15 @@ export function WebhooksCard({
                 <div className="min-w-0 flex-1">
                   <div className="type-page-value flex flex-wrap items-center gap-1.5">
                     <span className="font-medium text-foreground/90">{dashed(w.name)}</span>
-                    <Badge variant="outline" className="type-page-label h-4 px-1">
-                      {w.panel}
-                    </Badge>
+                    <Pill className="font-mono">{w.panel}</Pill>
                     {/* The status word is what the column KNOWS. "Not
                         revoked" is the whole of it: it does not say the
                         issuer still has rights, and it does not promise the
-                        next write is accepted. */}
-                    <Badge
-                      variant={w.live ? "outline" : "secondary"}
-                      data-slot="token-status"
-                      className="type-page-label h-4 px-1"
-                    >
-                      {w.live ? "Not revoked" : "Revoked"}
-                    </Badge>
+                        next write is accepted — which is why the live pill
+                        is the neutral tone and never the success green. */}
+                    <span data-slot="token-status">
+                      <Pill tone={w.live ? "default" : "warn"}>{w.live ? "Not revoked" : "Revoked"}</Pill>
+                    </span>
                   </div>
                   <div className="type-page-meta text-muted-foreground">
                     {w.live ? `Minted ${when(w.created_at)}` : `Revoked ${when(w.revoked_at)}`}
@@ -1525,7 +1435,7 @@ export function WebhooksCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1564,30 +1474,32 @@ export function DangerCard({
   })
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Trash2}>Delete this Page</CardLabel>}
-      className="gap-4 border-destructive/30 py-4"
+    <DetailCard
+      title="Delete this Page"
+      icon={Trash2}
+      tone="destructive"
+      action={
+        <Button
+          size="xs"
+          variant="outline"
+          className="border-destructive/50 text-destructive hover:bg-destructive/10"
+          onClick={() => {
+            setTyped("")
+            setOpen(true)
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+          Delete this Page
+        </Button>
+      }
+      footer="There is no undo — a rollback restores a spec, not a deleted page."
     >
       <div className="flex flex-col gap-3">
         {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
-        <p className="type-page-meta text-muted-foreground">
+        <p className="type-page-value text-muted-foreground">
           Deletes the page, its panels and every payload they hold. Grants, public links and webhook
-          tokens go with it. There is no undo — a rollback restores a spec, not a deleted page.
+          tokens go with it.
         </p>
-        <div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 border-destructive/50 px-3 text-xs text-destructive hover:bg-destructive/10"
-            onClick={() => {
-              setTyped("")
-              setOpen(true)
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete this Page
-          </Button>
-        </div>
       </div>
 
       <AlertDialog open={open} onOpenChange={setOpen}>
@@ -1623,7 +1535,7 @@ export function DangerCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1646,56 +1558,59 @@ export function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: s
   const [refusal, setRefusal] = React.useState<string | null>(null)
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Download}>Export</CardLabel>}
-      className="gap-4 py-4"
+    <DetailCard
+      title="Export"
+      icon={Download}
+      footer={
+        <>
+          Wake gates, on-failure routes, actions and publication do <strong>not</strong> travel:
+          they would arrive as automations and links nobody there approved.
+        </>
+      }
+      action={
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            setRefusal(null)
+            try {
+              const bundle = await fetchPageBundle(workspaceId, slug)
+              // Held only long enough for the browser to take it. Revoked
+              // straight after, because an object URL keeps the whole blob
+              // alive for the life of the document otherwise.
+              const sourceProject = bundle.format === "crewship-page-bundle/v2"
+              const filename = `${slug}.bundle.${sourceProject ? "yaml" : "json"}`
+              const blob = new Blob([sourceProject ? stringifyYaml(bundle) : JSON.stringify(bundle, null, 2)], {
+                type: sourceProject ? "application/yaml" : "application/json",
+              })
+              const href = URL.createObjectURL(blob)
+              const a = document.createElement("a")
+              a.href = href
+              a.download = filename
+              a.click()
+              URL.revokeObjectURL(href)
+              toast.success("Exported", { description: filename })
+            } catch (err) {
+              setRefusal(err instanceof Error ? err.message : "Export failed")
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+          Download bundle
+        </Button>
+      }
     >
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
-        <p className="type-page-meta text-muted-foreground">
+        <p className="type-page-value text-muted-foreground">
           Downloads this page as a portable bundle — its panels, their owners and producers, and the
-          references another workspace has to bind. Wake gates, on-failure routes, actions and
-          publication do <strong>not</strong> travel: they would arrive as automations and links
-          nobody there approved.
+          references another workspace has to bind.
         </p>
-        <div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 px-3 text-xs"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setRefusal(null)
-              try {
-                const bundle = await fetchPageBundle(workspaceId, slug)
-                // Held only long enough for the browser to take it. Revoked
-                // straight after, because an object URL keeps the whole blob
-                // alive for the life of the document otherwise.
-                const sourceProject = bundle.format === "crewship-page-bundle/v2"
-                const filename = `${slug}.bundle.${sourceProject ? "yaml" : "json"}`
-                const blob = new Blob([sourceProject ? stringifyYaml(bundle) : JSON.stringify(bundle, null, 2)], {
-                  type: sourceProject ? "application/yaml" : "application/json",
-                })
-                const href = URL.createObjectURL(blob)
-                const a = document.createElement("a")
-                a.href = href
-                a.download = filename
-                a.click()
-                URL.revokeObjectURL(href)
-                toast.success("Exported", { description: filename })
-              } catch (err) {
-                setRefusal(err instanceof Error ? err.message : "Export failed")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
-            Download bundle
-          </Button>
-        </div>
       </div>
-    </SectionCard>
+    </DetailCard>
   )
 }

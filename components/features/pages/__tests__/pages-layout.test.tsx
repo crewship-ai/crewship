@@ -195,10 +195,12 @@ describe("PagesLayout", () => {
     })
   })
 
-  // #2515: Edit hands the whole column to the editor. The rail must not be
+  // #2515: Edit hands the content column to the editor. The rail must not be
   // torn down for that — its scroll and filters have to be there on return —
-  // so it steps off-screen instead, and comes back with the same node.
-  it("keeps the rail mounted but out of the way while editing, and brings it back", async () => {
+  // and it is not moved out of the way either: it is the one rail every
+  // surface shares, and the editor no longer brings a second one that needed
+  // the width. Same node before, during and after.
+  it("keeps the rail mounted, reachable and the same node while editing", async () => {
     renderLayout([FLEET, CLOSE], "fleet-201")
     await waitFor(() => expect(document.querySelector("[data-slot='panel-grid']")).toBeTruthy())
     const rail = document.querySelector('[data-slot="pages-rail"]')
@@ -209,8 +211,8 @@ describe("PagesLayout", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }))
     await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeTruthy())
     expect(document.querySelector('[data-slot="pages-rail"]')).toBe(rail)
-    expect(aside?.hasAttribute("inert")).toBe(true)
-    expect(aside?.getAttribute("aria-hidden")).toBe("true")
+    expect(aside?.hasAttribute("inert")).toBe(false)
+    expect(aside?.getAttribute("aria-hidden")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: /back to page/i }))
     await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeNull())

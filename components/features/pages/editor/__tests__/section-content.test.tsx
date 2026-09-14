@@ -29,10 +29,6 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-li
 // and `application-review.tsx` is being written by S6. Both are mocked so this
 // suite's verdict is about THIS file, not about how far the other streams got.
 
-vi.mock("@/components/features/pages/page-settings", () => ({
-  PageFactsCard: ({ slug }: { slug: string }) => <div data-slot="page-facts">facts for {slug}</div>,
-}))
-
 vi.mock("@/components/features/pages/editor/application-review", () => ({
   EditorApplicationReview: ({ slug }: { slug: string }) => (
     <div data-slot="application-review">review of {slug}</div>
@@ -274,19 +270,19 @@ afterEach(() => vi.unstubAllGlobals())
 // ── 1. The ordinary Page is complete ───────────────────────────────────────
 
 describe("an ordinary panel Page renders as a complete product", () => {
-  it("shows the identity, the address and the derived facts", () => {
+  it("shows the identity as a form in a card named for it", () => {
     mount()
 
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
       "Services and container memory",
     )
-    // The address is a fact, not a field: the server refuses a slug change
-    // through PATCH because every producer pushes to that address.
-    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
-    expect(screen.getByRole("button", { name: /copy address/i })).toBeTruthy()
-    // The derived facts come from the shared card, not from a second copy of it.
-    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
+    // The address, the folder and the derived facts are not fields of this
+    // form and no longer sit inside it: they belong to the Properties card
+    // and the details strip (properties-card.test.tsx, editor-takeover.test.tsx).
+    expect(screen.queryByText("/pages/fleet-overview")).toBeNull()
+    expect(document.querySelector("[data-slot='page-facts']")).toBeNull()
+    expect(document.querySelector("[data-slot='page-folder']")).toBeNull()
   })
 
   it("lists every panel with its type, its producer and its state", () => {
@@ -404,15 +400,13 @@ describe("an application Page shows the review AND the Page itself", () => {
 
     // F1: every one of these was unreachable when Content returned the review
     // and nothing else — there was no other door onto them in the product.
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect(screen.getByLabelText("Description")).toBeTruthy()
-    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
-    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
     expect(screen.getByRole("button", { name: /edit document/i })).toBeTruthy()
 
     // Order: the review is the work; the Page's own content sits under it.
-    const own = screen.getByRole("heading", { name: "This Page itself" })
+    const own = document.querySelector("[data-slot='page-identity']")!
     expect(review.compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -420,7 +414,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     const { calls } = await mountApplicationPage()
     await screen.findByText("review of fleet-overview")
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Operations Lab" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Operations Lab" } })
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
     await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
 
@@ -442,7 +436,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     expect(line.textContent).toContain("nothing to review")
     // The Page's own content is the whole screen then.
     expect(panelRows()).toHaveLength(2)
-    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
   })
 
   it("opens no review when the candidate is identical to what is live", async () => {
@@ -452,7 +446,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     expect(document.querySelector("[data-slot='nothing-to-review']")?.textContent).toBe(
       "The candidate is identical to the live application.",
     )
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -465,7 +459,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     // Never "nothing to review": an unreadable snapshot is not an empty one.
     expect(warning.textContent).toContain("you may not read this application's review")
     expect(warning.textContent).not.toMatch(/nothing to review/)
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -503,7 +497,7 @@ describe("an application Page shows the review AND the Page itself", () => {
 
     // …and the Page's own content was reachable throughout, which is the part
     // of this gate that was already verified and must stay true.
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -534,8 +528,8 @@ describe("a Page whose application has never been published", () => {
     // The first-publication framing itself belongs to the review surface; what
     // this section owes it is the mount and the Page's own content underneath.
     expect(document.querySelector("[data-slot='nothing-to-review']")).toBeNull()
-    expect(screen.getByRole("heading", { name: "This Page itself" })).toBeTruthy()
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -550,7 +544,7 @@ describe("a Page whose application has never been published", () => {
     expect(line.textContent).not.toMatch(/version 0/)
     expect(line.textContent).not.toMatch(/published as version/)
 
-    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -576,12 +570,12 @@ describe("a Page carrying a panel this viewer may not see", () => {
     // the Page contains.
     expect(panelRows().length).toBeGreaterThan(0)
     // …and the metadata form is untouched by it.
-    expect(screen.getByLabelText("Page name")).not.toBeDisabled()
+    expect(screen.getByLabelText("Name")).not.toBeDisabled()
   })
 
   it("disables the metadata form only when the metadata capability is off", () => {
     mount({ capabilities: { mayEditMetadata: false } })
-    expect(screen.getByLabelText("Page name")).toBeDisabled()
+    expect(screen.getByLabelText("Name")).toBeDisabled()
     expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
   })
 })
@@ -592,7 +586,7 @@ describe("saving the Page's name and description", () => {
   it("issues exactly one PATCH with the two fields, and reports success", async () => {
     const { calls, onDirtyChange } = mount()
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Fleet overview v2" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Fleet overview v2" } })
     await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true))
 
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
@@ -653,16 +647,16 @@ describe("saving the Page's name and description", () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Renamed offline" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed offline" } })
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Could not reach the server"))
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Renamed offline")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Renamed offline")
   })
 
   it("refuses to submit an empty name rather than letting the server delete it", () => {
     mount()
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "   " } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "   " } })
     expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
     expect(screen.getByText(/A Page needs a name/)).toBeTruthy()
   })
@@ -711,37 +705,3 @@ describe("a failed detail read", () => {
 
 
 // ── Folder (#2527) ─────────────────────────────────────────────────────────
-
-describe("where the Page is filed", () => {
-  it("says the folder with its icon, and Change… opens the move dialog for this Page", async () => {
-    const { calls } = mount({ page: { ...PANEL_PAGE, folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" }, pages_version: 3 } })
-    const line = document.querySelector("[data-slot='page-folder']")!
-    expect(line.textContent).toContain("Folder")
-    expect(line.textContent).toContain("Ops")
-    // The colour sits on the icon itself, as in the picker (audit 2026-09-13, F4).
-    const glyph = line.querySelector<HTMLElement>("[data-slot='folder-glyph']")
-    expect(glyph).toBeTruthy()
-    expect(glyph!.style.color).not.toBe("")
-    // Nothing is fetched to draw the line: the folder rides on the record.
-    expect(calls.filter((c) => c.url.startsWith("/api/v1/page-folders"))).toHaveLength(0)
-
-    fireEvent.click(within(line as HTMLElement).getByRole("button", { name: "Change…" }))
-    const dialog = await screen.findByRole("dialog")
-    expect(within(dialog).getByText("Move to folder")).toBeTruthy()
-    expect(within(dialog).getByText("Fleet overview")).toBeTruthy()
-    // The current folder is preselected, so the primary waits for a change.
-    const ops = await within(dialog).findByRole("radio", { name: /^Ops/ })
-    expect(ops.getAttribute("aria-checked")).toBe("true")
-    expect(within(dialog).getByRole("button", { name: "Move" })).toBeDisabled()
-  })
-
-  it("says Unfiled when the Page is in no folder", () => {
-    mount({ page: { ...PANEL_PAGE, folder: null, pages_version: 0 } })
-    expect(document.querySelector("[data-slot='page-folder']")!.textContent).toContain("Unfiled")
-  })
-
-  it("draws no folder line at all when the server does not say", () => {
-    mount({ page: PANEL_PAGE })
-    expect(document.querySelector("[data-slot='page-folder']")).toBeNull()
-  })
-})

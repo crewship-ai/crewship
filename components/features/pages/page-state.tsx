@@ -16,6 +16,7 @@ import { CircleCheck, CircleDashed, CircleX, Clock } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import type { PanelState } from "@/components/features/pages/panels/types"
+import type { DetailTone } from "@/components/ui/detail"
 
 export interface PageStateMeta {
   /** The facet label, exactly as §9b.1 writes it. */
@@ -24,17 +25,24 @@ export interface PageStateMeta {
   /** Text tone token — never a hex. */
   tone: string
   dot: string
+  /**
+   * The same state as a `Pill` tone, for surfaces built on `ui/detail` —
+   * the editor's cards say "Fresh" in a pill, the way an issue says its
+   * status, rather than in coloured text beside an icon.
+   */
+  pill: DetailTone
 }
 
 export const PAGE_STATE_META: Record<PanelState, PageStateMeta> = {
-  fresh: { label: "Fresh", icon: CircleCheck, tone: "text-success", dot: "bg-success" },
-  stale: { label: "Stale", icon: Clock, tone: "text-warn", dot: "bg-warn" },
-  failed: { label: "Failed", icon: CircleX, tone: "text-destructive", dot: "bg-destructive" },
+  fresh: { label: "Fresh", icon: CircleCheck, tone: "text-success", dot: "bg-success", pill: "success" },
+  stale: { label: "Stale", icon: Clock, tone: "text-warn", dot: "bg-warn", pill: "warn" },
+  failed: { label: "Failed", icon: CircleX, tone: "text-destructive", dot: "bg-destructive", pill: "destructive" },
   never_produced: {
     label: "Never produced",
     icon: CircleDashed,
     tone: "text-muted-foreground",
     dot: "bg-muted-foreground/30",
+    pill: "default",
   },
 }
 

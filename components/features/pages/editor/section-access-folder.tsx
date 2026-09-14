@@ -27,13 +27,11 @@
 import * as React from "react"
 import { Folder } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { SectionCard } from "@/components/ui/section-card"
+import { DetailCard, EntityChip, Pill } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
-import { CardAnswer, CardLabel, ControlRefusal, Refusal } from "@/components/features/pages/page-settings"
+import { ControlRefusal, Refusal, pageSubjectIcon } from "@/components/features/pages/page-settings"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
-import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 import { toPageFolderRef } from "@/hooks/use-pages"
 import type { WirePageDetail } from "@/hooks/use-page-grants"
 import { useFolderAcl, usePageAccessMe, usePageFolders } from "@/hooks/use-page-folders"
@@ -78,28 +76,30 @@ export function FolderAccessCard({
           : folderSharingSentence(marker).toLowerCase()
         : "could not read"
 
+  // `DetailCard` has no `data-slot`; the tests and the section address this
+  // card by one, title band included, so a `contents` wrapper carries it
+  // without becoming a box of its own. The folder's name rides in the
+  // subtitle — the band's title is UPPERCASE and a folder name is not.
   return (
-    <SectionCard
-      title={
-        <CardLabel icon={Folder}>
-          <span className="inline-flex items-center gap-1.5">
-            From folder
-            <FolderGlyph icon={ref.icon} color={ref.color} className="h-3.5 w-3.5" />
-            <span className="min-w-0 truncate normal-case tracking-normal" title={ref.name}>
-              {ref.name}
-            </span>
-          </span>
-        </CardLabel>
-      }
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-      data-slot="page-folder-access"
-    >
+    <div data-slot="page-folder-access" className="contents">
+      <DetailCard
+        title="From folder"
+        icon={Folder}
+        subtitle={`${ref.name} · ${answer}`}
+        action={
+          acl.manages ? (
+            <Button type="button" size="xs" variant="outline" onClick={() => setSharing(true)}>
+              Open folder sharing…
+            </Button>
+          ) : undefined
+        }
+        footer="Folder permissions apply to every page in the folder and are changed on the folder, not here."
+      >
       <div className="flex flex-col gap-3">
         {acl.error && <Refusal>{acl.error}</Refusal>}
 
         {acl.loading && (
-          <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-2 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading the folder&rsquo;s permissions…
           </div>
@@ -112,25 +112,13 @@ export function FolderAccessCard({
               <div data-slot="folder-acl-readonly" className="flex flex-col divide-y divide-border/40">
                 {acl.entries.map((e) => (
                   <div key={`${e.subjectType}:${e.subjectId}`} className="flex items-center gap-2 py-1.5">
-                    <Badge variant="outline" className="h-4 shrink-0 px-1.5 font-mono leading-none">
-                      {e.subjectType}
-                    </Badge>
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={e.label}>
-                      {e.label}
-                    </span>
-                    <span className="type-page-meta shrink-0 text-muted-foreground">{e.canWrite ? "Can edit" : "Can view"}</span>
+                    <EntityChip icon={pageSubjectIcon(e.subjectType)} label={e.label} note={e.subjectType} />
+                    <div className="flex-1" />
+                    <Pill tone={e.canWrite ? "blue" : "default"}>{e.canWrite ? "Can edit" : "Can view"}</Pill>
                   </div>
                 ))}
               </div>
             )}
-            <p className="type-page-meta text-muted-foreground-soft">
-              These apply to every page in the folder and are changed on the folder, not here.
-            </p>
-            <div>
-              <Button type="button" size="sm" variant="outline" onClick={() => setSharing(true)}>
-                Open folder sharing…
-              </Button>
-            </div>
             {sharing && (
               <FolderSharingDialog
                 workspaceId={workspaceId}
@@ -149,7 +137,7 @@ export function FolderAccessCard({
               {folders.loading ? "Reading the folder's sharing…" : folderSharingSentence(marker)}
             </p>
             <ControlRefusal>{acl.refusal}</ControlRefusal>
-            <p data-slot="own-paths" className="type-page-meta text-muted-foreground">
+            <p data-slot="own-paths" className="type-meta text-muted-foreground">
               {me.loading ? (
                 <span className="inline-flex items-center gap-2">
                   <Spinner className="h-3 w-3" />
@@ -164,6 +152,7 @@ export function FolderAccessCard({
           </>
         )}
       </div>
-    </SectionCard>
+      </DetailCard>
+    </div>
   )
 }

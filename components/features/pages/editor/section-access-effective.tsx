@@ -34,14 +34,14 @@
 
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Route } from "lucide-react"
+import { EyeOff, Route } from "lucide-react"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
-import { SectionCard } from "@/components/ui/section-card"
+import { DetailCard, EntityChip } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/layout/empty-state"
-import { CardAnswer, CardLabel, Refusal } from "@/components/features/pages/page-settings"
+import { Refusal, pageSubjectIcon } from "@/components/features/pages/page-settings"
 import { PagesRequestError } from "@/hooks/use-pages"
 import { gateOf, pageQueryString } from "@/hooks/use-page-grants"
 
@@ -160,15 +160,20 @@ export function effectiveAccessPhrase(subject: EffectiveAccessSubject): string {
   return joinClauses(parts)
 }
 
+/**
+ * Everything after the "·": "reaches through crew ops and a read grant". The
+ * card draws the subject as a chip and this as the text beside it, so the two
+ * halves are built apart and joined once, by `effectiveAccessSentence`.
+ */
+export function effectiveAccessClause(subject: EffectiveAccessSubject): string {
+  if (subject.withheld) return "owns a panel on this Page. Which crew it is, is withheld from you."
+  const clause = effectiveAccessPhrase(subject)
+  return subject.kind === "user" ? `reaches ${clause}` : clause
+}
+
 /** The whole sentence: "ada@example.com · reaches through crew ops and a read grant". */
 export function effectiveAccessSentence(subject: EffectiveAccessSubject): string {
-  const who = effectiveAccessLabel(subject)
-  if (subject.withheld) {
-    return `${who} · owns a panel on this Page. Which crew it is, is withheld from you.`
-  }
-  const clause = effectiveAccessPhrase(subject)
-  if (subject.kind === "user") return `${who} · reaches ${clause}`
-  return `${who} · ${clause}`
+  return `${effectiveAccessLabel(subject)} · ${effectiveAccessClause(subject)}`
 }
 
 export function effectiveAccessLabel(subject: EffectiveAccessSubject): string {
@@ -219,25 +224,24 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
         ? "nobody"
         : `${subjects.length}${more ? "+" : ""} ${subjects.length === 1 && !more ? "subject" : "subjects"}`
 
+  // `DetailCard` has no `data-slot` of its own, and the tests (and the
+  // section) address this card by that slot — including its title band, so
+  // the slot has to enclose the whole card. `contents` keeps the wrapper out
+  // of the layout: the card stays the section's flex item.
   return (
-    <SectionCard
-      data-slot="page-effective-access"
-      title={<CardLabel icon={Route}>Effective access</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-    >
+    <div data-slot="page-effective-access" className="contents">
+      <DetailCard
+        title="Effective access"
+        icon={Route}
+        subtitle={answer}
+        footer="Computed by the server from the workspace roles, the owner, the crews that own its panels and the grants in force. Read-only — change access in the cards above."
+      >
       <div className="flex flex-col gap-3">
-        <p className="type-page-meta text-muted-foreground">
-          Who reaches this Page today and by which path, computed by the server from the workspace
-          roles, the owner, the crews that own its panels and the grants in force. Read-only: change
-          access in the cards above.
-        </p>
-
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Working out who reaches this Page…
           </div>
@@ -259,21 +263,35 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
                 key={`${s.kind}:${s.id}`}
                 data-slot="page-effective-access-row"
                 data-withheld={s.withheld ? "true" : undefined}
-                className="type-page-value text-foreground"
+                className="type-page-value flex flex-wrap items-center gap-1.5 text-foreground"
               >
-                {effectiveAccessSentence(s)}
+                {/* The subject as a chip, the paths as the sentence beside
+                    it. The " · " is a real text node so the row still READS
+                    as `effectiveAccessSentence` — the sentence the tests and
+                    the CLI both print — and not as two fragments. A chip with
+                    no onClick and no href is a span: nothing here is a
+                    control (rule 2 in the file comment). */}
+                <EntityChip
+                  icon={s.withheld ? EyeOff : pageSubjectIcon(s.kind)}
+                  label={effectiveAccessLabel(s)}
+                />
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {effectiveAccessClause(s)}
+                </span>
               </li>
             ))}
           </ul>
         )}
 
         {more && (
-          <p className="type-page-meta text-muted-foreground">
+          <p className="type-meta text-muted-foreground">
             More subjects reach this Page than are shown here. The complete list is{" "}
             <code className="font-mono">crewship page access {slug}</code>.
           </p>
         )}
       </div>
-    </SectionCard>
+      </DetailCard>
+    </div>
   )
 }

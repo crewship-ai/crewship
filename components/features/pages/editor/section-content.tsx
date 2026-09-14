@@ -50,14 +50,13 @@
  */
 
 import * as React from "react"
-import { Copy, Plus } from "lucide-react"
+import { Box, FileText, Layers, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { DetailCard, FieldLabel, Pill } from "@/components/ui/detail"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
 import { useQuery } from "@tanstack/react-query"
@@ -68,14 +67,7 @@ import { pageQueryString, type WirePageDetail } from "@/hooks/use-page-grants"
 import { usePageReview } from "@/hooks/use-page-review"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import { PageEditor } from "@/components/features/pages/page-editor"
-// `PageFactsCard` is the derived-facts block (owner, panels, created, spec
-// last changed) lifted out of the settings surface. It is exported from
-// page-settings.tsx by another stream; this is the seam.
-import { PageFactsCard } from "@/components/features/pages/page-settings"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
-import { toPageFolderRef } from "@/hooks/use-pages"
-import { MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
-import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 
 // Content on an application Page opens the review of the agent's change.
 // S6 owns that surface; import it lazily so the ordinary panel Page never
@@ -114,14 +106,7 @@ export function EditorContentSection(props: EditorSectionProps) {
 
 function PanelPageContent(props: EditorSectionProps) {
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h3 className="text-heading font-medium">Page content</h3>
-        <p className="type-page-meta text-muted-foreground">
-          This Page shows panels. Changes saved here update the live Page.
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-4">
       <PageOwnContent {...props} onDirtyChange={props.onDirtyChange} />
 
       {/* Structurally unreachable on a Page that already has application
@@ -210,55 +195,73 @@ function ApplicationPageContent(props: EditorSectionProps) {
   const reportReview = React.useMemo(() => report("review"), [report])
   const reportContent = React.useMemo(() => report("content"), [report])
 
+  // The state of the application, as a card in the vocabulary the rest of the
+  // detail uses: a blue border for "this Page runs an application", the
+  // publication as the subtitle. The review itself, when there is one, is its
+  // own surface below and not a card body.
+  const snapshot = review.snapshot.data
+  const applicationSubtitle =
+    gate.kind === "loading"
+      ? "loading"
+      : snapshot?.baseline.published && snapshot.baseline.publication_version > 0
+        ? `publication ${snapshot.baseline.publication_version}`
+        : "not published"
+
   return (
-    <div className="flex flex-col gap-6">
-      {gate.kind === "loading" && (
-        <p role="status" className="flex items-center gap-2 type-page-value text-muted-foreground">
-          <Spinner className="h-3.5 w-3.5" />
-          Checking whether an agent has submitted a change to this Page…
-        </p>
-      )}
+    <div className="flex flex-col gap-4">
+      {gate.kind !== "review" && (
+        <DetailCard title="Application" icon={Box} tone="blue" subtitle={applicationSubtitle} data-slot="application-gate">
+          <div className="flex flex-col gap-3">
+          {gate.kind === "loading" && (
+            <p role="status" className="flex items-center gap-2 type-page-value text-muted-foreground">
+              <Spinner className="h-3.5 w-3.5" />
+              Checking whether an agent has submitted a change to this Page…
+            </p>
+          )}
 
-      {gate.kind === "unreadable" && (
-        <div
-          data-slot="review-unreadable"
-          className="flex flex-col gap-2 rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2.5"
-        >
-          {/* `role="alert"` on the sentence, not on the box: a live region that
-              also contains the control is announced as one blob, and the
-              control is the part that has to be found. */}
-          <p role="alert" className="type-page-value">
-            This Page has a custom application, but its review could not be read, so this screen cannot
-            say whether a change is waiting: {gate.reason} The Page&apos;s own content is below and
-            unaffected.
-          </p>
-          <div>
-            {/* A 503 is the transient case — project storage busy, the build
-                worker restarting — and the only recovery this screen used to
-                offer was a browser reload. It refetches the QUERY THE GATE
-                READ, so a successful retry moves the gate itself; anything
-                else would clear the message without clearing the state. */}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="coarse:min-h-11"
-              disabled={review.snapshot.isFetching}
-              onClick={() => {
-                void review.snapshot.refetch()
-              }}
+          {gate.kind === "unreadable" && (
+            <div
+              data-slot="review-unreadable"
+              className="flex flex-col gap-2 rounded-md border border-warn/40 bg-warn/[0.06] px-3 py-2.5"
             >
-              {review.snapshot.isFetching && <Spinner className="h-3.5 w-3.5" />}
-              Try reading the review again
-            </Button>
-          </div>
-        </div>
-      )}
+              {/* `role="alert"` on the sentence, not on the box: a live region that
+                  also contains the control is announced as one blob, and the
+                  control is the part that has to be found. */}
+              <p role="alert" className="type-page-value">
+                This Page has a custom application, but its review could not be read, so this screen cannot
+                say whether a change is waiting: {gate.reason} The Page&apos;s own content is below and
+                unaffected.
+              </p>
+              <div>
+                {/* A 503 is the transient case — project storage busy, the build
+                    worker restarting — and the only recovery this screen used to
+                    offer was a browser reload. It refetches the QUERY THE GATE
+                    READ, so a successful retry moves the gate itself; anything
+                    else would clear the message without clearing the state. */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="coarse:min-h-11"
+                  disabled={review.snapshot.isFetching}
+                  onClick={() => {
+                    void review.snapshot.refetch()
+                  }}
+                >
+                  {review.snapshot.isFetching && <Spinner className="h-3.5 w-3.5" />}
+                  Try reading the review again
+                </Button>
+              </div>
+            </div>
+          )}
 
-      {gate.kind === "nothing" && (
-        <p role="status" data-slot="nothing-to-review" className="type-page-value text-muted-foreground">
-          {gate.sentence}
-        </p>
+          {gate.kind === "nothing" && (
+            <p role="status" data-slot="nothing-to-review" className="type-page-value text-muted-foreground">
+              {gate.sentence}
+            </p>
+          )}
+          </div>
+        </DetailCard>
       )}
 
       {gate.kind === "review" && (
@@ -274,21 +277,10 @@ function ApplicationPageContent(props: EditorSectionProps) {
         </React.Suspense>
       )}
 
-      <section aria-labelledby="page-own-content-heading" className="flex flex-col gap-5">
-        <div className={cn(gate.kind === "review" && "border-t border-border/60 pt-6")}>
-          <h3 id="page-own-content-heading" className="text-heading font-medium">
-            {gate.kind === "review" ? "This Page itself" : "Page content"}
-          </h3>
-          <p className="type-page-meta text-muted-foreground">
-            {/* Two definitions live on an application Page and they are not the
-                same thing. Saying which one this half writes is the whole of §4. */}
-            The Page&apos;s name, description and panels. Saved here they change the live Page — they are
-            not part of an application publication.
-          </p>
-        </div>
-
-        <PageOwnContent {...props} onDirtyChange={reportContent} />
-      </section>
+      {/* Two definitions live on an application Page and they are not the
+          same thing. Which one the Content card writes is said at its Save,
+          and the card's title band separates it from the review above (§4). */}
+      <PageOwnContent {...props} onDirtyChange={reportContent} />
     </div>
   )
 }
@@ -440,15 +432,16 @@ function PageIdentityCard({
   }
 
   return (
-    <form
-      onSubmit={submit}
-      data-slot="page-identity"
-      // `touch-form` is the house rule for 44px targets under a coarse
-      // pointer (app/globals.css) — the pointer decides, not the width.
-      className="touch-form flex flex-col gap-4 rounded-lg border border-border/60 bg-card p-4"
-    >
+    <DetailCard title="Content" icon={FileText} subtitle="name, description">
+      <form
+        onSubmit={submit}
+        data-slot="page-identity"
+        // `touch-form` is the house rule for 44px targets under a coarse
+        // pointer (app/globals.css) — the pointer decides, not the width.
+        className="touch-form flex flex-col gap-4"
+      >
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="page-name">Page name</Label>
+        <FieldLabel htmlFor="page-name">Name</FieldLabel>
         <Input
           id="page-name"
           value={form.name}
@@ -463,7 +456,7 @@ function PageIdentityCard({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="page-description">Description</Label>
+        <FieldLabel htmlFor="page-description">Description</FieldLabel>
         <Textarea
           id="page-description"
           rows={2}
@@ -473,16 +466,10 @@ function PageIdentityCard({
         />
       </div>
 
-      <PageAddress slug={slug} />
-
-      {/* Where the Page is filed (#2527). Not a field of this form: a move is
-          its own write with its own fence, through the same dialog the rail
-          opens, so it is a line with a button rather than a select. */}
-      <PageFolderLine workspaceId={workspaceId} slug={slug} page={page} />
-
-      {/* Derived facts — owner, panels, created, spec last changed. Read-only
-          by nature: none of them is something this form writes. */}
-      <PageFactsCard slug={slug} page={page} />
+      {/* The address, the folder and the derived facts used to sit here,
+          between the description and Save. None of them is something this
+          form writes: the folder and the address are in the Properties card,
+          the dates in the strip under the header. */}
 
       {!mayEdit && (
         <p role="note" className="type-page-value text-muted-foreground">
@@ -501,7 +488,7 @@ function PageIdentityCard({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-3">
         {/* The save's effect, stated at the control, from the one place the
             editor keeps that vocabulary. There is no global Save here and no
             autosave: every control says which of the five effects it is. */}
@@ -513,108 +500,8 @@ function PageIdentityCard({
           Save changes
         </Button>
       </div>
-    </form>
-  )
-}
-
-/**
- * "Folder: <icon> <name> · Change…" — or "Unfiled". Drawn only when the
- * server says which folder the Page is in: a record without the field is an
- * older server, and a line claiming "Unfiled" over it would be a claim the
- * server never made. The subject is rebuilt from `page` on every render, so
- * after the dialog's 409 re-read the version it sends is the current one.
- */
-function PageFolderLine({
-  workspaceId,
-  slug,
-  page,
-}: {
-  workspaceId: string
-  slug: string
-  page: WirePageDetail | null
-}) {
-  const [moving, setMoving] = React.useState(false)
-  if (!page || page.folder === undefined) return null
-  const folder = toPageFolderRef(page.folder)
-  const pagesVersion =
-    typeof page.pages_version === "number" && Number.isFinite(page.pages_version) ? page.pages_version : null
-
-  return (
-    <div
-      data-slot="page-folder"
-      className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3"
-    >
-      <div className="min-w-0">
-        <span className="type-page-label text-muted-foreground-soft">Folder</span>
-        <p className="type-page-value flex items-center gap-1.5 text-foreground/85">
-          {folder ? (
-            <>
-              <FolderGlyph icon={folder.icon} color={folder.color} className={folder.color ? undefined : "text-muted-foreground"} />
-              <span className="min-w-0 truncate" title={folder.name}>
-                {folder.name}
-              </span>
-            </>
-          ) : (
-            <span className="text-muted-foreground">Unfiled</span>
-          )}
-        </p>
-      </div>
-      <Button type="button" variant="outline" size="sm" className="coarse:min-h-11" onClick={() => setMoving(true)}>
-        Change…
-      </Button>
-      {moving && (
-        <MoveToFolderDialog
-          workspaceId={workspaceId}
-          open
-          onOpenChange={(open) => !open && setMoving(false)}
-          subject={{ slug, name: page.name?.trim() || slug, folder, pagesVersion }}
-        />
-      )}
-    </div>
-  )
-}
-
-/** The address, as a fact. It is the Page's identity and its producers' target,
- *  so it is shown and copyable and never editable — the server refuses a slug
- *  change through PATCH for exactly that reason (`pages_handler.go:806`). */
-function PageAddress({ slug }: { slug: string }) {
-  const address = `/pages/${slug}`
-  const [copied, setCopied] = React.useState<"idle" | "done" | "refused">("idle")
-
-  const copy = async () => {
-    // Three states, not two: a clipboard write can be refused (insecure
-    // origin, denied permission) and saying "Copied" anyway is a lie the
-    // reader only discovers when they paste.
-    try {
-      await navigator.clipboard.writeText(address)
-      setCopied("done")
-    } catch {
-      setCopied("refused")
-    }
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
-      <div className="min-w-0">
-        <span className="type-page-label text-muted-foreground-soft">Address</span>
-        <p className="type-page-stamp overflow-x-auto whitespace-nowrap text-foreground/85">{address}</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <span aria-live="polite" className="type-page-meta text-muted-foreground">
-          {copied === "done" ? "Copied" : copied === "refused" ? "This browser refused the clipboard" : ""}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="coarse:min-h-11"
-          onClick={() => void copy()}
-        >
-          <Copy className="h-3.5 w-3.5" aria-hidden />
-          Copy address
-        </Button>
-      </div>
-    </div>
+      </form>
+    </DetailCard>
   )
 }
 
@@ -643,20 +530,38 @@ function PanelListCard({
   const panels = panelsOf(page)
 
   return (
-    <section
-      aria-labelledby="page-panels-heading"
-      data-slot="page-panels"
-      className="flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-4"
+    <DetailCard
+      title="Panels"
+      icon={Layers}
+      subtitle={`${panels.length} ${panels.length === 1 ? "panel" : "panels"}`}
+      data-testid="page-panels"
+      action={
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="coarse:min-h-11"
+          disabled={!mayEditDocument}
+          onClick={() => setEditing(true)}
+        >
+          Edit document
+        </Button>
+      }
+      footer={
+        <>
+          Panels are edited as one document. Where each panel&apos;s data comes from is in{" "}
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => onNavigate("data")}
+          >
+            Data &amp; actions
+          </button>
+          .
+        </>
+      }
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 id="page-panels-heading" className="text-body font-medium">
-          Panels
-        </h4>
-        <span className="type-page-meta text-muted-foreground">
-          {panels.length} {panels.length === 1 ? "panel" : "panels"}
-        </span>
-      </div>
-
+      <div data-slot="page-panels" className="flex flex-col gap-3">
       {panels.length === 0 ? (
         <p className="type-page-value text-muted-foreground">
           This Page declares no panels yet. Add one in the document, or push a first payload with{" "}
@@ -686,30 +591,6 @@ function PanelListCard({
         </p>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
-        <p className="type-page-meta min-w-0 text-muted-foreground">
-          Panels are edited as one document. Where each panel&apos;s data comes from is in{" "}
-          <button
-            type="button"
-            className="underline underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            onClick={() => onNavigate("data")}
-          >
-            Data &amp; actions
-          </button>
-          .
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="coarse:min-h-11"
-          disabled={!mayEditDocument}
-          onClick={() => setEditing(true)}
-        >
-          Edit document
-        </Button>
-      </div>
-
       {editing && (
         <PageEditor
           workspaceId={workspaceId}
@@ -719,7 +600,8 @@ function PanelListCard({
           onSaved={() => setEditing(false)}
         />
       )}
-    </section>
+      </div>
+    </DetailCard>
   )
 }
 
@@ -747,7 +629,7 @@ function PanelRow({
       <li
         data-slot="page-panel-row"
         data-sealed="true"
-        className="flex flex-col gap-1 border-b border-border/40 py-2.5 last:border-b-0"
+        className="flex flex-col gap-1 border-b border-hairline py-2.5 last:border-b-0"
       >
         <span className="type-page-value font-medium">{view.spec.id}</span>
         <span className="type-page-meta text-muted-foreground">
@@ -761,7 +643,7 @@ function PanelRow({
     <li
       data-slot="page-panel-row"
       data-panel={view.spec.id}
-      className="flex flex-wrap items-start justify-between gap-2 border-b border-border/40 py-2.5 last:border-b-0"
+      className="flex flex-wrap items-start justify-between gap-2 border-b border-hairline py-2.5 last:border-b-0"
     >
       <div className="min-w-0 flex-1">
         <span className="type-page-value font-medium break-words">
@@ -781,17 +663,17 @@ function PanelRow({
       </div>
       <div className="flex shrink-0 items-center gap-3">
         {state ? (
-          <span className={cn("inline-flex items-center gap-1.5 type-page-meta", state.tone)}>
-            {StateIcon && <StateIcon className="h-3.5 w-3.5" aria-hidden />}
+          <Pill tone={state.pill}>
+            {StateIcon && <StateIcon className="h-3 w-3" aria-hidden />}
             {state.label}
-          </span>
+          </Pill>
         ) : (
-          <span className="type-page-meta text-muted-foreground">State unknown</span>
+          <Pill tone="default">State unknown</Pill>
         )}
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="xs"
           className="coarse:min-h-11"
           disabled={!mayEditDocument}
           onClick={onEdit}

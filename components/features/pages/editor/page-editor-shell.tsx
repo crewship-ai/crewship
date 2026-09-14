@@ -1,19 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { ArrowLeft, FileText, History, KeyRound, Workflow, type LucideIcon } from "lucide-react"
-
-import { SIDEBAR_WIDTH, SidebarRow, SidebarSection } from "@/components/layout/sidebar-kit"
 
 import {
   EDITOR_SECTIONS,
   EDITOR_SECTION_LABEL,
-  EDITOR_SECTION_SUMMARY,
   type EditorSection,
   type PageCapabilities,
 } from "@/lib/pages/editor-contract"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Appear } from "@/components/ui/detail"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +20,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { WirePageDetail } from "@/hooks/use-page-grants"
 import type { EditorNavigation } from "@/components/features/pages/editor/use-editor-route"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
@@ -32,6 +27,8 @@ import { EditorContentSection } from "@/components/features/pages/editor/section
 import { EditorDataActionsSection } from "@/components/features/pages/editor/section-data-actions"
 import { EditorAccessSection } from "@/components/features/pages/editor/section-access"
 import { EditorHistorySection } from "@/components/features/pages/editor/section-history"
+import { PageDetailsStrip, PageEditorHeader } from "@/components/features/pages/editor/editor-header"
+import { PropertiesCard } from "@/components/features/pages/editor/properties-card"
 
 /**
  * The editor's own chrome, inside the content column.
@@ -47,32 +44,20 @@ import { EditorHistorySection } from "@/components/features/pages/editor/section
  * it has to show, and none of them renders an empty application heading or a
  * permanently disabled Publish (U02).
  *
- * Pressing Edit hands the whole content column to this shell (#2515): a
- * header that names the Page, the way back and what viewers see meanwhile; a
- * rail of sections on the left with one line under each name; the open
- * section in a readable measure. The Pages list beside it stays mounted but
- * steps out of the way, so its scroll and filters are there on return.
+ * The shape is the issue detail's, on purpose. The first draft (#2515) gave
+ * the editor a rail of four sections and showed one at a time in a centred
+ * column; beside an issue, a routine or a crew it read as a settings wizard
+ * from another product. Now the header card names the Page, a strip behind a
+ * disclosure holds its dates, and the four sections are cards on one page —
+ * Content, Data & actions and History in the main column, Properties and
+ * Access in the sidebar — the way `issue-card-detail.tsx` lays out an issue.
+ * The Pages rail on the left is the shared element every surface keeps.
  *
- * The section nav is CSS-responsive rather than JavaScript-responsive — the
- * rail at ≥768px, one labelled picker below it — so the same DOM serves both
- * and there is no first-paint flash while a media query resolves.
+ * `section` in the address survives: it is where the page scrolls and where
+ * focus lands, so a pasted `?section=access` still opens on Access and
+ * "Manage producer access" in Data & actions still lands on the right card.
+ * What it no longer does is hide the other three.
  */
-
-// The same icons the rest of the product uses for these nouns, so the rail
-// reads like the Settings nav and not like a second design.
-const SECTION_ICON: Record<EditorSection, LucideIcon> = {
-  content: FileText,
-  data: Workflow,
-  access: KeyRound,
-  history: History,
-}
-
-const SECTION_COMPONENT: Record<EditorSection, React.ComponentType<EditorSectionProps>> = {
-  content: EditorContentSection,
-  data: EditorDataActionsSection,
-  access: EditorAccessSection,
-  history: EditorHistorySection,
-}
 
 export interface PageEditorShellProps {
   workspaceId: string
@@ -87,23 +72,61 @@ export interface PageEditorShellProps {
 
 export function PageEditorShell({ workspaceId, slug, page, loading, capabilities, navigation, onLeft }: PageEditorShellProps) {
   const { section, pane, setSection, setPane, setMode, setDirty, pending, openPage } = navigation
-  const Section = SECTION_COMPONENT[section]
 
-  // Focus lands on the editor's heading when a section changes, and when the
-  // editor opens.
+  // Focus lands on the editor's heading when the editor opens, and on the
+  // section's card when the address names one.
   //
   // The open case used to be skipped deliberately — and that was the wrong
   // call. Pressing Edit unmounts the button focus was on, so a keyboard user
   // arrived at the editor with focus on `<body>`: the single most common way
   // into this surface dropped them at the top of the document. A measured
-  // pass found the same at every other seam, which is why `focusHeading` is
-  // exported and the dialog and `Back to page` use it too.
+  // pass found the same at every other seam, which is why the dialog and
+  // `Back to page` use the same heading.
   const heading = React.useRef<HTMLHeadingElement>(null)
+  const frames = React.useRef<Record<EditorSection, HTMLElement | null>>({
+    content: null,
+    data: null,
+    access: null,
+    history: null,
+  })
+  const opened = React.useRef(false)
   React.useEffect(() => {
-    heading.current?.focus()
+    // The first section on a fresh open is the page itself: the heading is
+    // the honest target, and scrolling to the Content card would only move
+    // the header out of view.
+    if (!opened.current && section === "content") {
+      opened.current = true
+      heading.current?.focus()
+      return
+    }
+    opened.current = true
+    const frame = frames.current[section]
+    if (!frame) {
+      heading.current?.focus()
+      return
+    }
+    // jsdom has no layout, so it has no `scrollIntoView`; the focus alone is
+    // what a test can see, and what a screen reader hears.
+    if (typeof frame.scrollIntoView === "function") frame.scrollIntoView({ block: "start" })
+    frame.focus()
   }, [section])
 
-  const sectionProps: EditorSectionProps = {
+  // Every section reports its own unsaved work, and the address is guarded on
+  // the sum. With all four mounted at once a single flag would let History's
+  // "nothing unwritten" clear what Content had just raised.
+  const parts = React.useRef<Record<EditorSection, boolean>>({ content: false, data: false, access: false, history: false })
+  const reporters = React.useMemo(() => {
+    const out = {} as Record<EditorSection, (dirty: boolean) => void>
+    for (const id of EDITOR_SECTIONS) {
+      out[id] = (dirty: boolean) => {
+        parts.current[id] = dirty
+        setDirty(EDITOR_SECTIONS.some((s) => parts.current[s]))
+      }
+    }
+    return out
+  }, [setDirty])
+
+  const shared = {
     workspaceId,
     slug,
     page,
@@ -118,8 +141,8 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
     // A deleted Page has no view to go back to, so this is the overview and
     // not `setMode("view")`.
     onPageDeleted: () => openPage(null),
-    onDirtyChange: setDirty,
   }
+  const propsFor = (id: EditorSection): EditorSectionProps => ({ ...shared, onDirtyChange: reporters[id] })
 
   // What viewers see while this person edits. Stated in the header because
   // the whole screen has just changed under them, and the first question is
@@ -132,136 +155,101 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
       ? "The application draft is not published"
       : "Each section saves on its own"
 
+  const leave = () => {
+    setMode("view")
+    onLeft?.()
+  }
+
+  const frame = (id: EditorSection, node: React.ReactNode) => (
+    <SectionFrame key={id} id={id} frameRef={(el) => (frames.current[id] = el)}>
+      {node}
+    </SectionFrame>
+  )
+
   return (
     <div data-slot="page-editor" className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-4 py-2.5">
-        <Button
-          variant="outline"
-          size="sm"
-          className="coarse:min-h-11"
-          // Leaving unmounts this button, so something has to catch the
-          // focus it drops. The view's own heading is the honest target and
-          // the shell cannot reach it, so the caller — which renders both —
-          // is handed the moment instead. An id would have been simpler and
-          // was wrong: two page views can share a document, and a fixed id
-          // collides.
-          onClick={() => {
-            setMode("view")
-            onLeft?.()
-          }}
-        >
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-          Back to page
-        </Button>
-        <div className="min-w-0 flex-1">
-          {/* The identity of the page being edited never leaves the screen,
-              on any width — losing it is how someone edits the wrong Page. */}
-          {/* The focus this shell moves on every section change, on returning
-              from the preview and after a discard must be visible to a
-              sighted keyboard user — a correct, silent move is the same as
-              not making it. The ring is on `:focus-visible`, not `:focus`:
-              browsers carry the input modality across a scripted focus, so a
-              person who arrived by keyboard sees the ring and a person who
-              clicked the rail with a mouse does not. On `:focus` it lit up
-              the page's name after every click, which read as a text field. */}
-          <h2
-            ref={heading}
-            tabIndex={-1}
-            className="truncate rounded-sm text-body font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            {page?.name ?? slug}
-          </h2>
-          <p className="truncate text-xs text-muted-foreground">
-            Editing {EDITOR_SECTION_LABEL[section]} · {audience}
-          </p>
-        </div>
-      </header>
+      {/* Only this column scrolls, and wide content scrolls inside its own
+          container — the document itself must never move sideways. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col gap-4 p-4">
+          {loading && page == null ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              Loading this Page…
+            </p>
+          ) : pane === "preview" ? (
+            // The candidate's build gets the whole surface rather than a third
+            // of it beside a form and a diff. Content owns the preview and the
+            // way back from it.
+            frame("content", <EditorContentSection {...propsFor("content")} />)
+          ) : (
+            <>
+              <Appear order={0}>
+                <PageEditorHeader
+                  slug={slug}
+                  page={page}
+                  capabilities={capabilities}
+                  headingRef={heading}
+                  audience={audience}
+                  onBack={leave}
+                />
+              </Appear>
+              <Appear order={1}>
+                <PageDetailsStrip slug={slug} page={page} />
+              </Appear>
 
-      <div className="flex min-h-0 flex-1">
-        {/* The rail is the map of the editor: every section, with one line
-            saying what lives there, and the open one marked. It replaces the
-            row of tabs that sat under the page header — tabs said where you
-            were, never what the other three held (#2515). */}
-        {/* Same vocabulary as the Settings nav and the Pages, Issues and
-            Routines rails: `sidebar-kit`'s width, ground, section header and
-            rows, with the selected row marked by the shared accent bar. The
-            one-line summary under each name is composed inside the row, the
-            way settings-nav composes its badges. */}
-        <aside className={cn(SIDEBAR_WIDTH, "hidden shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex")}>
-          <nav aria-label="Editor sections" className="flex-1 overflow-y-auto py-2">
-            <SidebarSection label="Sections">
-              {EDITOR_SECTIONS.map((id) => {
-                const Icon = SECTION_ICON[id]
-                const selected = id === section
-                return (
-                  <SidebarRow
-                    key={id}
-                    selected={selected}
-                    onSelect={() => setSection(id)}
-                    aria-current={selected ? "page" : undefined}
-                    aria-label={EDITOR_SECTION_LABEL[id]}
-                    className="items-start py-1.5"
-                  >
-                    <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", selected ? "opacity-100" : "opacity-60")} aria-hidden />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{EDITOR_SECTION_LABEL[id]}</span>
-                      <span className="type-nav-sub truncate text-sidebar-foreground/50">{EDITOR_SECTION_SUMMARY[id]}</span>
-                    </span>
-                  </SidebarRow>
-                )
-              })}
-            </SidebarSection>
-          </nav>
-        </aside>
-
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="shrink-0 border-b border-white/[0.06] px-4 py-2 md:hidden">
-            {/* A named picker, not four tabs squeezed into 360px — the
-                reviewer's §4 point, and the reason the label is visible rather
-                than implied. */}
-            <label htmlFor="pages-editor-section" className="mb-1 block text-xs text-muted-foreground">
-              Editor section
-            </label>
-            <Select value={section} onValueChange={(next) => setSection(next as EditorSection)}>
-              <SelectTrigger id="pages-editor-section" className="w-full coarse:min-h-11">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EDITOR_SECTIONS.map((id) => (
-                  <SelectItem key={id} value={id}>
-                    {EDITOR_SECTION_LABEL[id]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Only this column scrolls, and wide content scrolls inside its own
-              container — the document itself must never move sideways.
-
-              Padding and the readable measure live here rather than in each
-              section, so there is one answer instead of four that drift: three
-              sections had rendered flush against the container, and the review —
-              the surface someone spends the most time on — had no maximum width
-              at all, so its diff and its prose stretched the full span of an
-              ultrawide monitor. Sections narrow further where a form wants it;
-              none of them widens past this. */}
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-            <div className="mx-auto w-full max-w-5xl p-4 sm:p-6 lg:px-10">
-              {loading && page == null ? (
-                <p role="status" className="text-sm text-muted-foreground">
-                  Loading this Page…
-                </p>
-              ) : (
-                <Section {...sectionProps} />
-              )}
-            </div>
-          </div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                <div className="flex min-w-0 flex-col gap-4 xl:col-span-2">
+                  <Appear order={2}>{frame("content", <EditorContentSection {...propsFor("content")} />)}</Appear>
+                  <Appear order={3}>{frame("data", <EditorDataActionsSection {...propsFor("data")} />)}</Appear>
+                  <Appear order={4}>{frame("history", <EditorHistorySection {...propsFor("history")} />)}</Appear>
+                </div>
+                <div className="flex min-w-0 flex-col gap-4">
+                  <Appear order={2}>
+                    <PropertiesCard workspaceId={workspaceId} slug={slug} page={page} capabilities={capabilities} />
+                  </Appear>
+                  <Appear order={3}>{frame("access", <EditorAccessSection {...propsFor("access")} />)}</Appear>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       <UnsavedWorkDialog pending={pending} onReturnFocus={() => heading.current?.focus()} />
     </div>
+  )
+}
+
+/**
+ * The landmark a section lives in: what `?section=` scrolls to and what an
+ * in-editor link ("Manage producer access", "Data & actions") hands focus to.
+ * Programmatic focus only (`tabIndex={-1}`), so it adds no stop to the
+ * ordinary tab order.
+ */
+function SectionFrame({
+  id,
+  frameRef,
+  children,
+}: {
+  id: EditorSection
+  frameRef: (el: HTMLElement | null) => void
+  children: React.ReactNode
+}) {
+  return (
+    <section
+      ref={frameRef}
+      id={`editor-section-${id}`}
+      data-slot="editor-section"
+      data-section={id}
+      aria-label={EDITOR_SECTION_LABEL[id]}
+      tabIndex={-1}
+      className={cn(
+        "flex min-w-0 flex-col gap-4 rounded-xl outline-none",
+        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      )}
+    >
+      {children}
+    </section>
   )
 }
 

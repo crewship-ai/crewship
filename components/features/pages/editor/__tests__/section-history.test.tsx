@@ -646,7 +646,10 @@ describe("the publish gate", () => {
       expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1),
     )
 
-    expect(sectionText()).toContain("live now")
+    // The live version is marked on its own row — a pill, not a phrase in the
+    // meta line — so the reviewer sees which one must not be republished.
+    const row = document.querySelector<HTMLElement>("[data-slot='publication'][data-version='5']")!
+    expect(within(row).getByTestId("publication-live").textContent).toBe("live")
     // Publishing what is already live would burn a version number to change
     // nothing.
     expect((await readyToPublish(5)).disabled).toBe(true)
