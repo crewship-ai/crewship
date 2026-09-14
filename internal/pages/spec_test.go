@@ -187,6 +187,12 @@ func TestValidateDocument_RefusesMalformedSpecs(t *testing.T) {
 			why:  "it goes in a URL",
 		},
 		{
+			name: "a slug that is a route",
+			spec: swap("slug: fleet-201", "slug: access"),
+			why: "GET /api/v1/pages/access is the subject-access report; a page slugged that way " +
+				"would be created, listed and editable, and never readable",
+		},
+		{
 			name: "no panels",
 			spec: "apiVersion: crewship/v1\nkind: Page\nmetadata:\n  name: Empty\n  slug: empty\nspec:\n  panels: []\n",
 			why:  "a page with no panels renders nothing and cannot be pushed to",
