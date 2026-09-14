@@ -164,6 +164,15 @@ describe("usePageReview", () => {
     expect(publishConflictOf(result.current.publish.error)?.conflict).toBe("routines")
   })
 
+  it("preserves the baseline conflict kind", async () => {
+    route()
+    const { result } = renderHook(() => usePageReview("ws1", "ops", true), { wrapper: wrapper(newQueryClient()) })
+    await waitFor(() => expect(result.current.snapshot.data).toBeTruthy())
+    apiFetch.mockImplementation(async () => json({ error: "Baseline unavailable", conflict: "baseline" }, 409))
+    result.current.publish.mutate()
+    await waitFor(() => expect(result.current.conflict?.conflict).toBe("baseline"))
+  })
+
   it("stays idle while disabled", async () => {
     route()
     const qc = newQueryClient()

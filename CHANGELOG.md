@@ -42,9 +42,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **`crewship work get -f yaml` no longer panics**, and the work commands print the same keys in YAML as in JSON. The detail payload embedded an unexported type, which yaml.v3 cannot reflect into, and the field names were being lowercased rather than read from their json tags — so a script written against one machine format silently disagreed with the other.
 ### Security
 
+- **Legacy Page panel updates and rollback could overwrite panels the caller could not read.** Both current and target declarations now require visibility, concurrent definition changes return 409, and metadata replies retain sealed placeholders. Project check no longer names routines called only by hidden panels (#2502).
+
 - **Page draft, archived definition and export reads could reveal panels hidden from the caller.** Whole-document authoring now requires visibility of every panel, including for agent project reads. Partial readers review source through separate endpoints that omit the definition; saves cannot silently remove withheld panels. ⚠️ **Behaviour change:** a Page write grant alone no longer permits these complete-document reads or replacements (#2502).
 
 ### Fixed
+
+- **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
 
 - **Routines rollback and re-enabling a plan now reject incompatible presets.** Rollback leaves HEAD unchanged on conflict; schedule writes and draft activation validate within their transaction, including wake inputs, and an expired run deadline stays failed in both the run and journal. Publish requires a change review and confirmation; live plans and budgets are managed outside the draft editor. Run discloses possible effects and schedule times name their zone (#2473).
 
@@ -64,6 +68,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 
 ### Added
+
+- `page project get --source-only`, also with `--revision`, reads shared source without requesting the full panel declaration.
 
 - **The Pages list says how you reach each page.** Every row now carries `reach` — `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant` — so a client can group pages by ownership or show the ones shared with you, and `crewship page list` prints it as a `REACH` column. It describes you and nobody else. Listing a workspace now runs a fixed number of database statements whatever its page count (#2524).
 - **One editor for a Page, and a screen for reviewing what an agent changed** (#2491) — the Pages toolbar carried five separate doors into one job: Settings, Edit, App preview, Source history and Publications, side by side, three of them behind the same icon. None of them was where the work happens, and for a Page with a custom application the actual work — deciding whether an agent's change goes live — had no screen at all. `Edit` now opens a routed editor in the page's content column with four named sections (Content / Data & actions / Access / History) and the Pages list still beside it; the address carries the section, so reload, Back, Forward and a shared link all land where they should. A Page whose application has a candidate newer than its live publication opens on a review of that change: definition changes derived by comparing the two documents (never a summary the agent wrote), a per-file source diff, a warning naming any routine whose definition moved since the last publication, the candidate's build state, and a consent that is bound to one candidate and one set of baselines and resets, visibly and with a reason, when any of them changes. An ordinary panel Page is a complete case rather than the same screen with features switched off: no empty application headings and no Publish that can never be pressed.
