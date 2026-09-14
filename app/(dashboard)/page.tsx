@@ -372,13 +372,22 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
   return (
     <div className="flex min-h-[calc(100dvh-48px)] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+      {/* Same geometry as the loaded page (results beside a stacked right
+          column of running / up next / crews, then the KPI strip), so
+          nothing jumps when the data lands. */}
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-4 md:p-5">
         <Skeleton className="h-[52px] rounded-xl" />
-        <Skeleton className="h-[120px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[420px] rounded-xl xl:col-span-2" /><Skeleton className="h-[200px] rounded-xl" /></div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: Math.max(1, Math.min(3, crews || 3)) }, (_, index) => <Skeleton key={index} className="h-[180px] rounded-xl" />)}</div>
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[118px] rounded-xl" />)}</div>
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-5"><Skeleton className="h-[330px] rounded-xl xl:col-span-3" /><Skeleton className="h-[330px] rounded-xl xl:col-span-2" /></div>
+        <Skeleton className="h-[110px] rounded-xl" />
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <Skeleton className="h-[380px] rounded-xl xl:col-span-2" />
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-[84px] rounded-xl" />
+            <Skeleton className="h-[84px] rounded-xl" />
+            <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.max(1, Math.min(3, crews || 3)) }} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[58px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-5"><Skeleton className="h-[220px] rounded-xl xl:col-span-3" /><Skeleton className="h-[220px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>
   )
