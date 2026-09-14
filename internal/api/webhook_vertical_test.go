@@ -82,6 +82,14 @@ func newFakeAgentProcess() *fakeAgentProcess {
 }
 
 func (f *fakeAgentProcess) RunAgent(ctx context.Context, req orchestrator.AgentRunRequest, handler orchestrator.EventHandler) error {
+	// The creation boundary, exactly where the production orchestrator asks
+	// it: after every preparation, immediately before the process exists. A
+	// refusal creates nothing.
+	if req.ExecGate != nil {
+		if err := req.ExecGate(ctx); err != nil {
+			return fmt.Errorf("%w: %w", orchestrator.ErrExecRefused, err)
+		}
+	}
 	f.mu.Lock()
 	f.started = append(f.started, req.RunID)
 	gone := make(chan struct{})

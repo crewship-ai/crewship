@@ -239,7 +239,7 @@ func (s *Store) StartRunning(ctx context.Context, workID, runID string, generati
 		SET runtime_locator = CASE WHEN ? != '' THEN ? ELSE runtime_locator END,
 		    runtime_phase = 'confirmed'
 		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
-		  AND runtime_phase IN ('starting', 'confirmed')`,
+		  AND runtime_phase IN ('starting', 'requested', 'confirmed')`,
 		locator, locator, runID, workID, generation)
 	if err != nil {
 		return fmt.Errorf("work: record locator: %w", err)
@@ -282,8 +282,52 @@ func (s *Store) Heartbeat(ctx context.Context, runID string, generation int64) e
 const (
 	runtimePhasePlanned   = "planned"
 	runtimePhaseStarting  = "starting"
+	runtimePhaseRequested = "requested"
 	runtimePhaseConfirmed = "confirmed"
 )
+
+// MarkRuntimeRequested records, durably and synchronously, that the runtime
+// is about to ask the provider for the agent's process — the last durable
+// word before creation. It is the store half of the creation gate: the
+// orchestrator asks the gate immediately before creating the exec, the gate
+// writes this, and a write that fails refuses the creation.
+//
+// The distinction it makes is the one a cancel needs and telemetry cannot
+// give: `starting` means a location was declared and nothing was requested
+// yet, so an absent process is a process that never existed; `requested`
+// means a process may exist, may have run, may have finished — and an absent
+// one is an unknown outcome, not a stop. Recovery already treats every phase
+// past `planned` as "a runtime may exist"; this adds the same honesty to the
+// live attempt.
+func (s *Store) MarkRuntimeRequested(ctx context.Context, workID, runID string, generation int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("work: begin mark-requested: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	it, err := getItemTx(ctx, tx, workID)
+	if err != nil {
+		return err
+	}
+	if err := verifyAttemptBindingTx(ctx, tx, workID, runID, generation, it.Generation); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE work_attempts
+		SET runtime_phase = 'requested'
+		WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL
+		  AND runtime_phase = 'starting'`,
+		runID, workID, generation)
+	if err != nil {
+		return fmt.Errorf("work: record creation request: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return fmt.Errorf("%w: attempt %s of %s is not a starting attempt awaiting its process",
+			ErrNotBound, runID, workID)
+	}
+	return tx.Commit()
+}
 
 // RecoveryOutcome is what one recovery pass did.
 type RecoveryOutcome struct {

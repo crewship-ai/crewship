@@ -556,6 +556,37 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		Details:     map[string]any{"current_chat_id": req.ChatID},
 	})
 
+	// The creation boundary. The gate is asked here, after every preparation
+	// and immediately before the exec is created, and its answer is the only
+	// authoritative statement of whether a process was requested: the
+	// exec.command entry above is queued telemetry whose persistence and
+	// failure are both invisible to this line. A refusal creates nothing.
+	if req.ExecGate != nil {
+		if gateErr := req.ExecGate(ctx); gateErr != nil {
+			refused := fmt.Errorf("%w: %w", ErrExecRefused, gateErr)
+			o.logger.Warn("exec creation refused at the gate; no process was created",
+				"agent_id", req.AgentID, "run_id", req.RunID, "error", gateErr)
+			o.failRun(ctx, req, runState.ID, "error")
+			_, _ = j.Emit(ctx, JournalEntry{
+				WorkspaceID: req.WorkspaceID,
+				CrewID:      req.CrewID,
+				AgentID:     req.AgentID,
+				MissionID:   req.MissionID,
+				Type:        "exec.command",
+				Severity:    "warn",
+				ActorType:   "agent",
+				ActorID:     req.AgentID,
+				Summary:     fmt.Sprintf("%s exec REFUSED before creation: %v", req.AgentSlug, gateErr),
+				Payload: execCommandPayload(req, journalCmd, "end", map[string]any{
+					"error":       refused.Error(),
+					"refused":     true,
+					"duration_ms": time.Since(execStart).Milliseconds(),
+				}),
+			})
+			o.markAgentOnline(ctx, req, map[string]any{"reason": "exec_refused"})
+			return refused
+		}
+	}
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
 		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
