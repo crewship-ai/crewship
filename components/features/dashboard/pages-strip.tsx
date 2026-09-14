@@ -115,7 +115,7 @@ export function PagesStrip({ now }: PagesStripProps) {
               <Link
                 key={p.id || p.slug}
                 href={`/pages/${encodeURIComponent(p.slug)}`}
-                className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                className="group flex items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
               >
                 <Icon
                   className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
