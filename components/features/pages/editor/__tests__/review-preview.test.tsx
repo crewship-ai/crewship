@@ -197,6 +197,11 @@ it("shows the keyboard user where focus went when this pane takes it", () => {
   const heading = screen.getByRole("heading", { name: "Candidate preview" })
   expect(document.activeElement).toBe(heading)
   expect(heading.getAttribute("tabindex")).toBe("-1")
-  expect(heading.className).toMatch(/focus:ring-2/)
-  expect(heading.className).not.toMatch(/focus-visible:ring/)
+  // `:focus-visible`, not `:focus`: browsers carry the input modality across
+  // a scripted focus, so the keyboard user sees the ring and the mouse user
+  // who clicked into the preview does not get the heading lit up like a
+  // text field. A `focus:` ring here was the "why is the title highlighted"
+  // report of 2026-09-12.
+  expect(heading.className).toMatch(/focus-visible:ring-2/)
+  expect(heading.className).not.toMatch(/(^|\s)focus:ring/)
 })
