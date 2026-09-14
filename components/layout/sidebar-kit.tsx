@@ -445,6 +445,7 @@ export function SidebarSection({
   actions,
   className,
   headerClassName,
+  headerProps,
   children,
 }: {
   label: React.ReactNode
@@ -455,6 +456,11 @@ export function SidebarSection({
   actions?: React.ReactNode
   className?: string
   headerClassName?: string
+  /** Extra attributes for the collapsible header button — a `title`, a
+   *  `data-*` hook for a list-level keyboard handler. Ignored when the
+   *  section is not collapsible, because then there is no button. */
+  headerProps?: Omit<React.ComponentProps<"button">, "type" | "onClick" | "className" | "children"> &
+    Record<`data-${string}`, string | undefined>
   children?: React.ReactNode
 }) {
   // Header content WITHOUT actions — this is what goes inside the toggle
@@ -472,7 +478,9 @@ export function SidebarSection({
           )}
         />
       )}
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">{label}</span>
+      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
+        {label}
+      </span>
       {count != null && (
         <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{count}</span>
       )}
@@ -485,6 +493,7 @@ export function SidebarSection({
         <div className="flex items-center">
           <button
             type="button"
+            {...headerProps}
             onClick={onToggle}
             aria-expanded={!collapsed}
             className={cn(

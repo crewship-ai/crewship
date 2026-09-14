@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { describeStep } from "@/lib/routine-step-describe"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
@@ -61,10 +63,7 @@ interface RoutineRunDetailProps {
   runId: string
 }
 
-export function RoutineRunDetail({
-  workspaceId,
-  runId,
-}: RoutineRunDetailProps) {
+export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
@@ -108,6 +107,7 @@ export function RoutineRunDetail({
   )
   const [starting, setStarting] = useState(false)
   const [selectedVersion, setSelectedVersion] = useState("current")
+  const [runDefinition, setRunDefinition] = useState<Record<string, unknown> | null>(null)
   const [inputSpecs, setInputSpecs] = useState<RoutineInputSpec[] | null>(null)
   const [stopping, setStopping] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -131,8 +131,8 @@ export function RoutineRunDetail({
     return (
       <div className="p-6">
         <p className="mb-4 text-sm text-muted-foreground">
-          No routine execution record is available for this activity. Recorded events are shown
-          below.
+          No routine execution record is available for this activity. Recorded events are
+          shown below.
         </p>
         <RunActivityTimeline
           workspaceId={workspaceId}
@@ -168,7 +168,8 @@ export function RoutineRunDetail({
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/${encodeURIComponent(runId)}/cancel`,
         { method: "POST" },
       )
-      if (!res.ok) throw new Error("Could not stop this run. It may already have finished.")
+      if (!res.ok)
+        throw new Error("Could not stop this run. It may already have finished.")
       setConfirmStop(false)
       await refresh()
       await approval.refresh()
@@ -182,7 +183,9 @@ export function RoutineRunDetail({
     const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/run`
     const body = {
       inputs,
-      ...(selectedVersion !== "current" ? { pinned_version: Number(selectedVersion) } : {}),
+      ...(selectedVersion !== "current"
+        ? { pinned_version: Number(selectedVersion) }
+        : {}),
     }
     const attempt = startIntent.current.begin(url, body)
     if (!attempt) return
@@ -230,6 +233,7 @@ export function RoutineRunDetail({
           ? { ...spec, default: run.inputs![spec.name] }
           : spec,
       )
+      setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
       setInputSpecs(specs)
     } catch (e) {
@@ -259,7 +263,10 @@ export function RoutineRunDetail({
   const identity =
     routine?.slug === run.pipeline_slug
       ? routine
-      : { slug: run.pipeline_slug, name: run.pipeline_name || run.pipeline_slug }
+      : {
+          slug: run.pipeline_slug,
+          name: run.pipeline_name || run.pipeline_slug,
+        }
   const activityHref = `/activity?${new URLSearchParams({ pipeline: run.pipeline_slug, run: runId })}`
   const StatusIcon =
     presentation.tone === "destructive" || presentation.tone === "warn"
@@ -451,13 +458,7 @@ export function RoutineRunDetail({
         items={[
           {
             label: "Started",
-            value: new Date(run.started_at).toLocaleString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
+            value: formatRoutineTime(run.started_at),
           },
           { label: "Duration", value: formatDurationMs(run.duration_ms) },
           { label: "Started by", value: triggerLabel },
@@ -483,12 +484,16 @@ export function RoutineRunDetail({
           <DialogHeader>
             <DialogTitle>Stop this run?</DialogTitle>
             <DialogDescription>
-              Pending and active work will be asked to stop. Recorded results remain available.
-              Actions that already happened are not rolled back.
+              Pending and active work will be asked to stop. Recorded results remain
+              available. Actions that already happened are not rolled back.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmStop(false)} disabled={stopping}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmStop(false)}
+              disabled={stopping}
+            >
               Keep running
             </Button>
             <Button variant="destructive" onClick={stop} disabled={stopping}>
@@ -498,6 +503,7 @@ export function RoutineRunDetail({
         </DialogContent>
       </Dialog>
       <RoutineRunInputsDialog
+        definition={runDefinition}
         versionChoices={[
           { value: "current", label: "Current recipe" },
           ...(run.pipeline_version != null
@@ -537,8 +543,8 @@ export function RoutineRunDetail({
           role="alert"
           className="rounded-xl border border-destructive/20 bg-card px-4 py-3 text-sm text-destructive"
         >
-          Step outputs could not be loaded for this run, so the per-step responses below are
-          missing.{" "}
+          Step outputs could not be loaded for this run, so the per-step responses below
+          are missing.{" "}
           <button className="underline" onClick={refresh}>
             Retry
           </button>
@@ -583,7 +589,8 @@ export function RoutineRunDetail({
         />
       ) : (
         <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
-          The historical recipe is unavailable. Recorded outputs and activity remain accessible.
+          The historical recipe is unavailable. Recorded outputs and activity remain
+          accessible.
         </p>
       )}
 

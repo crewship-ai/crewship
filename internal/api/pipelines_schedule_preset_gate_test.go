@@ -185,3 +185,41 @@ func TestSchedulePresetGate_DisabledPlanDoesNotBlock(t *testing.T) {
 		t.Fatalf("a disabled plan blocked the save: %s", rr.Body.String())
 	}
 }
+
+// Rollback must enforce the same compatibility contract as publishing.
+func TestSchedulePresetGate_RollbackDoor(t *testing.T) {
+	h, user, ws := presetRig(t)
+	p := seedPlannedRoutine(t, h, ws)
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET enabled=0 WHERE id='nightly'`); err != nil {
+		t.Fatal(err)
+	}
+	seedRoutineForPreset(t, h, ws, "planned", presetGateV2Def)
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET enabled=1, inputs_json='{"recipient":"alice"}' WHERE id='nightly'`); err != nil {
+		t.Fatal(err)
+	}
+	rollback := func() *httptest.ResponseRecorder {
+		req := withAuthCtx(withWorkspaceCtx(httptest.NewRequest("POST", "/rollback", bytes.NewBufferString(`{"target_version":1}`)), ws), user, "OWNER")
+		req.SetPathValue("slug", "planned")
+		rr := httptest.NewRecorder()
+		h.Rollback(rr, req)
+		return rr
+	}
+	assertActionableConflict(t, rollback(), "rollback")
+	current, err := h.store.GetByID(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := h.store.HeadVersion(t.Context(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.DefinitionJSON != presetGateV2Def || head != 2 {
+		t.Fatalf("refused rollback mutated HEAD: %d %s", head, current.DefinitionJSON)
+	}
+	if _, err := h.db.ExecContext(t.Context(), `UPDATE pipeline_schedules SET enabled=0 WHERE id='nightly'`); err != nil {
+		t.Fatal(err)
+	}
+	if rr := rollback(); rr.Code != 200 {
+		t.Fatalf("disabled plan blocked rollback: %d %s", rr.Code, rr.Body.String())
+	}
+}

@@ -37,11 +37,15 @@ function open(inputs: RoutineInputSpec[] | null) {
 }
 
 describe("routine run inputs dialog", () => {
-  it("renders nothing for a routine that declares no inputs", () => {
-    // That button keeps its single-click behaviour: the caller runs
-    // straight away rather than opening an empty form.
-    const { container } = open([])
-    expect(container).toBeEmptyDOMElement()
+  it("shows effects and asks for confirmation even without inputs", () => {
+    open([])
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Run effects" })).toBeInTheDocument()
+    expect(onRun).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    expect(onRun).toHaveBeenCalledWith({})
+  })
+  it("stays closed until requested", () => {
     open(null)
     expect(screen.queryByRole("dialog")).toBeNull()
   })
@@ -56,7 +60,9 @@ describe("routine run inputs dialog", () => {
 
   it("hands back the typed inputs the user filled in", () => {
     open(msnInputs)
-    fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.change(screen.getByLabelText(/obdobi/i), {
+      target: { value: "2026-07" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     expect(onRun).toHaveBeenCalledWith({
@@ -68,7 +74,9 @@ describe("routine run inputs dialog", () => {
 
   it("omits a field left empty so the routine's own default applies", () => {
     open(msnInputs)
-    fireEvent.change(screen.getByLabelText(/ucetnictvi root/i), { target: { value: "" } })
+    fireEvent.change(screen.getByLabelText(/ucetnictvi root/i), {
+      target: { value: "" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     const inputs = onRun.mock.calls[0][0]
@@ -84,7 +92,9 @@ describe("routine run inputs dialog", () => {
     ])
     // The default arrived as the number 10 and renders as "10", not "10.0".
     expect(screen.getByLabelText(/count/i)).toHaveValue(10)
-    fireEvent.change(screen.getByLabelText(/count/i), { target: { value: "42" } })
+    fireEvent.change(screen.getByLabelText(/count/i), {
+      target: { value: "42" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     // A `code` step sees inputs with their original types, so an integer
@@ -115,13 +125,17 @@ describe("routine run inputs dialog", () => {
 
   it("refuses a value it cannot restore, naming the field under the box", () => {
     open([{ name: "opts", type: "object" }])
-    fireEvent.change(screen.getByLabelText(/opts/i), { target: { value: "{not json" } })
+    fireEvent.change(screen.getByLabelText(/opts/i), {
+      target: { value: "{not json" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     expect(onRun).not.toHaveBeenCalled()
     // Under the field rather than in a toast: a form of six inputs and a
     // floating "not valid JSON" is a puzzle, not an error message.
-    expect(screen.getByTestId("routine-input-error-opts")).toHaveTextContent(/not valid JSON/)
+    expect(screen.getByTestId("routine-input-error-opts")).toHaveTextContent(
+      /not valid JSON/,
+    )
   })
 
   it("clears a field's error as soon as it is edited", () => {
@@ -129,7 +143,9 @@ describe("routine run inputs dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
     expect(screen.getByTestId("routine-input-error-obdobi")).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.change(screen.getByLabelText(/obdobi/i), {
+      target: { value: "2026-07" },
+    })
     // Leaving it up while the user fixes it reads as "still wrong".
     expect(screen.queryByTestId("routine-input-error-obdobi")).toBeNull()
   })
@@ -141,11 +157,18 @@ describe("routine run inputs dialog", () => {
     expect(onRun).not.toHaveBeenCalled()
   })
   it("does not dismiss an in-flight start through the dialog close button", () => {
-    render(<RoutineRunInputsDialog inputs={msnInputs} routineName="recipe" submitting onCancel={onCancel} onRun={onRun} />)
+    render(
+      <RoutineRunInputsDialog
+        inputs={msnInputs}
+        routineName="recipe"
+        submitting
+        onCancel={onCancel}
+        onRun={onRun}
+      />,
+    )
     fireEvent.click(screen.getByRole("button", { name: "Close" }))
     expect(onCancel).not.toHaveBeenCalled()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled()
   })
-
 })

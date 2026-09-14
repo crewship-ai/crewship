@@ -19,10 +19,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
 
+- **Routines rollback and re-enabling a plan now reject incompatible presets.** Rollback leaves HEAD unchanged on conflict; schedule writes and draft activation validate within their transaction, including wake inputs, and an expired run deadline stays failed in both the run and journal. Publish requires a change review and confirmation; live plans and budgets are managed outside the draft editor. Run discloses possible effects and schedule times name their zone (#2473).
+
 - **Closing the Pages editor on an empty Page could leave keyboard focus on the document body.** Empty Pages now keep the same focusable heading as populated Pages.
 - **Form boundaries and the Pages Filter label were hard to distinguish.** Shared controls now use a separate contrast token; CSS and application motion honor reduced-motion preferences, including loading spinners (#2499).
 
 ### Changed
+
+- **The Pages list is grouped by owner.** The rail folds into Mine, the crews you belong to, the other crews and Owned by others, each with its count in the header and the owner named there once rather than on every row. Groups collapse and remember it per user and workspace; a search opens every group that matches and hides the rest until it is cleared; opening a page unfolds its group; and the arrow keys walk the rows, with Left and Right folding and unfolding. When the server reports how you reach each page, the filter gains a Shared with me switch (#2523).
+
+- **Edit takes over the whole Page.** Pressing Edit now slides the editor in over the page instead of adding a row of tabs under its header: the sections sit in a rail on the left with one line under each name, the open section fills the rest, and the header names the way back and what viewers see meanwhile. The Pages list stays where it was, scroll and filters included, and returns on Back to page. The "Stop application / show panels" bar under an application Page is gone; the header carries an **Application | Panels** switch instead, shown only while an application is on screen — Panels closes the application in this tab and stops nothing for anyone else (#2515).
 
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 

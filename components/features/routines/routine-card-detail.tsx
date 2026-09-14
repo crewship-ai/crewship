@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { Button } from "@/components/ui/button"
 
 // Read the saved recipe here; author and edit it in the shared routine builder.
@@ -28,7 +30,10 @@ import { routineRunLabel } from "./routines-workspace"
 import { cn } from "@/lib/utils"
 import { relTime, formatDurationDecimal } from "@/lib/time"
 import { Appear, DetailCard, EntityChip, Pill } from "@/components/ui/detail"
-import { usePipelineRunRecords, type PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
+import {
+  usePipelineRunRecords,
+  type PipelineRunRecord,
+} from "@/hooks/use-pipeline-run-records"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useAutomations } from "@/hooks/use-automations"
 import { automationsForRoutine, crewshipActionsInDefinition } from "@/lib/automations"
@@ -160,7 +165,11 @@ export function RoutineCardDetail({
   const { automations } = useAutomations(workspaceId)
 
   const mine = React.useMemo(
-    () => schedules.filter((s) => s.target_pipeline_id === routine.id || s.target_pipeline_slug === routine.slug),
+    () =>
+      schedules.filter(
+        (s) =>
+          s.target_pipeline_id === routine.id || s.target_pipeline_slug === routine.slug,
+      ),
     [schedules, routine.id, routine.slug],
   )
   // The rules that can start THIS routine. A routine a rule can fire, on a
@@ -190,7 +199,8 @@ export function RoutineCardDetail({
   // Losing the automations view when the last rule is deleted must not strand
   // the card on an empty pane.
   React.useEffect(() => {
-    if (triggerKind === "automations" && myAutomations.length === 0) setTriggerKind("schedules")
+    if (triggerKind === "automations" && myAutomations.length === 0)
+      setTriggerKind("schedules")
   }, [triggerKind, myAutomations.length])
   const steps = React.useMemo(() => {
     const raw = (routine.definition as { steps?: unknown })?.steps
@@ -222,7 +232,8 @@ export function RoutineCardDetail({
           <span data-testid="routine-automations-pill">
             <Pill tone="default">
               <Zap className="h-3 w-3" />
-              {myAutomations.length} automation{myAutomations.length === 1 ? "" : "s"}
+              {myAutomations.length} automation
+              {myAutomations.length === 1 ? "" : "s"}
             </Pill>
           </span>
         )}
@@ -267,24 +278,11 @@ export function RoutineCardDetail({
             pipelineId={routine.id}
             slug={routine.slug}
           />
-        </div>
-      )}
-      {editing && (
-        <RoutineCreateDialog
-          workspaceId={workspaceId}
-          routine={routine}
-          initialDraft={draft?.definition}
-          open={editing}
-          onClose={() => {
-            setEditing(false)
-            setDraft(null)
-          }}
-          onCreated={() => {
-            setDraft(null)
-            onChanged()
-          }}
-          advancedDetails={
-            <>
+          <details className="rounded-xl border border-hairline p-4">
+            <summary className="cursor-pointer text-sm font-medium">
+              Access and budget
+            </summary>
+            <div className="mt-4 space-y-4">
               <DetailCard title="Connected workspace">
                 <div className="flex flex-wrap gap-4 text-xs">
                   <Link className="text-primary" href="/credentials">
@@ -301,8 +299,8 @@ export function RoutineCardDetail({
                   </Link>
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">
-                  The access checks are applied when a run starts. Editing these connections
-                  does not rewrite historical runs.
+                  The access checks are applied when a run starts. Editing these
+                  connections does not rewrite historical runs.
                 </p>
               </DetailCard>
               <AccessCard
@@ -314,16 +312,32 @@ export function RoutineCardDetail({
               <DetailCard title="Technical metadata">
                 <Metadata routine={routine} steps={steps.length} />
               </DetailCard>
-            </>
-          }
+            </div>
+          </details>
+        </div>
+      )}
+      {editing && (
+        <RoutineCreateDialog
+          workspaceId={workspaceId}
+          routine={routine}
+          initialDraft={draft?.definition}
+          open={editing}
+          onClose={() => {
+            setEditing(false)
+            setDraft(null)
+          }}
+          onCreated={() => {
+            setDraft(null)
+            onChanged()
+          }}
         />
       )}
 
       {view === "definition" && draft && (
         <DetailCard>
           <p className="text-sm">
-            Unsaved draft from version {draft.version}. Review the editor and save to create a
-            new version. The graph still shows the currently saved recipe.
+            Unsaved draft from version {draft.version}. Review the editor and save to
+            create a new version. The graph still shows the currently saved recipe.
           </p>
           <button
             className="mt-2 text-xs text-primary"
@@ -381,7 +395,9 @@ export function RoutineCardDetail({
                       </button>
                       <RoutineStepDefinition
                         step={(
-                          routine.definition.steps as Record<string, unknown>[] | undefined
+                          routine.definition.steps as
+                            | Record<string, unknown>[]
+                            | undefined
                         )?.find((s) => s.id === selected)}
                       />
                     </aside>
@@ -494,8 +510,8 @@ export function RoutineCardDetail({
                         >
                           {myAutomations.length}
                         </span>{" "}
-                        {myAutomations.length === 1 ? "automation" : "automations"} can start
-                        this routine.
+                        {myAutomations.length === 1 ? "automation" : "automations"} can
+                        start this routine.
                       </p>
                       <AutomationList automations={myAutomations} />
                     </div>
@@ -624,7 +640,9 @@ function LastRunCard({
             Last run · {presentation.label}
           </div>
           {runId && (
-            <div className="truncate font-mono text-[10px] text-muted-foreground">{runId}</div>
+            <div className="truncate font-mono text-[10px] text-muted-foreground">
+              {runId}
+            </div>
           )}
         </div>
       </div>
@@ -687,7 +705,8 @@ function ScheduleList({
   if (schedules.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
-        No recurring schedules. Open Edit schedules to see all scheduled starts or add one.
+        No recurring schedules. Open Edit schedules to see all scheduled starts or add
+        one.
       </p>
     )
   }
@@ -752,12 +771,19 @@ function AccessCard({
   workspaceId: string
 }) {
   const m = routine.manifest
-  const integrations = [...new Set(m?.integrations ?? routine.integrations_required ?? [])]
+  const integrations = [
+    ...new Set(m?.integrations ?? routine.integrations_required ?? []),
+  ]
   const credentials = m?.credentials ?? []
   const agentSlugs = [...new Set(m?.agents ?? [])]
   const hosts = [...new Set(m?.egress ?? [])]
   return (
-    <DetailCard title="Access" subtitle="what this can reach" icon={ShieldAlert} tone="warn">
+    <DetailCard
+      title="Access"
+      subtitle="what this can reach"
+      icon={ShieldAlert}
+      tone="warn"
+    >
       <div className="space-y-4">
         {agentSlugs.length > 0 && (
           <div>
@@ -771,7 +797,9 @@ function AccessCard({
           <div>
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
               Required credentials{" "}
-              <span className="font-normal">· accounts are resolved when the run starts</span>
+              <span className="font-normal">
+                · accounts are resolved when the run starts
+              </span>
             </h3>
             <div className="flex flex-wrap gap-1.5">
               {credentials.map((credential, index) => (
@@ -796,7 +824,9 @@ function AccessCard({
         )}
         {integrations.length > 0 && (
           <div>
-            <h3 className="mb-2 text-xs font-medium text-muted-foreground">Integrations</h3>
+            <h3 className="mb-2 text-xs font-medium text-muted-foreground">
+              Integrations
+            </h3>
             <div className="flex flex-wrap gap-1.5">
               {integrations.map((integration) => {
                 const brand = brandIconForType(integration)
@@ -807,7 +837,11 @@ function AccessCard({
                     icon={
                       brand
                         ? () => (
-                            <BrandGlyph brand={brand} fallback={Puzzle} className="h-3 w-3" />
+                            <BrandGlyph
+                              brand={brand}
+                              fallback={Puzzle}
+                              className="h-3 w-3"
+                            />
                           )
                         : Puzzle
                     }
@@ -949,7 +983,9 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
       )}
       {loading && <p className="p-4 text-sm text-muted-foreground">Loading history…</p>}
       {records.length === 0 ? (
-        <p className="px-4 py-3 text-[12px] text-muted-foreground">No runs recorded yet.</p>
+        <p className="px-4 py-3 text-[12px] text-muted-foreground">
+          No runs recorded yet.
+        </p>
       ) : (
         <ul className="divide-y divide-border/40">
           {records.map((r) => {
@@ -984,7 +1020,7 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
                   />
                   <div className="min-w-0">
                     <div className="truncate font-mono text-[11px] text-foreground/85">
-                      {new Date(r.started_at).toLocaleString("en-GB")} · {routineRunLabel(r)}
+                      {formatRoutineTime(r.started_at)} · {routineRunLabel(r)}
                     </div>
                     <div className="flex flex-wrap items-baseline gap-x-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
                       <span>{prov.label}</span>

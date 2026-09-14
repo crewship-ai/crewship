@@ -120,6 +120,7 @@ describe("slash action modal — running a routine", () => {
 
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(apiFetch.mock.calls[0][0]).toBe("/api/v1/workspaces/ws-1/pipelines/msn-etn-podklady/run")
+    expect(new Headers((apiFetch.mock.calls[0][1] as RequestInit).headers).get("Prefer")).toBe("respond-async")
     expect(lastBody()).toEqual({
       inputs: {
         obdobi: "2026-07",

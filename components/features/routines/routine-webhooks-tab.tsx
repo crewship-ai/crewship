@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { useMemo, useState } from "react"
 import { Plus, Trash2, Webhook, Copy, Check, Eye, EyeOff, Pencil } from "lucide-react"
 import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
@@ -197,7 +199,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                       <>
                         <span className="opacity-60">·</span>
                         <span>
-                          Last <span className="text-foreground/85">{new Date(w.last_fired_at).toLocaleString("en-GB")}</span>
+                          Last <span className="text-foreground/85">{formatRoutineTime(w.last_fired_at)}</span>
                           {w.last_status && (
                             <span className="ml-1 opacity-70">({w.last_status})</span>
                           )}

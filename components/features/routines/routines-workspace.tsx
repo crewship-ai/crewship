@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { RoutineCalendar } from "./routine-calendar"
 import Link from "next/link"
@@ -173,7 +175,7 @@ function RecentRoutineRuns({
               />
               <span className="min-w-0 flex-1">{run.pipeline_name || run.pipeline_slug}</span>
               <span className="text-muted-foreground">
-                {new Date(run.started_at).toLocaleString("en-GB")}
+                {formatRoutineTime(run.started_at)}
               </span>
               <span>{routineRunLabel(run)}</span>
             </Link>

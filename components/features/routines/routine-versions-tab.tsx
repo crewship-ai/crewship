@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
@@ -130,7 +132,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
                   {v.is_head && <Pill tone="blue">Current</Pill>}
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(v.created_at).toLocaleString("en-GB")} ·{" "}
+                  {formatRoutineTime(v.created_at)} ·{" "}
                   {v.change_summary || "Saved recipe"}
                 </p>
                 <details className="mt-1 text-[11px] text-muted-foreground">

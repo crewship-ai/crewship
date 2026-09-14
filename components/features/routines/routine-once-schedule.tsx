@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
 
 import { useCallback, useEffect, useState } from "react"
@@ -16,7 +18,13 @@ interface Pending {
   inputs?: Record<string, unknown>
   pinned_version?: number | null
 }
-export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+export function RoutineOnceSchedule({
+  workspaceId,
+  slug,
+}: {
+  workspaceId: string
+  slug: string
+}) {
   const [at, setAt] = useState("")
   const [pending, setPending] = useState<Pending[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +61,7 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
       setBusy(false)
     }
   }
+  const [definition, setDefinition] = useState<Record<string, unknown> | null>(null)
   const prepare = async () => {
     setBusy(true)
     setError(null)
@@ -61,8 +70,8 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
       if (!res.ok) throw new Error("Could not load routine inputs")
       const routine = await res.json()
       const inputs = routineInputSpecs(routine.definition)
-      if (inputs.length) setSpecs(inputs)
-      else await schedule({})
+      setDefinition(routine.definition ?? null)
+      setSpecs(inputs)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -73,11 +82,16 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
     setBusy(true)
     setError(null)
     try {
-      const res = await apiFetch(`${base}/pipelines/pending/${encodeURIComponent(id)}/cancel`, {
-        method: "POST",
-      })
+      const res = await apiFetch(
+        `${base}/pipelines/pending/${encodeURIComponent(id)}/cancel`,
+        {
+          method: "POST",
+        },
+      )
       if (!res.ok)
-        throw new Error("Could not cancel; the run may already have started. Refresh its history.")
+        throw new Error(
+          "Could not cancel; the run may already have started. Refresh its history.",
+        )
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -92,8 +106,8 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
     >
       <h3 className="text-sm font-medium">One-time starts</h3>
       <p className="text-xs text-muted-foreground">
-        {Intl.DateTimeFormat().resolvedOptions().timeZone} · Includes starts added from Calendar.
-        New starts keep the published recipe version selected when scheduled.
+        {Intl.DateTimeFormat().resolvedOptions().timeZone} · Includes starts added from
+        Calendar. New starts keep the published recipe version selected when scheduled.
       </p>
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -111,18 +125,13 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
                 ? `Recipe v${p.pinned_version}`
                 : "Legacy plan · live version at dispatch"}
             </span>
-            <span className="block font-medium">
-              {new Date(p.fire_at).toLocaleString("en-GB", {
-                weekday: "short",
-                day: "numeric",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+            <span className="block font-medium">{formatRoutineTime(p.fire_at)}</span>
+            <p className="truncate text-xs text-muted-foreground">
+              {routinePresetSummary(p.inputs)}
+            </p>
+            <span className="text-xs text-muted-foreground">
+              Scheduled · One-time start
             </span>
-            <p className="truncate text-xs text-muted-foreground">{routinePresetSummary(p.inputs)}</p>
-            <span className="text-xs text-muted-foreground">Scheduled · One-time start</span>
           </div>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => cancel(p.id)}>
             Cancel scheduled start
@@ -130,15 +139,25 @@ export function RoutineOnceSchedule({ workspaceId, slug }: { workspaceId: string
         </div>
       ))}
       <details>
-        <summary className="cursor-pointer text-xs text-primary">Schedule a one-time start</summary>
+        <summary className="cursor-pointer text-xs text-primary">
+          Schedule a one-time start
+        </summary>
         <div className="mt-3 flex flex-wrap gap-2">
-          <RoutineDateTimePicker label="One-time date and time" value={at} onChange={setAt} />
-          <Button disabled={busy || !at || !(Date.parse(at) > Date.now())} onClick={prepare}>
+          <RoutineDateTimePicker
+            label="One-time date and time"
+            value={at}
+            onChange={setAt}
+          />
+          <Button
+            disabled={busy || !at || !(Date.parse(at) > Date.now())}
+            onClick={prepare}
+          >
             Schedule once
           </Button>
         </div>
       </details>
       <RoutineRunInputsDialog
+        definition={definition}
         submitLabel="Schedule"
         inputs={specs}
         routineName={slug}

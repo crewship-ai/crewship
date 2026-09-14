@@ -135,7 +135,7 @@ describe("leaving the editor by the global navigation", () => {
     // On the way out: the shell asks whoever renders both halves to place it,
     // rather than reaching across the tree for an element it does not own.
     act(() => raiseDirty(false))
-    fireEvent.click(screen.getByRole("button", { name: /view page/i }))
+    fireEvent.click(screen.getByRole("button", { name: /back to page/i }))
     expect(onLeft).toHaveBeenCalledTimes(1)
     expect(screen.queryByTestId("section-content")).toBeNull()
   })

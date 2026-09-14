@@ -347,6 +347,9 @@ func TestClassify_RunDeadlineExceededStaysFailed(t *testing.T) {
 	if got.rec.Status != RunStatusFailed {
 		t.Errorf("status = %q, want failed — DeadlineExceeded is not a cancellation", got.rec.Status)
 	}
+	if got.runLevelStatus != "FAILED" {
+		t.Errorf("deadline journal status = %q, want FAILED to match row", got.runLevelStatus)
+	}
 	if got.rec.ErrorFingerprint == "" {
 		t.Error("a run that exceeded its own deadline must stay fingerprinted")
 	}

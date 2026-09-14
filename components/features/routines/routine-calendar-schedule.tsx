@@ -1,5 +1,7 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
@@ -89,7 +91,7 @@ export function RoutineCalendarSchedule({
       const data = await res.json()
       if (!res.ok || !data.pending_id)
         throw new Error(data.error || data.detail || "Could not schedule this routine.")
-      toast.success(`Routine scheduled for ${at.toLocaleString("en-GB")}`)
+      toast.success(`Routine scheduled for ${formatRoutineTime(at)}`)
       onScheduled()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))

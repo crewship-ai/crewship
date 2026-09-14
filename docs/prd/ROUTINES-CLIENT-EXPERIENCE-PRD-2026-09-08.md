@@ -1,9 +1,16 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-Datum zadání: 2026-09-08. Aktualizace implementace: 2026-09-10.
+Datum zadání: 2026-09-08. Aktualizace stavu: 2026-09-12.
 Toto je živý dokument rozsahu, akceptace a důkazů Routines. Historická předání
-zůstávají archivem. Opravy A–D jsou sloučené; čitelnost se ověřuje v samostatné
-větvi. Nasazení této změny a uživatelské přijetí Edit/Test zatím nejsou doložené.
+zůstávají archivem. Kód A–D a opravy N1–N4 byly sloučeny a nasazeny na dev1;
+P8 dokládá `f7a43cd22`, doplnění P8b přesně `7d470200a`.
+**Technické uzavření bylo předčasné:** oponentura 12. září reprodukovala
+obchvat rollbackem, opětovným zapnutím plánu a rozpor deadline v journalu;
+požaduje také opravy publikace, oddělení živých editorů a času/spouštění.
+Rozsah následných oprav uvádí [odpověď na oponenturu](reports/routines-opponent-2026-09-12.md);
+aktuální merge a CI jsou v [PR #2514](https://github.com/crewship-ai/crewship/pull/2514),
+přesná identita nasazení ve [veřejném protokolu](https://github.com/crewship-ai/crewship/issues/2473#issuecomment-5646862404).
+Lidská přejímka §11 zůstává otevřená; sloučení ani testy ji nenahrazují.
 
 ## 1. Rozhodnutí a problém
 

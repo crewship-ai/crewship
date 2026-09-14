@@ -1,4 +1,6 @@
 "use client"
+
+import { formatRoutineTime } from "@/lib/routine-time"
 import { useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { CalendarDays, Play, Repeat2, Zap } from "lucide-react"
@@ -91,7 +93,7 @@ export function RoutineTriggerFields({
               Next starts ({value.timezone}):
               {preview.map((at) => (
                 <p key={at}>
-                  {new Date(at).toLocaleString("en-GB", { timeZone: value.timezone })}
+                  {formatRoutineTime(at, value.timezone)}
                 </p>
               ))}
             </div>

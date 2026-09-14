@@ -50,12 +50,6 @@ vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
 }))
 
 // Stub the heavy sub-tabs so this test stays about the header toolbar.
-vi.mock("@/components/features/routines/routine-overview-tab", () => ({
-  RoutineOverviewTab: () => <div data-testid="overview-tab" />,
-}))
-vi.mock("@/components/features/routines/routine-editor-tab", () => ({
-  RoutineEditorTab: () => <div data-testid="editor-tab" />,
-}))
 vi.mock("@/components/features/routines/routine-runs-tab", () => ({
   RoutineRunsTab: () => <div data-testid="runs-tab" />,
 }))
@@ -134,7 +128,11 @@ function mockApi({
 }: { cancel?: Response; run?: Response } = {}) {
   vi.mocked(apiFetch).mockImplementation(async (url, init) => {
     const u = String(url)
-    if (init?.method === "POST" && u.includes("/pipelines/runs/") && u.endsWith("/cancel")) {
+    if (
+      init?.method === "POST" &&
+      u.includes("/pipelines/runs/") &&
+      u.endsWith("/cancel")
+    ) {
       return cancel
     }
     if (init?.method === "POST" && u.endsWith("/run")) {
@@ -192,7 +190,9 @@ describe("<RoutinesDetailPanel> — header Cancel button", () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
         "Cancel failed",
-        expect.objectContaining({ description: expect.stringMatching(/permission/i) }),
+        expect.objectContaining({
+          description: expect.stringMatching(/permission/i),
+        }),
       )
     })
   })
@@ -219,6 +219,7 @@ describe("<RoutinesDetailPanel> — 422 missing-integration toast", () => {
   it("explains the missing integration in English with a Manage integrations action", async () => {
     await renderPanel()
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     const [message, opts] = vi.mocked(toast.error).mock.calls[0] as [
       string,
@@ -246,7 +247,9 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
     ...ROUTINE,
     slug: "routine-a",
     name: "Routine A",
-    definition: { inputs: [{ name: "obdobi", type: "string", default: "2026-01" }] },
+    definition: {
+      inputs: [{ name: "obdobi", type: "string", default: "2026-01" }],
+    },
   }
   const OTHER = {
     ...ROUTINE,
@@ -267,7 +270,9 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
 
   it("closes the form when the selection moves to another routine", async () => {
     mockFor(WITH_INPUTS)
-    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    const { rerender } = render(
+      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
+    )
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
@@ -282,7 +287,9 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
 
   it("never posts a run for a routine the form was not built from", async () => {
     mockFor(WITH_INPUTS)
-    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    const { rerender } = render(
+      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
+    )
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
@@ -295,7 +302,9 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
     // one addressed to routine-b carrying routine-a's obdobi.
     const runPosts = vi
       .mocked(apiFetch)
-      .mock.calls.filter(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+      .mock.calls.filter(
+        ([u, init]) => init?.method === "POST" && String(u).endsWith("/run"),
+      )
     expect(runPosts).toEqual([])
   })
 
@@ -322,19 +331,25 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
       return okJSON(WITH_INPUTS)
     })
 
-    const { rerender } = render(<RoutinesDetailPanel {...defaultProps} slug="routine-a" />)
+    const { rerender } = render(
+      <RoutinesDetailPanel {...defaultProps} slug="routine-a" />,
+    )
     await waitFor(() => expect(screen.getByText("Routine A")).toBeInTheDocument())
 
     rerender(<RoutinesDetailPanel {...defaultProps} slug="routine-b" />)
     // A's toolbar is still on screen, under B's slug.
-    await waitFor(() => expect(screen.getByRole("button", { name: /^Run$/ })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Run$/ })).toBeInTheDocument(),
+    )
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
 
     // No form, and nothing started. Opening one here could only be wrong.
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
     const runPosts = vi
       .mocked(apiFetch)
-      .mock.calls.filter(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+      .mock.calls.filter(
+        ([u, init]) => init?.method === "POST" && String(u).endsWith("/run"),
+      )
     expect(runPosts).toEqual([])
 
     release?.()
@@ -348,13 +363,17 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
 
     fireEvent.click(screen.getByRole("button", { name: /^Run$/ }))
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText(/obdobi/i), { target: { value: "2026-07" } })
+    fireEvent.change(screen.getByLabelText(/obdobi/i), {
+      target: { value: "2026-07" },
+    })
     fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
 
     await waitFor(() => {
       const post = vi
         .mocked(apiFetch)
-        .mock.calls.find(([u, init]) => init?.method === "POST" && String(u).endsWith("/run"))
+        .mock.calls.find(
+          ([u, init]) => init?.method === "POST" && String(u).endsWith("/run"),
+        )
       expect(post).toBeTruthy()
       expect(String(post![0])).toContain("/pipelines/routine-a/run")
       expect(new Headers(post![1]?.headers).get("Prefer")).toBe("respond-async")
@@ -380,15 +399,23 @@ describe("routine start delivery", () => {
     })
     await renderPanel()
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled(),
+    )
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
-    const key = (i: number) => new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
+    const key = (i: number) =>
+      new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
     expect(key(0)).toBeTruthy()
     expect(key(1)).toBe(key(0))
-    await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled(),
+    )
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(post).toHaveBeenCalledTimes(3))
     expect(key(2)).not.toBe(key(0))
   })
@@ -408,7 +435,10 @@ describe("routine start delivery", () => {
       return okJSON(ROUTINE)
     })
     await renderPanel()
-    const run = screen.getByRole("button", { name: "Run" })
+    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    const run = screen
+      .getByRole("dialog")
+      .querySelector<HTMLButtonElement>("button[type=submit]")!
     act(() => {
       run.click()
       run.click()
@@ -444,12 +474,15 @@ it.each(["missing run ID", "unreadable JSON"])(
     })
     await renderPanel()
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(toast.success).not.toHaveBeenCalled()
     expect(defaultProps.onChanged).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("dialog").querySelector("button[type=submit]")!)
     await waitFor(() => expect(toast.success).toHaveBeenCalled())
-    const key = (i: number) => new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
+    const key = (i: number) =>
+      new Headers(post.mock.calls[i][1].headers).get("Idempotency-Key")
     expect(key(1)).toBe(key(0))
   },
 )
