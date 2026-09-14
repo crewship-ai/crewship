@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, waitFor, fireEvent, act } from "@testing-library/react"
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
@@ -60,7 +60,7 @@ function mount(page: WirePageDetail, routes: { acl?: Response; me?: Response; fo
       <FolderAccessCard workspaceId="ws-1" slug={page.slug!} page={page} />
     </QueryClientProvider>,
   )
-  return { calls }
+  return { calls, qc }
 }
 
 beforeEach(cleanup)
@@ -76,6 +76,30 @@ describe("From folder", () => {
     const card = await waitFor(() => document.querySelector('[data-slot="page-folder-access"]') as HTMLElement)
     await waitFor(() => expect(card.querySelector('[data-slot="folder-sharing-marker"]')?.textContent).toBe("Sharing could not be determined"))
     expect(card.textContent).not.toContain("Only the owning crew")
+  })
+
+  // Follow-up review 2026-09-14: a list that FAILS TO REFRESH still hands
+  // back its previous rows (React Query keeps them), and a marker from
+  // before the failure is not one the card can vouch for. Success, then a
+  // failed refresh, then recovery.
+  it("stops claiming private sharing when a cached list fails to refresh, and says it again once it recovers", async () => {
+    const routes = { folders: json(200, { folders: FOLDERS.folders.map((f) => ({ ...f, shared: "none" })) }) }
+    const { qc } = mount(FILED, routes)
+    const marker = () => document.querySelector('[data-slot="folder-sharing-marker"]')?.textContent
+    await waitFor(() => expect(marker()).toBe("Only the owning crew and workspace admins"))
+
+    routes.folders = json(500, { error: "refresh failed" })
+    await act(async () => {
+      await qc.refetchQueries()
+    })
+    await waitFor(() => expect(marker()).toBe("Sharing could not be determined"))
+    expect(document.body.textContent).not.toContain("Only the owning crew")
+
+    routes.folders = json(200, { folders: FOLDERS.folders.map((f) => ({ ...f, shared: "none" })) })
+    await act(async () => {
+      await qc.refetchQueries()
+    })
+    await waitFor(() => expect(marker()).toBe("Only the owning crew and workspace admins"))
   })
 
   it("is not drawn for a Page in no folder, and reads nothing", () => {

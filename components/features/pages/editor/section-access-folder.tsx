@@ -53,6 +53,12 @@ export function FolderAccessCard({
   const acl = useFolderAcl(workspaceId, folderSlug, folderSlug !== null)
   const folders = usePageFolders(workspaceId, folderSlug !== null)
   const folder = folderSlug ? (folders.folders.find((f) => f.slug === folderSlug) ?? null) : null
+  // The marker as this card may state it. A list that failed to REFRESH
+  // still hands back its previous rows (React Query keeps them), and a
+  // marker from before the failure is not one this card can vouch for —
+  // so an error on the list, first read or refresh, makes it "unknown"
+  // (follow-up review 2026-09-14).
+  const marker = folders.error !== null ? "unknown" : (folder?.shared ?? "unknown")
   const me = usePageAccessMe(workspaceId, slug, folderSlug !== null && acl.refusal !== null)
   const [sharing, setSharing] = React.useState(false)
 
@@ -69,7 +75,7 @@ export function FolderAccessCard({
           // 2026-09-13, R2).
           folders.loading
           ? "loading"
-          : folderSharingSentence(folder?.shared ?? "unknown").toLowerCase()
+          : folderSharingSentence(marker).toLowerCase()
         : "could not read"
 
   return (
@@ -140,7 +146,7 @@ export function FolderAccessCard({
         {acl.refusal !== null && (
           <>
             <p data-slot="folder-sharing-marker" className="type-page-value text-foreground/85">
-              {folders.loading ? "Reading the folder's sharing…" : folderSharingSentence(folder?.shared ?? "unknown")}
+              {folders.loading ? "Reading the folder's sharing…" : folderSharingSentence(marker)}
             </p>
             <ControlRefusal>{acl.refusal}</ControlRefusal>
             <p data-slot="own-paths" className="type-page-meta text-muted-foreground">
