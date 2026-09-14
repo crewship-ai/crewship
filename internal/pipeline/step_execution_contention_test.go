@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -12,7 +11,7 @@ func TestExecutionResultSurvivesTemporaryPoolContention(t *testing.T) {
 	_, db := openRunsTestDB(t)
 	t.Cleanup(func() { db.Close() })
 	installExecutionSchema(t, db)
-	if _, err := db.Exec(`INSERT INTO pipeline_runs (id,workspace_id,pipeline_id,pipeline_slug,status,started_at) VALUES ('run','ws_runs','pln_a','test','running','2026-09-14T00:00:00Z')`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO pipeline_runs (id,workspace_id,pipeline_id,pipeline_slug,status,started_at) VALUES ('run','ws_runs','pln_a','test','running','2026-09-14T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 	store := NewExecutionStore(db)
@@ -52,7 +51,7 @@ func TestExecutionResultSurvivesTemporaryPoolContention(t *testing.T) {
 		t.Fatal("result writer did not finish after the pool was released")
 	}
 	var status, output string
-	if err := db.QueryRowContext(context.Background(), `SELECT status,output FROM pipeline_step_executions WHERE id=?`, id).Scan(&status, &output); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT status,output FROM pipeline_step_executions WHERE id=?`, id).Scan(&status, &output); err != nil {
 		t.Fatal(err)
 	}
 	if status != "completed" || output != `{"receipt":"already-applied"}` {

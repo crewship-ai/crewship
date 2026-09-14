@@ -228,3 +228,14 @@ běhové testy jej ignorovaly. Testovací zápis je opraven, samostatná typová
 kontrola není nahrazena úspěšným frontend buildem. První úplný Go běh
 překročil výchozí 10minutový limit balíčku API při průběžném provádění testů;
 balíček se opakuje s 15minutovým limitem používaným v CI.
+
+Nezávislé CodeRabbit review hlavy `e735ae40e` (21:51 UTC) požadovalo dvě
+změny. Původní oprava V3 pokrývala explicitní zavření, ale ne tlačítko
+prohlížeče Zpět: tento odchod nevolá `closeEditor`. Nová sonda zčervenala
+v testu i v reálném prohlížeči nad předchozím exportem. Oprava sleduje
+přechod `editing=true → false`, vrací fokus a nepřepisuje položku historie;
+test současně kontroluje, že se nevolá `pushState` ani `replaceState`.
+Obě upravené UI sady prošly (35 testů). Druhá připomínka změnila INSERT
+přípravy a závěrečné čtení v databázovém regresním testu na `t.Context()`;
+šestisekundový test znovu prošel. Výsledek původního CI se nepovažuje za CI
+nové hlavy; ta znovu projde kontrolami i schválením.
