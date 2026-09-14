@@ -57,6 +57,11 @@ export const navSections: NavSection[] = [
     label: "Run",
     items: [
       { title: "Activity", href: "/activity", icon: CONCEPT_ICON.activity },
+      // Run, beside Activity: the durable work ledger answers "what happened
+      // to this piece of work" — the queue, its attempts, and the webhook
+      // deliveries that produced it (docs/prd/WEBHOOKS-AGENT-PARALLELISM-
+      // IMPLEMENTATION-1-0.md §9).
+      { title: "Work", href: "/work", icon: CONCEPT_ICON.work },
       { title: "Journal", href: "/journal", icon: CONCEPT_ICON.journal },
     ],
   },

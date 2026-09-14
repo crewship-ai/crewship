@@ -59,6 +59,17 @@ func TestDaemonPairsManagedWALWithCheckpointer(t *testing.T) {
 		})
 	}
 
+	// Durability: the daemon must take the FULL default. NORMAL in WAL mode
+	// survives a process crash but can lose the last commits to an OS crash or
+	// a power cut, and an accepted piece of work that vanishes on reboot is the
+	// exact failure the durable-work contract exists to prevent. Opting the
+	// daemon down to NORMAL would be a silent, invisible-until-it-matters
+	// change, so it fails here instead.
+	if regexp.MustCompile(`database\.Open\([^)]*WithSynchronous\(`).MatchString(text) {
+		t.Error("cmd_start.go passes WithSynchronous to database.Open; the daemon must take the FULL default. " +
+			"NORMAL commits can disappear after an OS crash, which loses work the server already answered 202 for.")
+	}
+
 	// Ordering: the checkpointer must be armed BEFORE migrations run.
 	// Migrations are the most write-heavy phase of a boot, and with
 	// autocheckpoint off that is exactly when an unattended WAL grows

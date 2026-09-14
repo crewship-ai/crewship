@@ -325,6 +325,9 @@ POST /api/v1/workspaces/{workspaceId}/signals roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/bulk-import roleCreate
 POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
+POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
+POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
+POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
 PUT /api/v1/admin/keeper/aux/{slot} roleManage
 PUT /api/v1/admin/keeper/config roleManage
 PUT /api/v1/admin/keeper/governance roleManage

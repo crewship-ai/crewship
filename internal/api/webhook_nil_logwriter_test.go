@@ -13,7 +13,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -50,18 +49,16 @@ func TestWebhookTrigger_NilLogWriterDoesNotPanic(t *testing.T) {
 	h := NewWebhookHandler(setupTestDB(t), newTestLogger(), resolver,
 		orchestrator.New(prov, newInbandAsgState(), newTestLogger()), nil, prov, nil)
 
-	if err := h.trigger(context.Background(), "crew-wh", "agent-wh",
-		webhook.WebhookPayload{Event: "deploy", Source: "gh"}); err != nil {
-		t.Fatalf("trigger: %v", err)
-	}
-	if !waitForBackgroundWork(60 * time.Second) {
-		t.Fatal("webhook dispatch goroutine did not finish")
-	}
+	// Driven directly: accepting a delivery no longer starts a run, and this
+	// test is about the run surviving a nil log sink rather than about who
+	// launches it. It is synchronous now, so there is nothing to wait for.
+	_ = h.runWebhookAgent(context.Background(), resolver.resolveReturnInfo,
+		"agent-wh", "run-nil-log", webhook.WebhookPayload{Event: "deploy", Source: "gh"}, nil, nil)
 
 	resolver.mu.Lock()
 	defer resolver.mu.Unlock()
 	if !resolver.called {
-		t.Fatal("run never finalized — the dispatch goroutine did not reach UpdateRun")
+		t.Fatal("run never finalized — it did not reach UpdateRun")
 	}
 	if resolver.status != "COMPLETED" {
 		t.Errorf("status = %q, want COMPLETED: losing the log sink must not fail the run", resolver.status)

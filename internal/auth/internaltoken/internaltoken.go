@@ -159,6 +159,143 @@ func agentMAC(master, workspaceID, agentID string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// AgentRunPrefix marks a per-RUN derived token on the wire (E0). Like
+// AgentPrefix it is a public format marker, not a secret.
+//
+// It exists because agtv1 could not answer the question E0 asks. A v1 token is
+// a pure function of (master, workspace, agent), so two concurrent runs of one
+// agent present BYTE-IDENTICAL credentials: the sidecar cannot tell them
+// apart, cannot attribute a memory write or a policy decision to the run that
+// made it, and cannot stop a finished run's token from still working. v2 binds
+// the run.
+const AgentRunPrefix = "agtv2"
+
+// agentRunDerivationContext domain-separates v2 from v1 and from every other
+// derived token. A v1 token and a v2 token for the same (workspace, agent) must
+// not share a MAC — otherwise truncating a v2 token back to v1 would forge one.
+const agentRunDerivationContext = "crewship internal-token agent-run binding v2\x00"
+
+const agentRunKeyContext = "crewship agent-run key v2\x00"
+
+// DeriveAgentRunKey returns the purpose-limited key a crew's sidecar uses to
+// VALIDATE per-run agent tokens, derived from the master for one
+// workspace/crew.
+//
+// The sidecar cannot be handed the master. It already is not: its IPC bearer
+// (sidecarIPCToken) is crew-derived precisely so a compromised sidecar cannot
+// mint identities outside its own crew, and a validator that needed the master
+// would undo that. This mirrors DeriveLLMRouteKey exactly, for the same reason
+// and with the same blast radius: holding it grants the authority to mint and
+// verify run tokens for ONE crew, and nothing else.
+//
+// That is what makes cryptographic validation affordable here. The sidecar's
+// roster is frozen at boot, so a token for a run that started later can never
+// be recognised by lookup — and restarting the sidecar to admit one would end
+// every other run sharing the container. With this key it does not have to
+// recognise anything; it verifies.
+//
+// A crew-less run is scoped to the workspace. Empty master/workspace fails
+// closed.
+func DeriveAgentRunKey(master, workspaceID, crewID string) string {
+	if master == "" || workspaceID == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, []byte(master))
+	m.Write([]byte(agentRunKeyContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(crewID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// DeriveAgentRunToken returns the per-RUN bearer token for (workspaceID,
+// agentID, runID), derived from a crew's run key (DeriveAgentRunKey) — NOT
+// from the master, which never reaches the sidecar that has to verify this.
+//
+// Format: agtv2.<b64(workspace)>.<b64(agent)>.<b64(run)>.<hex(HMAC-SHA256(
+// master, ctx || workspace || NUL || agent || NUL || run))>.
+//
+// The three id segments are base64url (raw, unpadded) rather than literal, so
+// an id containing the "." separator cannot split a token into a different
+// shape than the one that was signed. agtv1 embeds them literally, which is
+// survivable only because every id generator in the tree happens to avoid
+// dots; this does not rely on that.
+//
+// Unlike v1, the segments are not merely informational: ValidateAgentRunToken
+// recomputes the MAC over them, so a v2 token VERIFIES rather than needing to
+// be recognised. That is the property that lets a sidecar accept a run which
+// started after it booted — its roster is frozen at boot (internal/sidecar/
+// server.go), so a lookup-based scheme structurally cannot admit a later run
+// without a restart, and restarting the sidecar to admit a run would end every
+// other run sharing the container.
+//
+// Returns "" when any input is empty. Callers must treat "" as "do not issue".
+func DeriveAgentRunToken(runKey, workspaceID, agentID, runID string) string {
+	if runKey == "" || workspaceID == "" || agentID == "" || runID == "" {
+		return ""
+	}
+	enc := base64.RawURLEncoding.EncodeToString
+	return AgentRunPrefix + "." +
+		enc([]byte(workspaceID)) + "." +
+		enc([]byte(agentID)) + "." +
+		enc([]byte(runID)) + "." +
+		agentRunMAC(runKey, workspaceID, agentID, runID)
+}
+
+// ValidateAgentRunToken verifies a v2 token against the crew's run key and
+// returns the identity it is bound to. It fails closed on an empty key, a
+// wrong prefix, a malformed shape, or a MAC mismatch.
+//
+// This is the verifier agtv1 never had — nothing in the tree ever recomputed a
+// v1 MAC, so "is this token valid?" was only ever answered by equality against
+// a roster.
+func ValidateAgentRunToken(runKey, token string) (workspaceID, agentID, runID string, ok bool) {
+	if runKey == "" {
+		return "", "", "", false
+	}
+	rest, found := strings.CutPrefix(token, AgentRunPrefix+".")
+	if !found {
+		return "", "", "", false
+	}
+	parts := strings.Split(rest, ".")
+	if len(parts) != 4 {
+		return "", "", "", false
+	}
+	dec := func(s string) (string, bool) {
+		if s == "" {
+			return "", false
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(s)
+		if err != nil || len(raw) == 0 {
+			return "", false
+		}
+		return string(raw), true
+	}
+	ws, wsOK := dec(parts[0])
+	ag, agOK := dec(parts[1])
+	run, runOK := dec(parts[2])
+	sig := parts[3]
+	if !wsOK || !agOK || !runOK || sig == "" {
+		return "", "", "", false
+	}
+	expected := agentRunMAC(runKey, ws, ag, run)
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return "", "", "", false
+	}
+	return ws, ag, run, true
+}
+
+func agentRunMAC(runKey, workspaceID, agentID, runID string) string {
+	m := hmac.New(sha256.New, []byte(runKey))
+	m.Write([]byte(agentRunDerivationContext))
+	m.Write([]byte(workspaceID))
+	m.Write([]byte{0})
+	m.Write([]byte(agentID))
+	m.Write([]byte{0})
+	m.Write([]byte(runID))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
 // CrewPrefix marks a crew-bound internal token on the wire (#1159). Like
 // Prefix/AgentPrefix it is a public format marker, not a secret; the
 // middleware branches on it to pick the crew-binding validation path.

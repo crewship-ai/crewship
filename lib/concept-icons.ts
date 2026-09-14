@@ -1,6 +1,6 @@
 import {
   Activity, AtSign, Bell, BookOpen, Brain, CircleDot, ClipboardList, FolderTree, Inbox, Key,
-  LayoutDashboard, LayoutTemplate, MessageSquare, Play, Plug,
+  LayoutDashboard, LayoutTemplate, ListChecks, MessageSquare, Play, Plug,
   ScrollText, Settings, ShieldCheck, Store, Users, Zap,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -37,6 +37,13 @@ export const CONCEPT_ICON = {
    */
   pages: LayoutTemplate,
   activity: Activity,
+  /**
+   * The durable work ledger: accepted work, its attempts and the webhook
+   * deliveries that produced it. ListChecks rather than ClipboardList, which
+   * Missions already holds — a mission is work somebody planned, a work item
+   * is one accepted unit of dispatch, and the two must not wear one face.
+   */
+  work: ListChecks,
   journal: BookOpen,
   crews: Users,
   skills: Zap,

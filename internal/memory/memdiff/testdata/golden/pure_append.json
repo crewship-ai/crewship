@@ -1,0 +1,30 @@
+{
+  "name": "pure_append",
+  "why": "The append path. §8 requires empty removals here, which is what makes 'append expressed as replace' legal without touching existing content.",
+  "base": "alpha\nbeta\n",
+  "target": "alpha\nbeta\ngamma\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "alpha\n",
+        "beta\n"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 2,
+      "line_count": 1,
+      "lines": [
+        "gamma\n"
+      ]
+    }
+  ],
+  "removals": [],
+  "applied": "alpha\nbeta\ngamma\n",
+  "verify": {
+    "derived_removals_accepted": true
+  }
+}

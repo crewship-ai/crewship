@@ -73,6 +73,11 @@ type PipelineHandler struct {
 	// tests) drain in-flight dispatches via WaitWebhookDispatches
 	// instead of orphaning them mid-write.
 	webhookDispatchWG sync.WaitGroup
+	// webhookDispatchBarrier, when non-nil, holds every async webhook run
+	// before the executor is entered — before any run record exists. Tests
+	// use it to observe the window between the 202 and the run record;
+	// production leaves it nil.
+	webhookDispatchBarrier <-chan struct{}
 
 	// verdictWG is the shared group every executor this handler builds
 	// (newExecutor) — plus the boot-time executors that opt in via

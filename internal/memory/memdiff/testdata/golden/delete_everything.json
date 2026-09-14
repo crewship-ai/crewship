@@ -1,0 +1,46 @@
+{
+  "name": "delete_everything",
+  "why": "Emptying a file is one removal covering the whole base; the hash is over the whole file including its final LF.",
+  "base": "alpha\nbeta\n",
+  "target": "",
+  "ops": [
+    {
+      "kind": "delete",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "alpha\n",
+        "beta\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 1,
+      "line_count": 2,
+      "old_sha256": "e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee"
+    }
+  ],
+  "applied": "",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 1,
+          "line_count": 2,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

@@ -1043,6 +1043,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	runID := generateMsgID()
+	// E0: the orchestrator derives this run's tmux session and its /tmp args /
+	// env / FIFO / exit files from RunID. Set from the id this path already
+	// mints for CreateRun and journal.WithRunID, so a chat turn and a
+	// concurrent routine/webhook run of the same agent no longer share them.
+	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
 		"crew_id":     info.CrewID,

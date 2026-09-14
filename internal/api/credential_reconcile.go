@@ -74,27 +74,30 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 	// subscription mode) write that one file; a login in api_key mode and
 	// an Anthropic login never touch disk.
 	if codexauth.IsLogin(credType, provider) || isCodexProviderLogin(credType, provider, mode) {
-		return []string{"/crew/agents/" + agentSlug + "/" + codexauth.FileRel}
+		return agentHomeCredPaths(agentSlug, codexauth.FileRel)
 	}
 	// A Gemini login is the same shape one directory over: rendered whole
 	// into ~/.gemini/oauth_creds.json by the orchestrator's AuthDelivery.
 	if geminiauth.IsLogin(credType, provider) || (credType == providerlogin.Type && strings.EqualFold(provider, "GOOGLE") && mode == providerlogin.ModeSubscription) {
-		return []string{"/crew/agents/" + agentSlug + "/" + geminiauth.FileRel}
+		return agentHomeCredPaths(agentSlug, geminiauth.FileRel)
 	}
 	if credType == providerlogin.Type {
 		return nil
 	}
-	dir := "/secrets/" + agentSlug
+	// Both layouts. Runs get their own directory under the agent's, but a
+	// container that started before that change still has the flat one, and a
+	// revoke has to reach the credential wherever it actually is.
+	dirs := []string{"/secrets/" + agentSlug, "/secrets/" + agentSlug + "/*"}
 	var paths []string
 	switch credType {
 	case "SSH_KEY":
-		paths = []string{dir + "/ssh/" + envVar}
+		paths = eachDir(dirs, "/ssh/"+envVar)
 	case "CERTIFICATE":
-		paths = []string{dir + "/certs/" + envVar + ".pem"}
+		paths = eachDir(dirs, "/certs/"+envVar+".pem")
 	case "USERPASS":
-		paths = []string{dir + "/" + envVar + "_USERNAME", dir + "/" + envVar + "_PASSWORD"}
+		paths = append(eachDir(dirs, "/"+envVar+"_USERNAME"), eachDir(dirs, "/"+envVar+"_PASSWORD")...)
 	case "CLI_TOKEN", "SECRET", "GENERIC_SECRET":
-		paths = []string{dir + "/" + envVar}
+		paths = eachDir(dirs, "/"+envVar)
 	default:
 		// The credential itself never touches disk, so neither do its parts —
 		// buildCredFileScript skips the whole credential before reaching them.
@@ -105,9 +108,28 @@ func credSecretPaths(agentSlug, envVar, credType, provider, mode string, fieldKe
 		if !credname.Valid(name) {
 			continue
 		}
-		paths = append(paths, dir+"/"+name)
+		paths = append(paths, eachDir(dirs, "/"+name)...)
 	}
 	return paths
+}
+
+// eachDir joins suffix onto every directory form.
+func eachDir(dirs []string, suffix string) []string {
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, d+suffix)
+	}
+	return out
+}
+
+// agentHomeCredPaths returns the login file's path under both HOME layouts:
+// the per-run home each run now gets, and the shared one a container started
+// before that change still has.
+func agentHomeCredPaths(agentSlug, fileRel string) []string {
+	return []string{
+		"/crew/runs/" + agentSlug + "/*/" + fileRel,
+		"/crew/agents/" + agentSlug + "/" + fileRel,
+	}
 }
 
 // isCodexProviderLogin reports whether a PROVIDER_LOGIN row is a ChatGPT
@@ -136,8 +158,40 @@ func buildCredRemoveScript(agentSlug, envVar, credType, provider, mode string, f
 	var b strings.Builder
 	b.WriteString("rm -f")
 	for _, p := range paths {
-		b.WriteString(" '")
-		b.WriteString(p)
+		b.WriteString(" ")
+		b.WriteString(quoteWithGlob(p))
+	}
+	return b.String()
+}
+
+// quoteWithGlob single-quotes a path while leaving any `*` outside the quotes,
+// so the shell expands it: `/secrets/writer/*/GH_TOKEN` becomes
+// `'/secrets/writer/'*'/GH_TOKEN'`.
+//
+// The glob is load-bearing rather than convenient. Runs no longer share a
+// secrets directory or a HOME — each has its own, named by its run id — so a
+// revoke that names one fixed path removes a file from one run and leaves the
+// same credential sitting in every other live run's directory. There is no list
+// of live run ids here to substitute, and asking for one would be a round trip
+// per agent to remove a file that may not exist.
+//
+// Every attacker-influenced component stays inside the quotes. The only
+// unquoted character is the `*` this function put there, and the segments
+// around it come from credname-validated names. A glob that matches nothing
+// leaves rm the literal pattern, which `-f` swallows silently — the same
+// outcome as a path that was already gone.
+func quoteWithGlob(p string) string {
+	parts := strings.Split(p, "*")
+	var b strings.Builder
+	for i, part := range parts {
+		if i > 0 {
+			b.WriteString("*")
+		}
+		if part == "" {
+			continue
+		}
+		b.WriteString("'")
+		b.WriteString(part)
 		b.WriteString("'")
 	}
 	return b.String()
@@ -285,7 +339,10 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 			if script != "" {
 				script += "\n"
 			}
-			script += "rm -f '/crew/agents/" + t.agentSlug + "/" + orchestrator.OpenCodeAuthFileRel + "'"
+			for _, p := range agentHomeCredPaths(t.agentSlug, orchestrator.OpenCodeAuthFileRel) {
+				script += "rm -f " + quoteWithGlob(p) + "\n"
+			}
+			script = strings.TrimSuffix(script, "\n")
 		}
 		if script == "" {
 			continue // type has no on-disk form

@@ -308,6 +308,14 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.wake.fired": "page",
   "page.action.dispatched": "page",
   "page.spec.changed": "page",
+  // The durable work ledger sits one layer under a run: it decides which
+  // accepted work becomes the next attempt. Grouped with `run` rather than
+  // given a group of its own so a reader following one execution sees the
+  // dispatch decision and the run it produced in the same lane.
+  "work.accepted": "run",
+  "work.claimed": "run",
+  "work.needs_reconciliation": "run",
+  "work.lease_lost": "run",
   "page.grant_added": "page",
   "page.grant_removed": "page",
   "page.owner_transferred": "page",
@@ -415,6 +423,10 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "run.failed": "run·fail",
   "run.cancelled": "run·cancel",
   "run.timeout": "run·timeout",
+  "work.accepted": "work·accept",
+  "work.claimed": "work·claim",
+  "work.needs_reconciliation": "work·reconcile",
+  "work.lease_lost": "work·lease",
   "peer.conversation": "peer",
   "peer.escalation": "escalate",
   "message.broadcast": "broadcast",

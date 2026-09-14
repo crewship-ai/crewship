@@ -275,9 +275,15 @@ func TestLearnedRules_AgentCWDCannotDiscoverThem(t *testing.T) {
 	}
 	bodyText := string(src[start:end])
 
+	// E0 moved the CWD one level deeper — from the agent's shared /output
+	// tree to that run's own subdirectory of it — which does not change what
+	// this sentinel is actually guarding: the CWD must stay inside /output and
+	// must not come to sit under a memory root, where a CLI's own
+	// working-directory file discovery would reach learned-*.md.
 	for _, want := range []string{
 		`outputDir := path.Join("/output", req.AgentSlug)`,
-		`workDir := outputDir`,
+		`runOutputDir := agentRunOutputDir(req.AgentSlug, req.RunID)`,
+		`workDir := runOutputDir`,
 	} {
 		if !strings.Contains(bodyText, want) {
 			t.Errorf(`agent CWD wiring changed: %q no longer present in preparePreflightDirs.
@@ -287,6 +293,14 @@ must be replaced with a positive delivery test.`, want)
 		}
 	}
 
+	// The CWD must be derived from the /output tree and nowhere else. Checked
+	// as a property rather than only as a literal, so a future rewiring that
+	// keeps the variable names but re-points them at, say, the agent's HOME or
+	// a memory root still trips this.
+	if strings.Contains(bodyText, "workDir := ") &&
+		!strings.Contains(bodyText, "workDir := runOutputDir") {
+		t.Error(`agent CWD is no longer this run's /output subdirectory — re-check GAP 3`)
+	}
 	if strings.Contains(bodyText, "learned-") {
 		t.Errorf(`SENTINEL TRIPPED: preparePreflightDirs now references learned-* — the preflight is staging
 consolidated rules into the agent's working directory. Update the doc comment at the top of this file.`)

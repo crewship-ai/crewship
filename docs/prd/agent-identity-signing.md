@@ -873,8 +873,8 @@ pattern the whole industry already uses:
   orchestrated agent that works *inside* it and coordinates with your crew." That
   is differentiating vs framework-based competitors, and it is the same
   "agent-beside-not-inside" model the crew-filesystem vision already commits to.
-- **In the UI:** an injected agent appears as "an agent attached to <your
-  service>", sitting beside crew agents, driven by the same routines/orchestration
+- **In the UI:** an injected agent appears as "an agent attached to
+  `<your service>`", sitting beside crew agents, driven by the same routines/orchestration
   surface — the human sees a coworker on their app, not a container.
 
 ### 14.6 How this resolves the whole thread

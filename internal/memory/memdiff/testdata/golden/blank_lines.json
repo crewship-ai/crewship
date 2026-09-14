@@ -1,0 +1,62 @@
+{
+  "name": "blank_lines",
+  "why": "Blank lines are ordinary lines. Of two identical blank lines the later one is deleted, for the same positional reason as repeated_lines_abab.",
+  "base": "a\n\n\nb\n",
+  "target": "a\n\nb\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "a\n",
+        "\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 4,
+      "line_count": 1,
+      "lines": [
+        "b\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 3,
+      "line_count": 1,
+      "old_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    }
+  ],
+  "applied": "a\n\nb\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 3,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

@@ -52,6 +52,10 @@ func (r *Router) registerRoutes() {
 	// context, exactly like the public page above.
 	r.registerPageWebhookRoutes()
 
+	// The durable work ledger — work items, attempts, events, cancel/replay,
+	// and the webhook delivery ledger behind them.
+	r.registerWorkRoutes()
+
 	// Auth, signup, Google OAuth2, sessions, CLI tokens, NextAuth,
 	// onboarding.
 	r.registerAuthRoutes()

@@ -1,0 +1,54 @@
+{
+  "name": "delete_at_start",
+  "why": "Removal spans start at line 1; numbering is 1-based.",
+  "base": "alpha\nbeta\ngamma\n",
+  "target": "beta\ngamma\n",
+  "ops": [
+    {
+      "kind": "delete",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "alpha\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 2,
+      "line_count": 2,
+      "lines": [
+        "beta\n",
+        "gamma\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 1,
+      "line_count": 1,
+      "old_sha256": "b6a98d9ce9a2d9149288fa3df42d377c3e42737afdcdaf714e33c0a100b51060"
+    }
+  ],
+  "applied": "beta\ngamma\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 1,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

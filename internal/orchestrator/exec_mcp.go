@@ -16,10 +16,12 @@ func setupClaudeConfig(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
-	agentSlug string,
+	agentSlug, runID string,
 	logger *slog.Logger,
 ) error {
-	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
+	// E0: this run's own HOME, so two runs of one agent no longer share a
+	// .claude.json (and the onboarding/subscription flags in it).
+	homeDir := agentHomeDir(agentSlug, runID)
 	script := fmt.Sprintf(`mkdir -p %s/.claude && `+
 		`cat > %s/.claude.json << 'CFGEOF'
 {"hasCompletedOnboarding":true,"hasAvailableSubscription":true,"autoUpdates":false}
@@ -52,7 +54,7 @@ func setupMCPConfig(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
-	agentSlug string,
+	agentSlug, runID string,
 	crewMCPJSON string,
 	agentMCPJSON string,
 	servers []MCPServerConfig,
@@ -133,7 +135,7 @@ func setupMCPConfig(
 		logger.Warn("notify MCP injection failed; agent will have no notify_send tool", "error", err)
 	}
 
-	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
+	homeDir := agentHomeDir(agentSlug, runID)
 	// Write config file (600 perms, owned by agent user).
 	// Use base64 encoding to prevent shell injection if mcpJSON contains
 	// the heredoc delimiter or other special characters.
@@ -164,7 +166,7 @@ func setupMCPConfig(
 func injectMCPOAuthTokens(
 	ctx context.Context,
 	container provider.ContainerProvider,
-	containerID, agentSlug string,
+	containerID, agentSlug, runID string,
 	mcpServers []MCPServerConfig,
 	credentials []Credential,
 	logger *slog.Logger,
@@ -197,7 +199,10 @@ func injectMCPOAuthTokens(
 		}
 	}
 
-	homeDir := path.Join("/crew/agents", agentSlug)
+	// E0: MCP OAuth token files are per RUN. They are the clearest case for
+	// it — a refresh performed by one run used to overwrite the token file
+	// the other run's CLI was still authenticating with.
+	homeDir := agentHomeDir(agentSlug, runID)
 
 	for _, srv := range mcpServers {
 		if srv.Name == "" {

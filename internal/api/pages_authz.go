@@ -97,14 +97,69 @@ func (h *PageHandler) canSeePanel(viewer *pageViewer, p *panelRecord) bool {
 	return viewer.Crews[p.OwnerCrewID]
 }
 
+// The paths by which a caller reaches a page, as the index spells them
+// (pageListWire.Reach). The vocabulary is fixed and closed: a client keys on
+// these strings, and the crew-bearing ones carry the crew's slug after the
+// colon.
+const (
+	pageReachOwner     = "owner"       // owner_user_id is the caller
+	pageReachRole      = "role"        // the caller's workspace role carries manage
+	pageReachCrew      = "crew:"       // + slug: the caller belongs to the owning crew
+	pageReachPanelCrew = "panel_crew:" // + slug: the caller belongs to a crew owning a panel
+	pageReachGrant     = "grant"       // a live grant names the caller or one of their crews
+)
+
+// pageReach lists the paths by which THIS viewer reaches the page, in a fixed
+// order — owner, role, the owning crew, one entry per distinct crew of theirs
+// that owns a panel (in the page's panel order), grant — and returns nothing
+// when they reach it by none. It is the caller's own standing rendered back to
+// them and nothing else: no other subject, no grant row, no issuer appears in
+// it, which is what lets the index send it on every row it already shows.
+//
+// It costs no statement. ownerCrewSlug comes from whatever read rendered the
+// page's owner, and granted is the grant reader's verdict over records loaded
+// in bulk (liveGrantsIn, pages_grants_authz.go) — this function must never go
+// and fetch either, because a per-page lookup here would make the permission
+// check the slow part of the listing.
+//
+// The panel arm is canSeePanel's membership half; its role half is the `role`
+// arm above it. Reachability therefore still agrees with panel visibility —
+// a viewer served a panel through a path that refused them the page would be
+// a bug in whichever of the two was written second — and
+// pageReachedWithoutGrant is defined as "this list is non-empty" so the two
+// cannot be edited apart.
+func (h *PageHandler) pageReach(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord, viewer *pageViewer, granted bool) []string {
+	var out []string
+	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
+		out = append(out, pageReachOwner)
+	}
+	if canRole(viewer.Role, "manage") {
+		out = append(out, pageReachRole)
+	}
+	if rec.OwnerCrewID != "" && viewer.Crews[rec.OwnerCrewID] {
+		out = append(out, pageReachCrew+ownerCrewSlug)
+	}
+	seen := map[string]bool{}
+	for _, p := range panels {
+		if !viewer.Crews[p.OwnerCrewID] || seen[p.OwnerCrewID] {
+			continue
+		}
+		seen[p.OwnerCrewID] = true
+		out = append(out, pageReachPanelCrew+p.OwnerCrew)
+	}
+	if granted {
+		out = append(out, pageReachGrant)
+	}
+	return out
+}
+
 // pageReachedWithoutGrant answers the part of page reachability that needs no
 // grant lookup: ownership, the workspace role, and "may this viewer see any
-// panel on this page at all".
-//
-// The panel arm goes through canSeePanel rather than testing viewer.Crews
-// itself, so that "you can see a panel on it" and "you can open it" can never
-// disagree — a viewer served a panel through a path that refused them the page
-// would be a bug in whichever of the two was written second.
+// panel on this page at all". It is pageReach with the grant arm off, and it
+// is defined that way rather than restated so the index's `reach` and the
+// single-page verdict (canSeePage) are one function's opinion. The owning
+// crew's slug is never compared, only printed, so no caller of this predicate
+// needs to have loaded it.
 //
 // A nil viewer means an unscoped render (Create and Update echo the page back
 // to the author, Import to the importer); those callers have already made their
@@ -113,23 +168,7 @@ func (h *PageHandler) pageReachedWithoutGrant(rec *pageRecord, panels []*panelRe
 	if viewer == nil {
 		return true
 	}
-	if canRole(viewer.Role, "manage") {
-		return true
-	}
-	// Ownership, from the standing already loaded: owner_user_id is the caller,
-	// or owner_crew_id is a crew they belong to (§7.1 rule 1's xor).
-	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
-		return true
-	}
-	if rec.OwnerCrewID != "" && viewer.Crews[rec.OwnerCrewID] {
-		return true
-	}
-	for _, p := range panels {
-		if h.canSeePanel(viewer, p) {
-			return true
-		}
-	}
-	return false
+	return len(h.pageReach(rec, "", panels, viewer, false)) > 0
 }
 
 // canSeePage is the page-level twin of canSeePanel: may this caller open this

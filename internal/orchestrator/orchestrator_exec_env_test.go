@@ -10,7 +10,7 @@ import (
 // orchestrator_exec_env.go — tmux cache + session-name helper.
 //
 // Covers four small methods on Orchestrator:
-//   - TmuxSessionName  : pure helper, "agent-" + slug
+//   - TmuxSessionName  : pure helper, "agent-" + slug + "-" + run id
 //   - tmuxCacheLookup  : read cache with double-bool (value, present)
 //   - tmuxCacheStore   : write cache with size-cap flush on overflow
 //   - InvalidateTmuxCache : delete-by-id (called on container removal)
@@ -27,21 +27,53 @@ import (
 
 func TestTmuxSessionName_Format(t *testing.T) {
 	// Pure helper. Pin the literal "agent-" prefix so a tmux-side
-	// regex / grep that depends on the prefix doesn't drift silently.
+	// regex / grep that depends on the prefix doesn't drift silently, and pin
+	// the run-id segment so nothing quietly goes back to slug-only naming.
 	cases := []struct {
-		in, want string
+		name      string
+		slug, run string
+		want      string
 	}{
-		{"alice", "agent-alice"},
-		{"", "agent-"},                       // empty slug still produces a deterministic name
-		{"with-dashes", "agent-with-dashes"}, // dashes pass through
-		{"a", "agent-a"},
+		{"slug and run", "alice", "r1", "agent-alice-r1"},
+		{"empty slug", "", "r1", "agent--r1"},
+		{"dashes pass through", "with-dashes", "run-2", "agent-with-dashes-run-2"},
+		{"single char slug", "a", "c0000abc", "agent-a-c0000abc"},
+		// Not a supported input, but pinned: an empty run id must not silently
+		// collapse to the old shared "agent-<slug>" name.
+		{"empty run id", "alice", "", "agent-alice-"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			if got := TmuxSessionName(tc.in); got != tc.want {
-				t.Errorf("TmuxSessionName(%q) = %q, want %q", tc.in, got, tc.want)
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TmuxSessionName(tc.slug, tc.run); got != tc.want {
+				t.Errorf("TmuxSessionName(%q, %q) = %q, want %q", tc.slug, tc.run, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTmuxSessionName_DistinctPerRun is the property the whole E0 change
+// rests on: one agent, two runs, two names — and one run, called twice, one
+// name. Everything setupTmuxExec derives (args / env / script / FIFO / exit /
+// wait-for) is this string plus a suffix, so this is what keeps run B's setup
+// out of run A's files.
+func TestTmuxSessionName_DistinctPerRun(t *testing.T) {
+	const slug = "eva"
+	a := TmuxSessionName(slug, "run-a")
+	b := TmuxSessionName(slug, "run-b")
+	if a == b {
+		t.Fatalf("two runs of %q share a session name: %q", slug, a)
+	}
+	if again := TmuxSessionName(slug, "run-a"); again != a {
+		t.Errorf("session name is not stable for one run: %q then %q", a, again)
+	}
+	// And the prefix is what a slug-only caller has to enumerate with.
+	if !strings.HasPrefix(a, TmuxSessionPrefix(slug)) || !strings.HasPrefix(b, TmuxSessionPrefix(slug)) {
+		t.Errorf("both names must carry TmuxSessionPrefix(%q) = %q; got %q and %q",
+			slug, TmuxSessionPrefix(slug), a, b)
+	}
+	// The trailing "-" in the prefix keeps "eva" from prefixing "eva2".
+	if strings.HasPrefix(TmuxSessionName("eva2", "run-a"), TmuxSessionPrefix("eva")) {
+		t.Error("TmuxSessionPrefix(\"eva\") must not match agent eva2's sessions")
 	}
 }
 
@@ -245,10 +277,14 @@ func TestTmuxSessionName_OutputIsTmuxSessionSafe(t *testing.T) {
 	// Limited to common slug shapes — a future broader slug regex
 	// would need to update both this test and the slug validator.
 	for _, slug := range []string{"alice", "bob-1", "team_alpha", "x"} {
-		name := TmuxSessionName(slug)
-		for _, bad := range []string{":", "."} {
-			if strings.Contains(name, bad) {
-				t.Errorf("TmuxSessionName(%q) = %q, contains forbidden tmux char %q", slug, name, bad)
+		// Run ids come from generators that emit [a-z0-9_] and are gated by
+		// validRunIDRe, which excludes "." and ":" for exactly this reason.
+		for _, run := range []string{"c0000abc", "sched_1757000000000000000_deadbeef", "msg_1757000000000000000_00ff"} {
+			name := TmuxSessionName(slug, run)
+			for _, bad := range []string{":", "."} {
+				if strings.Contains(name, bad) {
+					t.Errorf("TmuxSessionName(%q, %q) = %q, contains forbidden tmux char %q", slug, run, name, bad)
+				}
 			}
 		}
 	}

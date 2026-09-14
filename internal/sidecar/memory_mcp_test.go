@@ -516,3 +516,70 @@ func TestMemoryMCP_TokenlessAllowedWhenNoTokensProvisioned(t *testing.T) {
 		t.Fatalf("beta AGENT.md = %q", got)
 	}
 }
+
+// The runtime requirement is stronger than the model's arguments. Until the
+// MCP host ledger bridge exists, neither write surface may silently use the
+// local legacy writer when the deployment requires guaranteed memory.
+func TestMemoryMCP_RequiredGuaranteedNeverWritesLocally(t *testing.T) {
+	t.Setenv("CREWSHIP_MEMORY_REQUIRE_GUARANTEED", "1")
+	for _, tc := range []struct {
+		name string
+		args string
+	}{
+		{"memory.write", `{"tier":"AGENT","mode":"append","content":"must not land\n","operation_id":"required-write"}`},
+		{"memory.append_daily", `{"entry":"must not land"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMemoryMCPTestServer(t)
+			before := map[string]string{}
+			if err := filepath.WalkDir(s.agentMemoryBase, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !entry.IsDir() {
+					data, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
+					before[path] = string(data)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			body := `{"jsonrpc":"2.0","id":71,"method":"tools/call","params":{"name":"` + tc.name + `","arguments":` + tc.args + `}}`
+			req := httptest.NewRequest("POST", "/mcp/memory", strings.NewReader(body))
+			req.Host = "127.0.0.1:9119"
+			rr := httptest.NewRecorder()
+			s.handleMemoryMCP(rr, req)
+			var response struct {
+				Result memoryMCPToolCallResult `json:"result"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if rr.Code != http.StatusOK || !response.Result.IsError {
+				t.Errorf("required guaranteed tool accepted a legacy write: %d %s", rr.Code, rr.Body.String())
+			}
+			if err := filepath.WalkDir(s.agentMemoryBase, func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if entry.IsDir() {
+					return nil
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				previous, exists := before[path]
+				if !exists || previous != string(data) {
+					t.Errorf("required guaranteed call changed local file %s", path)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
