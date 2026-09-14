@@ -149,7 +149,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("Folder → Sharing, for a manager (U1)", () => {
-  it("draws the sentence, the owning crew fixed at Can edit, each entry with a two-state control, and Everyone off", async () => {
+  it("draws the sentence, the owning crew as its managers' fixed row, each entry with a two-state control, and Everyone off", async () => {
     mount({ acl: () => ({ acl: [SUPPORT, OPS_CREW], acl_version: 5 }) })
     const dialog = await openSharing("Ops")
     await waitFor(() => expect(within(dialog).getByRole("table", { name: "Who reaches this folder" })).toBeTruthy())
@@ -157,7 +157,10 @@ describe("Folder → Sharing, for a manager (U1)", () => {
     expect(within(dialog).getByText(FOLDER_ACL_SENTENCE)).toBeTruthy()
     const owner = dialog.querySelector('[data-slot="acl-owner"]') as HTMLElement
     expect(owner.textContent).toContain("Lookout")
-    expect(owner.textContent).toContain("Can edit")
+    // Not "Can edit": the server gives a member of the owning crew no path to
+    // the pages inside, so the row says what the crew's managers really hold.
+    expect(owner.textContent).toContain("Managers administer")
+    expect(owner.textContent).not.toContain("Can edit")
     expect(within(owner).queryByRole("radio")).toBeNull()
 
     // Edit implies view: two states, never "edit without view".
