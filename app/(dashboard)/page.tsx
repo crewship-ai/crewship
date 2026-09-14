@@ -383,7 +383,11 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
           <div className="flex flex-col gap-3">
             <Skeleton className="h-[84px] rounded-xl" />
             <Skeleton className="h-[84px] rounded-xl" />
-            <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.max(1, Math.min(3, crews || 3)) }} />
+            {/* FleetBoard renders nothing for an empty workspace, so its
+                placeholder must not appear either. */}
+            {crews > 0 && (
+              <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.min(3, crews) }} />
+            )}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[58px] rounded-xl" />)}</div>
