@@ -314,8 +314,10 @@ export function PagesRail({
       const all = groupPagesByFolder(displayed, folders ?? [])
       return narrowing ? all.filter((g) => g.pages.length > 0) : all
     }
-    return groupPagesByOwner(displayed, currentUserId)
-  }, [groupBy, displayed, folders, narrowing, currentUserId])
+    // Membership is read from every page, not the filtered list: which crews
+    // are MINE does not change because a filter hid the page that said so.
+    return groupPagesByOwner(displayed, currentUserId, pages)
+  }, [groupBy, displayed, folders, narrowing, currentUserId, pages])
 
   const countOf = (g: PageGroup) =>
     g.kind === "folder" && !narrowing && g.pageCount !== undefined ? g.pageCount : g.pages.length
