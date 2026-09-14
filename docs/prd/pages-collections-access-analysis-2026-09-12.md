@@ -1,6 +1,6 @@
 # Pages: Složky, sdílení a sidebar — návrh v3
 
-Datum: 2026-09-13, verze 3. Historie: v1 (4be01545) → oponentura OpenAI
+Datum: 2026-09-13, verze 3. Historie: v1 (4be01545) → externí oponentura
 2026-09-12 (devět nálezů) → v2 (46e63492) → validace implementace sidebaru
 2026-09-13 (čtyři nálezy, všechny opraveny, viz §0) → **v3: zadání „vlastní
 složky s ikonkami a skutečnou správou oprávnění“**. Sledování: #2521.
@@ -106,9 +106,10 @@ z každé), ikonka + barva (`IconPickerDialog`). Přejmenování a změna ikonky
 tentýž dialog.
 
 **S-3 Smazání složky.** `AlertDialog`, povolené jen pro prázdnou složku;
-jinak tlačítko disabled s větou „Move its N pages out first“ (N = počet
-stránek, které volající *vidí*; pokud existují i nedostupné, věta říká
-„and pages you cannot see“ bez počtu, §1/13).
+jinak tlačítko disabled s větou „Move its pages out first“. Věta nezmiňuje
+počet ani existenci stránek, které volající nevidí (§1/13): server odmítne
+smazání neprázdné složky bez ohledu na viditelnost a UI ukáže jen počet
+viditelných stránek jako nápovědu, nikdy náznak, že jsou i skryté.
 
 **S-4 Přesun stránky.** Z railu (menu, klávesnice), z hromadné lišty
 (výběr více řádků, tlačítko *Select* v toolbaru; Shift-klik; Space) a z
@@ -246,8 +247,11 @@ stránky (§1/9), včetně těch, které volající nevidí.
 
 Vyhodnocení: `loadPageGrantRecordsIn` načte granty stránek a granty složek
 jedním `UNION ALL` (v2 §6), přidá kontrolu autority (§5/11) a expirace
-(§5/7); `pageReach` dostane novou cestu `folder:<slug>`; seznam zůstává na
-konstantním počtu dotazů (test z #2526 se rozšíří o složky).
+(§5/7); `pageReach` dostane novou cestu `folder:<slug>` **jen z práva
+`read` složky** — zápisové právo nikdy samo o sobě nepřidává cestu k dosahu
+ani neprozrazuje existenci stránky (§5/4; v modelu ACL je `can_read` vždy 1,
+takže záznam bez čtení neexistuje ani v datech, a test dosahu to pinuje);
+seznam zůstává na konstantním počtu dotazů (test z #2526 se rozšíří o složky).
 
 | Metoda a cesta | Kdo (§4) | CLI |
 |---|---|---|
@@ -262,6 +266,22 @@ konstantním počtu dotazů (test z #2526 se rozšíří o složky).
 
 Každý endpoint má CLI příkaz a akceptační test nad binárkou; dokumentace v
 `docs/api-reference/pages.mdx` a `docs/cli/page.mdx` jde ve stejném PR.
+
+**Registrační role a workspace kontroly (doplněno po oponentuře, podle
+implementace v #2542).** Tabulka výše uvádí politiku volajícího; routa se
+registruje s rolí, kterou middleware vynutí před handlerem, a handler pak
+teprve rozhodne podle vlastnictví:
+
+| Routa (jak je registrovaná) | Role | Kontrola v handleru |
+|---|---|---|
+| `POST /page-folders`, `DELETE /page-folders/{slug}` | `create` (MANAGER+) | vlastnická crew nebo admin; složka i volající ve stejném workspace |
+| `PUT /page-folders/{slug}/acl`, `DELETE …/acl/{subject_type}/{subject_id}` | `create` (MANAGER+) | vlastnická crew nebo admin; `user` subjekt musí být členem workspace složky, `crew` subjekt crew téhož workspace, `workspace` subjekt má `subject_id = ''` |
+| `PATCH /page-folders/{slug}`, `POST …/pages`, `POST …/pages:batch`, `DELETE …/pages/{page}` | `self` (inline) | vlastnictví stránky/složky a `pages_version` fence; stránka i složka ve stejném workspace |
+
+Cizí klíče `page_folders.owner_crew_id` a `pages.folder_id` ověřují jen
+existenci ID; příslušnost k workspace se ověřuje v transakci každého zápisu
+výše, protože `page_folder_acl` ukládá `user`/`crew` subjekty polymorfně bez
+FK na workspace. Test těchto kontrol je součástí #2542.
 
 ## 7. Konflikty a souběh
 

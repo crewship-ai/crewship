@@ -1,6 +1,6 @@
 # Děděná oprávnění složek Pages — návrh F3′ (verze 2)
 
-Datum: 2026-09-13, verze 2 po oponentuře (OpenAI, nad commitem e543324e).
+Datum: 2026-09-13, verze 2 po externí oponentuře (nad commitem e543324e).
 Stav: **schválený směr, k implementaci jako jedno PR F3′.** Navazuje na
 `pages-collections-access-analysis-2026-09-12.md` v3 a nahrazuje jeho fáze
 F3–F5. Sledování: #2521.
@@ -137,6 +137,8 @@ CREATE TABLE page_folder_acl (
   folder_id      TEXT NOT NULL REFERENCES page_folders(id) ON DELETE CASCADE,
   subject_type   TEXT NOT NULL CHECK (subject_type IN ('user','crew','workspace')),
   subject_id     TEXT NOT NULL DEFAULT '',                      -- '' pro workspace
+  -- tvar subjektu je vázaný na typ: workspace ⇔ prázdné id, user/crew ⇔ neprázdné
+  CHECK ((subject_type = 'workspace') = (subject_id = '')),
   can_read       INTEGER NOT NULL DEFAULT 1 CHECK (can_read = 1), -- w ⇒ r: r je vždy
   can_write      INTEGER NOT NULL DEFAULT 0 CHECK (can_write IN (0,1)),
   set_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,   -- audit, ne autorita
@@ -148,6 +150,19 @@ CREATE TABLE page_folder_acl (
 
 `can_read` je vždy 1: záznam buď existuje (zobrazit) nebo má navíc
 `can_write`; „upravovat bez zobrazení“ neexistuje ani v datech.
+
+**Subjekt `workspace` napříč všemi konzumenty.** Zápis (`PUT/DELETE …/acl`)
+přijme `workspace` jen s prázdným `subject_id` (CHECK výše) a jen od
+vlastnické crew nebo admina. Vyhodnocení — `grantsFor`, vykreslení ACL,
+seznam stránek, dosah (`pageReach`) i kontrola při požadavku — přiřadí
+`workspace` záznam volajícímu jen tehdy, je‑li **v okamžiku požadavku**
+členem workspace složky; členství se nečte ze snapshotu při udělení, takže
+odebraný člen ztrácí dosah okamžitě a nový člen ho získává bez zásahu do
+ACL. `page_grants` dostává stejný subjekt se stejnými pravidly
+(`subject_id = ''`, jen `read|write`); `resolveGrantSubject`, validace
+odvolání a `pageViewerGrantMatch` dostávají větev `workspace` se stejným
+členským testem, aby `List`/`Get`, které tyto cesty sdílejí, nemohly
+workspace grant ani ignorovat, ani uplatnit na nečlena.
 
 Vyhodnocení: `loadPageGrantRecordsIn` načte stránkové granty (s dnešní
 kontrolou vydavatele) a **zvlášť** ACL složek přes `pages.folder_id` (bez
