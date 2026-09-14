@@ -208,6 +208,52 @@ describe("shared routine editor", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
 
+  it("does not block reload for an unchanged durable draft", async () => {
+    h.linked = true
+    h.linkedExisting = true
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    const unload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(false)
+  })
+
+  it.each([false, true])("guards browser Back before the editor can unmount (discard=%s)", async (discard) => {
+    const previousHref = window.location.href
+    const previousState = window.history.state
+    const editorHref = "/routines?slug=existing&view=edit"
+    const editorState = { retainedRouterState: true }
+    window.history.replaceState(editorState, "", editorHref)
+    const originalConfirm = window.confirm
+    const confirm = vi.fn(() => discard)
+    window.confirm = confirm
+    const routerPop = vi.fn()
+    window.addEventListener("popstate", routerPop)
+    try {
+      h.linked = true
+      h.linkedExisting = true
+      render(<RoutineCreateDialog {...props} />)
+      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved navigation" } })
+      window.history.replaceState({ previousEntry: true }, "", "/routines?slug=existing")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(routerPop).toHaveBeenCalledTimes(discard ? 1 : 0)
+      if (discard) {
+        expect(window.location.search).toBe("?slug=existing")
+        expect(window.history.state).toEqual({ previousEntry: true })
+      } else {
+        expect(window.location.pathname + window.location.search).toBe(editorHref)
+        expect(window.history.state).toEqual(editorState)
+        expect(screen.getByLabelText("Name")).toHaveValue("Unsaved navigation")
+      }
+    } finally {
+      window.removeEventListener("popstate", routerPop)
+      window.confirm = originalConfirm
+      window.history.replaceState(previousState, "", previousHref)
+    }
+  })
+
   it("moves the metadata baseline after Save draft, but still guards later edits", async () => {
     render(<RoutineCreateDialog {...props} />)
     await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())

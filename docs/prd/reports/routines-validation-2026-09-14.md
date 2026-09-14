@@ -239,3 +239,32 @@ Obě upravené UI sady prošly (35 testů). Druhá připomínka změnila INSERT
 přípravy a závěrečné čtení v databázovém regresním testu na `t.Context()`;
 šestisekundový test znovu prošel. Výsledek původního CI se nepovažuje za CI
 nové hlavy; ta znovu projde kontrolami i schválením.
+
+Vlastní rozšíření kontroly navigace po review našlo dvě další cesty v téže
+vadě V2: reload/odkaz používal druhý výpočet změn proti publikované rutině,
+a proto varoval i u beze změny načteného uloženého draftu; browser Zpět zase
+neprocházel žádnou ochranou a ztratil rozepsané jméno. Browser sonda ukázala
+`unchanged_draft_blocks_reload=true`, žádnou otázku při Zpět a po Vpřed
+uložené jméno místo neuloženého. Původní Go/UI fixy tím nejsou důkazem
+bezpečného odchodu všemi cestami.
+
+Oprava používá jednu baseline pro Cancel, reload i navigaci. Odkazy a změna
+workspace využívají společný navigation guard. Ochrana browser historie má
+malý statický dispatcher v head dokumentu před hydratací routeru; připojit
+listener teprve při otevření editoru nestačilo, protože router editor
+odmontoval dřív, než pozdější listener dostal stejný popstate. Tuto chybu
+odhalil až skutečný browser, přestože komponentový test už procházel.
+Odmítnutý odchod obnoví položku editoru s jeho router stavem a zachová text;
+přijaté Zpět/Vpřed historii nepřepisuje. Bez aktivního guardu dispatcher
+pouze propustí událost.
+
+Tři nové komponentové regrese na předchozím produkčním kódu zčervenaly.
+Výsledná lokální sada: 413 testů / 53 souborů, build, lint (0 chyb / 30
+existujících varování) a typová kontrola bez nových diagnostik prošly.
+Deset scénářů v Chromium nad výsledným exportem a API dev1 prošlo: původní
+zavírání/fokus, čistý Back/Forward, nezměněný saved draft bez reload guardu,
+Zpět s ponecháním textu i s potvrzeným zahozením pouze neuložených změn,
+skutečný reload a odmítnutá navigace do Inboxu. Uložený serverový draft
+zůstal shodný a vlastní fixture byly odstraněné. Předchozí CI hlavy a29269952
+bylo zrušeno jako nahrazené touto opravou; nový commit musí mít vlastní CI
+výsledek a nové review. Nasazení se stále netvrdí.
