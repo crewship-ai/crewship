@@ -2,8 +2,12 @@ import { it, expect, vi } from "vitest"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT, registerHistoryNavigationGuard } from "../navigation-history-guard"
 
 it("asks registered guards before a later router listener can unmount the editor", () => {
-  // Execute the exact static head script that ships in the export.
-  new Function("window", HISTORY_NAVIGATION_GUARD_SCRIPT)(window)
+  const isolated = Object.assign(new EventTarget(), {
+    history: { state: null, replaceState: vi.fn(), pushState: vi.fn(), go: vi.fn() },
+  })
+  // Execute the exact static head script without changing the shared DOM.
+  new Function("window", HISTORY_NAVIGATION_GUARD_SCRIPT)(isolated)
+  vi.stubGlobal("window", isolated)
   const router = vi.fn()
   window.addEventListener("popstate", router)
   const guard = vi.fn(() => false)
@@ -22,6 +26,7 @@ it("asks registered guards before a later router listener can unmount the editor
   } finally {
     unregister()
     window.removeEventListener("popstate", router)
+    vi.unstubAllGlobals()
   }
 })
 

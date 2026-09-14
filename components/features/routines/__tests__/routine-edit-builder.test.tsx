@@ -496,7 +496,7 @@ describe("shared routine editor", () => {
     expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
   })
-  it("opens a historical version as an unsaved draft", () => {
+  it("opens a historical version as an unsaved draft", async () => {
     render(
       <RoutineCreateDialog
         {...props}
@@ -505,6 +505,10 @@ describe("shared routine editor", () => {
     )
     expect(screen.queryByText("1. work")).not.toBeInTheDocument()
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)
+    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(props.onClose).not.toHaveBeenCalled()
   })
 })
 

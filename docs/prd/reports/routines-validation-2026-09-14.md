@@ -287,3 +287,20 @@ errors; vlastní rutina a draft byly odstraněné. Lokálně 416 testů / 53
 souborů, build, lint a typová kontrola bez nových diagnostik prošly.
 CI hlavy `21d559fc6` bylo zrušeno jako nahrazené opravou. Finální CI,
 schválení a nasazení stále čekají; tento odstavec je nenahrazuje.
+
+
+Plné standardní review `840a988a5` dokončeno 23:10 UTC. Opravená izolace
+browser testu (vrací původní URL i state) a bootstrap testu (vlastní
+EventTarget/history místo změn sdíleného window). Návrh baselinovat
+`initialDraft` jako uložený stav nebyl přijat: Versions → Use as draft
+vytváří výslovně neuloženou změnu; kód Versions to uvádí a serverový draft
+se touto akcí nepřepíše. Zesílená existující regrese vyžaduje varování při
+Cancel. Reviewerem navržená změna `pristineText = text` tuto regresi shodila.
+Chromium ověřilo v1 → Use as draft při HEAD v2, varování při zavření a
+nezměněný serverový draft po zahození. Celkem 13 browser scénářů prošlo.
+
+Celé CI `840a988a5` úspěšně dokončeno: 9 099 frontend testů / 758 souborů,
+Go, Shuffle, obě další platformy i všechny Race sady. Následná změna obsahuje
+jen izolaci/zesílení testů a tento záznam; žádný produkční kód. Lokálně znovu
+416 testů / 53 souborů, lint a test types bez nových diagnostik prošly.
+Výsledek tohoto CI nenahrazuje povinné kontroly následující hlavy.

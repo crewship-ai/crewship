@@ -170,6 +170,8 @@ it("returns keyboard focus to Edit after leaving the editor page", async () => {
 })
 
 it("returns focus on browser Back without rewriting the history entry", async () => {
+  const originalUrl = window.location.href
+  const originalState = window.history.state
   window.history.replaceState(null, "", "/routines?slug=daily-triage")
   renderCard()
   const before = window.location.pathname + window.location.search
@@ -189,6 +191,7 @@ it("returns focus on browser Back without rewriting the history entry", async ()
   } finally {
     replace.mockRestore()
     push.mockRestore()
+    window.history.replaceState(originalState, "", originalUrl)
   }
 })
 
