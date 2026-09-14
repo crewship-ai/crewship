@@ -74,9 +74,12 @@ have no `read` grant for and no crew membership on any of its panels for is
 not in the list.
 
 `list` takes no flags of its own. Columns are `SLUG  NAME  PANELS  STATE
-OWNER  LAST DATA`, where `PANELS` counts every panel on the page including the
-ones sealed to you. `--format quiet` prints one slug per line, which is the
-form the next command in a pipe wants.
+OWNER  REACH  LAST DATA`, where `PANELS` counts every panel on the page
+including the ones sealed to you, and `REACH` says how *you* reach the page —
+`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant`, comma-joined
+when there is more than one path. A page whose only path is `grant` is one
+somebody shared with you. `--format quiet` prints one slug per line, which is
+the form the next command in a pipe wants.
 
 ---
 
