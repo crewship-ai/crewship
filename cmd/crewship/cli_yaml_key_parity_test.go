@@ -125,6 +125,10 @@ func yamlParityTypes() []any {
 		// cmd_provider_check.go
 		CheckTarget{},
 		providerCheckResult{},
+		// cmd_page_folder.go
+		PageFolderJSON{},
+		pageFoldersJSON{},
+		pageFolderShowJSON{},
 		// cmd_work.go — the durable work ledger's read surface. workItemDetail
 		// embeds WorkItemRow, so its json and yaml key sets can only agree
 		// while that embed is inline in both.

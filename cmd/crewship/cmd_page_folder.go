@@ -53,28 +53,32 @@ import (
 
 // ── The wire (mirrors internal/api/pages_folders.go) ───────────────────────
 
-type pageFolderJSON struct {
+type PageFolderJSON struct {
 	ID            string `json:"id"`
 	Slug          string `json:"slug"`
 	Name          string `json:"name"`
 	Icon          string `json:"icon"`
 	Color         string `json:"color"`
 	Owner         string `json:"owner"`
-	OwnerCrewName string `json:"owner_crew_name"`
-	PageCount     int    `json:"page_count"`
+	OwnerCrewName string `json:"owner_crew_name" yaml:"owner_crew_name"`
+	PageCount     int    `json:"page_count" yaml:"page_count"`
 	Shared        string `json:"shared"`
-	ACLVersion    int64  `json:"acl_version"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ACLVersion    int64  `json:"acl_version" yaml:"acl_version"`
+	CreatedAt     string `json:"created_at" yaml:"created_at"`
+	UpdatedAt     string `json:"updated_at" yaml:"updated_at"`
 }
 
 type pageFoldersJSON struct {
-	Folders []pageFolderJSON `json:"folders"`
+	Folders []PageFolderJSON `json:"folders"`
 }
 
+// PageFolderJSON is exported for the same reason ActivityRow is: yaml.v3
+// cannot reflect into an unexported embedded struct, so `-f yaml` on
+// `folder show` panicked while `-f json` flattened it fine. The inline tags
+// make the two formats agree on the keys (cli_yaml_inline_contract_test.go).
 type pageFolderShowJSON struct {
-	pageFolderJSON
-	Pages []pageListRowJSON `json:"pages"`
+	PageFolderJSON `json:",inline" yaml:",inline"`
+	Pages          []pageListRowJSON `json:"pages"`
 }
 
 // pageFolderWriteBody is create's body; update sends the subset that changed
@@ -261,7 +265,7 @@ picker a crew uses — and the server refuses anything outside either set.`,
 		case "json", "yaml", "ndjson":
 			return pageEmitMachine(f, raw, "{}")
 		}
-		var folder pageFolderJSON
+		var folder PageFolderJSON
 		if err := json.Unmarshal(raw, &folder); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
@@ -370,7 +374,7 @@ at creation.
 		case "json", "yaml", "ndjson":
 			return pageEmitMachine(f, raw, "{}")
 		}
-		var folder pageFolderJSON
+		var folder PageFolderJSON
 		if err := json.Unmarshal(raw, &folder); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
@@ -733,7 +737,7 @@ func pageFolderFile(client *cli.Client, folder, page string) error {
 	if err != nil {
 		return err
 	}
-	var doc pageFolderJSON
+	var doc PageFolderJSON
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return fmt.Errorf("decode folder: %w", err)
 	}
@@ -765,7 +769,7 @@ func pageFolderFileMany(client *cli.Client, folder string, pages []string) error
 	if err != nil {
 		return err
 	}
-	var doc pageFolderJSON
+	var doc PageFolderJSON
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return fmt.Errorf("decode folder: %w", err)
 	}
