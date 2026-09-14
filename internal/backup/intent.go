@@ -132,6 +132,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// snapshot, so it carries spec, grants, versions AND panel data —
 	// "a page whose numbers vanish on restore would be a page nobody
 	// trusts afterwards".
+	// page_folders is how a workspace files its pages (#2527); a restore
+	// that dropped it would hand every page back Unfiled, and pages.folder_id
+	// points at it, so it cannot be left out without breaking the FK either.
+	"page_folders":  IntentInclude,
 	"pages":         IntentInclude,
 	"page_panels":   IntentInclude,
 	"page_versions": IntentInclude,
