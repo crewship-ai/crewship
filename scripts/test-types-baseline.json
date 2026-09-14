@@ -5,534 +5,1316 @@
       "file": "components/__tests__/command-palette-conversations.test.tsx",
       "code": 2345,
       "message": "Argument of type '(url: string, init?: RequestInit) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "096bbcc5b4746ae3872219093362a46807fbe1528ec2762bd963120afe634bc6",
       "count": 1
     },
     {
       "file": "components/__tests__/command-palette-conversations.test.tsx",
       "code": 2345,
       "message": "Argument of type '(url: string) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "539b73fa65d97725f28f861b6dc4700d62051fc17214af91cc6a032a0632a229",
       "count": 1
     },
     {
       "file": "components/__tests__/command-palette.test.tsx",
       "code": 2345,
       "message": "Argument of type '(url: string) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "c8ec35ffcd5313f894292b3daa205ffca82ee240a3fd90e97394bea4ed5debe7",
       "count": 1
     },
     {
       "file": "components/__tests__/telemetry-palette-search.test.tsx",
       "code": 2345,
       "message": "Argument of type '(url: string) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "e5d1759a09a30356bceeedf67ae79690bde742ac69a9c5700fad0ee6ca4b1c50",
       "count": 1
     },
     {
       "file": "components/features/admin/__tests__/keeper-governance-panel.test.tsx",
       "code": 2578,
       "message": "Unused '@ts-expect-error' directive.",
-      "count": 3
+      "anchor": "d5676ad6ee4eae561e1a47938892f8fb653fad4dee1427611f176d1dbf6d70bc",
+      "count": 1
+    },
+    {
+      "file": "components/features/admin/__tests__/keeper-governance-panel.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "50ac871962432218baec1fda1fc170a9b437f0ba4b7445907dc472fb93a3072c",
+      "count": 1
+    },
+    {
+      "file": "components/features/admin/__tests__/keeper-governance-panel.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "e437a9a57d516ca1e7038440f1c1941f58dd60a15647e8a0cf59902cb80ffdfa",
+      "count": 1
     },
     {
       "file": "components/features/chat/__tests__/chat-panel-reply-sound.test.tsx",
       "code": 2352,
       "message": "Conversion of type 'undefined' to type '() => boolean' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
-      "count": 2
+      "anchor": "60a5a690717e09e0c6e69eecc1424a24f203247d0544b92e25a3008e42ee60ee",
+      "count": 1
+    },
+    {
+      "file": "components/features/chat/__tests__/chat-panel-reply-sound.test.tsx",
+      "code": 2352,
+      "message": "Conversion of type 'undefined' to type '() => boolean' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.",
+      "anchor": "e713935f39adf9b3e96501cc5b18a25b3d124437176011b41dccec3bb979119f",
+      "count": 1
     },
     {
       "file": "components/features/chat/__tests__/chat-panel-reply-sound.test.tsx",
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '2'.",
-      "count": 2
+      "anchor": "26913a08db856117e35cb6d91803ad5f3454ec97f719de61ee2bc3ad1ae20281",
+      "count": 1
+    },
+    {
+      "file": "components/features/chat/__tests__/chat-panel-reply-sound.test.tsx",
+      "code": 2493,
+      "message": "Tuple type '[]' of length '0' has no element at index '2'.",
+      "anchor": "3506da25eea6eaf0dcd10adb2119b2d425cf19111875580f68d9293a4627c40b",
+      "count": 1
     },
     {
       "file": "components/features/chat/__tests__/use-message-submit.test.ts",
       "code": 2345,
       "message": "Argument of type '() => void' is not assignable to parameter of type '() => never'.\n  Type 'void' is not assignable to type 'never'.",
+      "anchor": "9efe442014ca119969c502613ac0e2cc37f00860ec6bfaa4fe1d984a46b25bf0",
       "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-envelope.test.tsx",
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '1'.",
+      "anchor": "2809e9a7d4b954d8955163881aaa99b3cd7f2478622d12ef31263354ee74d48b",
       "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-field-attachments.test.tsx",
       "code": 2345,
       "message": "Argument of type '(form: AskForm, values: AskValues, chatId: string) => string' is not assignable to parameter of type '(form: AskForm, values: AskValues) => string'.\n  Target signature provides too few arguments. Expected 3 or more, but got 2.",
-      "count": 2
+      "anchor": "9d5efd7561d1e5bc0239bf355df426cba371789c7669fc2358686c41e08c5e48",
+      "count": 1
+    },
+    {
+      "file": "components/features/chat/asks/__tests__/ask-field-attachments.test.tsx",
+      "code": 2345,
+      "message": "Argument of type '(form: AskForm, values: AskValues, chatId: string) => string' is not assignable to parameter of type '(form: AskForm, values: AskValues) => string'.\n  Target signature provides too few arguments. Expected 3 or more, but got 2.",
+      "anchor": "592edde79872f9aca8330e65e7ee81237efb024fcb3a7c9fe17d4bed46b35bf4",
+      "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-field-attachments.test.tsx",
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '1'.",
+      "anchor": "a02d42238b2107901eb677404ea9d856b45f5c0de3f92eb82c5942c813c84f5f",
       "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-form-sheet.test.tsx",
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '0'.",
+      "anchor": "17f3685b1bb7c8d3962298399b82f66fc00ebe0603ffc164b14c5d53ac257103",
       "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-form-sheet.test.tsx",
       "code": 2493,
       "message": "Tuple type '[]' of length '0' has no element at index '1'.",
-      "count": 2
+      "anchor": "6d11ded938073cb40f045838568e624e0037263b29d0bcf4904e54b46479bebf",
+      "count": 1
+    },
+    {
+      "file": "components/features/chat/asks/__tests__/ask-form-sheet.test.tsx",
+      "code": 2493,
+      "message": "Tuple type '[]' of length '0' has no element at index '1'.",
+      "anchor": "d6b0a90e2406796370e632ea667dbac0746d64eff468c0e217709c2a603acaa5",
+      "count": 1
     },
     {
       "file": "components/features/chat/asks/__tests__/ask-form-sheet.test.tsx",
       "code": 2532,
       "message": "Object is possibly 'undefined'.",
+      "anchor": "48053bb9f406053544bf9ecca601895cbf01484276e6776318ccbc86d99b13cb",
       "count": 1
     },
     {
       "file": "components/features/connectors/__tests__/connect-sheet.test.tsx",
       "code": 2352,
       "message": "Conversion of type '((message: titleT, data?: ExternalToast | undefined) => string | number) & { success: (message: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | ... 5 more ... | undefined, data?: ExternalToast | undefined) => string | number; ... 7 more ...; loading: (message: string...' to type '{ error: Mock<Procedure | Constructable>; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Types of property 'error' are incompatible.\n    Type '(message: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ... 4 more ... | undefined, data?: ExternalToast | undefined) => string | number' is not comparable to type 'Mock<Procedure | Constructable>'.\n      Type '(message: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ... 4 more ... | undefined, data?: ExternalToast | undefined) => string | number' is not comparable to type 'MockInstance<Procedure | Constructable> & { (...args: any[]): any; new (...args: any[]): any; } & {}'.\n        Type '(message: string | number | bigint | boolean | ReactElement<unknown, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ... 4 more ... | undefined, data?: ExternalToast | undefined) => string | number' is not comparable to type 'MockInstance<Procedure | Constructable>'.",
+      "anchor": "cbf55277275334380c97f5d1fc023e990368d95df9fd8c911705ad06450a423c",
       "count": 1
     },
     {
       "file": "components/features/conversations/__tests__/conversation-link.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "ea7427dbd99b93bc084aa2df784493fb0071fec496688b2542c8b32abce53194",
       "count": 1
     },
     {
       "file": "components/features/credentials/__tests__/credential-detail-sheet-p6.test.tsx",
       "code": 2345,
       "message": "Argument of type 'Element' is not assignable to parameter of type 'HTMLElement'.\n  Type 'Element' is missing the following properties from type 'HTMLElement': accessKey, accessKeyLabel, autocapitalize, autocorrect, and 131 more.",
+      "anchor": "501370401c1ed636913a4ab879f72455bf80b0dc84af2439ae56aaf6b256bc16",
       "count": 1
     },
     {
       "file": "components/features/credentials/__tests__/credentials-overview.test.tsx",
       "code": 2322,
       "message": "Type '{ children: ReactNode; credentials: CredentialsOverviewCredential[]; missingToolIds: Set<string>; crewsChecked: number; readinessLoading: boolean; onSelect: Mock<...> | ((id: string) => void); onSelectTier: Mock<...> | ((t: string) => void); onSelectStatus: Mock<...> | ((s: \"all\" | ... 1 more ... | \"missing-tool\") =...' is not assignable to type 'IntrinsicAttributes & CredentialsOverviewProps'.\n  Property 'children' does not exist on type 'IntrinsicAttributes & CredentialsOverviewProps'.",
+      "anchor": "ca2308e1177a4bd74ae672f4ddf2c2024093a27eaf0579dbdf5acc545267aacd",
       "count": 1
     },
     {
       "file": "components/features/credentials/__tests__/rotation-dialog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "63b87735529a9f1068b4767f5223947ee6626f8eb69b32513f8553b909f1ff3c",
       "count": 1
     },
     {
       "file": "components/features/crews/__tests__/create-crew-dialog-ux.test.tsx",
       "code": 2349,
       "message": "This expression is not callable.\n  Type 'never' has no call signatures.",
-      "count": 2
+      "anchor": "b4613fc0ee9253ebdc86a74b6d5e597fed20bb7bae1f91114ff9def8d12eb8f8",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/__tests__/create-crew-dialog-ux.test.tsx",
+      "code": 2349,
+      "message": "This expression is not callable.\n  Type 'never' has no call signatures.",
+      "anchor": "e78180816b44743f7e6635a68e7141a92a2096e3e2d9008244c7b8a0b6aec314",
+      "count": 1
     },
     {
       "file": "components/features/crews/__tests__/create-crew-dialog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 2
+      "anchor": "53ed82f8c8bdb1574a876ec8f8398a5147d3a1f02e75b7071121711564606388",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/__tests__/create-crew-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "50678214d282e851aee9229f0c0168da41efab8c3d9c19819702e8123353adb5",
+      "count": 1
     },
     {
       "file": "components/features/crews/__tests__/crew-catalog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "e99d05a7b7340b5cf9915fac76c49b57ad91d3b10cc4cb8a7e36591125e43559",
       "count": 1
     },
     {
       "file": "components/features/crews/__tests__/crew-restart-button.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 2
+      "anchor": "86f1d60d0dba5762f57a90b9beaa64c5c0138e2c00a227dc1daee47d1297614d",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/__tests__/crew-restart-button.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "9f6f1d019ed38dc2c44b8d0fa47075f2bcd5d8578875ab5551b717b45aabf2fe",
+      "count": 1
     },
     {
       "file": "components/features/crews/__tests__/crew-restart-button.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 2
+      "anchor": "e5d1b1514dc3678065dd53eb66019b8d2d97357bd170b70103fb91c362f36e0d",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/__tests__/crew-restart-button.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "a768b5c63b961705a41706ca3cdf8a9549cb9a59169ce23f20b41dd7491f137b",
+      "count": 1
     },
     {
       "file": "components/features/crews/__tests__/memory-workspace.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 2
+      "anchor": "e30c728d122cf1c00ddb7145ec00613b1550e71455805ef2a25fed5e7d44f9c2",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/__tests__/memory-workspace.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "b22df21357ce327eb539d11f00263cdf3dca23496833fd7ce066d3f0c07b84a0",
+      "count": 1
     },
     {
       "file": "components/features/crews/__tests__/run-metrics.test.tsx",
       "code": 2352,
       "message": "Conversion of type '{ data: { totals: { succeeded: number; failed: number; running: number; }; truncated: boolean; by_trigger: { key: string; total: number; }[] | undefined; }; error: null; }' to type '{ key: string; data?: unknown; error?: string | undefined; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Property 'key' is missing in type '{ data: { totals: { succeeded: number; failed: number; running: number; }; truncated: boolean; by_trigger: { key: string; total: number; }[] | undefined; }; error: null; }' but required in type '{ key: string; data?: unknown; error?: string | undefined; }'.",
+      "anchor": "9fa247fd8de917ca842243d112fa3918dfe9dafef453323781f2c8ab4815a8bd",
       "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/agent-access.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 3
+      "anchor": "3682fd09a1a6ea4ec947ba005b82b885981f9de57f7415e0bb368412a302e45b",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/agent-access.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "fdf4e176c707ca688633c20850a0e1bf8099b70b6f19302fb72aafeec3f3709a",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/agent-access.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "7ca1d984bc73ac7b2307e42dbf9063016578cd5f292202b98e6389594cc52555",
+      "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/agent-draft.test.ts",
       "code": 2367,
       "message": "This comparison appears to be unintentional because the types '\"AGENT\"' and '\"LEAD\"' have no overlap.",
+      "anchor": "c629ead7f4d7c102db8de5082c52a88eb5c4a502ff35926bd52b8da2343272c9",
       "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/agent-model-settings.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "b9cccbd3641f22862b1a40bc11f10883ea7f80936bedc419d6640e3a17c5ef69",
       "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 10
+      "anchor": "9f7da905236f877c886a42e1b08a8aa11bbae4ba6ea116aa510763426022badc",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "8c1d7b472c4102c705b0ba4b133580de6f81a3910d5d37035e7f8e373d2c7865",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "c6144325415a4fc148184c5130232c492cf52d2c4dc098e53ea6f6d54da308f4",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "ee6e7985b62abf2d9f96b5e448ed8073bb82b8bd0ba5466f895f22d43724e94f",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "709e2824d602bbdb3d45d9153c393f7529bcd2024b7c9279ff2c670f99f72f43",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "f67bc6f10d00f3898042b4395e78b26f2fa76e5feb619477409988daf06baffe",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "bbe10729c247b259933c12ea7b5fce015fe1ae5e8629d3490b31fa84fe40b822",
+      "count": 2
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "ab90f984af39986f560d17c39e09d834c829e2c9abc0a0f7d5a0b8811329c50f",
+      "count": 1
+    },
+    {
+      "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "03762373c5637ecc26ce4a0afb1e817570e00183ec431d50410d1bf4f0988c2e",
+      "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
       "code": 7031,
       "message": "Binding element 'init' implicitly has an 'any' type.",
+      "anchor": "b4c90ab07d70aae5245dd74be9aa4f09601d70921a46736850a6919f3ab803e5",
       "count": 1
     },
     {
       "file": "components/features/crews/create-agent/__tests__/create-agent-dialog.test.tsx",
       "code": 7031,
       "message": "Binding element 'url' implicitly has an 'any' type.",
+      "anchor": "6c60be28e154a51cf563fd13d7479bf9bf82d68a9e3092b0ae441eb4adef6706",
       "count": 1
     },
     {
       "file": "components/features/escalations/__tests__/escalation-response-card.test.tsx",
       "code": 2741,
       "message": "Property 'credential_status' is missing in type '{ id: string; type: \"CREDENTIAL\"; from_name: string; from_slug: string; reason: string; context: null; metadata: null; peer_conversation_id: null; status: \"PENDING\"; resolution: null; action: null; ... 8 more ...; security_level_label: null; }' but required in type '{ id: string; type: \"LINK\" | \"CREDENTIAL\" | \"TEXT\"; from_name: string; from_slug: string; reason: string; context: string | null; metadata: string | null; peer_conversation_id: string | null; ... 12 more ...; security_level_label: string | null; }'.",
+      "anchor": "c8fae7572e32deecec7030c49452f4812bf1e5be526d9bc0a5a2ac8cfdcc19e0",
       "count": 1
     },
     {
       "file": "components/features/inbox-v2/__tests__/inbox-client-navigation.test.tsx",
       "code": 2345,
       "message": "Argument of type '{ inboxItem: { sender_type: string; sender_name: string; payload: { mission_id: string; }; source_missing?: boolean; id: string; workspace_id: string; kind: \"waitpoint\" | \"escalation\" | \"failed_run\" | \"message\" | \"memory_consolidation\" | \"schedule_missed\" | \"schedule_circuit_breaker_tripped\" | \"webhook_fire_failed\" ...' is not assignable to parameter of type 'InboxV2Entry'.\n  The types of 'inboxItem.sender_type' are incompatible between these types.\n    Type 'string' is not assignable to type '\"crew\" | \"agent\" | \"pipeline\" | \"system\" | undefined'.",
-      "count": 2
+      "anchor": "32e79e22f7ec6d24788928d0815c23e5d91b6b665be07055bed0cdc397649d1a",
+      "count": 1
+    },
+    {
+      "file": "components/features/inbox-v2/__tests__/inbox-client-navigation.test.tsx",
+      "code": 2345,
+      "message": "Argument of type '{ inboxItem: { sender_type: string; sender_name: string; payload: { mission_id: string; }; source_missing?: boolean; id: string; workspace_id: string; kind: \"waitpoint\" | \"escalation\" | \"failed_run\" | \"message\" | \"memory_consolidation\" | \"schedule_missed\" | \"schedule_circuit_breaker_tripped\" | \"webhook_fire_failed\" ...' is not assignable to parameter of type 'InboxV2Entry'.\n  The types of 'inboxItem.sender_type' are incompatible between these types.\n    Type 'string' is not assignable to type '\"crew\" | \"agent\" | \"pipeline\" | \"system\" | undefined'.",
+      "anchor": "70646a87a6e05340d4fe9c04956b77ad57429cc08560875cc7592361f057625a",
+      "count": 1
     },
     {
       "file": "components/features/inbox/__tests__/inbox-bell-view.test.tsx",
       "code": 2322,
       "message": "Type 'string' is not assignable to type '\"message\" | \"escalation\" | \"waitpoint\" | \"failed_run\" | \"memory_consolidation\" | \"schedule_missed\" | \"schedule_circuit_breaker_tripped\" | \"webhook_fire_failed\" | \"automation_enqueue_failed\" | \"run_needs_human\"'.",
+      "anchor": "0ea6ccb58f21847205b478b37711082f3809b47d27070daf3f341c5703ac61d4",
       "count": 1
     },
     {
       "file": "components/features/inbox/__tests__/inbox-detail-jump.test.tsx",
       "code": 2741,
       "message": "Property 'onArchive' is missing in type '{ item: InboxItem; role: \"OWNER\"; onResolve: Mock<Procedure>; onRefresh: Mock<Procedure>; onMarkUnread: Mock<Procedure>; }' but required in type 'InboxDetailProps'.",
+      "anchor": "d9aa9798bec0cb9d0a83c65dfc65157785dfc9cd29c4a1bb31d26fb1275b600d",
       "count": 1
     },
     {
       "file": "components/features/inbox/__tests__/inbox-four-eyes.test.tsx",
       "code": 2741,
       "message": "Property 'credential_status' is missing in type '{ id: string; type: \"CREDENTIAL\"; from_name: string; from_slug: string; reason: string; context: null; metadata: null; peer_conversation_id: null; status: \"PENDING\"; resolution: null; action: null; ... 8 more ...; security_level_label: null; }' but required in type '{ id: string; type: \"LINK\" | \"CREDENTIAL\" | \"TEXT\"; from_name: string; from_slug: string; reason: string; context: string | null; metadata: string | null; peer_conversation_id: string | null; ... 12 more ...; security_level_label: string | null; }'.",
+      "anchor": "0c4e8d9827bafd7249a50e4e1fcefbbe6f6f1923e6efc72e0d10336c82618905",
       "count": 1
     },
     {
       "file": "components/features/inbox/__tests__/inbox-grouping.test.ts",
       "code": 2554,
       "message": "Expected 1 arguments, but got 2.",
-      "count": 4
+      "anchor": "efd96102fceeb1056cd558f542ce093ec8ddd75bb6895203d7cae7248b49028f",
+      "count": 1
+    },
+    {
+      "file": "components/features/inbox/__tests__/inbox-grouping.test.ts",
+      "code": 2554,
+      "message": "Expected 1 arguments, but got 2.",
+      "anchor": "2116d2dd8a55cc34f734383192cd1cc70f24f1a5e23f7b41ae562fc88657aff0",
+      "count": 1
+    },
+    {
+      "file": "components/features/inbox/__tests__/inbox-grouping.test.ts",
+      "code": 2554,
+      "message": "Expected 1 arguments, but got 2.",
+      "anchor": "6a6607b28768513dcfc1ca4f3a82b59de1dc3664ee2708be886aabd363196e76",
+      "count": 1
+    },
+    {
+      "file": "components/features/inbox/__tests__/inbox-grouping.test.ts",
+      "code": 2554,
+      "message": "Expected 1 arguments, but got 2.",
+      "anchor": "be4012b99323e48322ad7b72aa76046913e77cd04a1ed9f48dcc0f05c0e4c540",
+      "count": 1
     },
     {
       "file": "components/features/inbox/__tests__/inbox-risk-and-body.test.tsx",
       "code": 2741,
       "message": "Property 'onArchive' is missing in type '{ item: InboxItem; role: \"OWNER\"; onResolve: Mock<Procedure>; onRefresh: Mock<Procedure>; onMarkUnread: Mock<Procedure>; }' but required in type 'InboxDetailProps'.",
+      "anchor": "5ea304caeb2968393dc27837d58e7a69389b8742cb0ca96f4bfcbad8d0f17d00",
       "count": 1
     },
     {
       "file": "components/features/integrations/__tests__/add-channel-dialog.test.tsx",
       "code": 2339,
       "message": "Property 'mock' does not exist on type 'Mock<Procedure> | ((body: ChannelCreateBody) => Promise<CreatedChannel | null>)'.\n  Property 'mock' does not exist on type '(body: ChannelCreateBody) => Promise<CreatedChannel | null>'.",
-      "count": 2
+      "anchor": "fc737a73c7d4ae9aba33da06cdd8693c2ad49d14baa844c2a24ba49089b8b167",
+      "count": 1
+    },
+    {
+      "file": "components/features/integrations/__tests__/add-channel-dialog.test.tsx",
+      "code": 2339,
+      "message": "Property 'mock' does not exist on type 'Mock<Procedure> | ((body: ChannelCreateBody) => Promise<CreatedChannel | null>)'.\n  Property 'mock' does not exist on type '(body: ChannelCreateBody) => Promise<CreatedChannel | null>'.",
+      "anchor": "7a1882b09de96a538f28423a93c3aecc87b7b7489fcbe04a6fa97fd4fbb53f2a",
+      "count": 1
     },
     {
       "file": "components/features/integrations/__tests__/add-integration-dialog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 2
+      "anchor": "8a4b276ad5801edd08de4de91b967b2fdf28320c0137023f32d40fb7a83cce72",
+      "count": 1
+    },
+    {
+      "file": "components/features/integrations/__tests__/add-integration-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "8d41354110505b68314642ebe4418953c6d2f0c1a137348761dba638ad4f3f6b",
+      "count": 1
     },
     {
       "file": "components/features/integrations/__tests__/crew-tools.test.ts",
       "code": 2345,
       "message": "Argument of type '(url: string, init?: RequestInit) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "ca1017dac30d9d62a14098e1b3045c9976a73cec138ca457b8b98d312429fd0f",
       "count": 1
     },
     {
       "file": "components/features/integrations/__tests__/facets.test.ts",
       "code": 2739,
       "message": "Type '{ loading: false; configured: true; keyLabel: string; counts: { apps: number; accounts: number; users: number; agentsBound: number; agentsTotal: number; endpoints: number; }; toolkits: { slug: string; count: number; }[]; users: { ...; }[]; }' is missing the following properties from type 'ComposioStatus': accounts, agents, bindings",
+      "anchor": "db5ad03dc0098281520e790f63d3f71283c2350281d241d1d39f0cfce9594207",
       "count": 1
     },
     {
       "file": "components/features/issues/__tests__/issue-automations.test.tsx",
       "code": 2322,
       "message": "Type '{ id: string; pipeline_id: string; pipeline_slug: string; status: string; mode: string; started_at: string; cost_usd: number; duration_ms: number; triggered_via: string; }' is not assignable to type 'PipelineRunRecord'.\n  Types of property 'status' are incompatible.\n    Type 'string' is not assignable to type '\"waiting\" | \"failed\" | \"running\" | \"interrupted\" | \"completed\" | \"queued\" | \"cancelled\" | \"dry_run\"'.",
-      "count": 8
+      "anchor": "e3c7bb480957521c36f4d89e7495af0acbc099876cb058e26b7bf8ff088e085d",
+      "count": 1
+    },
+    {
+      "file": "components/features/issues/__tests__/issue-automations.test.tsx",
+      "code": 2322,
+      "message": "Type '{ id: string; pipeline_id: string; pipeline_slug: string; status: string; mode: string; started_at: string; cost_usd: number; duration_ms: number; triggered_via: string; }' is not assignable to type 'PipelineRunRecord'.\n  Types of property 'status' are incompatible.\n    Type 'string' is not assignable to type '\"waiting\" | \"failed\" | \"running\" | \"interrupted\" | \"completed\" | \"queued\" | \"cancelled\" | \"dry_run\"'.",
+      "anchor": "0866948ace60664f217a983ecded9b30b325ef9c8e10be58049a3fcbb760688f",
+      "count": 4
+    },
+    {
+      "file": "components/features/issues/__tests__/issue-automations.test.tsx",
+      "code": 2322,
+      "message": "Type '{ id: string; pipeline_id: string; pipeline_slug: string; status: string; mode: string; started_at: string; cost_usd: number; duration_ms: number; triggered_via: string; }' is not assignable to type 'PipelineRunRecord'.\n  Types of property 'status' are incompatible.\n    Type 'string' is not assignable to type '\"waiting\" | \"failed\" | \"running\" | \"interrupted\" | \"completed\" | \"queued\" | \"cancelled\" | \"dry_run\"'.",
+      "anchor": "74758f322cc7d783e6bde6fca8afbbbe3103831a1c96adcf399842c98e020a1f",
+      "count": 3
     },
     {
       "file": "components/features/onboarding/__tests__/onboarding-created-panel.test.tsx",
       "code": 2345,
       "message": "Argument of type '(url: string) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
-      "count": 2
+      "anchor": "b8099e4deb35729f5253fec33064f899700fe88abf30fb5d63115d0f20cd8663",
+      "count": 1
+    },
+    {
+      "file": "components/features/onboarding/__tests__/onboarding-created-panel.test.tsx",
+      "code": 2345,
+      "message": "Argument of type '(url: string) => Promise<Response>' is not assignable to parameter of type '(input: RequestInfo | URL, init?: ApiFetchInit | undefined) => Promise<Response>'.\n  Types of parameters 'url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "14f78b8b6e82b2b538e6668c9e8d840d6ea03427b421df83e446a21d262bf0da",
+      "count": 1
     },
     {
       "file": "components/features/onboarding/__tests__/onboarding-proposal-summary.test.tsx",
       "code": 2741,
       "message": "Property 'tools' is missing in type '{ id: string; crewName: string; crewSlug: string; templateSlug: string; agents: { name: string; role: string; model: string; }[]; egressDomains: never[]; status: string; }' but required in type 'OnboardingProposal'.",
+      "anchor": "2703b18ec6881ad064fde6a9e49fe29491b230a3f2e648bcb1805063b8fcabd5",
       "count": 1
     },
     {
       "file": "components/features/onboarding/__tests__/onboarding-setup-chat.test.tsx",
       "code": 2353,
       "message": "Object literal may only specify known properties, and 'text' does not exist in type 'TurnPart'.",
+      "anchor": "c13c966b92e18749ca0dbade86644bf1b65c37a1c2468ba2f62550a1635ae0b9",
       "count": 1
     },
     {
       "file": "components/features/onboarding/__tests__/onboarding-setup-chat.test.tsx",
       "code": 2741,
       "message": "Property 'tools' is missing in type '{ id: string; crewName: string; crewSlug: string; templateSlug: string; agents: { name: string; role: string; model: string; }[]; egressDomains: never[]; status: string; }' but required in type 'OnboardingProposal'.",
+      "anchor": "3c983331fdd69c3cfb5c16856f0c1be5aa516fdbb2f2e1ea6d119a5fabbb08bf",
       "count": 1
     },
     {
       "file": "components/features/onboarding/__tests__/onboarding-setup-chat.test.tsx",
       "code": 2783,
       "message": "'role' is specified more than once, so this usage will be overwritten.",
+      "anchor": "65b53cacb8577749090435984f584da82ddfe677118552d9ff363ed0b20a2a48",
       "count": 1
     },
     {
       "file": "components/features/onboarding/__tests__/proposal-card.test.tsx",
       "code": 2739,
       "message": "Type '{ id: string; crewName: string; agents: { name: string; role: string; model: string; }[]; egressDomains: string[]; }' is missing the following properties from type 'OnboardingProposal': crewSlug, templateSlug, tools, status",
+      "anchor": "90a0f959253463d6e83f887b0c4f60159f6ebb82683b10dd1c7f039f0d7fa5e0",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<(_url: string, init?: RequestInit | undefined) => Promise<{ ok: boolean; json: () => Promise<{ detail: string; }>; }> | Promise<{ ok: boolean; json: () => Promise<never[]>; }>>' is not assignable to type '{ (input: RequestInfo | URL, init?: RequestInit | undefined): Promise<Response>; (input: string | Request | URL, init?: RequestInit | undefined): Promise<...>; }'.\n  Types of parameters '_url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
-      "count": 2
+      "anchor": "5b707227d4056b6ec0d719d623165a8fb34a36f2eb1baa17a3d29c8c15e63156",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
+      "code": 2322,
+      "message": "Type 'Mock<(_url: string, init?: RequestInit | undefined) => Promise<{ ok: boolean; json: () => Promise<{ detail: string; }>; }> | Promise<{ ok: boolean; json: () => Promise<never[]>; }>>' is not assignable to type '{ (input: RequestInfo | URL, init?: RequestInit | undefined): Promise<Response>; (input: string | Request | URL, init?: RequestInit | undefined): Promise<...>; }'.\n  Types of parameters '_url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "88de64c43c29f4f7e5fa13a5668d7cc98bf04fc885cec3b595eae1d4ee9afbe6",
+      "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<(_url: string, init?: RequestInit | undefined) => Promise<{ ok: boolean; json: () => Promise<{ id: string; }>; }> | Promise<{ ok: boolean; json: () => Promise<never[]>; }>>' is not assignable to type '{ (input: RequestInfo | URL, init?: RequestInit | undefined): Promise<Response>; (input: string | Request | URL, init?: RequestInit | undefined): Promise<...>; }'.\n  Types of parameters '_url' and 'input' are incompatible.\n    Type 'RequestInfo | URL' is not assignable to type 'string'.\n      Type 'Request' is not assignable to type 'string'.",
+      "anchor": "d2645ac2ae62ed9dabd05e4c536d3c0a4198a5f29889103bece4919f9052e6e4",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
-      "count": 4
+      "anchor": "8ce0ece268fa64d1572e4737dc17005fa486e4e19a53af434d7822ab837e1677",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
+      "anchor": "0eeb7d20c6b5bb2a8c926350d893636d7fa716d752ba9222dbc20d07c0e2d2ac",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
+      "anchor": "b0b7808e5ef7e6457e1df44e4a3b6fe7a4f473728b9dfc1ef556cd3359bdf256",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-issue-modal.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
+      "anchor": "0281e15ba9d3d274e979f97bcc587f2bc184b5db042e8a74843fca0edd4bd887",
+      "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/create-project-modal.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
-      "count": 3
+      "anchor": "4bf8b589a20ea03bdb33b0748d5f014ca03541208c2a9fedcd665defcc1b1c8e",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-project-modal.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
+      "anchor": "2407745c7a772492fd70cfc268a0f3d333f937192f75336034c4d49de2079db1",
+      "count": 1
+    },
+    {
+      "file": "components/features/orchestration/__tests__/create-project-modal.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => value is any[], thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => value is any[]'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.\n  Overload 2 of 2, '(predicate: (value: any[], index: number, obj: any[][]) => unknown, thisArg?: any): any[] | undefined', gave the following error.\n    Argument of type '(call: [string, RequestInit?]) => boolean' is not assignable to parameter of type '(value: any[], index: number, obj: any[][]) => unknown'.\n      Types of parameters 'call' and 'value' are incompatible.\n        Type 'any[]' is not assignable to type '[string, (RequestInit | undefined)?]'.\n          Target requires 1 element(s) but source may have fewer.",
+      "anchor": "1a8540ca2c754f6d4d83391b1e0edd2df7081a261b717386eaea7e21f20e3c63",
+      "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/unified-explorer.test.tsx",
       "code": 2322,
       "message": "Type '{ issues: Mission[]; projects: Project[]; search: string; onSearchChange: (value: string) => void; selectedIssue: Mission | null; selectedProjectId: string | null; ... 15 more ...; total?: number | ... 1 more ... | undefined; }' is not assignable to type 'UnifiedExplorerProps'.\n  Types of property 'onCrewFilter' are incompatible.\n    Type '(MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}) | ((crewId: string | null) => void)' is not assignable to type '(crewId: string | null) => void'.\n      Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '(crewId: string | null) => void'.\n        Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' provides no match for the signature '(crewId: string | null): void'.",
+      "anchor": "3d3a210b787590702a157bc91672a3677d8f14135b5c2b0acdda2a9e9e980b81",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/unified-explorer.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<Procedure | Constructable>' is not assignable to type '((priority: IssuePriority | null) => void) | undefined'.\n  Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '((priority: IssuePriority | null) => void) | undefined'.",
+      "anchor": "b8b737ba9a76c580e31664ac9591c4a56ee6a872949f4fd45543e005a0e6e9e9",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/unified-explorer.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<Procedure | Constructable>' is not assignable to type '((statuses: MissionStatus[]) => void) | undefined'.\n  Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '((statuses: MissionStatus[]) => void) | undefined'.",
+      "anchor": "03b2e5c3e76a013a001d922a763dd3db0295ea8b5e1447a048cf48b2ee853cb7",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/unified-explorer.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<Procedure | Constructable>' is not assignable to type '(agentId: string | null) => void'.\n  Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '(agentId: string | null) => void'.\n    Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' provides no match for the signature '(agentId: string | null): void'.",
+      "anchor": "a28da4083fded82a466487fbab06a8f0e9aca7aca0ba2fcdc7803a5a7d02e8f0",
       "count": 1
     },
     {
       "file": "components/features/orchestration/__tests__/unified-explorer.test.tsx",
       "code": 2322,
       "message": "Type 'Mock<Procedure | Constructable>' is not assignable to type '(crewId: string | null) => void'.\n  Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' is not assignable to type '(crewId: string | null) => void'.\n    Type 'MockInstance<Procedure | Constructable> & (new (...args: any[]) => any) & {}' provides no match for the signature '(crewId: string | null): void'.",
+      "anchor": "68ff0f24f33de95df3aeba523a6b9cffb58f76077f6e576010777033ef276955",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-automations.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 5
+      "anchor": "47652b7802d056447d2f7006f70ce25bcb557ee2ccb4228b7c83e9c38955cfd3",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-automations.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "13ee8b2e8c9a563ac5bfcee84818a588293409fab3fe475f1ec6927bdd405fde",
+      "count": 2
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-automations.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "6dc0a9fc2f7b3fad76a37eb0d19549052f1f71dec1ce53c335b1f04e3e1b5f26",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-automations.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "d66dae0e099413c7ae49b8395b166bd736767838a36896da623bf002382e1ac1",
+      "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-automations.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "aef0a7fc65136537635ade9d4e853085aa0b43c5af50c5dd5798c511040ffaa7",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-client-workspace.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 4
+      "anchor": "6de523037afe650c6cb61b14e5d2944bb8859e476cc669e696b3c4730c15cf73",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-client-workspace.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "ec5678e6f5cda8b26556fdeb7249a8497ae14393f153dd4bef4bfe4766f10e87",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-client-workspace.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "a4d1202c3c93e721cb8e60d342b71ab4949d64433b325c121e532ab79decd4fa",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-client-workspace.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "7f2d3456440528cc023a2485cdd751a6d9ac9ca9191f82d858cfc3e2fe793ed4",
+      "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 10
+      "anchor": "e3f6f2e1ab9ee53439933f4ca7a7ace301f517f719429a9a5fde0d286a0eff71",
+      "count": 2
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "b3affb4d097205f33ea82d1ce3bc09b18fdc9ba890017025e8c6ffaace3d41c7",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "98436a9f47c9d29080a1d4c60441ec70af7808a2d1c42c102c1fdb84ea651da0",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "df0fdc6bf1f4d23d6a574f6cc0a6de3978b532a3c104cdc9282e0d38731b4a68",
+      "count": 3
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "474a040da30446c4327267d0e2c3284fcb7e7615c47c9acdf45a73749e3428fb",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "35db8bc56b24e25c45cb59b852e88d5a289d675361b17b3d45a98388a0536f35",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-dialog.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "b24fa31e2baa37477b774634cd00dbfbdc22b6817b413a512a1091d3e5bc1050",
+      "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-create-surface.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 3
+      "anchor": "88539cf25e0f74280b3ed4e772212d0c253d3901741be654cec3cca5ad2dc407",
+      "count": 2
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-create-surface.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "d7d9140c907bfeb5471e60abcb8840c9c094d52f252f64210645471c0c2c68f7",
+      "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-create-surface.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement[]', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "409fb0f8143584090ae5388519acd0fe914deadb82289875c6cd39b3f7b8a57d",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement | null', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement | null', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "e14f099abe6c60721e0535195e2db60c7164b1d4686a08a2aac1dd08557976cf",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 6
+      "anchor": "65c04e9783b56c0271de6e4e3b6c85d34de6d3aff9e810cff83702eaadf98d13",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "01189d4b07913ececc85bb1958a85e35a1ab25e27ddafb5f4388df1d61d395b4",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "d745673feeab7bbf7e717c870dd8548c90da428f1de2c9110433a5816edcc23a",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "f826abf9808cdeb69f079a087d81e1572205e316d8d372c22eba67c2eacf6f11",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "4493da0ac12396eccda4aa4200b6724bb0d3a0ea1919291e21df775d40b70bcf",
+      "count": 1
+    },
+    {
+      "file": "components/features/routines/__tests__/routine-edit-builder.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "192f92228c501313efd4f6613c81e979ffaeb6f6ae5271eb081c08122d0ceffc",
+      "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-recipe-steps.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "2f09fc1a3fe6355cde8ed757483757fc68fce0db7d7c0f9ba65b8e7eada69e5c",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routine-step-spine.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "65f785c4e8a4f87c777111caf578f871a879bcf89edd468e9cad2c5d6c4edd4b",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routines-detail-panel.test.tsx",
       "code": 2349,
       "message": "This expression is not callable.\n  Type 'never' has no call signatures.",
+      "anchor": "df7d2ab7a9fa51fa523b982738e0820d46d76bbe213c7a0910a4f2ec3de06ebb",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routines-detail-panel.test.tsx",
       "code": 2352,
       "message": "Conversion of type '{ ok: true; json: () => Promise<never>; }' to type 'Response' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '{ ok: true; json: () => Promise<never>; }' is missing the following properties from type 'Response': headers, redirected, status, statusText, and 10 more.",
+      "anchor": "b8ef7b96b2b539e8719edbb749e9462908426434b7f232d2ba2063e0cd3b16a3",
       "count": 1
     },
     {
       "file": "components/features/routines/__tests__/routines-overview.test.tsx",
       "code": 2556,
       "message": "A spread argument must either have a tuple type or be passed to a rest parameter.",
+      "anchor": "8424c42a077e127f5d3a37ec485270611d739bc2e8d0a1cbe807af3671d824c5",
       "count": 1
     },
     {
       "file": "components/features/settings/sections/__tests__/members-unified-row.test.tsx",
       "code": 2578,
       "message": "Unused '@ts-expect-error' directive.",
-      "count": 3
+      "anchor": "d5676ad6ee4eae561e1a47938892f8fb653fad4dee1427611f176d1dbf6d70bc",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/members-unified-row.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "50ac871962432218baec1fda1fc170a9b437f0ba4b7445907dc472fb93a3072c",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/members-unified-row.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "e437a9a57d516ca1e7038440f1c1941f58dd60a15647e8a0cf59902cb80ffdfa",
+      "count": 1
     },
     {
       "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined, waitForElementOptions?: waitForOptions | undefined): Promise<HTMLElement>', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined, waitForElementOptions?: waitForOptions | undefined): Promise<HTMLElement>', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "fd9110f5ee54758ed0a88969e7d7175ad28850e8d07192a4281af1ada6eccf9a",
       "count": 1
     },
     {
       "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 5
+      "anchor": "a265cd53db98535e9fdf5304a94db79e8258624d22d68cad8eeb9a80db4b60d2",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "2c53d5b482990ee698f5f87d63bed89d1ad2f1af62a96800842370a64841770d",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "dbe3063da53edf241de051a27d19691b724ac13bd9edd749424dbc099c82a38f",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "aba06034eb29225d2838af5ff13ba8e4c4bf35bb9cb801d00faacfa9f66b6547",
+      "count": 1
+    },
+    {
+      "file": "components/features/settings/sections/__tests__/privacy-section.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "f96e340bdc419bd2834471860bc8e546b245175f5ca9ffaeef015897200784c7",
+      "count": 1
     },
     {
       "file": "components/features/timeline/__tests__/mission-timeline.test.tsx",
       "code": 2578,
       "message": "Unused '@ts-expect-error' directive.",
-      "count": 3
+      "anchor": "d5676ad6ee4eae561e1a47938892f8fb653fad4dee1427611f176d1dbf6d70bc",
+      "count": 1
+    },
+    {
+      "file": "components/features/timeline/__tests__/mission-timeline.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "50ac871962432218baec1fda1fc170a9b437f0ba4b7445907dc472fb93a3072c",
+      "count": 1
+    },
+    {
+      "file": "components/features/timeline/__tests__/mission-timeline.test.tsx",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "e437a9a57d516ca1e7038440f1c1941f58dd60a15647e8a0cf59902cb80ffdfa",
+      "count": 1
     },
     {
       "file": "components/icons/si-fallback.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  The last overload gave the following error.\n    Object literal may only specify known properties, and 'className' does not exist in type 'Attributes'.",
+      "anchor": "45b32e58bb423f099349a404bebf22268f4b48606d90fb3c63567a14a9cf6a8f",
       "count": 1
     },
     {
       "file": "components/layout/__tests__/notification-sound-settings.test.tsx",
       "code": 2769,
       "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
-      "count": 5
+      "anchor": "520d10f60a2e791cc7ca0c99c8084504fc550712e5650e46262b176a1817492a",
+      "count": 1
+    },
+    {
+      "file": "components/layout/__tests__/notification-sound-settings.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "53c35f01fc287ae30c59bd661e729cf19d87494145b3b1efe5c50c9b85aa6e95",
+      "count": 1
+    },
+    {
+      "file": "components/layout/__tests__/notification-sound-settings.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "58531dd268cf16dac05aa0416023ca82f1cd9c911a6a9f475e24260473087948",
+      "count": 2
+    },
+    {
+      "file": "components/layout/__tests__/notification-sound-settings.test.tsx",
+      "code": 2769,
+      "message": "No overload matches this call.\n  Overload 1 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.\n  Overload 2 of 2, '(role: ByRoleMatcher, options?: ByRoleOptions | undefined): HTMLElement', gave the following error.\n    Object literal may only specify known properties, and 'exact' does not exist in type 'ByRoleOptions'.",
+      "anchor": "550c0ea06205b80107b7cc4f9aaa665432c28841433f23217da30a127e740025",
+      "count": 1
     },
     {
       "file": "hooks/__tests__/use-chat.test.ts",
       "code": 2353,
       "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
-      "count": 27
+      "anchor": "e0e20e894254a30bcf475097ce0e16ca40699bd4585069b13060a2c5a6ed3fc3",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "873451634458fbda42ffa53ee4844cd948fa185e41e3a0163a14e2d919f49619",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "b627fb329a2d5e6a6da4c95a2711681b1dc34553f10672389c31416873daedc1",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "29785e315a189b550379be74a57c4a1e437930d20f43c965e6dfce4eff1031e6",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "85db7497084d7675320e7454bbbc403a6f16abf5d7799ddc8e47e0d19d0d7f19",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "49b45f44e1e1e18bb67e96b48a1e6f0f5d2d738881bb3f924e2400edce7d7839",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "38b18d01a6f6214c5c097fca27c26e48e89bfb9a166284a322f12d8ae51de62d",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "bc0b179f8bebf30308cf8d7c887307213e431e4cd448056aeaa8a52dfe780874",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "51320d09cf87bc4e72a885d285b735668d5a10e996f538d2ea5201bfedb839fa",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "a692b08fc52ab3153187e7176982d8724aa83c82479555cc67d2e039a6f71d62",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "21feddc918062bca5cdfd44954d6fe151b17cc8269f8c50355a762a2dd9ba582",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "f3cc5fa6b7b8ba002767e574ae6dd1e9abb6b0d5b1de0a88364e515f35e075d2",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "6d7feda08d4bee484466d7b90c8a87f5cac5762c7f3126435eee0f1e1861d173",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "37aa9a7cfc26f16cbfc1231248d793e1552a659246851ea841c2cebc405ae9fc",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "fd7343a12ceca194a9ae0c945d8f7a80c87c47661e9c83cebf26b24e1f155320",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "18406f23d7b24590dd866af68d95365d0496b82f1ea6ead540776232461aec04",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "e0479f3ee644adee54c766e7a5e7d15a4735d231614457d09448182818bd5a14",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "62ef26f067883b85b372962a8b2b54a4478885994cceaf540e0b8613d8fd79a0",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "cef0dcafd3434ed107f36c51441c5ed67c86a307d3cbcb9ef846fa0b6818f6ca",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "2149e88ae3be0b28d8b448208c838b930dd3a40a6ce0cd5191f983a0bb3d9741",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "7433c781585f51e761cd6275dceb1a972c66d8e567f72e07bc8a7ebaca17e118",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "76c33ba3e583ac78173c615494ea6e0ecd78beced472c9f1e393b1fef1f494df",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "af9f01e608970e394be59e3c5c9b8c02ebf143093f09f72f1a241dd8c0c5f615",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "5872b538d4489fe9f44b56e56c7057813cd44dbb28e3ca447c7848f99542f806",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "b38189e6541f4f71bdaef9407c9d2872644475afb1e3f1021119ea98c1d308c2",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "418f2d7b119a598aa50496c818cd7e7611dc7b0be9e671854eef265c92a39bf7",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-chat.test.ts",
+      "code": 2353,
+      "message": "Object literal may only specify known properties, and 'token' does not exist in type 'UseChatOptions'.",
+      "anchor": "33b2355e49199e9273908c61f01db6ff5411e58ca66f38f36f59f31059187ef6",
+      "count": 1
     },
     {
       "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
       "code": 2352,
       "message": "Conversion of type '\"done\"[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"done\"' is not comparable to type 'MissionStatus'.",
-      "count": 4
+      "anchor": "4cf25dd172eec275e042348f6c2376d945b43957097c94bf86ccddd71225aeb9",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
+      "code": 2352,
+      "message": "Conversion of type '\"done\"[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"done\"' is not comparable to type 'MissionStatus'.",
+      "anchor": "ebdf15ca138504dee14d33f1111b4afd1cb3d6ec78adafaec45675139984f25c",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
+      "code": 2352,
+      "message": "Conversion of type '\"done\"[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"done\"' is not comparable to type 'MissionStatus'.",
+      "anchor": "1fcd7fe7528c04813b581bad3651a7554193fb12b0d65d46603ae569400d1892",
+      "count": 1
+    },
+    {
+      "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
+      "code": 2352,
+      "message": "Conversion of type '\"done\"[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"done\"' is not comparable to type 'MissionStatus'.",
+      "anchor": "93c0d1c1867594946e1b09a83bab028a5259cba831f9f5335e2897dd4db3bd19",
+      "count": 1
     },
     {
       "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
       "code": 2352,
       "message": "Conversion of type '\"in_progress\"[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"in_progress\"' is not comparable to type 'MissionStatus'.",
+      "anchor": "386c2acbecd2bfed81a97cc3a87f453b612a02e37f9fbff831c40bfdb63ade88",
       "count": 1
     },
     {
       "file": "hooks/__tests__/use-filtered-issues.cov.test.ts",
       "code": 2352,
       "message": "Conversion of type '(\"done\" | \"backlog\")[]' to type 'MissionStatus[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.\n  Type '\"done\" | \"backlog\"' is not comparable to type 'MissionStatus'.\n    Type '\"backlog\"' is not comparable to type 'MissionStatus'.",
+      "anchor": "ec12ea88059d6339c7acc48a502b8036594f0178ad5e4455c38bace68af2a9c9",
       "count": 1
     },
     {
       "file": "hooks/__tests__/use-journal-stream-reconnect.test.ts",
       "code": 2345,
       "message": "Argument of type '([e]: [{ id: string; }]) => string' is not assignable to parameter of type '(value: any[], index: number, array: any[][]) => string'.\n  Types of parameters '__0' and 'value' are incompatible.\n    Type 'any[]' is not assignable to type '[{ id: string; }]'.\n      Target requires 1 element(s) but source may have fewer.",
+      "anchor": "2a1ecceb44869be1e19b8a10af60425ee72c3602386231f837a97d54be18474f",
       "count": 1
     },
     {
       "file": "hooks/__tests__/use-notification-channels.test.ts",
       "code": 2339,
       "message": "Property 'secret' does not exist on type 'never'.",
+      "anchor": "af57afcabfe06dcce42cef8af9ac37e9f74e0aa08eaa07d92d7094871a59c968",
       "count": 1
     },
     {
       "file": "hooks/__tests__/use-routine-budget.test.ts",
       "code": 2454,
       "message": "Variable 'updated' is used before being assigned.",
+      "anchor": "af28496d7ff55b753749152692dd682385b31c9fd83be556c73351bb72a95c06",
       "count": 1
     },
     {
       "file": "lib/__tests__/run-activity.test.ts",
       "code": 2783,
       "message": "'entry_type' is specified more than once, so this usage will be overwritten.",
+      "anchor": "8beb92894943d7bb707b4cfed8f5cd2eb5bcfb2aa50bac64feec064dd9cf04aa",
       "count": 1
     },
     {
       "file": "lib/__tests__/sentry-scrub.test.ts",
       "code": 2578,
       "message": "Unused '@ts-expect-error' directive.",
-      "count": 2
+      "anchor": "32cd8d1f81cc71d7e8c8438863b14e61049f3832fbc593bb9e146ac71baa5360",
+      "count": 1
+    },
+    {
+      "file": "lib/__tests__/sentry-scrub.test.ts",
+      "code": 2578,
+      "message": "Unused '@ts-expect-error' directive.",
+      "anchor": "bc6b9c7aade9ccd07b684090bb4894b3b07c4d7bf1abb7bc38090f99805d6a1e",
+      "count": 1
     },
     {
       "file": "lib/trace/__tests__/build-overview-graph.test.ts",
       "code": 2345,
       "message": "Argument of type 'CSSProperties | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.\n  Type 'CSSProperties' is not assignable to type 'Record<string, unknown>'.\n    Index signature for type 'string' is missing in type 'Properties<string | number, string & {}>'.",
-      "count": 5
+      "anchor": "ae9373adb3eff482eed6119b40e8509d9ce8cfbd23551995418c06f7faa54aad",
+      "count": 1
+    },
+    {
+      "file": "lib/trace/__tests__/build-overview-graph.test.ts",
+      "code": 2345,
+      "message": "Argument of type 'CSSProperties | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.\n  Type 'CSSProperties' is not assignable to type 'Record<string, unknown>'.\n    Index signature for type 'string' is missing in type 'Properties<string | number, string & {}>'.",
+      "anchor": "872e9aa4623fb73f6774b2707b4bd903515cd24be7f4ee5b462c09b528bfa889",
+      "count": 1
+    },
+    {
+      "file": "lib/trace/__tests__/build-overview-graph.test.ts",
+      "code": 2345,
+      "message": "Argument of type 'CSSProperties | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.\n  Type 'CSSProperties' is not assignable to type 'Record<string, unknown>'.\n    Index signature for type 'string' is missing in type 'Properties<string | number, string & {}>'.",
+      "anchor": "8503b5bee7fe0880b1481747b8abf870846e7d76ad01f9da1b74e28f883e9872",
+      "count": 1
+    },
+    {
+      "file": "lib/trace/__tests__/build-overview-graph.test.ts",
+      "code": 2345,
+      "message": "Argument of type 'CSSProperties | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.\n  Type 'CSSProperties' is not assignable to type 'Record<string, unknown>'.\n    Index signature for type 'string' is missing in type 'Properties<string | number, string & {}>'.",
+      "anchor": "59a9a9b7df91559936a9826f147ba876e1ad994d67500b4719d856387037742c",
+      "count": 1
+    },
+    {
+      "file": "lib/trace/__tests__/build-overview-graph.test.ts",
+      "code": 2345,
+      "message": "Argument of type 'CSSProperties | undefined' is not assignable to parameter of type 'Record<string, unknown> | undefined'.\n  Type 'CSSProperties' is not assignable to type 'Record<string, unknown>'.\n    Index signature for type 'string' is missing in type 'Properties<string | number, string & {}>'.",
+      "anchor": "4facd2064d263efb005af6af66bdccfbb1fa8eab1ac032ae8bc9144327279bd9",
+      "count": 1
     },
     {
       "file": "lib/trace/__tests__/build-trace-graph.test.ts",
       "code": 2353,
       "message": "Object literal may only specify known properties, and 'if' does not exist in type 'TraceStep'.",
+      "anchor": "4b040ab39cc9a48eab05efa05ddb4ab14f21881c00ec510667ce16f75b5ae274",
       "count": 1
     }
   ]

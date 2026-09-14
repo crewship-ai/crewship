@@ -318,7 +318,7 @@ function usePublicationReview(workspaceId: string, slug: string, version: number
  */
 function conflictFromBody(body: unknown): PublishConflictWire {
   const raw = (body ?? {}) as Partial<PublishConflictWire>
-  const kinds = ["definition", "routines", "publication", "draft"] as const
+  const kinds = ["definition", "routines", "publication", "draft", "baseline"] as const
   const conflict = kinds.find((kind) => kind === raw.conflict)
   const routines = Array.isArray(raw.routines)
     ? raw.routines.filter((r): r is string => typeof r === "string")
@@ -909,11 +909,11 @@ export function EditorHistorySection({
 
   return (
     <div data-slot="editor-section-history" className="flex w-full flex-col gap-4">
-      <PanelVersionsCard workspaceId={workspaceId} slug={slug} title="Panel definitions" />
+      <PanelVersionsCard workspaceId={workspaceId} slug={slug} title="Panel definitions" mayRestore={capabilities.mayEditDocument} />
 
       {/* Only a Page that HAS an application gets application headings. An
           ordinary panel Page shows panel definitions and stops. */}
-      {capabilities.hasApplication &&
+      {(capabilities.hasApplicationDraft || capabilities.hasApplication) &&
         (capabilities.mayViewSourceHistory ? (
           <>
             <SourceRevisionsCard workspaceId={workspaceId} slug={slug} />

@@ -1,0 +1,80 @@
+{
+  "name": "markdown_memory_edit",
+  "why": "A realistic memory-file edit: a heading kept, one bullet rewritten, two consecutive bullets dropped, one appended.",
+  "base": "# Lessons\n\n- always claim the issue first\n- never merge on red CI\n- the DB is repo-local\n- run tests in the foreground\n",
+  "target": "# Lessons\n\n- always claim the issue before the first commit\n- run tests in the foreground\n- wait for CodeRabbit\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "# Lessons\n",
+        "\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 3,
+      "line_count": 3,
+      "lines": [
+        "- always claim the issue first\n",
+        "- never merge on red CI\n",
+        "- the DB is repo-local\n"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 5,
+      "line_count": 1,
+      "lines": [
+        "- always claim the issue before the first commit\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 6,
+      "line_count": 1,
+      "lines": [
+        "- run tests in the foreground\n"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 6,
+      "line_count": 1,
+      "lines": [
+        "- wait for CodeRabbit\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 3,
+      "line_count": 3,
+      "old_sha256": "4a54e1705262cf73b44024a1c7cf9077d9840041a94086a2c63bcf5de0ce1c99"
+    }
+  ],
+  "applied": "# Lessons\n\n- always claim the issue before the first commit\n- run tests in the foreground\n- wait for CodeRabbit\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 3,
+          "line_count": 3,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

@@ -1,9 +1,9 @@
 package memory
 
-// Tests for the per-workspace memory_versions retention sweep. The
-// fixture builder reuses the schema-light openVersionsDB helper from
-// versions_test.go and extends it with a memory_config column on
-// workspaces so the JSON-extraction path can be exercised end-to-end.
+// Tests for the per-workspace memory_versions retention sweep. The fixture
+// builder reuses the openVersionsDB helper from versions_test.go, which is now
+// a fully-migrated database — so workspaces.memory_config is already there and
+// no longer has to be bolted on with an ALTER.
 
 import (
 	"context"
@@ -18,20 +18,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// retentionTestDB sets up a minimal schema: workspaces (with the
-// memory_config column the v90 migration introduces) and memory_versions.
-// We open() a fresh DB per test so failures can be diagnosed without
-// cross-test contamination.
+// retentionTestDB returns a fresh migrated database per test, seeded with the
+// ws_test workspace, so failures can be diagnosed without cross-test
+// contamination. memory_config is a real column of the real schema now; the
+// ALTER that used to add it here fails against the migrated table, which is the
+// correct failure — a test fixture that hand-adds a shipped column is a fixture
+// that can disagree with production about its type.
 func retentionTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db := openVersionsDB(t)
-	// openVersionsDB created a workspaces table without memory_config;
-	// add the column so the SELECT in SweepAllWorkspaces can read it.
-	// Rebuild via ALTER (workspaces is empty + we own it for the test).
-	if _, err := db.Exec(`ALTER TABLE workspaces ADD COLUMN memory_config TEXT`); err != nil {
-		t.Fatalf("add memory_config column: %v", err)
-	}
-	return db
+	return openVersionsDB(t)
 }
 
 // seedVersion inserts one memory_versions row whose written_at is N

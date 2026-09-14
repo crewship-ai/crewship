@@ -245,6 +245,19 @@ var responseShapeContracts = []struct {
 	{name: "WorkspaceConversationAgent", pointer: "/components/schemas/WorkspaceConversationAgent", value: groupchat.AgentMember{}},
 	{name: "WorkspaceConversationAgentJob", pointer: "/components/schemas/WorkspaceConversationAgentJob", value: groupchat.Job{}},
 	{name: "CredentialTestResponse", pointer: "/components/schemas/CredentialTestResponse", value: testConnectionResponse{}},
+	// ── The durable work ledger (§9) ───────────────────────────────────────
+	// Every field on these views is emitted unconditionally, so `required` is
+	// the whole field set. That matters most for WorkCancelResponse: `outcome`
+	// is what separates "stopped" from "asked, and it may still be running",
+	// and a schema that let it be absent would let a UI show the wrong one.
+	{name: "WorkItem", pointer: "/components/schemas/WorkItem", value: workItemView{}},
+	{name: "WorkItemDetail", pointer: "/components/schemas/WorkItemDetail", value: workItemDetailView{}},
+	{name: "WorkItemPage", pointer: "/components/schemas/WorkItemPage", value: workItemPage{}},
+	{name: "WorkAttempt", pointer: "/components/schemas/WorkAttempt", value: workAttemptView{}},
+	{name: "WorkEvent", pointer: "/components/schemas/WorkEvent", value: workEventView{}},
+	{name: "WorkCancelResponse", pointer: "/components/schemas/WorkCancelResponse", value: workCancelResponse{}},
+	{name: "WebhookDelivery", pointer: "/components/schemas/WebhookDelivery", value: webhookDeliveryView{}},
+	{name: "WebhookDeliveryPage", pointer: "/components/schemas/WebhookDeliveryPage", value: webhookDeliveryPage{}},
 }
 
 func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {

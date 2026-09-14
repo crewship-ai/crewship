@@ -1,0 +1,61 @@
+{
+  "name": "lf_input",
+  "why": "The LF twin of crlf_input. If these two fixtures ever diverge, normalization broke.",
+  "base": "alpha\nbeta\ngamma\n",
+  "target": "alpha\ngamma\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "alpha\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 2,
+      "line_count": 1,
+      "lines": [
+        "beta\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "gamma\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 2,
+      "line_count": 1,
+      "old_sha256": "f2c82decdd7181cf98945929a62598db7e6b477e11f6e0eb0ae97020eff151ad"
+    }
+  ],
+  "applied": "alpha\ngamma\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 2,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

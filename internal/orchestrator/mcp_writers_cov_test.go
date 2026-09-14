@@ -112,7 +112,8 @@ func TestWriters_PropagateNormaliseError(t *testing.T) {
 		"codex":    writeMCPCodex,
 		"cursor":   writeMCPCursor,
 	}
-	req := AgentRunRequest{AgentSlug: "agent-x", CrewMCPConfigJSON: `{bad`}
+	req := AgentRunRequest{AgentSlug: "agent-x",
+		RunID: "run-1", CrewMCPConfigJSON: `{bad`}
 	for name, w := range writers {
 		t.Run(name, func(t *testing.T) {
 			cap := &captureContainer{}
@@ -132,6 +133,7 @@ func TestWriteMCPOpenCode_SkipsEntryWithoutCommandOrURL(t *testing.T) {
 	cap := &captureContainer{}
 	req := AgentRunRequest{
 		AgentSlug: "agent-x",
+		RunID:     "run-1",
 		MCPServers: []MCPServerConfig{
 			{Name: "ghost"}, // neither command nor endpoint
 			{Name: "ok", Command: "node", Args: []string{"s.js"}},
@@ -157,6 +159,7 @@ func TestWriteMCPCodex_EnvAndHeaderRepresentations(t *testing.T) {
 	cap := &captureContainer{}
 	req := AgentRunRequest{
 		AgentSlug: "agent-x",
+		RunID:     "run-1",
 		CrewMCPConfigJSON: `{
 			"mcpServers": {
 				"stdio-srv": {
@@ -183,7 +186,7 @@ func TestWriteMCPCodex_EnvAndHeaderRepresentations(t *testing.T) {
 		t.Fatalf("want 1 write, got %d", len(cap.calls))
 	}
 	w := cap.calls[0]
-	if w.workingDir != "/crew/agents/agent-x" {
+	if w.workingDir != "/crew/runs/agent-x/run-1" {
 		t.Errorf("codex config must land in HOME, got workdir %q", w.workingDir)
 	}
 	body := w.body

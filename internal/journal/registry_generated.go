@@ -165,4 +165,8 @@ var AllEntryTypes = []EntryType{
 	EntrySystemHookToggled,
 	EntrySystemMigration,
 	EntryTaskDelegated,
+	EntryWorkAccepted,
+	EntryWorkClaimed,
+	EntryWorkLeaseLost,
+	EntryWorkNeedsReconciliation,
 }

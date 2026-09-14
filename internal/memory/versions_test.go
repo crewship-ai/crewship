@@ -13,41 +13,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/testutil"
+
 	_ "modernc.org/sqlite"
 )
 
-// openVersionsDB sets up the v90 schema in isolation so the test
-// doesn't depend on the full migrate chain. memory_versions has a
-// FK against workspaces(id); we create both tables flat.
+// openVersionsDB returns a real, fully-migrated database.
+//
+// It used to hand-roll two CREATE TABLEs. That was survivable while
+// memory_versions was the only table these functions touched; it stopped being
+// survivable when Restore started going through the §8 mutation contract, which
+// needs memory_revisions and memory_mutations too. Re-declaring those here
+// would put a second copy of the schema in a test file, free to drift from the
+// migration that actually ships. testutil builds the migrated template once per
+// process and copies it, so this is also not slower in any way that matters.
 func openVersionsDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.Exec(`
-CREATE TABLE workspaces (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,
-    created_at TEXT, updated_at TEXT, deleted_at TEXT
-);
-INSERT INTO workspaces (id, name, slug) VALUES ('ws_test', 'WS', 'ws_test');
-CREATE TABLE memory_versions (
-    id           TEXT PRIMARY KEY,
-    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    path         TEXT NOT NULL,
-    tier         TEXT NOT NULL CHECK (tier IN ('agent','crew','workspace','pins','learned')),
-    sha256       TEXT NOT NULL,
-    bytes        INTEGER NOT NULL,
-    written_at   TEXT NOT NULL DEFAULT (datetime('now','subsec')),
-    written_by   TEXT,
-    parent_sha   TEXT,
-    payload_ref  TEXT NOT NULL
-);
-CREATE INDEX idx_memory_versions_ws_path_ts ON memory_versions (workspace_id, path, written_at DESC);
-`); err != nil {
-		t.Fatalf("schema: %v", err)
+	db := testutil.MigratedSQLDB(t)
+	if _, err := db.Exec(
+		`INSERT INTO workspaces (id, name, slug, created_at, updated_at)
+		 VALUES ('ws_test', 'WS', 'ws_test', ?, ?)`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("seed workspace: %v", err)
 	}
 	return db
 }

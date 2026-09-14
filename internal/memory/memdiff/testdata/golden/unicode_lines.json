@@ -1,0 +1,79 @@
+{
+  "name": "unicode_lines",
+  "why": "Multi-byte content. Lines are compared and hashed as bytes; the removal hash covers the UTF-8 encoding of the line plus its LF.",
+  "base": "příliš\nžluťoučký\nkůň\n🚀\n",
+  "target": "příliš\nkůň\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "příliš\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 2,
+      "line_count": 1,
+      "lines": [
+        "žluťoučký\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "kůň\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 4,
+      "line_count": 1,
+      "lines": [
+        "🚀\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 2,
+      "line_count": 1,
+      "old_sha256": "d51cd943a788be308ee443e0eee214f65fece0dbf1278cd471745c265fe3480b"
+    },
+    {
+      "start_line": 4,
+      "line_count": 1,
+      "old_sha256": "2adb05932518b1ed5954548eff4bbedff09dbdc1d72728fc231bf9d3debeaefc"
+    }
+  ],
+  "applied": "příliš\nkůň\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 2,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        },
+        {
+          "start_line": 4,
+          "line_count": 1,
+          "old_sha256": "2adb05932518b1ed5954548eff4bbedff09dbdc1d72728fc231bf9d3debeaefc"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

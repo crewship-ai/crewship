@@ -106,7 +106,7 @@ describe("New routine on CreateSurface", () => {
   it("N11 renames a saved unpublished recipe without creating another draft", async () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     const saves = () =>
       h.calls.filter((call) => call.url.endsWith("/drafts") && call.body)
     await waitFor(() => expect(saves()).toHaveLength(1))
@@ -125,7 +125,7 @@ describe("New routine on CreateSurface", () => {
         }),
       },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await waitFor(() => expect(saves()).toHaveLength(2))
     expect(saves()[1].body).toMatchObject({
       id: "draft-1",
@@ -200,9 +200,9 @@ describe("New routine on CreateSurface", () => {
     expect(screen.getByLabelText("Name")).toBeVisible()
     expect(screen.queryByLabelText(/skip test-run gate/i)).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Test", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Test" }))
     expect(screen.getByRole("button", { name: "Test routine" })).toBeVisible()
-    expect(screen.getAllByRole("button", { name: "Publish", exact: true })).toHaveLength(
+    expect(screen.getAllByRole("button", { name: "Publish" })).toHaveLength(
       1,
     )
   })

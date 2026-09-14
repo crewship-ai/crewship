@@ -708,6 +708,45 @@ const (
 	// itself in a circle. Payload: page, page_id, panels, created,
 	// fingerprint.
 	EntryPageSpecChanged EntryType = "page.spec.changed"
+
+	// Durable work ledger — the dispatch decisions internal/work owns
+	// (WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md §3, §4, §10).
+	//
+	// Four entries, not one per state edge. work_events already holds the
+	// complete per-item history in the ledger itself; these exist for the
+	// operator-facing stream, and §10 is explicit about the division of
+	// labour: "Metriky exportovat bez raw payloadu, credentials a
+	// high-cardinality run IDs v labels. IDs patří do strukturovaného
+	// auditu." So the work id, run id, generation and attempt live HERE, in
+	// the structured payload, and never in a metric label.
+	//
+	// None of them carries an input payload, a raw webhook body or a
+	// credential — a delivery's bytes stay in webhook_deliveries.raw_body
+	// under their own retention, and the journal keeps only the identifiers
+	// needed to go and find them.
+	//
+	// EntryWorkAccepted: a producer took durable responsibility for a unit
+	// of work (I1 — nothing answers 202 before this row's transaction
+	// commits). Payload: work_id, source, class, session_id, agent_id,
+	// source_ref, priority, eligible_at.
+	EntryWorkAccepted EntryType = "work.accepted"
+	// EntryWorkClaimed: capacity was reserved and one attempt started.
+	// Payload: work_id, run_id, generation, attempt, class, lease_owner,
+	// lease_expires_at. run_id is the same namespace as agent_runs.id, so
+	// TraceID is set to it and the entry joins the run's existing trace.
+	EntryWorkClaimed EntryType = "work.claimed"
+	// EntryWorkNeedsReconciliation: an external effect or a live runtime
+	// whose ownership could not be safely recovered (§4). Severity warn —
+	// this state holds its conflicting capacity until a human or a
+	// reconciler resolves it, so it is never routine. Payload: work_id,
+	// run_id, generation, reason, runtime_locator.
+	EntryWorkNeedsReconciliation EntryType = "work.needs_reconciliation"
+	// EntryWorkLeaseLost: an attempt stopped heartbeating and its lease
+	// expired. Distinct from the entry above because the two answer
+	// different questions — this one is "a worker went away", which is
+	// still true when recovery could safely requeue the item. Payload:
+	// work_id, run_id, generation, requeued (bool), runtime_locator.
+	EntryWorkLeaseLost EntryType = "work.lease_lost"
 )
 
 // Severity is a coarse importance level used by filters and retention. UI

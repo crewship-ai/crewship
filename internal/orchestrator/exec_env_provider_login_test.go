@@ -58,7 +58,8 @@ func codexProviderLoginCred(t *testing.T) Credential {
 func codexProviderLoginReq(t *testing.T) AgentRunRequest {
 	t.Helper()
 	return AgentRunRequest{
-		AgentID: "a1", AgentSlug: "reviewer", CLIAdapter: "CODEX_CLI",
+		AgentID: "a1", AgentSlug: "reviewer",
+		RunID: "run-1", CLIAdapter: "CODEX_CLI",
 		LLMProvider: "OPENAI", LLMModel: "gpt-5.5", sidecarActive: true,
 		Credentials: []Credential{codexProviderLoginCred(t)},
 	}
@@ -156,7 +157,7 @@ func TestBuildEnvVarsSidecar_ProviderLoginCodex_NoPartsInEnv(t *testing.T) {
 	if _, ok := envValue(env, "CODEX_API_KEY"); ok {
 		t.Errorf("CODEX_API_KEY must never be set: it overrides auth.json")
 	}
-	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/agents/reviewer/.codex" {
+	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/runs/reviewer/run-1/.codex" {
 		t.Errorf("CODEX_HOME = %q (present=%v)", got, ok)
 	}
 	if got, _ := envValue(env, "CREWSHIP_BILLING_MODE"); got != "flat_rate" {

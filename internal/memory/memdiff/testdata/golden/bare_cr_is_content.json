@@ -1,0 +1,61 @@
+{
+  "name": "bare_cr_is_content",
+  "why": "A CR that is not part of a CRLF stays inside its line, so 'a\\rb' and 'ab' are different lines and this is a rewrite, not an equal.",
+  "base": "a\rb\nc\n",
+  "target": "ab\nc\n",
+  "ops": [
+    {
+      "kind": "delete",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "a\rb\n"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "ab\n"
+      ]
+    },
+    {
+      "kind": "equal",
+      "start_line": 2,
+      "line_count": 1,
+      "lines": [
+        "c\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 1,
+      "line_count": 1,
+      "old_sha256": "367d1c77eadc1495a7db4200f46a8b90ea1fa926282722d308c05a65098a4112"
+    }
+  ],
+  "applied": "ab\nc\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 1,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

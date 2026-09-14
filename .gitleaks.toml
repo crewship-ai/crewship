@@ -220,6 +220,19 @@ paths = [
   # doc is explicitly "blocked on secret" and the signing key lives only as a
   # repo/org secret, never in the tree.
   '''packaging/SIGNING\.md$''',
+
+  # Standard Webhooks conformance vectors. The `whsec_` values here are the
+  # PUBLISHED test vectors from the reference implementations — the same
+  # literals appear in
+  # standard-webhooks/standard-webhooks libraries/go/webhook_test.go,
+  # libraries/python/tests/test_webhooks.py and libraries/rust/src/lib.rs, each
+  # recorded in a `_source_file` field beside the vector it came from. They are
+  # secrets nobody holds: the whole point of publishing them is that anyone can
+  # reproduce the signature. The claim is enforced rather than asserted —
+  # TestStandardWebhooksOfficialVectors verifies each published signature
+  # against its secret, so a real credential swapped in here fails the test
+  # rather than passing quietly.
+  '''internal/webhook/profiles/testdata/standard-webhooks-vectors\.json$''',
 ]
 
 # Strings that look like secrets but are documented placeholders.
