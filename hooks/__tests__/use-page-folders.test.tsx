@@ -277,7 +277,10 @@ describe("useFolderAcl", () => {
 
 describe("useFolderAclMutations", () => {
   it("PUTs an entry with its subject and whether it may edit, never a bare write", async () => {
-    apiFetch.mockResolvedValue(json({ subject_type: "crew", subject_id: "c2", label: "Ops", can_read: true, can_write: true }))
+    // The server answers the whole ACL document with the written row under
+    // `entry` (PutFolderACL → folderACLDocument), not the row alone.
+    const written = { subject_type: "crew", subject_id: "c2", label: "Ops", can_read: true, can_write: true }
+    apiFetch.mockResolvedValue(json({ folder: "ops", acl: [written], acl_version: 2, entry: written }))
     const { result } = renderHook(() => useFolderAclMutations("ws-1", "ops"), { wrapper: wrapper() })
     const entry = await result.current.set.mutateAsync({ subjectType: "crew", subjectId: "ops", canWrite: true })
     expect(lastCall()).toEqual({
