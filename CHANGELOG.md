@@ -51,6 +51,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Agent turn-limit failures could appear only as a generic process exit.** Structured terminal failures now retain their original cause even with a nonzero exit, and the execution journal preserves the subtype and turn count when the raw output exceeds its capture limit (#2544).
 - **`dev.sh status` now says when a workstation serves old code.** A `STALE:` line names the HEAD `web/out/` was built from when the repo has moved past it, or a running binary older than HEAD's commit, with the reload command to run — two dev slots were serving day-old frontends while looking healthy. `.env.local` also stopped gaining another `CREWSHIP_ALLOWED_ORIGINS` line and banner on every start (clone 3 had over a hundred).
 
 - **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
