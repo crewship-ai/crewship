@@ -706,7 +706,10 @@ cmd_status() {
     # inode that is actually executing (validation 2026-09-13).
     local stale running_bin="/tmp/crewship${S}-dev" listening_pid=""
     listening_pid=$(ss -ltnpH "sport = :$GO_PORT" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2 || true)
-    if [[ -n "$listening_pid" ]] && [[ -e "/proc/$listening_pid/exe" ]]; then
+    # -L, not -e: once the binary on disk has been replaced the exe link is
+    # dangling to any test that follows it, and -e would fall back to the
+    # path — the one case the STALE line exists for (CodeRabbit on #2518).
+    if [[ -n "$listening_pid" ]] && [[ -L "/proc/$listening_pid/exe" ]]; then
       running_bin="/proc/$listening_pid/exe"
     fi
     if stale=$(deploy_staleness "$PROJECT_DIR" "$running_bin"); then :; fi
