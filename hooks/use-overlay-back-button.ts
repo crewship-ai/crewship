@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 /**
  * Makes the hardware/gesture back button close an overlay instead of
@@ -45,32 +45,83 @@ import { useEffect } from "react"
  */
 const stack: symbol[] = []
 
+/**
+ * Set while an overlay unwinds its own entry with `history.back()`. That call
+ * fires a `popstate` like any other, and with a sheet inside a sheet the outer
+ * one answered it: closing the inner drawer by its × closed the outer one too.
+ * The next `popstate` after an unwind is ours, not the person's, and is
+ * swallowed once — by whichever overlay is left on the stack to be fooled.
+ */
+let unwinding = false
+
 const isTop = (token: symbol) => stack.length > 0 && stack[stack.length - 1] === token
 
 const holdsOwnEntry = () =>
   (window.history.state as { __overlay?: boolean } | null)?.__overlay === true
 
-export function useOverlayBackButton(enabled = true) {
+const pushOwnEntry = () =>
+  // Spread the router's own state so Next's internal keys survive; a bare
+  // object here makes the App Router lose its place.
+  window.history.pushState({ ...window.history.state, __overlay: true }, "")
+
+/**
+ * @param stillOpen Answers "did the overlay refuse to close?" after Escape
+ *   was dispatched for a back press. Radix prevents the Escape event's default
+ *   whether it dismisses or is told not to, so the event itself cannot say;
+ *   what can is the content's own `data-state` once React has flushed. Given
+ *   this, an overlay that blocks Escape keeps its history entry — the next
+ *   back asks it again rather than navigating underneath it. Without it, the
+ *   entry is treated as spent on the first back.
+ */
+export function useOverlayBackButton(enabled = true, stillOpen?: () => boolean) {
+  const stillOpenRef = useRef(stillOpen)
+  stillOpenRef.current = stillOpen
+
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return
 
     const token = Symbol("overlay")
     stack.push(token)
-    // Spread the router's own state so Next's internal keys survive; a bare
-    // object here makes the App Router lose its place.
-    window.history.pushState({ ...window.history.state, __overlay: true }, "")
+    pushOwnEntry()
+
+    let settle: number | undefined
 
     const onPop = () => {
+      if (unwinding) {
+        unwinding = false
+        return
+      }
       if (!isTop(token)) return
-      stack.pop()
       document.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
       )
+      const probe = stillOpenRef.current
+      if (!probe) {
+        stack.pop()
+        return
+      }
+      // Ownership is decided once Radix has answered, not before. The state
+      // update from its dismissal is flushed in a microtask, so by the next
+      // task the content either carries `data-state="closed"` (dismissing,
+      // entry spent — a second back during the exit animation should reach
+      // the page) or is still open (refused — put the entry back so back
+      // keeps asking this overlay).
+      settle = window.setTimeout(() => {
+        settle = undefined
+        const i = stack.lastIndexOf(token)
+        if (i === -1) return
+        if (probe()) {
+          pushOwnEntry()
+        } else {
+          stack.splice(i, 1)
+        }
+      }, 0)
     }
     window.addEventListener("popstate", onPop)
 
     return () => {
       window.removeEventListener("popstate", onPop)
+      if (settle !== undefined) window.clearTimeout(settle)
       const wasTop = isTop(token)
       const i = stack.lastIndexOf(token)
       if (i !== -1) stack.splice(i, 1)
@@ -87,7 +138,15 @@ export function useOverlayBackButton(enabled = true) {
       // with replaceState and re-reads it on popstate
       // (app/(dashboard)/chat/chat-client.tsx:73-136, :383), and is the
       // surface that showed this.
-      if (wasTop && holdsOwnEntry()) window.history.back()
+      if (wasTop && holdsOwnEntry()) {
+        // Only an overlay still on the stack can mistake the unwind for a
+        // back press; with nobody left to fool, a flag set here would sit
+        // until the next sheet opened and swallow its first real back.
+        unwinding = stack.length > 0
+        window.history.back()
+      } else if (stack.length === 0) {
+        unwinding = false
+      }
     }
   }, [enabled])
 }

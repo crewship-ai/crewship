@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 import { usePathname } from "next/navigation"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useRouteScrollRestoration } from "@/hooks/use-route-scroll-restoration"
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar"
 import { Spinner } from "@/components/ui/spinner"
 import { useSession } from "@/hooks/use-auth"
@@ -33,13 +34,12 @@ export default function DashboardLayout({
 
   /**
    * The page content scrolls inside this div, not the document, so the browser
-   * has nothing to reset on a route change — arriving at a new screen already
-   * scrolled halfway down the last one. Nothing about that is visible on a
+   * has nothing to manage on a route change — a new screen opened already
+   * scrolled halfway down the last one, and back opened a list at the top
+   * instead of where the person left it. Nothing about that is visible on a
    * desktop, where a route change usually fits the viewport anyway.
    */
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 })
-  }, [pathname])
+  useRouteScrollRestoration(scrollRef, pathname)
 
   useEffect(() => {
     if (status === "unauthenticated") {

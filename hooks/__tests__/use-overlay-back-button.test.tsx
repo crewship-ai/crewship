@@ -3,9 +3,24 @@ import { render, cleanup, act } from "@testing-library/react"
 
 import { useOverlayBackButton } from "../use-overlay-back-button"
 
-function Probe({ enabled = true }: { enabled?: boolean }) {
-  useOverlayBackButton(enabled)
+function Probe({ enabled = true, stillOpen }: { enabled?: boolean; stillOpen?: () => boolean }) {
+  useOverlayBackButton(enabled, stillOpen)
   return null
+}
+
+const back = () => act(() => { window.dispatchEvent(new PopStateEvent("popstate")) })
+
+/** Lets the hook's post-Escape settle timer (a 0ms task) run. */
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 5)) })
+
+function recordKeys() {
+  const seen: string[] = []
+  const listener = (e: Event) => seen.push((e as KeyboardEvent).key)
+  document.addEventListener("keydown", listener)
+  return {
+    escapes: () => seen.filter((k) => k === "Escape").length,
+    stop: () => document.removeEventListener("keydown", listener),
+  }
 }
 
 let pushSpy: ReturnType<typeof vi.spyOn>
@@ -13,11 +28,20 @@ let backSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   pushSpy = vi.spyOn(window.history, "pushState")
-  backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {})
+  // A real `back()` fires popstate in a later task, which would land in
+  // whichever test runs next. Firing it here, synchronously, keeps each
+  // test's traversal inside that test — and it is what the nested-sheet case
+  // needs to observe at all.
+  backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  })
 })
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  // The hook marks the current entry; with `back` mocked nothing unmarks it,
+  // and the next test would start inside an overlay it never opened.
+  window.history.replaceState(null, "", "/")
 })
 
 describe("back closes an overlay instead of leaving the page", () => {
@@ -113,5 +137,60 @@ describe("back closes an overlay instead of leaving the page", () => {
     act(() => { window.dispatchEvent(new PopStateEvent("popstate")) })
     document.removeEventListener("keydown", listener)
     expect(seen.filter((k) => k === "Escape")).toHaveLength(1)
+  })
+
+  it("keeps its entry when the overlay refuses to close", async () => {
+    // Radix prevents Escape's default whether it dismisses or is told not
+    // to, so the hook reads the overlay's own answer instead. An
+    // unsaved-changes guard that blocks Escape must block back the same way:
+    // the entry goes back on the stack, and the next back asks again rather
+    // than navigating underneath a sheet that is still showing.
+    const keys = recordKeys()
+    render(<Probe stillOpen={() => true} />)
+    expect(pushSpy).toHaveBeenCalledTimes(1)
+
+    back()
+    await settle()
+    expect(pushSpy, "entry was not restored after a refused Escape").toHaveBeenCalledTimes(2)
+    expect(pushSpy.mock.calls[1][0]).toMatchObject({ __overlay: true })
+
+    back()
+    await settle()
+    keys.stop()
+    expect(keys.escapes(), "second back did not ask the overlay again").toBe(2)
+  })
+
+  it("lets its entry go once the overlay is actually closing", async () => {
+    const keys = recordKeys()
+    render(<Probe stillOpen={() => false} />)
+    back()
+    await settle()
+    expect(pushSpy, "entry was restored for an overlay that closed").toHaveBeenCalledTimes(1)
+
+    // A second back during the exit animation belongs to the page.
+    back()
+    await settle()
+    keys.stop()
+    expect(keys.escapes()).toBe(1)
+  })
+
+  it("does not answer the popstate its own unwind produces", () => {
+    // Closing an inner sheet by its × unwinds the inner entry with
+    // history.back(). That fires popstate like any other, and the outer
+    // sheet — now innermost — took it for a back press and closed too.
+    window.history.replaceState({ __overlay: true }, "")
+    const keys = recordKeys()
+    const outer = render(<Probe />)
+    const inner = render(<Probe />)
+
+    inner.unmount()
+    expect(backSpy, "inner sheet did not unwind its entry").toHaveBeenCalledTimes(1)
+    expect(keys.escapes(), "outer sheet answered the unwind").toBe(0)
+
+    // The next real back press does reach the outer sheet.
+    back()
+    keys.stop()
+    expect(keys.escapes()).toBe(1)
+    outer.unmount()
   })
 })

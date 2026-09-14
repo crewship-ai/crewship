@@ -37,7 +37,7 @@ vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 3 }))
 // The sheet only renders when the toolbar believes it is on a phone.
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => true }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
-const setMobileNavOpen = vi.fn()
+const { setMobileNavOpen } = vi.hoisted(() => ({ setMobileNavOpen: vi.fn() }))
 vi.mock("@/lib/store", () => ({
   // The sheet is open for the whole of this file: what is under test is what
   // it offers, not how it is opened (that is mobile-tab-bar.test.tsx).

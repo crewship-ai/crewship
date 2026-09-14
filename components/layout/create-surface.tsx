@@ -547,6 +547,18 @@ function SheetGrabber() {
     }
   }
 
+  // A cancelled gesture is not a release. The browser cancels when something
+  // else claims the pointer — a scroll, a system gesture, the tab losing
+  // focus — and the event's coordinates are wherever that happened, so
+  // reading the threshold off it dismissed a sheet nobody let go of. The
+  // sheet springs back and nothing else.
+  const onPointerCancel = () => {
+    const d = drag.current
+    if (!d) return
+    drag.current = null
+    setOffset(d.sheet, null)
+  }
+
   return (
     <div
       // Still aria-hidden, deliberately. It is a pointer-only convenience that
@@ -557,7 +569,7 @@ function SheetGrabber() {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       className="hidden shrink-0 cursor-grab touch-none justify-center pt-2 pb-0.5 active:cursor-grabbing max-sm:flex group-data-[mobile=true]/surface:flex"
     >
       <span className="h-1 w-9 rounded-full bg-foreground/20" />

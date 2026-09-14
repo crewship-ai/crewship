@@ -45,10 +45,21 @@ function SheetOverlay({
   )
 }
 
-/** Nothing rendered; it exists so the hook's lifetime is the sheet's. */
+/**
+ * Exists so the hook's lifetime is the sheet's. The marker it renders is
+ * `hidden` and only there to reach the content element: after a back press
+ * the hook needs to know whether the sheet refused Escape, and Radix writes
+ * that answer to `data-state`, nowhere a hook can read it from.
+ */
 function OverlayBackButton() {
-  useOverlayBackButton()
-  return null
+  const marker = React.useRef<HTMLSpanElement>(null)
+  useOverlayBackButton(
+    true,
+    () =>
+      marker.current?.closest('[data-slot="sheet-content"]')?.getAttribute("data-state") ===
+      "open",
+  )
+  return <span ref={marker} hidden />
 }
 
 function SheetContent({

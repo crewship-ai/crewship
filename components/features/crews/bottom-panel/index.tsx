@@ -129,8 +129,11 @@ export function BottomPanel({
     window.addEventListener("resize", read)
     return () => window.removeEventListener("resize", read)
   }, [])
-  const ceiling = viewportH ? Math.round(viewportH * 0.6) : PANEL_HEIGHT_MAX
-  const clampedHeight = Math.min(height, Math.max(PANEL_HEIGHT_MIN, ceiling))
+  const ceiling = Math.max(
+    PANEL_HEIGHT_MIN,
+    viewportH ? Math.round(viewportH * 0.6) : PANEL_HEIGHT_MAX,
+  )
+  const clampedHeight = Math.min(height, ceiling)
 
   useEffect(() => {
     setTab(firstTab)
@@ -173,7 +176,7 @@ export function BottomPanel({
       document.removeEventListener("touchmove", onTouchMove)
       document.removeEventListener("touchend", onUp)
     }
-  }, [dragging, setHeight])
+  }, [dragging, setHeight, ceiling])
 
   const startDrag = (clientY: number) => {
     if (!open) return
@@ -225,10 +228,13 @@ export function BottomPanel({
             const step = e.key === "PageUp" || e.key === "PageDown" ? 64 : 16
             if (e.key === "ArrowUp" || e.key === "PageUp") {
               e.preventDefault()
-              setHeight(Math.min(PANEL_HEIGHT_MAX, height + step))
+              // From the rendered height, to the same ceiling as the drag:
+              // stepping from a stored desktop height on a phone changed the
+              // preference and nothing on screen.
+              setHeight(Math.min(ceiling, clampedHeight + step))
             } else if (e.key === "ArrowDown" || e.key === "PageDown") {
               e.preventDefault()
-              setHeight(Math.max(PANEL_HEIGHT_MIN, height - step))
+              setHeight(Math.max(PANEL_HEIGHT_MIN, clampedHeight - step))
             }
           }}
           className={cn(

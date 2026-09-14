@@ -4,7 +4,7 @@ import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws-test" }) }))
 vi.mock("@/hooks/use-inbox", () => ({ useInboxUnreadCount: () => 4 }))
 
-const setMobileNavOpen = vi.fn()
+const { setMobileNavOpen } = vi.hoisted(() => ({ setMobileNavOpen: vi.fn() }))
 vi.mock("@/lib/store", () => ({
   useAppStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({ mobileNavOpen: false, setMobileNavOpen }),

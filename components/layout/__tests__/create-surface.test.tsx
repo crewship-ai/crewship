@@ -646,3 +646,56 @@ describe("CreateSurface as a page", () => {
     expect(container.querySelector('[data-slot="create-surface-page"]')).toBeNull()
   })
 })
+
+// =============================================================================
+// The sheet's drag handle. It is aria-hidden by design (a pointer-only
+// duplicate of the header's ×), so it is reached by its class here, not a role.
+// =============================================================================
+
+describe("the sheet grabber", () => {
+  function grabber() {
+    const el = document.querySelector<HTMLElement>('[data-slot="dialog-content"] .cursor-grab')
+    expect(el, "no grabber rendered inside the dialog content").toBeTruthy()
+    return el!
+  }
+
+  function withSheetHeight(px: number) {
+    const sheet = document.querySelector<HTMLElement>('[data-slot="dialog-content"]')!
+    sheet.getBoundingClientRect = () => ({ height: px } as DOMRect)
+    return sheet
+  }
+
+  beforeEach(() => {
+    cleanup()
+    HTMLElement.prototype.setPointerCapture ??= () => {}
+    HTMLElement.prototype.releasePointerCapture ??= () => {}
+  })
+
+  it("dismisses on a release past a third of the sheet", async () => {
+    const onOpenChange = vi.fn()
+    render(<Harness onOpenChange={onOpenChange} />)
+    withSheetHeight(600)
+    const g = grabber()
+    fireEvent.pointerDown(g, { clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(g, { clientY: 400, pointerId: 1 })
+    fireEvent.pointerUp(g, { clientY: 400, pointerId: 1 })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("springs back, and only that, when the browser cancels the gesture", () => {
+    // A scroll or a system gesture claiming the pointer cancels the drag with
+    // its coordinates wherever that happened. Reading the dismissal threshold
+    // off that event closed a sheet nobody let go of.
+    const onOpenChange = vi.fn()
+    render(<Harness onOpenChange={onOpenChange} />)
+    const sheet = withSheetHeight(600)
+    const g = grabber()
+    fireEvent.pointerDown(g, { clientY: 100, pointerId: 1 })
+    fireEvent.pointerMove(g, { clientY: 400, pointerId: 1 })
+    expect(sheet.style.transform, "sheet did not follow the drag").toBe("translateY(300px)")
+
+    fireEvent.pointerCancel(g, { clientY: 400, pointerId: 1 })
+    expect(sheet.style.transform, "sheet did not spring back").toBe("")
+    expect(onOpenChange, "a cancelled drag dismissed the sheet").not.toHaveBeenCalled()
+  })
+})

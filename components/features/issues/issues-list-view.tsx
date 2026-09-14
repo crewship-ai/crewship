@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState, useRef, useEffect } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, ArrowUpDown, X } from "lucide-react"
 import {
   Table,
@@ -230,14 +230,20 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
    * `@md` on a container is 28rem. Measured, not guessed at from the viewport:
    * this view also renders in a narrowed pane beside an open issue.
    */
-  const scopeRef = useRef<HTMLDivElement>(null)
   const [wide, setWide] = useState<boolean | undefined>(undefined)
-  useEffect(() => {
-    const el = scopeRef.current
+  // A callback ref, not an effect: the root below unmounts whenever the list
+  // is empty and comes back as a new element. An effect that observed the
+  // first root once kept watching a detached node, and a remount into a
+  // narrower pane inherited `wide` from the old one — table hidden by the
+  // container query, cards never built, nothing on screen.
+  const scopeRef = useCallback((el: HTMLDivElement | null) => {
     if (!el || typeof ResizeObserver === "undefined") return
     const ro = new ResizeObserver(([entry]) => setWide(entry.contentRect.width >= 448))
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      setWide(undefined)
+    }
   }, [])
 
   if (issues.length === 0) {
