@@ -1792,7 +1792,7 @@ jobs:
     # This cap only ever bounds a hang. It must stay above the derived
     # `-timeout` plus job overhead — and the step CHECKS that before it
     # starts a single test, rather than trusting this comment.
-    timeout-minutes: 55
+    timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1813,12 +1813,25 @@ jobs:
           # runner, re-measured after #2031 lowered the test binary's
           # bcrypt cost.
           #
-          #   measured:  2026-08-20
-          #   value:     1405.3s, rounded down to 1400 — run 32395823919,
-          #              job 96512768782, `ok … 1405.311s`, the first green
-          #              run carrying the lowered test-binary bcrypt cost.
-          #              For scale, the five pre-#2031 green `main` runs
-          #              tabulated on the job above ran 1155.7-1708.1s.
+          #   measured:  2026-09-14
+          #   value:     2291-2358s over four consecutive `main` runs
+          #              (34828855474, 34833070262, 34835848487,
+          #              34840188893: 2313.9 / 2291.0 / 2357.8 / 2339.4s),
+          #              rounded down to 2300. The growth from the previous
+          #              1400 came with #2490 (durable work dispatch): it
+          #              added the vertical HTTP webhook/dispatch suites, the
+          #              memory mutation and canonical-read families and the
+          #              run-status tests to internal/api, all of which
+          #              exercise real timers under the race detector. The
+          #              old baseline's erosion alarm (2240s) then fired on
+          #              every push to main from 9c47bad6 on, while the same
+          #              job on the PR only warned. Sharding the package
+          #              (#2031) is the durable fix; this re-measure restores
+          #              a truthful budget in the meantime.
+          #
+          #   previous:  2026-08-20, 1405.3s rounded to 1400 — run
+          #              32395823919, job 96512768782, the first green run
+          #              carrying the lowered test-binary bcrypt cost.
           #
           # It is a point estimate and cannot be anything else: the spread
           # between two runners on the same tree is 1.48x, so no number of
@@ -1839,8 +1852,8 @@ jobs:
           # To re-measure: take `ok … Ns` off a few green `main` runs of
           # this job — the step prints it into the run summary for exactly
           # this purpose — and update the three lines above together.
-          RACE_API_BASELINE_SECONDS: "1400"
-          JOB_CAP_MINUTES: "55"       # MUST equal timeout-minutes above
+          RACE_API_BASELINE_SECONDS: "2300"
+          JOB_CAP_MINUTES: "85"       # MUST equal timeout-minutes above
           JOB_OVERHEAD_MINUTES: "6"   # checkout + toolchain + race build
         run: |
           set -euo pipefail
