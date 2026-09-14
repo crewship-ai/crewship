@@ -1216,3 +1216,54 @@ The complete release gaps remain open: shared admission for every producer,
 agent-facing R6 namespace/retry/MCP integration, R7 LLM proxy revocation,
 mailbox, real Claude T06/T07, and T14 power/OS crash evidence. Chat and webhook
 for the same agent may still overlap. No PR merge or deployment occurred.
+
+
+## 2026-09-13 — follow-ups after the second external review
+
+Two separate PRs, stacked on `feat/durable-work-parallelism` because
+`routine_webhook_receipts` only exists there; each is to be retargeted to
+`main` once #2490 lands. Neither is a claim about the parallel profile.
+
+### Throttled routine redelivery (fix/routine-redelivery-throttle)
+
+The per-token rate gate on the routine webhook route ran before the receipt
+lookup, so a redelivery of accepted work under throttling was answered
+`429`. The lookup now runs right after signature verification and before the
+rate gate and every other capacity pre-check: duplicate → `202 DEDUPED` with
+the original run, different body → `409`, unreadable ledger → `503`, new work
+under an exhausted limit → still `429`, bad signature → `401` before any
+lookup. The acceptance transaction still owns the atomic reservation. Red test
+first (real handler, real SQLite); restoring the old handler under an overlay
+fails it the same way; the entire `internal/api` package passed after the fix.
+
+### Routine receipts: read surface and retention (feat/routine-receipts-retention)
+
+`routine_webhook_receipts` gains `received_at`, `dedup_expires_at`,
+`body_bytes` and `profile` (append-only migration; rows without an age are
+dated from the migration and get the full window from there). Two read routes,
+`GET …/routine-webhook-receipts` and `…/{receiptId}`, and
+`crewship routine webhooks receipts list|get` expose identity, body
+fingerprint, the real `run_id` and its `run_status` (null when no run row
+exists), fenced to the workspace and paged at 100. The dedup window is 30 days
+from acceptance (§6); `pipeline.StartRoutineReceiptRetentionSweeper` runs
+daily from `cmd_start` and deletes expired receipts in bounded batches, after
+which the same identifier is new work again — the contract's answer, stated in
+the docs rather than implied. Not done here: durable pipeline dispatch
+recovery (routine execution stays direct), and the agent-webhook ledger's own
+retention sweeper (`work.Store.Sweep`) is still unscheduled — routine
+retention is not system retention, and that item stays open on its own.
+
+After the independent review (P2): the CLI said an absent run record meant
+"the dispatch failed before the engine wrote one", which the absence cannot
+establish — the receipt and the 202 exist before execution starts, so the run
+may simply not have begun, or its record may have been retained away. The
+CLI, API description, handler comments and docs now say "run record not
+available" and nothing more; a handler test holds execution on a barrier
+before the executor is entered and reads the receipt (null status), then
+releases it and reads the run's real status. Whole-flow tests added over the
+production handler: redelivery inside the window → same receipt/run; the real
+sweeper at day 31 → the same identity accepted again as new work (the
+executor's 24-hour key aged the same way); a migrated legacy-shaped receipt
+still deduplicates and conflicts; both legacy signature profiles are recorded
+and a fresh-timestamp redelivery is still a duplicate; the sweeper LOOP sweeps
+on start; and a source guard pins that `cmd_start` runs it.

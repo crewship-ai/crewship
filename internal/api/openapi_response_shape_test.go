@@ -258,6 +258,8 @@ var responseShapeContracts = []struct {
 	{name: "WorkCancelResponse", pointer: "/components/schemas/WorkCancelResponse", value: workCancelResponse{}},
 	{name: "WebhookDelivery", pointer: "/components/schemas/WebhookDelivery", value: webhookDeliveryView{}},
 	{name: "WebhookDeliveryPage", pointer: "/components/schemas/WebhookDeliveryPage", value: webhookDeliveryPage{}},
+	{name: "RoutineWebhookReceipt", pointer: "/components/schemas/RoutineWebhookReceipt", value: routineReceiptView{}},
+	{name: "RoutineWebhookReceiptPage", pointer: "/components/schemas/RoutineWebhookReceiptPage", value: routineReceiptPage{}},
 }
 
 func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {
