@@ -1,0 +1,62 @@
+{
+  "name": "append_to_unterminated_base",
+  "why": "Appending to a file with no trailing newline necessarily REWRITES its last line ('beta' -\u003e 'beta\\n'), so it is a delete plus an insert and removals are not empty. This is why append must not silently add the LF.",
+  "base": "alpha\nbeta",
+  "target": "alpha\nbeta\ngamma\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "alpha\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 2,
+      "line_count": 1,
+      "lines": [
+        "beta"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 2,
+      "line_count": 2,
+      "lines": [
+        "beta\n",
+        "gamma\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 2,
+      "line_count": 1,
+      "old_sha256": "f44e64e75f3948e9f73f8dfa94721c4ce8cbb4f265c4790c702b2d41cfbf2753"
+    }
+  ],
+  "applied": "alpha\nbeta\ngamma\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 2,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

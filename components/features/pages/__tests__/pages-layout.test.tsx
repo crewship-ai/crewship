@@ -37,6 +37,30 @@ vi.mock("@/components/features/pages/editor/section-access", () => ({
 vi.mock("@/components/features/pages/editor/section-history", () => ({
   EditorHistorySection: () => <div data-testid="section-history">History</div>,
 }))
+// A stand-in application host: reports "an application is on screen" for a
+// Page that has one, and follows the header's switch between the frame and
+// the panels — which is exactly the contract the real view keeps.
+vi.mock("@/components/features/pages/page-application", () => ({
+  PageApplicationView: ({
+    page,
+    panels,
+    fallback,
+    onAvailableChange,
+  }: {
+    page: { has_application?: boolean } | null
+    panels?: boolean
+    fallback: React.ReactNode
+    onAvailableChange?: (available: boolean) => void
+  }) => {
+    const available = page?.has_application === true
+    React.useEffect(() => {
+      onAvailableChange?.(available)
+      return () => onAvailableChange?.(false)
+    }, [available, onAvailableChange])
+    if (!available || panels) return <>{fallback}</>
+    return <div data-testid="application">Running application</div>
+  },
+}))
 
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
@@ -165,6 +189,61 @@ describe("PagesLayout", () => {
       const railAfter = document.querySelector('[data-slot="pages-rail"]')
       expect(railAfter).toBe(railBefore)
     })
+  })
+
+  // #2515: Edit hands the whole column to the editor. The rail must not be
+  // torn down for that — its scroll and filters have to be there on return —
+  // so it steps off-screen instead, and comes back with the same node.
+  it("keeps the rail mounted but out of the way while editing, and brings it back", async () => {
+    renderLayout([FLEET, CLOSE], "fleet-201")
+    await waitFor(() => expect(document.querySelector("[data-slot='panel-grid']")).toBeTruthy())
+    const rail = document.querySelector('[data-slot="pages-rail"]')
+    const aside = rail?.closest("aside")
+    expect(aside).toBeTruthy()
+    expect(aside?.hasAttribute("inert")).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeTruthy())
+    expect(document.querySelector('[data-slot="pages-rail"]')).toBe(rail)
+    expect(aside?.hasAttribute("inert")).toBe(true)
+    expect(aside?.getAttribute("aria-hidden")).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: /back to page/i }))
+    await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeNull())
+    expect(document.querySelector('[data-slot="pages-rail"]')).toBe(rail)
+    expect(aside?.hasAttribute("inert")).toBe(false)
+  })
+
+  // The Application | Panels switch replaces the "Stop application / show
+  // panels" bar. It sits in the page header, only while an application is
+  // on screen, and Panels closes the frame in this tab.
+  it("offers Application | Panels in the header only for a running application, and Panels shows the grid", async () => {
+    const APP: WirePage = { ...CLOSE, slug: "ops-lab", name: "Operations Lab", has_application: true, publication_version: 4 }
+    renderLayout([FLEET, APP], "fleet-201")
+    await waitFor(() => expect(document.querySelector("[data-slot='panel-grid']")).toBeTruthy())
+    expect(screen.queryByRole("group", { name: "Show" })).toBeNull()
+
+    cleanup()
+    renderLayout([FLEET, APP], "ops-lab")
+    await waitFor(() => expect(screen.getByTestId("application")).toBeTruthy())
+    // The view reports availability from an effect, one commit after the
+    // frame appears, so the header's switch is awaited on its own.
+    const group = await screen.findByRole("group", { name: "Show" })
+    expect(screen.getByRole("button", { name: "Application" }).getAttribute("aria-pressed")).toBe("true")
+    expect(group.textContent).not.toContain("Stop")
+
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }))
+    await waitFor(() => expect(screen.queryByTestId("application")).toBeNull())
+    expect(document.querySelector("[data-slot='panel-grid']")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Panels" }).getAttribute("aria-pressed")).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: "Application" }))
+    await waitFor(() => expect(screen.getByTestId("application")).toBeTruthy())
+
+    // Editing takes the whole column; the switch is not a thing to do while editing.
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+    await waitFor(() => expect(document.querySelector("[data-slot='page-editor']")).toBeTruthy())
+    expect(screen.queryByRole("group", { name: "Show" })).toBeNull()
   })
 
   it("renders the overview with no slug, and the page's grid with one", async () => {

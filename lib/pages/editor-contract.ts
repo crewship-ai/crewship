@@ -42,6 +42,19 @@ export const EDITOR_SECTION_LABEL: Readonly<Record<EditorSection, string>> = {
  * What each section is for, in one line, for the mobile picker and for the
  * empty states. Product copy is English throughout the editor.
  */
+/**
+ * The one line under each section's name in the editor's rail. Short on
+ * purpose: the rail is 256px wide and a name that needs a paragraph under it
+ * is a name that needs changing. The full sentence stays in
+ * `EDITOR_SECTION_HINT` for the `title` tooltip.
+ */
+export const EDITOR_SECTION_SUMMARY: Readonly<Record<EditorSection, string>> = {
+  content: "Name, description, panels",
+  data: "Producers and actions",
+  access: "People, tokens, public links",
+  history: "Versions, revisions, publications",
+}
+
 export const EDITOR_SECTION_HINT: Readonly<Record<EditorSection, string>> = {
   content: "This Page's name, its panels, and any custom application awaiting review",
   data: "Where each panel's data comes from, and the actions it offers",

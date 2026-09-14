@@ -1,0 +1,54 @@
+{
+  "name": "trailing_newline_absent",
+  "why": "Last line 'gamma' is hashed WITHOUT an LF, because the base has none. §8: 'poslední řádek LF nemít může.'",
+  "base": "alpha\nbeta\ngamma",
+  "target": "alpha\nbeta\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "alpha\n",
+        "beta\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "gamma"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 3,
+      "line_count": 1,
+      "old_sha256": "be9d587defa1f0c09ef49eb17e206983a5f8f8289e4281860bd0ee5a19592c67"
+    }
+  ],
+  "applied": "alpha\nbeta\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 3,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

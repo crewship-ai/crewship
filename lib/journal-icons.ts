@@ -46,6 +46,7 @@ import {
   Microscope,
   Network,
   PackageOpen,
+  Inbox,
   Play,
   PlugZap,
   RotateCcw,
@@ -98,6 +99,14 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "run.failed": XCircle,
   "run.cancelled": Ban,
   "run.timeout": AlertTriangle,
+
+  // Durable work ledger — the dispatch decision under a run. Accept and
+  // claim are the happy path; the other two are the states an operator has
+  // to act on, so they carry the warning shapes.
+  "work.accepted": Inbox,
+  "work.claimed": Play,
+  "work.needs_reconciliation": AlertTriangle,
+  "work.lease_lost": Unplug,
 
   // Security
   "keeper.request": ShieldAlert,

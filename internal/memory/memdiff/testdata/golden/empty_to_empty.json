@@ -1,0 +1,12 @@
+{
+  "name": "empty_to_empty",
+  "why": "Both sides empty: no ops, no removals. SplitLines(\"\") is zero lines, not one empty line.",
+  "base": "",
+  "target": "",
+  "ops": [],
+  "removals": [],
+  "applied": "",
+  "verify": {
+    "derived_removals_accepted": true
+  }
+}

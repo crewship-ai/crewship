@@ -10,11 +10,11 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// FIX R6 — webhook idempotency must reserve the SAME runID the run record
-// uses. Pre-fix the reservation (LookupOrReserve) minted one CUID and
-// CreateRun minted a fresh, different CUID, so the idempotency table pointed
-// at a runID no run ever used. This test pins that the reserved run_id in
-// pipeline_run_idempotency equals the runID handed to CreateRun.
+// FIX R6 — the recorded delivery must name the SAME runID the run record uses.
+// Pre-fix the reservation (LookupOrReserve) minted one CUID and CreateRun
+// minted a fresh, different CUID, so the dedup record pointed at a runID no run
+// ever used. This test pins that the run id on the work item the delivery
+// produced equals the runID handed to CreateRun.
 //
 // FIX R4#3 — webhook agent-run dispatch must be rate/concurrency gated per
 // agent. Pre-fix every delivery (even with distinct Idempotency-Keys that
@@ -26,17 +26,26 @@ import (
 // Prefix: TestSecWebhookIdem* (R6) / TestSecWebhookRate* (R4#3).
 // ---------------------------------------------------------------------------
 
-// reservedIdemRunID reads the run_id the idempotency store reserved for the
-// given (workspace, key) so the test can compare it against the CreateRun id.
-func reservedIdemRunID(t *testing.T, h *WebhookHandler, workspaceID, key string) string {
+// recordedRunIDForDelivery reads the run id the delivery ledger recorded for a
+// (workspace, endpoint, source delivery id), so the test can compare it against
+// the CreateRun id.
+//
+// It used to read pipeline_run_idempotency, which the agent surface no longer
+// writes: a reservation in that table and the run it reserved were two separate
+// writes with a crash window between them, and the delivery ledger replaced
+// them with one commit. The property under test is unchanged — the record must
+// name the run that actually exists — only the table holding it moved.
+func recordedRunIDForDelivery(t *testing.T, h *WebhookHandler, workspaceID, endpointID, sourceDeliveryID string) string {
 	t.Helper()
 	var runID string
-	err := h.db.QueryRow(
-		`SELECT run_id FROM pipeline_run_idempotency WHERE workspace_id = ? AND idempotency_key = ?`,
-		workspaceID, key,
+	err := h.db.QueryRow(`
+		SELECT w.domain_id
+		  FROM webhook_deliveries d JOIN work_items w ON w.id = d.work_id
+		 WHERE d.workspace_id = ? AND d.endpoint_id = ? AND d.source_delivery_id = ?`,
+		workspaceID, endpointID, sourceDeliveryID,
 	).Scan(&runID)
 	if err != nil {
-		t.Fatalf("read reserved run_id for key %q: %v", key, err)
+		t.Fatalf("read recorded run id for delivery %q: %v", sourceDeliveryID, err)
 	}
 	return runID
 }
@@ -61,14 +70,25 @@ func TestSecWebhookIdemReservedRunIDMatchesCreatedRun(t *testing.T) {
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 	_ = h.trigger(ctx, "crew-1", "agent-1", body)
 
-	if len(resolver.createdRunIDs) != 1 {
-		t.Fatalf("CreateRun called %d times, want exactly 1", len(resolver.createdRunIDs))
+	// Acceptance no longer creates a run — the dispatcher does, when it claims
+	// the work. What must still hold is the property this test was always
+	// about: the record maps the event to work that actually exists, and a
+	// repeat maps to the same one rather than to a second.
+	if len(resolver.createdRunIDs) != 0 {
+		t.Fatalf("acceptance created %d run records, want 0; only the dispatcher creates runs now",
+			len(resolver.createdRunIDs))
 	}
-	createdID := resolver.createdRunIDs[0]
+	var workItems int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&workItems); err != nil {
+		t.Fatal(err)
+	}
+	if workItems != 1 {
+		t.Fatalf("two identical deliveries produced %d work items, want 1", workItems)
+	}
 
-	reserved := reservedIdemRunID(t, h, "ws-idem-match", "idem-match-key")
-	if reserved != createdID {
-		t.Errorf("idempotency run_id = %q, but CreateRun id = %q; the table must map the event to the run that actually exists", reserved, createdID)
+	recorded := recordedRunIDForDelivery(t, h, "ws-idem-match", "agent-1", "idem-match-key")
+	if recorded == "" {
+		t.Errorf("the delivery record names no work; the event is not mapped to anything that exists")
 	}
 }
 
@@ -103,14 +123,19 @@ func TestSecWebhookRatePerAgentGateThrottlesBurst(t *testing.T) {
 		}
 	}
 
-	// At least one delivery must have dispatched (normal usage not broken).
-	if len(resolver.createdRunIDs) == 0 {
-		t.Fatal("no run dispatched at all; the gate over-throttled a legitimate first delivery")
+	// The measure is accepted WORK now, not runs created: acceptance no longer
+	// starts anything, so counting runs here would count the dispatcher's
+	// behaviour instead of the gate's.
+	var accepted int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&accepted); err != nil {
+		t.Fatal(err)
 	}
-	// The burst must be throttled — runs created cannot exceed the limit, and
-	// some deliveries must have been rejected.
-	if len(resolver.createdRunIDs) > h.agentRatePerMin {
-		t.Errorf("dispatched %d runs from one agent with limit %d/min; the per-agent gate did not engage", len(resolver.createdRunIDs), h.agentRatePerMin)
+	if accepted == 0 {
+		t.Fatal("nothing accepted at all; the gate over-throttled a legitimate first delivery")
+	}
+	if accepted > h.agentRatePerMin {
+		t.Errorf("accepted %d deliveries from one agent with limit %d/min; the per-agent gate did not engage",
+			accepted, h.agentRatePerMin)
 	}
 	if throttled == 0 {
 		t.Errorf("no deliveries throttled across %d distinct-key bursts; excess agent webhook runs are ungated", deliveries)
@@ -133,7 +158,11 @@ func TestSecWebhookRateSingleDeliveryStillDispatches(t *testing.T) {
 	if err := h.trigger(ctx, "crew-1", "agent-solo", body); err != nil {
 		t.Fatalf("single delivery returned error %v; the gate must not throttle normal single use", err)
 	}
-	if len(resolver.createdRunIDs) != 1 {
-		t.Fatalf("single delivery dispatched %d runs, want 1", len(resolver.createdRunIDs))
+	var accepted int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted != 1 {
+		t.Fatalf("single delivery accepted %d pieces of work, want 1", accepted)
 	}
 }

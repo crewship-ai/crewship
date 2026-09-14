@@ -33,12 +33,19 @@ func TestCredSecretPaths(t *testing.T) {
 		credType string
 		want     []string
 	}{
-		{"SECRET", []string{"/secrets/writer/GH_TOKEN"}},
-		{"CLI_TOKEN", []string{"/secrets/writer/GH_TOKEN"}},
-		{"GENERIC_SECRET", []string{"/secrets/writer/GH_TOKEN"}},
-		{"USERPASS", []string{"/secrets/writer/GH_TOKEN_USERNAME", "/secrets/writer/GH_TOKEN_PASSWORD"}},
-		{"SSH_KEY", []string{"/secrets/writer/ssh/GH_TOKEN"}},
-		{"CERTIFICATE", []string{"/secrets/writer/certs/GH_TOKEN.pem"}},
+		// Each credential now yields TWO paths: the flat directory a container
+		// started before per-run secrets still has, and the glob that reaches
+		// every live run's own directory. Naming only the first is what turned
+		// revocation into a silent no-op.
+		{"SECRET", []string{"/secrets/writer/GH_TOKEN", "/secrets/writer/*/GH_TOKEN"}},
+		{"CLI_TOKEN", []string{"/secrets/writer/GH_TOKEN", "/secrets/writer/*/GH_TOKEN"}},
+		{"GENERIC_SECRET", []string{"/secrets/writer/GH_TOKEN", "/secrets/writer/*/GH_TOKEN"}},
+		{"USERPASS", []string{
+			"/secrets/writer/GH_TOKEN_USERNAME", "/secrets/writer/*/GH_TOKEN_USERNAME",
+			"/secrets/writer/GH_TOKEN_PASSWORD", "/secrets/writer/*/GH_TOKEN_PASSWORD",
+		}},
+		{"SSH_KEY", []string{"/secrets/writer/ssh/GH_TOKEN", "/secrets/writer/*/ssh/GH_TOKEN"}},
+		{"CERTIFICATE", []string{"/secrets/writer/certs/GH_TOKEN.pem", "/secrets/writer/*/certs/GH_TOKEN.pem"}},
 		{"API_KEY", nil},      // sidecar-injected, never on disk
 		{"AI_CLI_TOKEN", nil}, // ditto
 	}
@@ -73,9 +80,9 @@ func TestCodexProviderRevokeRequiresSubscriptionMode(t *testing.T) {
 func TestCredSecretPaths_IncludesMultiPartFields(t *testing.T) {
 	got := credSecretPaths("writer", "AWS", "GENERIC_SECRET", "", "", []string{"region", "secret_access_key"})
 	want := []string{
-		"/secrets/writer/AWS",
-		"/secrets/writer/AWS_REGION",
-		"/secrets/writer/AWS_SECRET_ACCESS_KEY",
+		"/secrets/writer/AWS", "/secrets/writer/*/AWS",
+		"/secrets/writer/AWS_REGION", "/secrets/writer/*/AWS_REGION",
+		"/secrets/writer/AWS_SECRET_ACCESS_KEY", "/secrets/writer/*/AWS_SECRET_ACCESS_KEY",
 	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("paths = %v, want %v", got, want)
@@ -90,19 +97,19 @@ func TestCredSecretPaths_IncludesMultiPartFields(t *testing.T) {
 	// An unsafe derived name is dropped rather than interpolated into the `rm`.
 	// Delivery would have refused to write it, so there is nothing to remove,
 	// and the one thing that must not happen is it reaching a shell.
-	if got := credSecretPaths("writer", "AWS", "SECRET", "", "", []string{"a;rm -rf /"}); strings.Join(got, "|") != "/secrets/writer/AWS" {
+	if got := credSecretPaths("writer", "AWS", "SECRET", "", "", []string{"a;rm -rf /"}); strings.Join(got, "|") != "/secrets/writer/AWS|/secrets/writer/*/AWS" {
 		t.Errorf("paths = %v, want only the primary — an unsafe part name must not reach the shell", got)
 	}
 }
 
 func TestBuildCredRemoveScript(t *testing.T) {
-	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET", "", "", nil); s != "rm -f '/secrets/writer/GH_TOKEN'" {
+	if s := buildCredRemoveScript("writer", "GH_TOKEN", "SECRET", "", "", nil); s != "rm -f '/secrets/writer/GH_TOKEN' '/secrets/writer/'*'/GH_TOKEN'" {
 		t.Errorf("SECRET script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "DB", "USERPASS", "", "", nil); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/DB_PASSWORD'" {
+	if s := buildCredRemoveScript("writer", "DB", "USERPASS", "", "", nil); s != "rm -f '/secrets/writer/DB_USERNAME' '/secrets/writer/'*'/DB_USERNAME' '/secrets/writer/DB_PASSWORD' '/secrets/writer/'*'/DB_PASSWORD'" {
 		t.Errorf("USERPASS script = %q", s)
 	}
-	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY", "", "", nil); s != "rm -f '/secrets/writer/ssh/KEY'" {
+	if s := buildCredRemoveScript("writer", "KEY", "SSH_KEY", "", "", nil); s != "rm -f '/secrets/writer/ssh/KEY' '/secrets/writer/'*'/ssh/KEY'" {
 		t.Errorf("SSH_KEY script = %q", s)
 	}
 	if s := buildCredRemoveScript("writer", "X", "API_KEY", "", "", nil); s != "" {
@@ -237,15 +244,16 @@ func TestReconcileRevokedCredential_ExecError_Tolerated(t *testing.T) {
 // #2428: a Codex login is the one credential written outside /secrets — into
 // the agent's HOME, where Codex reads it — and revoke must reach it there.
 func TestCredSecretPaths_CodexLoginLivesInHome(t *testing.T) {
+	// Both HOME layouts: the per-run glob and the pre-upgrade flat path.
 	got := credSecretPaths("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "OPENAI", "", []string{"region"})
-	if strings.Join(got, "|") != "/crew/agents/reviewer/.codex/auth.json" {
+	if strings.Join(got, "|") != "/crew/runs/reviewer/*/.codex/auth.json|/crew/agents/reviewer/.codex/auth.json" {
 		t.Errorf("paths = %v", got)
 	}
 	// Same type, other vendor: still never on disk.
 	if got := credSecretPaths("reviewer", "CLAUDE_CODE_OAUTH_TOKEN", "AI_CLI_TOKEN", "ANTHROPIC", "", nil); got != nil {
 		t.Errorf("Anthropic login must not map to a file: %v", got)
 	}
-	if s := buildCredRemoveScript("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "openai", "", nil); s != "rm -f '/crew/agents/reviewer/.codex/auth.json'" {
+	if s := buildCredRemoveScript("reviewer", "OPENAI_API_KEY", "AI_CLI_TOKEN", "openai", "", nil); s != "rm -f '/crew/runs/reviewer/'*'/.codex/auth.json' '/crew/agents/reviewer/.codex/auth.json'" {
 		t.Errorf("remove script = %q", s)
 	}
 }
@@ -260,8 +268,12 @@ func TestCredSecretPaths_GeminiLoginLivesInHome(t *testing.T) {
 		wantPaths  string
 		wantScript string
 	}{
-		{"google login", "AI_CLI_TOKEN", "GOOGLE", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
-		{"google login, lower-case provider", "AI_CLI_TOKEN", "google", "/crew/agents/researcher/.gemini/oauth_creds.json", "rm -f '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google login", "AI_CLI_TOKEN", "GOOGLE",
+			"/crew/runs/researcher/*/.gemini/oauth_creds.json|/crew/agents/researcher/.gemini/oauth_creds.json",
+			"rm -f '/crew/runs/researcher/'*'/.gemini/oauth_creds.json' '/crew/agents/researcher/.gemini/oauth_creds.json'"},
+		{"google login, lower-case provider", "AI_CLI_TOKEN", "google",
+			"/crew/runs/researcher/*/.gemini/oauth_creds.json|/crew/agents/researcher/.gemini/oauth_creds.json",
+			"rm -f '/crew/runs/researcher/'*'/.gemini/oauth_creds.json' '/crew/agents/researcher/.gemini/oauth_creds.json'"},
 		{"google api key never touches disk", "API_KEY", "GOOGLE", "", ""},
 	}
 	for _, tc := range cases {
@@ -274,5 +286,99 @@ func TestCredSecretPaths_GeminiLoginLivesInHome(t *testing.T) {
 				t.Errorf("remove script = %q, want %q", s, tc.wantScript)
 			}
 		})
+	}
+}
+
+// E0 gave every run its own secrets directory and its own HOME. That silently
+// turned revocation into a no-op: the paths here named the old shared
+// locations, `rm -f` reported success on files that were not there, and the
+// revoked credential stayed on disk in every live run — while the vault showed
+// it gone.
+func TestCredSecretPaths_ReachEveryLiveRun(t *testing.T) {
+	tests := []struct {
+		name     string
+		credType string
+		provider string
+		mode     string
+		envVar   string
+		fields   []string
+		wantAny  []string // substrings that must appear among the paths
+	}{
+		{
+			name: "generic secret covers both layouts", credType: "GENERIC_SECRET", envVar: "GH_TOKEN",
+			wantAny: []string{"/secrets/writer/*/GH_TOKEN", "/secrets/writer/GH_TOKEN"},
+		},
+		{
+			name: "ssh key", credType: "SSH_KEY", envVar: "DEPLOY_KEY",
+			wantAny: []string{"/secrets/writer/*/ssh/DEPLOY_KEY", "/secrets/writer/ssh/DEPLOY_KEY"},
+		},
+		{
+			name: "userpass covers both halves in both layouts", credType: "USERPASS", envVar: "DB",
+			wantAny: []string{
+				"/secrets/writer/*/DB_USERNAME", "/secrets/writer/*/DB_PASSWORD",
+				"/secrets/writer/DB_USERNAME", "/secrets/writer/DB_PASSWORD",
+			},
+		},
+		{
+			name: "multi-part fields follow the same layouts", credType: "GENERIC_SECRET", envVar: "AWS",
+			fields:  []string{"secret_access_key"},
+			wantAny: []string{"/secrets/writer/*/AWS_SECRET_ACCESS_KEY", "/secrets/writer/AWS_SECRET_ACCESS_KEY"},
+		},
+		{
+			// A Codex login is the one credential written outside /secrets, into
+			// HOME — which is per run now, so it needs the glob too.
+			name:     "codex login lives in HOME, which is now per run",
+			credType: "AI_CLI_TOKEN", provider: "OPENAI", envVar: "OPENAI_API_KEY",
+			wantAny: []string{"/crew/runs/writer/*/.codex/auth.json", "/crew/agents/writer/.codex/auth.json"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := credSecretPaths("writer", tc.envVar, tc.credType, tc.provider, tc.mode, tc.fields)
+			joined := strings.Join(got, " ")
+			for _, want := range tc.wantAny {
+				if !strings.Contains(joined, want) {
+					t.Errorf("no path contains %q; a revoked credential would survive there.\ngot: %v", want, got)
+				}
+			}
+		})
+	}
+}
+
+// The glob has to survive quoting or it is not a glob. Every other character
+// must stay inside the quotes, because the shell is the one place a credential
+// name could stop being data.
+func TestQuoteWithGlob_ExpandsOnlyTheStarWeAdded(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"/secrets/writer/GH_TOKEN", "'/secrets/writer/GH_TOKEN'"},
+		{"/secrets/writer/*/GH_TOKEN", "'/secrets/writer/'*'/GH_TOKEN'"},
+		{"/crew/runs/writer/*/.codex/auth.json", "'/crew/runs/writer/'*'/.codex/auth.json'"},
+	}
+	for _, tc := range tests {
+		if got := quoteWithGlob(tc.in); got != tc.want {
+			t.Errorf("quoteWithGlob(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	// A name that somehow carried a quote must not break out of it. Delivery
+	// refuses such a name, so this asserts the second line of defence.
+	got := quoteWithGlob("/secrets/writer/EVIL'; rm -rf /; '")
+	if strings.Count(got, "*") != 0 {
+		t.Errorf("quoteWithGlob invented a glob: %q", got)
+	}
+}
+
+// The whole script, so the quoting and the paths are checked together rather
+// than each being right on its own.
+func TestBuildCredRemoveScript_GlobsAreShellVisible(t *testing.T) {
+	script := buildCredRemoveScript("writer", "GH_TOKEN", "GENERIC_SECRET", "", "", nil)
+	if !strings.Contains(script, "'/secrets/writer/'*'/GH_TOKEN'") {
+		t.Errorf("the per-run glob is not shell-visible in the script:\n%s", script)
+	}
+	if strings.Contains(script, "'/secrets/writer/*/GH_TOKEN'") {
+		t.Errorf("the glob is inside the quotes, so the shell will treat it as a literal path:\n%s", script)
 	}
 }

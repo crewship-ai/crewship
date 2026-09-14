@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -20,16 +21,29 @@ type DB struct {
 	// goroutine is responsible for folding the WAL back. Read by
 	// ManagedWAL() so the boot-wiring test can assert the pairing.
 	managedWAL bool
+	// synchronous records the `synchronous` pragma this handle was opened
+	// with, so a caller can assert it rather than trust the default.
+	synchronous string
 }
 
-// Option customises Open. The zero set of options is the safe standalone
-// configuration every short-lived caller (CLI commands, migrations, tests)
-// should use.
+// Option customises Open. The defaults are the safe configuration every
+// short-lived caller (CLI commands, migrations, tests) should use: FULL
+// durability and a 30-second busy timeout.
 type Option func(*openOptions)
 
 type openOptions struct {
-	managedWAL bool
+	managedWAL  bool
+	synchronous string
+	busyTimeout time.Duration
 }
+
+// Synchronous levels. FULL fsyncs the WAL at every commit; NORMAL does not,
+// which is why a NORMAL commit survives a process crash but can vanish after an
+// OS crash or a power cut. See https://www.sqlite.org/pragma.html#pragma_synchronous.
+const (
+	SynchronousFull   = "FULL"
+	SynchronousNormal = "NORMAL"
+)
 
 // WithManagedWAL disables SQLite's inline autocheckpoint
 // (`wal_autocheckpoint=0`) so that no request-serving write transaction
@@ -48,16 +62,72 @@ func WithManagedWAL() Option {
 	return func(o *openOptions) { o.managedWAL = true }
 }
 
+// WithSynchronous sets the `synchronous` pragma. The default is FULL, because
+// the durable-work contract requires an accepted webhook to survive an OS crash,
+// not merely a process crash — and NORMAL in WAL mode explicitly does not
+// promise that (https://www.sqlite.org/pragma.html#pragma_synchronous).
+//
+// Measured cost on crewship-dev (12 vCPU, ext4, non-rotational), 200 commits,
+// under the managed-WAL configuration the daemon actually runs: a two-statement
+// acceptance transaction goes from 288 microseconds at NORMAL to 21488 at FULL,
+// p95 539 to 55770. That is ~21 ms of fsync per commit and a ceiling near 42
+// commits per second on the single writer — the number the capacity report has
+// to carry. In absolute terms it is 55.8 ms at p95 against a 500 ms acceptance
+// budget, so the headroom is an order of magnitude, not two.
+//
+// An earlier measurement said 6.4 ms and ~150 commits/s. It was taken with
+// SQLite's inline autocheckpoint, which this daemon never uses; with
+// autocheckpoint off the WAL grows between checkpointer ticks, so each commit's
+// fsync flushes more. The numbers and the harness are in
+// docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
+//
+// Pass SynchronousNormal only where losing the last few commits to a power cut
+// is genuinely acceptable — a rebuildable index, a throwaway fixture — and say
+// which in the call. It is not a performance knob for the main database.
+func WithSynchronous(mode string) Option {
+	return func(o *openOptions) { o.synchronous = mode }
+}
+
+// Synchronous reports the level this handle was opened with.
+func (d *DB) Synchronous() string { return d.synchronous }
+
+// WithBusyTimeout overrides `busy_timeout`, which is 30 s by default.
+//
+// A shorter one is the only way to bound how long a write can block, because a
+// context deadline does not: modernc.org/sqlite passes context.Background() into
+// Commit and Rollback (tx.go:36,50,58), so only statement execution is
+// interruptible. Measured: a 500 ms context against a write lock held for 5 s
+// returned after 5036 ms. An HTTP path with an acceptance budget therefore needs
+// a handle whose busy_timeout is smaller than that budget — see
+// internal/work's acceptance handle.
+func WithBusyTimeout(d time.Duration) Option {
+	return func(o *openOptions) { o.busyTimeout = d }
+}
+
 // ManagedWAL reports whether this handle was opened with WithManagedWAL.
 func (d *DB) ManagedWAL() bool { return d.managedWAL }
 
 // Open parses the given database URL (e.g. "file:/path/to/db"), creates the
 // parent directory if needed, and opens an SQLite connection with WAL mode,
-// foreign keys, and a 5-second busy timeout.
+// foreign keys, synchronous=FULL and a 30-second busy timeout. Override the
+// last two with WithSynchronous and WithBusyTimeout.
 func Open(databaseURL string, opts ...Option) (*DB, error) {
-	var o openOptions
+	o := openOptions{
+		// FULL by default: a commit that survives only a process crash is not
+		// durable enough for accepted work. Opt out explicitly, per handle.
+		synchronous: SynchronousFull,
+		busyTimeout: 30 * time.Second,
+	}
 	for _, fn := range opts {
 		fn(&o)
+	}
+	switch o.synchronous {
+	case SynchronousFull, SynchronousNormal:
+	default:
+		return nil, fmt.Errorf("open sqlite: unsupported synchronous mode %q", o.synchronous)
+	}
+	if o.busyTimeout <= 0 {
+		return nil, fmt.Errorf("open sqlite: busy timeout must be positive, got %s", o.busyTimeout)
 	}
 
 	path, err := parseDSN(databaseURL)
@@ -110,9 +180,9 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 	// actually a transient lock contention. 30s matches the
 	// background purge period so a worst-case login retry waits
 	// out one full cycle instead of dying mid-cycle.
-	dsn := path + sep + "_pragma=busy_timeout(30000)" +
+	dsn := path + sep + fmt.Sprintf("_pragma=busy_timeout(%d)", o.busyTimeout.Milliseconds()) +
 		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=synchronous(" + o.synchronous + ")" +
 		"&_pragma=foreign_keys(ON)" +
 		"&_pragma=cache_size(-65536)" +
 		"&_pragma=temp_store(MEMORY)" +
@@ -218,7 +288,7 @@ func Open(databaseURL string, opts ...Option) (*DB, error) {
 		_ = os.Chmod(filePath+"-shm", 0600)
 	}
 
-	return &DB{DB: db, path: path, managedWAL: o.managedWAL}, nil
+	return &DB{DB: db, path: path, managedWAL: o.managedWAL, synchronous: o.synchronous}, nil
 }
 
 // Path returns the resolved filesystem path of the SQLite database file.

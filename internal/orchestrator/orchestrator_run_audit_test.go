@@ -75,8 +75,12 @@ func TestRunAgent_RecordsAuditOnCompletion(t *testing.T) {
 	if got.action != "agent.run.completed" {
 		t.Errorf("action = %q, want agent.run.completed", got.action)
 	}
-	if got.entityID != "chat1" {
-		t.Errorf("entityID = %q, want chat1 (run id)", got.entityID)
+	// The audited entity is the RUN. It used to read "chat1" only because
+	// RunState.ID was the chat id; since E0 it is the run id the dispatch
+	// path minted, so one chat's successive runs no longer audit as one
+	// entity.
+	if got.entityID != covRunID {
+		t.Errorf("entityID = %q, want %q (the run id, not the chat id)", got.entityID, covRunID)
 	}
 	if got.userID != "user-1" {
 		t.Errorf("userID = %q, want user-1 (req.OpenedByUserID)", got.userID)

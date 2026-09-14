@@ -549,6 +549,12 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		// burn to the wall-clock timeout. See orchestrator.RoutineMaxTurns.
 		MaxTurns: orchestrator.RoutineMaxTurns,
 	})
+	// E0: pass through the run id already minted above — the same one
+	// CreateRun records and journal.WithRunID stamps on every entry beneath
+	// this run. It is what the orchestrator derives this run's tmux session
+	// and /tmp file set from, so a cron tick landing while a chat run of the
+	// same agent is live no longer overwrites it.
+	req.RunID = runID
 
 	// 6. Create run record
 	runMeta := map[string]interface{}{

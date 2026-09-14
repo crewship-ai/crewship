@@ -10,16 +10,15 @@ import * as React from "react"
 import Link from "next/link"
 import {
   ArrowUpRight,
-  CalendarClock,
   CheckCircle2,
   ChevronRight,
   Clock,
   Globe,
   KeyRound,
   PenSquare,
+  PlayCircle,
   Puzzle,
   ShieldAlert,
-  Webhook,
   XCircle,
   Zap,
 } from "lucide-react"
@@ -46,7 +45,10 @@ import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineStepDefinition } from "./routine-step-definition"
-import { RoutineWorkOverview } from "./routine-work-overview"
+import { RoutineStepSpine } from "./routine-step-spine"
+import { routineInputSpecs } from "@/lib/routine-inputs"
+import { routineEffects } from "@/lib/routine-effects"
+import { isRecord } from "@/lib/routine-step-describe"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineBudgetCard } from "./routine-budget-card"
 import { RoutineCreateDialog } from "./routine-create-dialog"
@@ -97,22 +99,6 @@ interface Props {
  * targets this routine; a permanent third option that is empty on nearly every
  * routine is the scaffolding this page was built to remove.
  */
-type TriggerKind = "schedules" | "webhooks" | "automations"
-
-const TRIGGER_KINDS: readonly TriggerKind[] = ["schedules", "webhooks", "automations"]
-
-const TRIGGER_TITLE: Record<TriggerKind, string> = {
-  schedules: "When it runs",
-  webhooks: "When it runs",
-  automations: "When it runs",
-}
-
-const TRIGGER_ICON: Record<TriggerKind, React.ComponentType<{ className?: string }>> = {
-  schedules: CalendarClock,
-  webhooks: Webhook,
-  automations: Zap,
-}
-
 export function RoutineCardDetail({
   routine,
   workspaceId,
@@ -123,22 +109,23 @@ export function RoutineCardDetail({
 }: Props) {
   const [selectedView, setView] = useUrlSelection("view")
   const view = ROUTINE_VIEWS.find((v) => v === selectedView) ?? "definition"
-  const [editing, setEditing] = React.useState(false)
   const { role } = useAbilities()
   const canEdit = roleAtLeast(role, "MANAGER")
+  // `?view=edit` IS the editing state (#2519): reload, Back and Forward all
+  // land where the address says, and leaving the routine clears it.
+  const editing = (selectedView === "edit" || selectedView === "settings") && canEdit
   const [draft, setDraft] = React.useState<{
     definition: Record<string, unknown>
     version: number
   } | null>(null)
+  const openEditor = React.useCallback(() => setView("edit"), [setView])
   React.useEffect(() => {
-    if (editRequest > 0 && canEdit) setEditing(true)
-  }, [editRequest, canEdit])
-  React.useEffect(() => {
-    if ((selectedView === "edit" || selectedView === "settings") && canEdit) {
-      setEditing(true)
-      setView("definition")
-    }
-  }, [selectedView, canEdit, setView])
+    if (editRequest > 0 && canEdit) openEditor()
+  }, [editRequest, canEdit, openEditor])
+  const closeEditor = React.useCallback(() => {
+    setDraft(null)
+    setView(null, { replace: true })
+  }, [setView])
   const [selected, setSelected] = React.useState<string | null>(null)
   // Separate from `selected`: selection is a persistent choice, focus a
   // one-shot "bring this into view". Merged, a re-render could yank the
@@ -148,8 +135,6 @@ export function RoutineCardDetail({
     setSelected(id)
     setFocus(null)
   }, [])
-  const [triggerKind, setTriggerKind] = React.useState<TriggerKind>("schedules")
-  const [manageTriggers, setManageTriggers] = React.useState(false)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
   // per-row buttons and the RBAC handling. Dropping the tab must not
   // drop the capability, so Manage mounts the real thing rather than a
@@ -157,11 +142,7 @@ export function RoutineCardDetail({
   const [manageRuns, setManageRuns] = React.useState(false)
 
   const { records } = usePipelineRunRecords(workspaceId, routine.slug)
-  const {
-    schedules,
-    loading: schedulesLoading,
-    error: schedulesError,
-  } = usePipelineSchedules(workspaceId)
+  const { schedules } = usePipelineSchedules(workspaceId)
   const { automations } = useAutomations(workspaceId)
 
   const mine = React.useMemo(
@@ -196,12 +177,6 @@ export function RoutineCardDetail({
     const raw = (routine.definition as { max_concurrent?: unknown })?.max_concurrent
     return typeof raw === "number" && raw > 0 ? raw : undefined
   }, [routine.definition])
-  // Losing the automations view when the last rule is deleted must not strand
-  // the card on an empty pane.
-  React.useEffect(() => {
-    if (triggerKind === "automations" && myAutomations.length === 0)
-      setTriggerKind("schedules")
-  }, [triggerKind, myAutomations.length])
   const steps = React.useMemo(() => {
     const raw = (routine.definition as { steps?: unknown })?.steps
     return Array.isArray(raw) ? (raw as { type?: string }[]) : []
@@ -212,6 +187,25 @@ export function RoutineCardDetail({
   // read as a broken page, not as a small recipe.
   const mapHeight = Math.min(560, Math.max(300, steps.length * 78))
 
+  if (editing) {
+    return (
+      <div className="flex h-full min-h-0 flex-col" data-testid="routine-editor-page">
+        <RoutineCreateDialog
+          presentation="page"
+          workspaceId={workspaceId}
+          routine={routine}
+          initialDraft={draft?.definition}
+          open
+          onClose={closeEditor}
+          onCreated={() => {
+            closeEditor()
+            onChanged()
+          }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4 p-4">
       {/* Identity, as a card that scrolls with the page rather than a
@@ -221,30 +215,12 @@ export function RoutineCardDetail({
         routine={routine}
         workspaceId={workspaceId}
         onChanged={onChanged}
-        onEdit={() => setEditing(true)}
+        onEdit={canEdit ? openEditor : undefined}
         actions={actions}
       >
-        {statusPills}
-        <Pill tone="default">
-          {mine.some((s) => s.enabled) ? "scheduled" : "manual / event"}
-        </Pill>
-        {myAutomations.length > 0 && (
-          <span data-testid="routine-automations-pill">
-            <Pill tone="default">
-              <Zap className="h-3 w-3" />
-              {myAutomations.length} automation
-              {myAutomations.length === 1 ? "" : "s"}
-            </Pill>
-          </span>
-        )}
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
       </RoutineIdentityHeader>
-      <RoutineNavigation
-        slug={routine.slug}
-        view={view}
-        onChange={setView}
-        runId={lastRun?.id}
-      />
+      <RoutineNavigation slug={routine.slug} view={view} onChange={setView} />
       {view === "versions" && (
         <div className="space-y-5">
           <RoutineVersionsTab
@@ -253,15 +229,21 @@ export function RoutineCardDetail({
             onRolledBack={onChanged}
             onPrepareDraft={(definition, version) => {
               setDraft({ definition, version })
-              setEditing(true)
-              setView("definition")
+              openEditor()
             }}
           />
-          <RoutineComparison
-            key={`${workspaceId}:${routine.slug}`}
-            workspaceId={workspaceId}
-            slug={routine.slug}
-          />
+          <details className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">
+              Compare two versions on the same data · live runs, real costs
+            </summary>
+            <div className="mt-3">
+              <RoutineComparison
+                key={`${workspaceId}:${routine.slug}`}
+                workspaceId={workspaceId}
+                slug={routine.slug}
+              />
+            </div>
+          </details>
         </div>
       )}
       {view === "plan" && (
@@ -278,6 +260,20 @@ export function RoutineCardDetail({
             pipelineId={routine.id}
             slug={routine.slug}
           />
+          {myAutomations.length > 0 && (
+            <DetailCard title="Automations" icon={Zap}>
+              <div data-testid="routine-automations" className="space-y-2.5">
+                <p className="text-[12px] text-muted-foreground">
+                  <span data-testid="routine-automations-count" className="text-foreground/85">
+                    {myAutomations.length}
+                  </span>{" "}
+                  {myAutomations.length === 1 ? "automation" : "automations"} can start this
+                  routine.
+                </p>
+                <AutomationList automations={myAutomations} />
+              </div>
+            </DetailCard>
+          )}
           <details className="rounded-xl border border-hairline p-4">
             <summary className="cursor-pointer text-sm font-medium">
               Access and budget
@@ -316,22 +312,6 @@ export function RoutineCardDetail({
           </details>
         </div>
       )}
-      {editing && (
-        <RoutineCreateDialog
-          workspaceId={workspaceId}
-          routine={routine}
-          initialDraft={draft?.definition}
-          open={editing}
-          onClose={() => {
-            setEditing(false)
-            setDraft(null)
-          }}
-          onCreated={() => {
-            setDraft(null)
-            onChanged()
-          }}
-        />
-      )}
 
       {view === "definition" && draft && (
         <DetailCard>
@@ -341,74 +321,68 @@ export function RoutineCardDetail({
           </p>
           <button
             className="mt-2 text-xs text-primary"
-            onClick={() => {
-              setDraft(null)
-              setEditing(false)
-            }}
+            onClick={closeEditor}
           >
             Discard draft
           </button>
         </DetailCard>
       )}
       {view === "definition" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
-          <Appear order={2} className="xl:col-span-2 2xl:col-span-3">
-            <RoutineWorkOverview
-              workspaceId={workspaceId}
-              definition={routine.definition}
-              onEdit={canEdit ? () => setEditing(true) : undefined}
-              map={() => (
-                // Sized to the graph it holds. A fixed 56vh pane left a
-                // two-node recipe floating in an empty grid taller than the
-                // rest of the page.
-                <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>
-                  <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
-                    <RoutineDefinitionCanvas
-                      definition={routine.definition}
-                      slug={routine.slug}
-                      name={routine.name}
-                      selectedStepId={selected}
-                      onStepSelect={handleSelect}
-                      focusStepId={focus}
-                    />
-                    {/* On the canvas, not in the card header: the button that
-                      opens an editor for this graph belongs next to the
-                      graph, not a title-bar away from it. */}
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => setEditing(true)}
-                        className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/85 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                      >
-                        <PenSquare className="h-3.5 w-3.5" />
-                        Edit recipe
-                      </button>
+        <>
+          {/* Three answers, in the order a reader brings them: what it does,
+              how it went last time, what I need before I run it. Everything
+              that used to compete with them — status chrome, access, the
+              schedule card — sits below in one disclosure or in Plan (#2519). */}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <Appear order={2} className="min-w-0">
+              <RoutineStepSpine
+                workspaceId={workspaceId}
+                definition={routine.definition}
+                onEdit={canEdit ? openEditor : undefined}
+                map={() => (
+                  <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>
+                    <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
+                      <RoutineDefinitionCanvas
+                        definition={routine.definition}
+                        slug={routine.slug}
+                        name={routine.name}
+                        selectedStepId={selected}
+                        onStepSelect={handleSelect}
+                        focusStepId={focus}
+                      />
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={openEditor}
+                          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/85 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                        >
+                          <PenSquare className="h-3.5 w-3.5" />
+                          Edit recipe
+                        </button>
+                      )}
+                    </div>
+                    {selected && !editing && (
+                      <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0">
+                        <button
+                          onClick={() => setSelected(null)}
+                          className="mb-3 text-xs text-muted-foreground"
+                        >
+                          Close step detail
+                        </button>
+                        <RoutineStepDefinition
+                          step={(
+                            routine.definition.steps as
+                              | Record<string, unknown>[]
+                              | undefined
+                          )?.find((s) => s.id === selected)}
+                        />
+                      </aside>
                     )}
                   </div>
-                  {selected && !editing && (
-                    <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0">
-                      <button
-                        onClick={() => setSelected(null)}
-                        className="mb-3 text-xs text-muted-foreground"
-                      >
-                        Close step detail
-                      </button>
-                      <RoutineStepDefinition
-                        step={(
-                          routine.definition.steps as
-                            | Record<string, unknown>[]
-                            | undefined
-                        )?.find((s) => s.id === selected)}
-                      />
-                    </aside>
-                  )}
-                </div>
-              )}
-            />
-          </Appear>
-
-          <div className="flex flex-col gap-4">
-            <Appear order={3}>
+                )}
+              />
+            </Appear>
+            <Appear order={3} className="min-w-0">
               <LastRunCard
                 status={lastRun?.status ?? routine.last_invocation_status}
                 outcome={lastRun?.outcome}
@@ -418,139 +392,47 @@ export function RoutineCardDetail({
                 slug={routine.slug}
               />
             </Appear>
-
-            <Appear order={4}>
-              {!schedulesLoading &&
-              !schedulesError &&
-              mine.length === 0 &&
-              myAutomations.length === 0 &&
-              !manageTriggers &&
-              triggerKind === "schedules" ? (
-                <details className="rounded-lg border border-border px-4 py-3 text-xs">
-                  <summary className="cursor-pointer text-muted-foreground">
-                    Schedule · 0
-                  </summary>
-                  <p className="mt-2">No scheduled starts.</p>
-                  <button
-                    type="button"
-                    className="mt-2 text-primary"
-                    onClick={() => setManageTriggers(true)}
-                  >
-                    Edit schedule
-                  </button>
-                  <button
-                    type="button"
-                    className="ml-4 mt-2 text-primary"
-                    onClick={() => setTriggerKind("webhooks")}
-                  >
-                    Webhooks
-                  </button>
-                </details>
-              ) : (
-                <DetailCard
-                  title={TRIGGER_TITLE[triggerKind]}
-                  icon={TRIGGER_ICON[triggerKind]}
-                  tone="purple"
-                  action={
-                    triggerKind !== "automations" && (
-                      <button
-                        type="button"
-                        onClick={() => setManageTriggers((v) => !v)}
-                        className="rounded-md border border-border/60 px-1.5 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-                      >
-                        {manageTriggers
-                          ? "Done"
-                          : triggerKind === "schedules"
-                            ? "Edit schedules"
-                            : "Manage webhooks"}
-                      </button>
-                    )
-                  }
-                  footer={
-                    // Was a link that toggled between two kinds. A third kind
-                    // makes a toggle unreadable — you cannot see the option you
-                    // are not on — so the same switch the card already uses in
-                    // its header does the job here. `automations` appears only
-                    // when a rule actually targets this routine.
-                    <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
-                      {TRIGGER_KINDS.filter(
-                        (k) => k !== "automations" || myAutomations.length > 0,
-                      ).map((k) => (
-                        <button
-                          key={k}
-                          type="button"
-                          onClick={() => {
-                            setTriggerKind(k)
-                            setManageTriggers(false)
-                          }}
-                          aria-pressed={triggerKind === k}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors",
-                            triggerKind === k
-                              ? "bg-primary/15 text-primary"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {React.createElement(TRIGGER_ICON[k], {
-                            className: "h-3 w-3",
-                            "aria-hidden": true,
-                          } as React.ComponentProps<typeof CalendarClock>)}
-                          {k}
-                        </button>
-                      ))}
-                    </div>
-                  }
-                >
-                  {triggerKind === "automations" ? (
-                    <div data-testid="routine-automations" className="space-y-2.5">
-                      <p className="text-[12px] text-muted-foreground">
-                        <span
-                          data-testid="routine-automations-count"
-                          className="text-foreground/85"
-                        >
-                          {myAutomations.length}
-                        </span>{" "}
-                        {myAutomations.length === 1 ? "automation" : "automations"} can
-                        start this routine.
-                      </p>
-                      <AutomationList automations={myAutomations} />
-                    </div>
-                  ) : manageTriggers ? (
-                    triggerKind === "webhooks" ? (
-                      <RoutineWebhooksTab
-                        workspaceId={workspaceId}
-                        pipelineId={routine.id}
-                        slug={routine.slug}
-                      />
-                    ) : (
-                      <RoutineSchedulesTab
-                        workspaceId={workspaceId}
-                        pipelineId={routine.id}
-                        slug={routine.slug}
-                        concurrencyKey={concurrencyKey}
-                        maxConcurrent={maxConcurrent}
-                      />
-                    )
-                  ) : triggerKind === "webhooks" ? (
-                    <p className="text-[12px] text-muted-foreground">
-                      Open Manage webhooks to view, create or rotate webhook URLs.
-                    </p>
-                  ) : (
-                    <ScheduleList schedules={mine} />
-                  )}
-                </DetailCard>
-              )}
-            </Appear>
-
-            <Appear order={5}>
-              <AccessCard
-                workspaceId={workspaceId}
-                routine={routine}
-                crewshipActions={crewshipActions}
+            <Appear order={4} className="min-w-0">
+              <BeforeYouRunCard
+                definition={routine.definition}
+                schedules={mine}
+                automations={myAutomations.length}
+                onPlan={() => setView("plan")}
               />
             </Appear>
           </div>
-        </div>
+          <Appear order={5}>
+            <details
+              data-testid="routine-technical"
+              className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs"
+            >
+              <summary className="cursor-pointer text-muted-foreground">Technical details</summary>
+              <div className="mt-3 space-y-4">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {statusPills}
+                  <Pill tone="default">
+                    {mine.some((s) => s.enabled) ? "scheduled" : "manual / event"}
+                  </Pill>
+                  {myAutomations.length > 0 && (
+                    <span data-testid="routine-automations-pill">
+                      <Pill tone="default">
+                        <Zap className="h-3 w-3" />
+                        {myAutomations.length} automation
+                        {myAutomations.length === 1 ? "" : "s"}
+                      </Pill>
+                    </span>
+                  )}
+                </div>
+                <Metadata routine={routine} steps={steps.length} />
+                <AccessCard
+                  workspaceId={workspaceId}
+                  routine={routine}
+                  crewshipActions={crewshipActions}
+                />
+              </div>
+            </details>
+          </Appear>
+        </>
       )}
       {view === "history" && (
         <Appear order={9}>
@@ -690,68 +572,90 @@ function activityHref(slug: string, runId?: string): string {
   return `/routines?${params.toString()}`
 }
 
-function ScheduleList({
+const readableName = (value: unknown) =>
+  String(value ?? "")
+    .replace(/[_-]+/g, " ")
+    .replace(/^\w/, (c) => c.toUpperCase())
+
+/** What the reader needs before pressing Run: the questions, the effects, the plan. */
+function BeforeYouRunCard({
+  definition,
   schedules,
+  automations,
+  onPlan,
 }: {
-  schedules: {
-    id: string
-    name: string
-    cron_expr: string
-    timezone: string
-    enabled: boolean
-    next_run_at?: string
-  }[]
+  definition: unknown
+  schedules: { enabled: boolean; cron_expr: string; timezone?: string }[]
+  automations: number
+  onPlan: () => void
 }) {
-  if (schedules.length === 0) {
-    return (
-      <p className="text-[12px] text-muted-foreground">
-        No recurring schedules. Open Edit schedules to see all scheduled starts or add
-        one.
-      </p>
-    )
-  }
+  const dsl = isRecord(definition) ? definition : {}
+  const inputs = routineInputSpecs(dsl)
+  const outputs = Array.isArray(dsl.outputs) ? dsl.outputs.filter(isRecord) : []
+  const effects = routineEffects(dsl)
+  const plan = schedules.find((s) => s.enabled)
+  const parts: string[] = []
+  if (effects.agents.length) parts.push(`uses ${effects.agents.join(", ")} (tools, costs)`)
+  if (effects.http)
+    parts.push(`sends HTTP requests${effects.hosts.length ? " to " + effects.hosts.join(", ") : ""}`)
+  if (effects.credentials.length) parts.push(`needs ${effects.credentials.join(", ")}`)
+  const effectLine = parts.length
+    ? `A run ${parts.join(", ")}. Stopping does not undo what already happened.`
+    : effects.indirect
+      ? "Scripts, tools, notifications or called routines can perform actions. Stopping does not undo what already happened."
+      : "Runs locally. No agents, no network, no credentials."
   return (
-    <ul className="space-y-2.5 text-[12px]">
-      {schedules.map((s) => (
-        <li key={s.id} className="flex items-start gap-2">
-          <CalendarClock
-            className={cn(
-              "mt-0.5 h-3.5 w-3.5 shrink-0",
-              s.enabled ? "text-muted-foreground" : "text-muted-foreground-soft",
-            )}
-          />
-          <div className="min-w-0 flex-1">
-            <div
-              className={cn(
-                "truncate",
-                s.enabled ? "text-foreground/90" : "text-muted-foreground",
-              )}
-            >
-              {s.name}
-            </div>
-            <div className="flex flex-wrap items-baseline gap-x-2 text-[10px] text-muted-foreground">
-              <span>{describeCron(s.cron_expr)}</span>
-              <span aria-hidden>·</span>
-              <span>{s.timezone}</span>
-              {s.enabled && s.next_run_at && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span className="text-info">next {relTime(s.next_run_at)}</span>
-                </>
-              )}
-              {!s.enabled && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>paused</span>
-                </>
-              )}
-            </div>
+    <DetailCard title="Before you run" icon={PlayCircle}>
+      <div className="space-y-3 text-[12px]">
+        {inputs.length ? (
+          <div>
+            <p className="mb-1 text-muted-foreground">You will be asked for:</p>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
+              {inputs.map((input) => (
+                <React.Fragment key={input.name}>
+                  <dt className="font-medium">{input.label || readableName(input.name)}</dt>
+                  <dd className="text-muted-foreground">
+                    {input.type || "text"}
+                    {input.required ? " · required" : ""}
+                    {input.default !== undefined ? " · has a default" : ""}
+                    {input.description && (
+                      <span className="block text-muted-foreground-soft">{input.description}</span>
+                    )}
+                  </dd>
+                </React.Fragment>
+              ))}
+            </dl>
           </div>
-        </li>
-      ))}
-    </ul>
+        ) : (
+          <p className="text-muted-foreground">Nothing to fill in. Run starts immediately.</p>
+        )}
+        {outputs.length > 0 && (
+          <p className="text-muted-foreground">
+            <span className="font-medium text-foreground">Produces:</span>{" "}
+            {outputs
+              .map((o) =>
+                typeof o.label === "string" ? o.label : readableName(o.name || "Result"),
+              )
+              .join(", ")}
+          </p>
+        )}
+        <p className="text-muted-foreground" data-testid="routine-effects-line">
+          {effectLine}
+        </p>
+        <p>
+          <span className="font-medium">Runs:</span>{" "}
+          {plan ? `${describeCron(plan.cron_expr)} · ${plan.timezone || "UTC"}` : "Manual"}
+          {automations > 0 && ` · ${automations} automation${automations === 1 ? "" : "s"}`}{" "}
+          ·{" "}
+          <button type="button" className="text-primary hover:underline" onClick={onPlan}>
+            change plan
+          </button>
+        </p>
+      </div>
+    </DetailCard>
   )
 }
+
 
 /**
  * Everything the routine can reach, as one row of chips.

@@ -1,0 +1,53 @@
+{
+  "name": "tie_break_delete_before_insert",
+  "why": "A one-line file whose only line is replaced. Both 'delete then insert' and 'insert then delete' are shortest scripts of length 2; §8 fixes delete first, and Myers' tie-break delivers it.",
+  "base": "old\n",
+  "target": "new\n",
+  "ops": [
+    {
+      "kind": "delete",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "old\n"
+      ]
+    },
+    {
+      "kind": "insert",
+      "start_line": 1,
+      "line_count": 1,
+      "lines": [
+        "new\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 1,
+      "line_count": 1,
+      "old_sha256": "01d09d19c2139a46aebfb577780d123d7396e97201bc7ead210a2ebff8239dee"
+    }
+  ],
+  "applied": "new\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 1,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}
