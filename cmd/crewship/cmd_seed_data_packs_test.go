@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
+	pagesdemo "github.com/crewship-ai/crewship/examples/pages-apps"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
 
@@ -32,7 +34,11 @@ func TestSeedPackFiles_DeliversEveryFileToItsCrew(t *testing.T) {
 	if err := seedPackFiles(context.Background(), covStubClient(s), packCrewIDs()); err != nil {
 		t.Fatalf("seedPackFiles: %v", err)
 	}
-	want := 0
+	want := 1
+	if got := saved[crewFileSavePath("crew-ops", "shared/scripts/pages-operations-sample.mjs")]; !bytes.Equal(got, pagesdemo.Collector) {
+		t.Fatal("Operations Lab collector missing or changed")
+	}
+
 	for _, p := range seeddata.Packs {
 		for _, f := range p.Files {
 			want++

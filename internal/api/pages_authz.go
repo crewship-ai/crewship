@@ -46,6 +46,16 @@ type pageViewer struct {
 	Crews  map[string]bool
 }
 
+// isWorkspaceMember answers the `workspace` subject (#2533 §3/1): a HUMAN
+// with a membership in this workspace. Role is what RequireWorkspace resolved
+// from workspace_members for this request, so a non-member never gets here
+// with one; an agent's viewer (agentViewer) carries neither a user nor a
+// role, and that is what keeps "everyone in the workspace" from meaning "every
+// container in it".
+func (v *pageViewer) isWorkspaceMember() bool {
+	return v != nil && v.UserID != "" && v.Role != ""
+}
+
 func (h *PageHandler) loadViewer(ctx context.Context, wsID, userID string) (*pageViewer, error) {
 	v := &pageViewer{UserID: userID, Role: RoleFromContext(ctx), Crews: map[string]bool{}}
 	rows, err := h.db.QueryContext(ctx, `
@@ -97,14 +107,76 @@ func (h *PageHandler) canSeePanel(viewer *pageViewer, p *panelRecord) bool {
 	return viewer.Crews[p.OwnerCrewID]
 }
 
+// The paths by which a caller reaches a page, as the index spells them
+// (pageListWire.Reach). The vocabulary is fixed and closed: a client keys on
+// these strings, and the crew-bearing ones carry the crew's slug after the
+// colon.
+const (
+	pageReachOwner     = "owner"       // owner_user_id is the caller
+	pageReachRole      = "role"        // the caller's workspace role carries manage
+	pageReachCrew      = "crew:"       // + slug: the caller belongs to the owning crew
+	pageReachPanelCrew = "panel_crew:" // + slug: the caller belongs to a crew owning a panel
+	pageReachFolder    = "folder:"     // + slug: the folder the page is in names the caller in its ACL (#2533)
+	pageReachGrant     = "grant"       // a live grant names the caller or one of their crews
+)
+
+// pageReach lists the paths by which THIS viewer reaches the page, in a fixed
+// order — owner, role, the owning crew, one entry per distinct crew of theirs
+// that owns a panel (in the page's panel order), the folder, grant — and
+// returns nothing when they reach it by none. folderSlug is the slug of the
+// page's folder when that folder's ACL names the viewer (folderACLReach,
+// pages_folder_acl.go) and "" otherwise; like `granted`, it is a verdict over
+// records loaded in bulk, never a lookup made here. It is the caller's own standing rendered back to
+// them and nothing else: no other subject, no grant row, no issuer appears in
+// it, which is what lets the index send it on every row it already shows.
+//
+// It costs no statement. ownerCrewSlug comes from whatever read rendered the
+// page's owner, and granted is the grant reader's verdict over records loaded
+// in bulk (liveGrantsIn, pages_grants_authz.go) — this function must never go
+// and fetch either, because a per-page lookup here would make the permission
+// check the slow part of the listing.
+//
+// The panel arm is canSeePanel's membership half; its role half is the `role`
+// arm above it. Reachability therefore still agrees with panel visibility —
+// a viewer served a panel through a path that refused them the page would be
+// a bug in whichever of the two was written second — and
+// pageReachedWithoutGrant is defined as "this list is non-empty" so the two
+// cannot be edited apart.
+func (h *PageHandler) pageReach(rec *pageRecord, ownerCrewSlug string, panels []*panelRecord, viewer *pageViewer, folderSlug string, granted bool) []string {
+	var out []string
+	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
+		out = append(out, pageReachOwner)
+	}
+	if canRole(viewer.Role, "manage") {
+		out = append(out, pageReachRole)
+	}
+	if rec.OwnerCrewID != "" && viewer.Crews[rec.OwnerCrewID] {
+		out = append(out, pageReachCrew+ownerCrewSlug)
+	}
+	seen := map[string]bool{}
+	for _, p := range panels {
+		if !viewer.Crews[p.OwnerCrewID] || seen[p.OwnerCrewID] {
+			continue
+		}
+		seen[p.OwnerCrewID] = true
+		out = append(out, pageReachPanelCrew+p.OwnerCrew)
+	}
+	if folderSlug != "" {
+		out = append(out, pageReachFolder+folderSlug)
+	}
+	if granted {
+		out = append(out, pageReachGrant)
+	}
+	return out
+}
+
 // pageReachedWithoutGrant answers the part of page reachability that needs no
 // grant lookup: ownership, the workspace role, and "may this viewer see any
-// panel on this page at all".
-//
-// The panel arm goes through canSeePanel rather than testing viewer.Crews
-// itself, so that "you can see a panel on it" and "you can open it" can never
-// disagree — a viewer served a panel through a path that refused them the page
-// would be a bug in whichever of the two was written second.
+// panel on this page at all". It is pageReach with the grant arm off, and it
+// is defined that way rather than restated so the index's `reach` and the
+// single-page verdict (canSeePage) are one function's opinion. The owning
+// crew's slug is never compared, only printed, so no caller of this predicate
+// needs to have loaded it.
 //
 // A nil viewer means an unscoped render (Create and Update echo the page back
 // to the author, Import to the importer); those callers have already made their
@@ -113,23 +185,7 @@ func (h *PageHandler) pageReachedWithoutGrant(rec *pageRecord, panels []*panelRe
 	if viewer == nil {
 		return true
 	}
-	if canRole(viewer.Role, "manage") {
-		return true
-	}
-	// Ownership, from the standing already loaded: owner_user_id is the caller,
-	// or owner_crew_id is a crew they belong to (§7.1 rule 1's xor).
-	if rec.OwnerUserID != "" && rec.OwnerUserID == viewer.UserID {
-		return true
-	}
-	if rec.OwnerCrewID != "" && viewer.Crews[rec.OwnerCrewID] {
-		return true
-	}
-	for _, p := range panels {
-		if h.canSeePanel(viewer, p) {
-			return true
-		}
-	}
-	return false
+	return len(h.pageReach(rec, "", panels, viewer, "", false)) > 0
 }
 
 // canSeePage is the page-level twin of canSeePanel: may this caller open this
@@ -141,9 +197,11 @@ func (h *PageHandler) pageReachedWithoutGrant(rec *pageRecord, panels []*panelRe
 // oracle for every page in the workspace. That is the same posture §11b
 // decision 14 takes for a panel, one level up.
 //
-// The grant lookup is last because it is the only arm that costs a query, and
+// The grant lookup comes after the free arms because it costs a query, and
 // it goes through grantsFor so the issuer's use-time standing is re-derived
-// here exactly as it is for `produce` and `write` (§7.1b).
+// here exactly as it is for `produce` and `write` (§7.1b). The folder arm is
+// last and costs one more statement, only when the page is filed: the folder's
+// ACL names the viewer, or it does not (#2533 §3/3).
 func (h *PageHandler) canSeePage(ctx context.Context, wsID string, rec *pageRecord,
 	panels []*panelRecord, viewer *pageViewer) (bool, error) {
 	if h.pageReachedWithoutGrant(rec, panels, viewer) {
@@ -153,7 +211,14 @@ func (h *PageHandler) canSeePage(ctx context.Context, wsID string, rec *pageReco
 	if err != nil {
 		return false, err
 	}
-	return anyGrantReachesPage(grants), nil
+	if anyGrantReachesPage(grants) {
+		return true, nil
+	}
+	verdict, err := h.folderACLVerdictFor(ctx, rec, viewer)
+	if err != nil {
+		return false, err
+	}
+	return verdict.read, nil
 }
 
 // anyGrantReachesPage is the shared verdict over an already-resolved grant set,
@@ -234,7 +299,14 @@ func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string
 			return true
 		}
 	}
-	return false
+	// `w` on the folder the page is in is `write` on the page (#2533 §3/2-3),
+	// and it is subject to the same whole-document check as a page `write`
+	// (#2502): requireProjectDefinitions runs after this, not instead of it.
+	verdict, err := h.folderACLVerdictFor(ctx, rec, viewer)
+	if err != nil {
+		return false
+	}
+	return verdict.write
 }
 
 // mayProduce answers §7.1 rule 4 — "Only the declared producer may write a

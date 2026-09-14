@@ -463,17 +463,23 @@ export interface GradientPalette {
   to: string
   text: string
   dot: string // solid color for small crew badges
+  // The same dot colour as Tailwind classes, for a glyph tinted by it and a
+  // swatch filled with it. Literal strings, not built from `dot` at runtime:
+  // Tailwind compiles what it can read in the source, and `components/` is
+  // Tailwind-only by rule (no inline styles).
+  glyph: string
+  swatch: string
 }
 
 export const GRADIENT_PALETTES: GradientPalette[] = [
-  { id: "blue", from: "from-blue-500/15", to: "to-indigo-500/15", text: "text-blue-600 dark:text-blue-400", dot: "#5b8def" },
-  { id: "emerald", from: "from-emerald-500/15", to: "to-teal-500/15", text: "text-emerald-600 dark:text-emerald-400", dot: "#34d399" },
-  { id: "violet", from: "from-violet-500/15", to: "to-purple-500/15", text: "text-violet-600 dark:text-violet-400", dot: "#8b5cf6" },
-  { id: "amber", from: "from-amber-500/15", to: "to-orange-500/15", text: "text-amber-600 dark:text-amber-400", dot: "#f59e0b" },
-  { id: "rose", from: "from-rose-500/15", to: "to-pink-500/15", text: "text-rose-600 dark:text-rose-400", dot: "#f43f5e" },
-  { id: "cyan", from: "from-cyan-500/15", to: "to-sky-500/15", text: "text-cyan-600 dark:text-cyan-400", dot: "#22d3ee" },
-  { id: "lime", from: "from-lime-500/15", to: "to-green-500/15", text: "text-lime-600 dark:text-lime-400", dot: "#84cc16" },
-  { id: "fuchsia", from: "from-fuchsia-500/15", to: "to-pink-500/15", text: "text-fuchsia-600 dark:text-fuchsia-400", dot: "#d946ef" },
+  { id: "blue", from: "from-blue-500/15", to: "to-indigo-500/15", text: "text-blue-600 dark:text-blue-400", dot: "#5b8def", glyph: "text-[#5b8def]", swatch: "bg-[#5b8def]" },
+  { id: "emerald", from: "from-emerald-500/15", to: "to-teal-500/15", text: "text-emerald-600 dark:text-emerald-400", dot: "#34d399", glyph: "text-[#34d399]", swatch: "bg-[#34d399]" },
+  { id: "violet", from: "from-violet-500/15", to: "to-purple-500/15", text: "text-violet-600 dark:text-violet-400", dot: "#8b5cf6", glyph: "text-[#8b5cf6]", swatch: "bg-[#8b5cf6]" },
+  { id: "amber", from: "from-amber-500/15", to: "to-orange-500/15", text: "text-amber-600 dark:text-amber-400", dot: "#f59e0b", glyph: "text-[#f59e0b]", swatch: "bg-[#f59e0b]" },
+  { id: "rose", from: "from-rose-500/15", to: "to-pink-500/15", text: "text-rose-600 dark:text-rose-400", dot: "#f43f5e", glyph: "text-[#f43f5e]", swatch: "bg-[#f43f5e]" },
+  { id: "cyan", from: "from-cyan-500/15", to: "to-sky-500/15", text: "text-cyan-600 dark:text-cyan-400", dot: "#22d3ee", glyph: "text-[#22d3ee]", swatch: "bg-[#22d3ee]" },
+  { id: "lime", from: "from-lime-500/15", to: "to-green-500/15", text: "text-lime-600 dark:text-lime-400", dot: "#84cc16", glyph: "text-[#84cc16]", swatch: "bg-[#84cc16]" },
+  { id: "fuchsia", from: "from-fuchsia-500/15", to: "to-pink-500/15", text: "text-fuchsia-600 dark:text-fuchsia-400", dot: "#d946ef", glyph: "text-[#d946ef]", swatch: "bg-[#d946ef]" },
 ]
 
 const paletteById: Record<string, GradientPalette> = {}

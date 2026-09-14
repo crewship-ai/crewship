@@ -182,6 +182,10 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				{name: "spec_json", notNull: true},
 				{name: "created_at", notNull: true},
 				{name: "updated_at", notNull: true},
+				// #2531: folders. folder_id is nullable (Unfiled), pages_version
+				// counts membership changes and fences moves.
+				{name: "folder_id"},
+				{name: "pages_version", notNull: true},
 			},
 		},
 		{

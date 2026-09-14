@@ -27,7 +27,6 @@ import {
   Activity,
   AlarmClock,
   AlertTriangle,
-  Banknote,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -132,14 +131,20 @@ export function RoutinesOverview({
     return () => clearInterval(t)
   }, [])
 
-  const routineBySlug = React.useMemo(() => new Map(routines.map((r) => [r.slug, r])), [routines])
+  const routineBySlug = React.useMemo(
+    () => new Map(routines.map((r) => [r.slug, r])),
+    [routines],
+  )
   const liveSlugs = React.useMemo(() => new Set(liveBySlug.keys()), [liveBySlug])
 
   const today = React.useMemo(() => runsToday(runs, now), [runs, now])
   const success = React.useMemo(() => successRate(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
   const next = React.useMemo(() => nextScheduled(schedules, now), [schedules, now])
   const attention = React.useMemo(() => needsAttention(routines), [routines])
-  const buckets = React.useMemo(() => catalogBuckets(routines, liveSlugs), [routines, liveSlugs])
+  const buckets = React.useMemo(
+    () => catalogBuckets(routines, liveSlugs),
+    [routines, liveSlugs],
+  )
   const upcoming = React.useMemo(
     () => upcomingSchedules(schedules, now, UPCOMING_LIMIT),
     [schedules, now],
@@ -147,7 +152,10 @@ export function RoutinesOverview({
   const recent = React.useMemo(() => recentRuns(runs, RECENT_RUN_LIMIT), [runs])
   // A waitpoint carries a run id, not a slug — this is how the queue
   // learns which routine stopped.
-  const slugByRunId = React.useMemo(() => new Map(runs.map((r) => [r.id, r.pipeline_slug])), [runs])
+  const slugByRunId = React.useMemo(
+    () => new Map(runs.map((r) => [r.id, r.pipeline_slug])),
+    [runs],
+  )
   const waiting = React.useMemo(
     () => pendingApprovals(waitpoints, routines, slugByRunId),
     [waitpoints, routines, slugByRunId],
@@ -180,9 +188,10 @@ export function RoutinesOverview({
             next_run_at moves the moment one fires. */}
         <Appear order={0}>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Health</h1>
             <p className="text-xs text-muted-foreground">
-              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this workspace
+              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this
+              workspace
             </p>
           </div>
         </Appear>
@@ -244,7 +253,11 @@ export function RoutinesOverview({
         {/* ── The catalog as a shape, and the week ahead ───────────── */}
         <Appear order={2}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <DashboardCard title="Catalog health" icon={PieChart} hint={`${routines.length} total`}>
+            <DashboardCard
+              title="Catalog health"
+              icon={PieChart}
+              hint={`${routines.length} total`}
+            >
               {/* The arcs sum to the catalog, so the number in the
                   centre is the number in the header. A donut whose
                   slices do not add up is worse than no donut. */}
@@ -269,7 +282,7 @@ export function RoutinesOverview({
             >
               {upcoming.length === 0 ? (
                 <Empty icon={AlarmClock}>
-                  No schedule is due. Open a routine and add one under Triggers.
+                  No schedule is due. Open a routine and add one under Schedule.
                 </Empty>
               ) : (
                 <div className="flex flex-col">
@@ -281,7 +294,9 @@ export function RoutinesOverview({
                       <button
                         key={s.id}
                         type="button"
-                        onClick={() => s.target_pipeline_slug && onSelect(s.target_pipeline_slug)}
+                        onClick={() =>
+                          s.target_pipeline_slug && onSelect(s.target_pipeline_slug)
+                        }
                         className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
                       >
                         <span className="w-[62px] shrink-0 font-mono text-[11px] tabular-nums text-primary">
@@ -406,7 +421,9 @@ export function RoutinesOverview({
                         key={item.token}
                         workspaceId={workspaceId}
                         item={item}
-                        routine={item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined}
+                        routine={
+                          item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined
+                        }
                         onDecided={refreshWaitpoints}
                       />
                     ) : (
@@ -464,7 +481,9 @@ export function RoutinesOverview({
                   summing it into a workspace ledger answered one
                   nobody asked. */}
               {weekTotal === 0 ? (
-                <Empty icon={Activity}>Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.</Empty>
+                <Empty icon={Activity}>
+                  Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.
+                </Empty>
               ) : (
                 <OutcomeChart data={outcomes} />
               )}

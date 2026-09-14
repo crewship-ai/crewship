@@ -1,0 +1,32 @@
+{
+  "zen": "Non-blocking is better than blocking.",
+  "hook_id": 528637842,
+  "hook": {
+    "type": "Repository",
+    "id": 528637842,
+    "name": "web",
+    "active": true,
+    "events": ["pull_request"],
+    "config": {
+      "content_type": "json",
+      "insecure_ssl": "0",
+      "secret": "********",
+      "url": "https://crewship.example/api/webhooks/gh/ep_01"
+    },
+    "updated_at": "2026-09-10T08:14:22Z",
+    "created_at": "2026-09-10T08:14:22Z"
+  },
+  "repository": {
+    "id": 671250311,
+    "node_id": "R_kgDOKAgWhw",
+    "name": "crewship",
+    "full_name": "crewship-ai/crewship",
+    "private": false,
+    "default_branch": "main"
+  },
+  "sender": {
+    "login": "octocat",
+    "id": 583231,
+    "type": "User"
+  }
+}

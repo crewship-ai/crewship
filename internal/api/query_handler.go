@@ -376,7 +376,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 Answer concisely. This is a quick question, not a task.
 Question: %s`, body.FromSlug, body.Question)
 
-	req, buildErr := h.buildPeerQueryRequest(r.Context(), body, target, containerID, peerQueryBlock)
+	req, buildErr := h.buildPeerQueryRequest(r.Context(), body, target, containerID, peerQueryBlock, runID)
 	if buildErr != nil {
 		// Fail closed: the single builder could not assemble the request (no
 		// resolver / resolve failure). Fail the query loudly rather than answer
@@ -438,11 +438,17 @@ Question: %s`, body.FromSlug, body.Question)
 // used to read raw system_prompt_legacy with no MCP, and the earlier #810 cut
 // kept it as a silent-degrade fallback on resolve error). Production always
 // wires the resolver.
+// runID is the id this handler already minted for the journal (trace_id) and
+// is threaded in as a PARAMETER rather than set by the caller afterwards, so a
+// future dispatch path cannot build a peer-query request that reaches the
+// orchestrator without one. It matters more here than on most paths: a peer
+// query deliberately reuses the CALLER's ChatID (body.ChatID), so ChatID has
+// never distinguished two live runs on this path.
 func (h *QueryHandler) buildPeerQueryRequest(
 	ctx context.Context,
 	body createQueryBody,
 	target targetAgentInfo,
-	containerID, peerQueryBlock string,
+	containerID, peerQueryBlock, runID string,
 ) (orchestrator.AgentRunRequest, error) {
 	if h.resolver == nil {
 		return orchestrator.AgentRunRequest{}, fmt.Errorf("peer query dispatch: no agent resolver wired")
@@ -468,6 +474,7 @@ func (h *QueryHandler) buildPeerQueryRequest(
 		MemoryMB:    info.MemoryMB,
 		CPUs:        info.CPUs,
 	})
+	req.RunID = runID // E0 run identity — see the doc comment above.
 	req.AgentRole = "AGENT"
 	req.SkipSidecar = true     // Sidecar already running on 9119 in this container
 	req.SkipConvHistory = true // Fresh context for peer queries

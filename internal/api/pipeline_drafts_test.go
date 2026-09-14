@@ -150,7 +150,8 @@ func TestDraftPublicationReturnsScheduleRepairTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := json.RawMessage(`{"name":"preset-repair","inputs":[{"name":"region","type":"string","required":true}],"steps":[{"id":"a","type":"transform","transform":{"input":"hello","expression":"."}}]}`)
+	// A widget opts into the form contract; a required legacy input alone does not.
+	updated := json.RawMessage(`{"name":"preset-repair","inputs":[{"name":"region","type":"string","widget":"text","required":true}],"steps":[{"id":"a","type":"transform","transform":{"input":"hello","expression":"."}}]}`)
 	d.Document, _ = json.Marshal(map[string]any{"slug": p.Slug, "name": p.Name, "definition": updated})
 	d.UpdatedBy = user
 	d, err = h.store.SaveDraft(ctx, *d)

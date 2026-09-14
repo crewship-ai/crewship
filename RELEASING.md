@@ -29,7 +29,7 @@ Before tagging, verify:
       prefix; `0.1.0-beta.1` for tag `v0.1.0-beta.1`).
 - [ ] No unresolved CodeRabbit major comments on the release PR.
 - [ ] Goreleaser dry-run passes:
-      `goreleaser release --snapshot --clean --skip=publish,sign`.
+      `goreleaser release --parallelism 2 --snapshot --clean --skip=publish,sign,sbom,homebrew`.
 - [ ] The `release` branch is at most a few commits behind `main`
       (`git log --oneline origin/release..origin/main`). The dogfood
       prod VM tracks `release` and a stale branch means you ship from
@@ -47,21 +47,19 @@ git tag -a v0.1.0-beta.1 -m "v0.1.0-beta.1: first public beta"
 git push origin v0.1.0-beta.1
 ```
 
-The push triggers `.github/workflows/release.yml`. Watch the run at
-`https://github.com/crewship-ai/crewship/actions`. Expected duration
-~10 minutes:
+The push triggers `.github/workflows/release.yml`. The tagged commit must
+have successful CI, Security and CodeQL main-push runs and belong to main's
+history. The workflow builds a multi-platform image candidate, scans it,
+boots both platforms and signs its digest. It then builds the final binary
+assets once with GoReleaser publishing disabled, verifies checksums and
+signatures are present, scans the artifacts and boots the Linux archive.
 
-1. Checkout, install pnpm + Node + Go.
-2. `pnpm install` and `pnpm build` to produce `out/`.
-3. `scripts/embed-web-out.sh sync` stages `out/` into `web/out/` for the Go
-   embed FS **and fails the release** if what landed there is the tracked
-   placeholder rather than a real export — a release must never ship a
-   binary whose UI routes answer 503.
-4. `goreleaser release --clean` cross-compiles for darwin/linux/windows
-   (amd64 + arm64 where supported), signs each binary with cosign
-   keyless via GitHub OIDC, generates SPDX + CycloneDX SBOMs, builds
-   archives, and uploads everything to a GitHub Release.
-5. Homebrew formula is auto-pushed to `crewship-ai/homebrew-tap`.
+Only these verified assets are uploaded to a draft GitHub Release, which is
+published after upload completes. Image aliases and the atomic stable
+Homebrew update follow publication. Homebrew has a separate retryable job.
+Package signing credentials are required; a missing key stops publication.
+See [the CI/CD runbook](docs/prd/reports/ci-cd-implementation-2026-09-11.md)
+for exact identity checks and rollout requirements.
 
 ## After the release lands
 
@@ -160,8 +158,8 @@ Three concurrent channels serve different audiences:
 | Channel | Trigger | Docker tag | Binary | Use case |
 |---|---|---|---|---|
 | **stable** | clean semver tag (`v0.1.0`) | `:vX.Y.Z`, `:vX.Y`, `:latest` | GitHub Release, Homebrew | Production / default `brew install crewship` |
-| **beta** | pre-release tag (`v0.1.0-beta.1`) | `:vX.Y.Z-beta.N`, `:vX.Y` | GitHub Pre-release | Opt-in beta testers (`brew install crewship@0.1.0-beta.1` or `docker pull :vX.Y.Z-beta.N`) |
-| **nightly** | every push to `main` | `:nightly`, `:main-<sha>` | Rolling `nightly` GH pre-release | Internal CI, brave testers wanting trunk |
+| **beta** | pre-release tag (`v0.1.0-beta.1`) | `:vX.Y.Z-beta.N` | GitHub Pre-release | Opt-in beta testers (`brew install crewship@0.1.0-beta.1` or `docker pull :vX.Y.Z-beta.N`) |
+| **nightly** | successful verified main CI + daily schedule | `:nightly`, `:main-<sha>` | Immutable `nightly-YYYYMMDD-rN` GH pre-release | Internal CI, brave testers wanting trunk |
 
 The `:latest` Docker tag only moves on clean semver tags — pre-releases
 must never overwrite `:latest`, or `docker pull crewship` would silently

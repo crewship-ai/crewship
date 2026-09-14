@@ -180,6 +180,11 @@ export const JOURNAL_ENTRY_TYPES = [
   "page.panel.updated",
   "page.grant_added",
   "page.grant_removed",
+  // Folders (#2527): the folder itself, and a page moving in or out.
+  "page.folder_changed",
+  "page.folder_membership_changed",
+  // Folder permissions (#2533): an entry set or removed on a folder's ACL.
+  "page.folder_acl_changed",
   // §4 freshness verdicts and §5's wake gates.
   "page.panel.stale",
   "page.panel.recovered",
@@ -190,6 +195,10 @@ export const JOURNAL_ENTRY_TYPES = [
   // an untrusted producer: the record has to exist regardless of who clicked.
   "page.action.dispatched",
   "page.spec.changed",
+  "work.accepted",
+  "work.claimed",
+  "work.needs_reconciliation",
+  "work.lease_lost",
 
   // ── Added 2026-08-31 (#2207). Every type below is emitted by the
   // backend today but was declared OUTSIDE internal/journal/types.go — as

@@ -1,5 +1,6 @@
 "use client"
 
+import { describeStep } from "@/lib/routine-step-describe"
 import { useId, useState } from "react"
 import { Button } from "@/components/ui/button"
 
@@ -45,8 +46,8 @@ export function RoutineFixtureOutputsEditor({
       <div>
         <h4 className="text-sm font-medium">Data from earlier steps</h4>
         <p className="mt-1 text-xs text-muted-foreground">
-          Provide a sample or import a previous run. A missing result stays missing until you add
-          it.
+          Provide a sample or import a previous run. A missing result stays missing until you
+          add it.
         </p>
       </div>
       {outputs && !keys.length && (
@@ -69,7 +70,7 @@ export function RoutineFixtureOutputsEditor({
                   htmlFor={`${prefix}-${index}`}
                   className="min-w-0 max-w-full break-words text-sm font-medium"
                 >
-                  {String(source?.name || key)}
+                  {source ? describeStep(source, 1).title : "Unavailable step"}
                 </label>
                 <span className="text-xs text-muted-foreground">
                   {present ? "Sample provided" : "Not provided"}
@@ -113,7 +114,7 @@ export function RoutineFixtureOutputsEditor({
                     update(key, "")
                   }}
                 >
-                  Add sample for {String(source?.name || key)}
+                  Add sample for {source ? describeStep(source, 1).title : "Unavailable step"}
                 </Button>
               )}
             </div>
@@ -121,11 +122,11 @@ export function RoutineFixtureOutputsEditor({
         })}
       <details open={!outputs} className="rounded-xl border border-hairline p-3">
         <summary className="cursor-pointer text-xs text-muted-foreground">
-          Advanced · all captured outputs
+          Technical details
         </summary>
         <div className="mt-3">
           <label htmlFor={`${prefix}-raw`} className="text-sm font-medium">
-            Captured upstream outputs · JSON
+            Sample results · JSON
           </label>
           <textarea
             id={`${prefix}-raw`}

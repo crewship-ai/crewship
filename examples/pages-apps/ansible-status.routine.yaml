@@ -1,0 +1,23 @@
+dsl_version: "1.0"
+name: ansible-status-check
+description: Collect a bounded health verdict and publish it with routine identity.
+steps:
+  - id: collect
+    type: script
+    script:
+      path: scripts/collect_status.py
+      interpreter: python3
+      args: [ansible, --routine-output]
+  - id: publish
+    type: crewship
+    needs: [collect]
+    action: page.write
+    args:
+      page: ansible-status
+      panel: health
+      state: "{{ steps.collect.output.producer_state }}"
+      data:
+        items:
+          - name: "{{ steps.collect.output.name }}"
+            state: "{{ steps.collect.output.state }}"
+            label: "{{ steps.collect.output.label }}"

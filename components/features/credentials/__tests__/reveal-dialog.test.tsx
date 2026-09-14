@@ -37,7 +37,9 @@ describe("bounded reveal lifetime", () => {
   it("hides the value when the tab becomes hidden", async () => {
     renderDialog()
     fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: GOOD_REASON } })
-    fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /reveal the existing value/i }))
+    })
     await screen.findByTestId("revealed-value")
     const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true)
     try {

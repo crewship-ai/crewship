@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { RoutineRunDetail } from "../routine-run-detail"
 import { RoutineResultContent } from "../routine-result-content"
-import { RoutineWorkOverview } from "../routine-work-overview"
+import { RoutineStepSpine } from "../routine-step-spine"
 
 const h = vi.hoisted(() => ({
   run: {} as Record<string, unknown>,
@@ -34,7 +34,9 @@ vi.mock("../routine-identity-header", () => ({
   ),
 }))
 vi.mock("@/components/features/activity/trace-canvas", () => ({
-  TraceCanvas: ({ dsl }: { dsl: unknown }) => <div data-testid="map">{JSON.stringify(dsl)}</div>,
+  TraceCanvas: ({ dsl }: { dsl: unknown }) => (
+    <div data-testid="map">{JSON.stringify(dsl)}</div>
+  ),
 }))
 vi.mock("@/components/features/activity/run-activity-timeline", () => ({
   RunActivityTimeline: () => <div>Activity evidence</div>,
@@ -70,6 +72,40 @@ beforeEach(() => {
 })
 
 describe("client routine workspace", () => {
+  it("retains the failed step identifier when its historical recipe cannot be read", () => {
+    h.run = {
+      ...h.run,
+      status: "failed",
+      failed_at_step: "original_step",
+      error_message: "Connection lost",
+    }
+    h.dsl = null
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    expect(screen.getByText("Connection lost").parentElement).toHaveTextContent(
+      "Name unavailable",
+    )
+    expect(screen.getByText("original_step")).toBeVisible()
+    expect(screen.queryByText("new-head")).not.toBeInTheDocument()
+  })
+  it("shows the error and named failed step together without opening technical details", () => {
+    h.run = {
+      ...h.run,
+      status: "failed",
+      failed_at_step: "internal_probe",
+      error_message: "Service did not answer",
+    }
+    h.dsl = {
+      steps: [{ id: "internal_probe", name: "Check the customer service", type: "http" }],
+    }
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    const error = screen.getByText("Service did not answer")
+    expect(error).toBeVisible()
+    expect(error.closest("details")).toBeNull()
+    expect(error.parentElement).toHaveTextContent("Check the customer service")
+    expect(document.querySelector('details[data-step-id="internal_probe"]')).toHaveAttribute(
+      "open",
+    )
+  })
   it("leads with the recorded report without disguising failed completion", async () => {
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
     expect(
@@ -116,7 +152,9 @@ describe("client routine workspace", () => {
     // is behind a second row of tabs any more.
     expect(screen.getByText("Original prompt")).toBeInTheDocument()
     expect(screen.getByText("Saved answer")).toBeInTheDocument()
-    expect(screen.getByText("Historical step")).toBeInTheDocument()
+    expect(
+      document.querySelector('[data-step-id="historical-step"] > summary'),
+    ).toHaveTextContent("Ask an agent")
     fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
   })
@@ -128,11 +166,13 @@ describe("client routine workspace", () => {
     expect(screen.getByText(/Step outputs could not be loaded/)).toBeInTheDocument()
     expect(screen.queryByText("No step outputs recorded yet.")).not.toBeInTheDocument()
   })
-  it("describes declared results and conditions without claiming readiness or a fixed order", () => {
+  it("describes conditions and dependencies without claiming readiness or a fixed order", () => {
     render(
-      <RoutineWorkOverview
+      <RoutineStepSpine
         definition={{
-          inputs: [{ name: "source", label: "Service URL", required: true, default: "example" }],
+          inputs: [
+            { name: "source", label: "Service URL", required: true, default: "example" },
+          ],
           outputs: [{ name: "report" }],
           steps: [
             {
@@ -146,8 +186,6 @@ describe("client routine workspace", () => {
         }}
       />,
     )
-    expect(screen.getByText("Service URL")).toBeInTheDocument()
-    expect(screen.getByText("You get")).toBeInTheDocument()
     expect(screen.getByText("Only if")).toBeInTheDocument()
     expect(screen.getAllByText("Runs after: fetch").length).toBeGreaterThan(0)
     expect(screen.queryByText(/Ready to run/)).not.toBeInTheDocument()
@@ -155,9 +193,9 @@ describe("client routine workspace", () => {
 })
 
 describe("readable recipe", () => {
-  it("distinguishes work types and explains required inputs without revealing defaults", () => {
+  it("distinguishes work types", () => {
     const { container } = render(
-      <RoutineWorkOverview
+      <RoutineStepSpine
         definition={{
           inputs: [
             { name: "max_stale_hours", type: "number", required: true, default: 24 },
@@ -171,10 +209,6 @@ describe("readable recipe", () => {
         }}
       />,
     )
-    expect(screen.getByText("Max stale hours")).toBeInTheDocument()
-    expect(screen.getByText(/Number · required/)).toBeInTheDocument()
-    expect(screen.getByText("Change report")).toBeInTheDocument()
-    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
     expect(container.querySelector('[data-step-kind="script"] svg')).not.toBeNull()
     expect(container.querySelector('[data-step-kind="transform"] svg')).not.toBeNull()
     expect(screen.getAllByText("Run a script").length).toBeGreaterThan(0)

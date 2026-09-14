@@ -37,6 +37,12 @@ func TestPageProjectPublicationAtomicCASRollbackAndReach(t *testing.T) {
 		return &job
 	}
 	call := func(actor, role string, request pageProjectPublishRequest) *httptest.ResponseRecorder {
+		// Publication is fenced on the definition and routine digests the
+		// caller reviewed. Every call here re-reads them, which is what a
+		// reviewer who just opened the review screen would send.
+		if request.ExpectedDefinitionDigest == "" {
+			request.ExpectedDefinitionDigest, request.ExpectedRoutineDigests = pageFenceForTest(t, h, ws, "health")
+		}
 		body, _ := json.Marshal(request)
 		r := pagesRequest(t, "POST", "/", ws, actor, role, string(body))
 		r.SetPathValue("slug", "health")

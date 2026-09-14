@@ -25,6 +25,25 @@ const definition = {
   ],
 }
 describe("readable recipe steps", () => {
+  it("renames a step without changing its identity, dependencies or advanced settings", () => {
+    const change = vi.fn()
+    render(
+      <RoutineRecipeSteps
+        definition={definition}
+        slug="demo"
+        name="Demo"
+        onChange={change}
+        onOpenCode={vi.fn()}
+      />,
+    )
+    const name = screen.getByLabelText("Step name")
+    expect(name).toHaveAttribute("placeholder", "Wait for approval")
+    fireEvent.change(name, { target: { value: "Approve the service report" } })
+    expect(change.mock.calls[0][0]).toEqual({
+      ...definition,
+      steps: [{ ...definition.steps[0], name: "Approve the service report" }],
+    })
+  })
   it("explains real actions and input conditions without exposing only identifiers", () => {
     expect(recipeStepSummary(definition.steps[0])).toBe("Review the result")
     expect(
@@ -32,8 +51,10 @@ describe("readable recipe steps", () => {
         type: "transform",
         transform: { input: "{{ inputs.a }} {{ inputs.b }} {{ inputs.c }}" },
       }),
-    ).toBe("Prepare data from 3 start-form answers")
-    expect(recipeCondition(definition.steps[0], definition.inputs)).toBe("Demo scenario: Approval")
+    ).toBe("Prepare data from 3 inputs")
+    expect(recipeCondition(definition.steps[0], definition.inputs)).toBe(
+      "Demo scenario: Approval",
+    )
     expect(recipeCondition({ if: "size(inputs.items) > 1" }, [])).toBe("Conditional step")
     render(
       <RoutineRecipeSteps
@@ -44,10 +65,10 @@ describe("readable recipe steps", () => {
         onOpenCode={vi.fn()}
       />,
     )
-    expect(screen.getByText("Request approval")).toBeInTheDocument()
-    expect(screen.getByText("Demo scenario: Approval")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Wait for approval/ })).toBeInTheDocument()
+    expect(screen.getAllByText("Demo scenario: Approval")[0]).toBeInTheDocument()
     expect(screen.queryByText("Interactive graph")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Graph", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
     expect(screen.getByText("Interactive graph")).toBeInTheDocument()
   })
   it("edits the selected step while preserving conditions, dependencies and unknown fields", () => {
@@ -68,7 +89,7 @@ describe("readable recipe steps", () => {
       )
     }
     render(<Harness />)
-    fireEvent.click(screen.getByRole("button", { name: /Request approval/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Wait for approval/ }))
     fireEvent.change(screen.getByLabelText("Approval title"), {
       target: { value: "Approve the delivery" },
     })
@@ -98,7 +119,7 @@ describe("readable recipe steps", () => {
         onOpenCode={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: /Prepare.*Prepare data/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Transform data/ }))
     fireEvent.change(screen.getByLabelText("Data source"), {
       target: { value: "{{ steps.fetch.output }}" },
     })
@@ -127,7 +148,7 @@ it("inserts data into an agent prompt without erasing instructions or changing s
       onOpenCode={vi.fn()}
     />,
   )
-  fireEvent.click(screen.getByRole("button", { name: /Summarize/ }))
+  fireEvent.click(screen.getByRole("button", { name: /Ask writer/ }))
   fireEvent.change(screen.getByLabelText("Insert data into instructions"), {
     target: { value: "{{ inputs.request }}" },
   })
@@ -155,7 +176,7 @@ it("changes one child routine binding while preserving typed literals and step c
       onOpenCode={vi.fn()}
     />,
   )
-  fireEvent.click(screen.getByRole("button", { name: /Child.*Run another routine/ }))
+  fireEvent.click(screen.getByRole("button", { name: /Call routine delivery/ }))
   expect(save).not.toHaveBeenCalled()
   fireEvent.change(screen.getByLabelText("Source for count"), {
     target: { value: "{{ inputs.count }}" },

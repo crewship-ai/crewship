@@ -90,7 +90,9 @@ func TestMigrationChain_ScalesWithAPopulatedJournal(t *testing.T) {
 			m.duration.Round(time.Millisecond), perRow.Round(time.Microsecond))
 	}
 
-	if total > scalingBudget {
+	if raceEnabled {
+		t.Log("race instrumentation enabled: production wall-time budget is enforced by the non-race CI suite")
+	} else if total > scalingBudget {
 		t.Errorf("upgrading %d journal rows took %s, over the %s ceiling. An upgrade is "+
 			"downtime: a table-rewriting migration this expensive belongs in the "+
 			"post-deployment lane (see docs/guides/migrations.mdx), not at boot",

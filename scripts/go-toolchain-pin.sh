@@ -123,7 +123,7 @@ scan() {
   local f
   for f in "$@"; do
     [ -f "$f" ] || continue
-    awk '{ printf "%d\t%s\n", FNR, $0 }' "$f" \
+    awk '{ sub(/^FROM[[:space:]]+--platform=[^[:space:]]+[[:space:]]+/, "FROM "); printf "%d\t%s\n", FNR, $0 }' "$f" \
       | sed -nE "s|^([0-9]+)\t${prog}\$|\1\t\2|p" \
       | while IFS=$'\t' read -r ln v; do
           printf '%s:%s\t%s\n' "${f#"$ROOT"/}" "$ln" "$v"
@@ -304,7 +304,7 @@ GO_STAGES="$(awk '
     sub(/[[:space:]].*$/, "", val)
   }
   END { flush() }
-' "$DOCKERFILE")"
+' <(sed -E 's/^(FROM[[:space:]]+)--platform=[^[:space:]]+[[:space:]]+/\1/' "$DOCKERFILE"))"
 
 DOCKERFILE_REL="${DOCKERFILE#"$ROOT"/}"
 while IFS=$'\t' read -r stage_ln GOTOOLCHAIN_VAL; do

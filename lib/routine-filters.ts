@@ -1,3 +1,4 @@
+import type { Pipeline } from "@/hooks/use-pipelines"
 // Which routines survive the explorer's filters.
 //
 // Extracted from the layout because two of the buckets stopped being a
@@ -22,6 +23,8 @@ export interface RoutineFilterState {
   invocations: "all" | "popular" | "fresh"
   authorAgentId: string | null
   showEphemeral: boolean
+  /** Release-verification fixtures (`test-*` slugs) are hidden unless asked for. */
+  showTestRoutines?: boolean
 }
 
 /** The routine fields the filter reads — a narrow view, not the row. */
@@ -33,6 +36,8 @@ export interface RoutineFilterInput {
   authorAgentName?: string | null
   invocationCount: number
   lastStatus?: string | null
+  /** A run can complete and still fail its result check (`FAILED`). */
+  lastOutcome?: string | null
   ephemeral?: boolean
 }
 
@@ -83,6 +88,10 @@ export function matchesRoutineFilters(
       const run = live.get(routine.slug)
       return run ? !isAwaitingApproval(run.status) : false
     }
+    case "failed":
+      // The row's Failed pill covers both a run that could not finish and a
+      // run that finished with a failed result; the bucket must agree.
+      return routine.lastStatus?.toLowerCase() === "failed" || routine.lastOutcome === "FAILED"
     default:
       return routine.lastStatus?.toLowerCase() === filters.status
   }
@@ -91,4 +100,18 @@ export function matchesRoutineFilters(
 /** Reserved prefixes used by release verification fixtures, not client examples. */
 export function isRoutineTestFixture(slug: string): boolean {
   return slug.startsWith("test-routines-") || slug.startsWith("test-issue-")
+}
+
+export function routineFilterInput(p: Pipeline): RoutineFilterInput {
+  return {
+    slug: p.slug,
+    name: p.name,
+    description: p.description,
+    authorAgentId: p.author_agent_id,
+    authorAgentName: p.author_agent_name,
+    invocationCount: p.invocation_count,
+    lastStatus: p.last_invocation_status,
+    lastOutcome: p.last_run_outcome,
+    ephemeral: p.ephemeral,
+  }
 }

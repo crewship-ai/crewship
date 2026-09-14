@@ -1,0 +1,69 @@
+name: Extended Go Checks
+
+# Expensive migration race coverage stays off the PR critical path. Fuzzing
+# runs actual mutations, not only the seed corpus that ordinary go test runs.
+on:
+  schedule:
+    - cron: '29 1 * * 0'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+concurrency:
+  group: extended-go-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  GO_VERSION: '1.27.1'
+
+jobs:
+  database-race:
+    name: Database race (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Run an exhaustive partition of the migration race suite
+        timeout-minutes: 95
+        run: bash scripts/ci/database-race-shard.sh "${{ matrix.shard }}" 4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: database-race-${{ github.sha }}-${{ matrix.shard }}
+          path: .ci-results/
+          include-hidden-files: true
+          retention-days: 14
+
+  fuzz:
+    name: Security boundary fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Mutate security boundary inputs
+        timeout-minutes: 10
+        run: |
+          go test ./internal/scrubber -run '^$' -fuzz '^FuzzScrub$' -fuzztime 60s -parallel 2 -timeout 3m
+          go test ./internal/untrusted -run '^$' -fuzz '^FuzzFenceWrap$' -fuzztime 60s -parallel 2 -timeout 3m
+          go test ./internal/sidecar -run '^$' -fuzz '^FuzzDomainAllowlistIsAllowed$' -fuzztime 60s -parallel 2 -timeout 3m
+          go test ./internal/manifest -run '^$' -fuzz '^FuzzLoad$' -fuzztime 60s -parallel 2 -timeout 3m
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: fuzz-reproducers-${{ github.sha }}
+          path: internal/**/testdata/fuzz/
+          if-no-files-found: warn
+          retention-days: 14

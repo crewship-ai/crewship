@@ -47,9 +47,23 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject> --level <level>` | Grant read, produce, or write on a page |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, produce, or write on a page |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
+| `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
+| `folder list` | List the folders you can see, with how many of their pages you reach |
+| `folder create <slug> --owner crew/<slug>` | Create a folder owned by a crew |
+| `folder show <slug>` | Show a folder and the pages in it you reach |
+| `folder update <slug>` | Rename a folder or change its icon or colour |
+| `folder delete <slug> --yes` | Delete an empty folder |
+| `folder add <folder> <page>` | File a page in a folder |
+| `folder remove <folder> <page>` | Take a page out of a folder |
+| `folder acl <slug>` | Who a folder is shared with (owning crew's managers and admins only) |
+| `folder share <slug> <subject> --view\|--edit` | Share a folder with a user, a crew or everyone in the workspace |
+| `folder unshare <slug> <subject>` | Stop sharing a folder with a subject |
+| `move <page>... --folder <slug>\|--unfiled` | Move pages into a folder, or out of the ones they are in |
+| `access <slug>` | Who reaches a page, and by which paths |
+| `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
 | `webhook create <slug> --panel <id>` | Mint a URL that lets something outside the workspace write one panel |
 | `webhook list <slug>` | List a page's webhook tokens and say which still work |
 | `webhook revoke <slug> --id <id> --yes` | Withdraw one webhook token |
@@ -74,9 +88,12 @@ have no `read` grant for and no crew membership on any of its panels for is
 not in the list.
 
 `list` takes no flags of its own. Columns are `SLUG  NAME  PANELS  STATE
-OWNER  LAST DATA`, where `PANELS` counts every panel on the page including the
-ones sealed to you. `--format quiet` prints one slug per line, which is the
-form the next command in a pipe wants.
+OWNER  REACH  LAST DATA`, where `PANELS` counts every panel on the page
+including the ones sealed to you, and `REACH` says how *you* reach the page —
+`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant`, comma-joined
+when there is more than one path. A page whose only path is `grant` is one
+somebody shared with you. `--format quiet` prints one slug per line, which is
+the form the next command in a pipe wants.
 
 ---
 
@@ -640,6 +657,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--user <email>` | Grant to a human user |
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
+| `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
 | `--level <read\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
@@ -665,8 +683,8 @@ crewship page revoke fleet-201 --agent devops-bot
 
 Removes a grant, journalled as `page.grant_removed`.
 
-`revoke` takes the same three subject flags as `grant` — `--user`, `--crew`,
-`--agent` — plus an optional `--level`. Omit the level and every level that
+`revoke` takes the same subject flags as `grant` — `--user`, `--crew`,
+`--agent`, `--workspace` — plus an optional `--level`. Omit the level and every level that
 subject holds is withdrawn at once.
 
 <Note>
@@ -689,6 +707,283 @@ crewship page grants fleet-201
 
 Lists every grant on the page: subject type, subject, level, and (for
 `produce`) which panels it covers.
+
+---
+
+## `crewship page access <slug> --me`
+
+```bash
+crewship page access fleet-201 --me
+```
+
+| Flag | Description |
+|---|---|
+| `--me` | Ask about yourself: your own paths, which anyone who can open the page may read. Without it the command answers who reaches the page, or with `--subject` what a subject reaches — see [`page access`](#crewship-page-access). |
+
+Prints the paths by which you reach the page, in the API's own words —
+`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`
+— the same words `page list` prints in its `REACH` column. When the page is in
+a folder, the folder's slug and its sharing label (`none`, `people`, `crews`,
+`people_and_crews`, `workspace`) are printed too: the label, never the names. Anyone who can open
+the page may ask; a page you cannot reach is a 404.
+
+Backed by the page's own-access endpoint (`GET …/access/me`).
+
+---
+
+## `crewship page folder`
+
+A folder is a named group of pages owned by one crew, with an icon from the
+crew icon set and a colour from the crew palette — the same picker a crew uses.
+One level, a page in at most one folder; a page outside any folder is
+*unfiled*. A folder shows you only the pages in it you reach.
+
+A folder can be shared — with a person, a crew, or everyone in the workspace —
+and what it is shared with applies to every page in it right now: filing a page
+in a shared folder shares it, taking it out unshares it. *Can view* opens the
+pages; *can edit* also renames the folder, edits the pages inside and takes
+pages out of it. A panel owned by another crew stays sealed whatever the folder
+says, and a folder is never shared with an agent. Only the owning crew's
+managers and workspace admins see or change a folder's sharing; everyone else
+sees a label (`none`, `people`, `crews`, `people_and_crews`, `workspace`) in `folder list` and `folder show`,
+and their own access in [`page access --me`](#crewship-page-access-slug-me).
+
+Every folder command is backed by the [folder endpoints](/api-reference/pages#folders).
+
+### `crewship page folder list`
+
+```bash
+crewship page folder list
+```
+
+The folders you can see — the ones you reach a page in, your crews' own, or all
+of them as an admin — with `PAGES` counting the pages in each that you reach.
+`--format quiet` prints one slug per line.
+
+### `crewship page folder create <slug>`
+
+```bash
+crewship page folder create ops-board --name "Ops board" --owner crew/ops
+crewship page folder create ops-board --name "Ops board" --owner crew/ops --icon rocket --color amber
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | The folder's display name. Defaults to the slug. |
+| `--owner crew/<slug>` | The owning crew. Required — a folder is owned by a crew, never by a person. The `crew/` prefix may be omitted. |
+| `--icon <name>` | A crew icon name, from the crew icon picker's set. The server refuses anything outside it and says so. |
+| `--color <key>` | A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
+
+A workspace admin, or a MANAGER (or higher) who belongs to the owning crew,
+may create it; the folder is the crew's from birth.
+
+### `crewship page folder show <slug>`
+
+```bash
+crewship page folder show ops-board
+```
+
+The folder and the pages in it you reach, each with its `REACH` column. A
+folder you reach no page in — and have no standing on as its crew or an admin
+— is a 404, indistinguishable from one that does not exist.
+
+### `crewship page folder update <slug>`
+
+```bash
+crewship page folder update ops-board --name "Operations"
+crewship page folder update ops-board --icon chart --color cyan
+crewship page folder update ops-board --icon ""
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | A new display name. |
+| `--icon <name>` | A crew icon name. Pass `""` to clear it. |
+| `--color <key>` | A crew palette key. Pass `""` to clear it. |
+
+Only the flags you pass are sent. The slug and the owning crew are fixed at
+creation. An admin, the owning crew's MANAGER (or higher), or somebody the
+folder's sharing lets edit it.
+
+### `crewship page folder delete <slug>`
+
+```bash
+crewship page folder delete ops-board --yes
+```
+
+| Flag | Description |
+|---|---|
+| `--yes`, `-y` | Skip the confirmation prompt. Required in a script. |
+
+Only an empty folder: one still holding a page — including one you cannot see
+— is refused with 409, and the refusal does not say how many. Move the pages
+out first (`crewship page move <page> --unfiled`).
+
+### `crewship page folder add <folder> <page>`
+
+```bash
+crewship page folder add ops-board fleet-201
+```
+
+The same as `crewship page move fleet-201 --folder ops-board`. See
+[`page move`](#crewship-page-move-page) for the two authorities it needs and
+the fences it carries.
+
+### `crewship page folder remove <folder> <page>`
+
+```bash
+crewship page folder remove ops-board fleet-201
+```
+
+The same as `crewship page move fleet-201 --unfiled`, naming the folder
+explicitly. The page's owner, a workspace admin, or somebody the folder's
+sharing lets edit it may — the last on purpose: taking a page out withdraws
+the access everyone else inherited from the folder. Taking your own page back
+never waits for anyone.
+
+### `crewship page folder acl <slug>`
+
+```bash
+crewship page folder acl ops-board
+```
+
+Who the folder is shared with: each subject, *can view* or *can view and
+edit*, who set it and when, and the folder's `acl_version`. Only a workspace
+admin or a MANAGER (or higher) of the owning crew may read this; everyone else
+sees the sharing label in `folder show` and their own access in
+[`page access --me`](#crewship-page-access-slug-me). The owning crew and
+admins are not listed: they hold the folder without an entry.
+
+### `crewship page folder share <slug> <subject>`
+
+```bash
+crewship page folder share ops-board user:ada@example.com --view
+crewship page folder share ops-board crew:support --edit
+crewship page folder share ops-board workspace --view
+```
+
+| Flag | Description |
+|---|---|
+| `--view` | Can open the folder and the pages in it. |
+| `--edit` | Can also rename the folder, edit the pages inside, and take pages out of it. Includes `--view`. |
+
+Exactly one of the two. A subject is `user:<email or id>`, `crew:<slug>`, or
+the word `workspace` for every current member. Never an agent: an agent
+reaches a page only by `page grant --agent` on that page, and the command
+refuses `agent:` before any request.
+
+Sharing applies to every page in the folder now or later. *Can edit* never
+opens a panel owned by another crew, moves a page elsewhere, deletes the
+folder or changes its sharing — and it can take pages out, which withdraws the
+access everyone else inherited. Only a workspace admin or a MANAGER (or
+higher) of the owning crew may run this. The entry belongs to the folder and
+stays when whoever set it leaves. Repeating the command is the same state, not
+a second entry.
+
+### `crewship page folder unshare <slug> <subject>`
+
+```bash
+crewship page folder unshare ops-board crew:support
+crewship page folder unshare ops-board workspace
+```
+
+Removes one entry, with the same subject spelling as `share`. A user who has
+since left is removed by the id or email `folder acl` prints. Only a workspace
+admin or a MANAGER (or higher) of the owning crew may run this.
+
+Sharing changes are journalled as `page.folder_acl_changed`.
+
+---
+
+## `crewship page move <page>`
+
+```bash
+crewship page move fleet-201 --folder ops-board
+crewship page move fleet-201 fleet-202 fleet-203 --folder ops-board
+crewship page move fleet-201 --unfiled
+```
+
+| Flag | Description |
+|---|---|
+| `--folder <slug>` | File the pages in this folder, moving them out of any other. Several pages are one all-or-nothing request. |
+| `--unfiled` | Take each page out of whichever folder it is in. The folder is read from the page, so you name none. |
+
+Exactly one of the two. Moving a page into a shared folder shares it with
+whoever the folder is shared with; moving it out unshares it.
+
+**Who may.** Filing needs both halves of the authority in one caller: you
+initiate as the page's owner or a workspace admin, and the folder accepts you
+as an admin, a MANAGER (or higher) of its owning crew, or somebody its sharing
+lets edit it. Lacking either, the refusal names who can; *can edit* alone
+never takes somebody else's page. Unfiling is the page owner's, an admin's, or
+a *can edit* holder's — taking your own page back never waits for anyone.
+
+**Several pages.** With more than one page and `--folder`, the command sends
+one request: every page is checked on its own, one refusal moves nothing, and
+the error names the page.
+
+**The fences.** The command reads each page's `pages_version` and the folder's
+`acl_version` right before it writes and sends exactly what it read. A
+**409** therefore means somebody else moved a page, or changed the folder's
+sharing, between that read and the write; the error prints the current pair —
+look again and re-run. There is deliberately no flag to type a fence by hand: a
+fence you typed says nothing about what you saw.
+
+Moves and removals are journalled as `page.folder_membership_changed`; the
+folder's own changes as `page.folder_changed`.
+
+---
+
+## `crewship page access`
+
+```bash
+crewship page access fleet-201
+crewship page access --subject user:ada@example.com
+crewship page access --subject crew:lookout
+crewship page access --subject agent:watcher
+```
+
+One command, two questions, one per invocation. With a slug it answers *who
+reaches this page* — every user, crew and agent, each with the paths that
+carry it. With `--subject` it answers the reverse: *which pages does this
+subject reach*, and how. Both are read-only renderings of what the server
+already enforces; no grant is issued or implied, and an inert grant is not a
+path.
+
+| Flag | Description |
+|---|---|
+| `--subject <kind>:<ref>` | Ask about a subject instead of a page: `user:<email or id>`, `crew:<slug>` or `agent:<slug>`. Exclusive with the slug. |
+| `--limit <n>` | Rows per page. The server defaults to 100 and caps at 1000. |
+| `--cursor <cursor>` | Continue from the cursor the previous page printed. Opaque. |
+
+A path is one of the server's own words, printed verbatim:
+
+| Path | Meaning |
+|---|---|
+| `owner` | The page's owning user — or, on a crew's row, the crew that owns it. |
+| `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
+| `crew:<slug>` | A member of the crew that owns the page. |
+| `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
+| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
+| `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
+
+```
+SUBJECT              KIND   PATHS
+ada@example.com      user   owner
+bob@example.com      user   panel_crew:ops, grant:page:read
+ops                  crew   panel_crew:ops
+watcher              agent  grant:page:produce
+(withheld)           crew   panel_crew:withheld
+```
+
+Reading a page's access takes the same right as reading its grants: the
+page's owner, or a workspace ADMIN/OWNER. Asking about a subject is an
+administrator's, except that anyone may ask about themselves
+(`--subject user:<your email>`). Every other caller is refused with the
+server's sentence and a non-zero exit.
+
+`--format json` prints the server's document unchanged — the page (or the
+subject), the rows with their `paths`, and `next_cursor` when more follow.
 
 ---
 
@@ -922,12 +1217,151 @@ Refused **locally**, before anything is sent (always exit 2): a page document
 that does not validate, a `<page>/<panel>` address with no slash, an empty or
 non-JSON `--data`, an `--owner` that is not `crew/<slug>`, a missing
 `--file`/`--panel`/`--id`, a `--to` that is not positive, an `--input` that is
-not `k=v`, a malformed or repeated `--bind`, a bundle whose `format` is not
-`crewship-page-bundle/v1`, and a `--file` whose `metadata.slug` disagrees with
+not `k=v`, a malformed or repeated `--bind`, a bundle whose `format` is neither
+`crewship-page-bundle/v1` nor `crewship-page-bundle/v2`, and a `--file` whose `metadata.slug` disagrees with
 the slug you passed to `update`.
 
 Everything else is the server's answer — including an unknown slug and an
 unknown `--level`, both of which are checked there and not here.
+
+## Custom React projects (experimental)
+
+The opt-in Pages application profile uses React, TypeScript and Vite. Projects
+are source drafts; saving/importing one does not execute or publish its code.
+The operator must configure protected source storage, a pinned build image and
+a separate-site runtime origin. The current profile accepts its fixed dependency
+set and lockfile, with custom React and CSS. It does not install arbitrary packages.
+
+```sh
+crewship page project init --dir health-app
+# Edit health-app/src/main.tsx and health-app/src/style.css.
+crewship page project pack health-app > health-source.yaml
+crewship page project set health --file health-source.yaml --revision 0
+crewship page project get health
+crewship page project history health
+crewship page project build health --revision 1
+crewship page project preview health
+```
+
+`init` prints source YAML unless `--dir` is set (or JSON with `--format json`).
+`pack` prints YAML and skips `.git`, `node_modules` and `dist`; `unpack <directory>
+--file source.yaml` extracts into a new directory. Existing directories are never
+overwritten. Symlinks, environment files and paths outside the project are refused.
+Source limits are 256 files, 512 KiB/file and 2 MiB total decoded content.
+
+`set --revision` is the **expected current draft revision**, with 0 for the first
+save. Add `--definition page.yaml` to save an authored definition in the same
+draft. `build --revision` requires the revision to build. Stale values return 409.
+Build returns a job receipt, not a ready preview; `preview` reads its current state.
+A busy compiler returns 429 without a waiting queue.
+
+```sh
+crewship page project get health --revision 1
+# Review sources without requesting the complete panel declaration:
+crewship page project get health --source-only
+crewship page project get health --revision 1 --source-only
+crewship page project restore health --revision 1 --expected-revision 3
+crewship page project history health --before 50
+```
+
+History lists at most 50 revisions per page. Restore creates a new Git checkpoint
+and source revision; it does not change the live application. Source reads and
+history require Page edit permission, not just permission to view its panels.
+
+After inspecting the source and preview, check and publish the exact candidate:
+
+```sh
+crewship page project review health
+crewship page project check health --build BUILD_ID --revision 4
+crewship page project publish health --build BUILD_ID --revision 4 --expected-publication 0 --reviewed-code
+crewship page project application health
+crewship page project rollback health --publication 1 --expected-publication 2 --reviewed-code
+```
+
+`review --publication <version>` asks the same question about a retained
+version instead of the draft: the candidate becomes that publication's
+archived source and its routines become the ones its archived definition
+declares, which is what a rollback is fenced on. Without the flag, `review`
+prints the snapshot a publication is fenced against: the candidate
+draft revision and its build, the live publication and its retained source, the
+routine definitions each `call` action would run, and machine-readable
+`blockers` explaining why publishing is refused. A baseline it cannot read back
+reports `source_available: false` with a reason — that is a missing comparison,
+not agreement — and a routine with no recorded digest is `unknown`, never
+`unchanged`.
+
+Use the actual build ID, source revision and publication version returned by the
+server. `check` verifies stored source/artifact integrity, the compiler result and
+current bindings. It still requires browser and code review. `--reviewed-code`
+confirms that review; it is not a request for an automated security scan.
+Publication requires Page owner/workspace admin authority. An ordinary write grant
+does not grant permission to publish executable code for readers.
+
+`publish` and `rollback` also send the two fence values.
+`--expected-definition-digest` is the sha256 of the Page definition that was
+reviewed, and `--expected-routine-digest routine=sha256` (repeatable) is the
+routine definition behind each `call` action. Pass either flag and that half
+is sent verbatim.
+
+Omit them and the CLI reads `project review` itself immediately before
+publishing — `rollback` asks it for the retained version it is restoring —
+uses the digests it returns, and prints each one to stderr as it sends the
+request. That saves copying hex by hand, and it leaves a record of what the
+publication was fenced on. It is **not** a review step: the command does not
+pause, and nobody sees those digests before they are sent. To review first,
+run `crewship page project review <slug>`, read it, and pass the values back
+with the flags. If the live definition or a routine script moves between the
+snapshot and the write, the server refuses with 409 and names which one.
+
+`review` also answers whether the comparison it just printed is the whole
+change. Panels belonging to crews you are not in are withheld from it, and
+`excluded_panels` says how many; `withheld_changed` says whether any of them
+actually differs between the live definition and the candidate. When it does,
+`publish` and `rollback` are refused with 403 and `blockers` carries
+`withheld_change`. `--reviewed-code` attests that the whole change was
+reviewed, and that attestation cannot be made by a publisher who cannot read
+all of it — the rollback path included, since restoring a version replaces the
+live definition too. Publishing the Page is still yours to do; this particular
+claim is not yours to make, so there is no flag that waives it, unlike the
+baseline acknowledgement below. Ask a workspace administrator, or a member of
+the crew that owns the withheld part, to publish instead. The CLI prints the
+refusal ahead of the request, and says how many panels are withheld and
+nothing about what they are.
+
+`--acknowledge-unavailable-baseline` is separate from the digests and is never
+filled in for you. When the live publication's retained source cannot be read
+back — history compacted, a checkpoint lost — there is nothing to compare the
+candidate against, and the server refuses the publication with 409 until
+somebody says so explicitly. The CLI prints what is missing and what
+acknowledging it would mean, and then stops; passing the flag records that
+nobody made that comparison. It proves nothing about the candidate, which is
+verified in full either way, and the publication's `checks` keep the answer as
+`baseline_source`.
+
+`--expected-publication 0` creates the first publication. Exact retries return the
+original receipt. Rollback creates a new publication of an earlier artifact and
+Page definition, keeping the source draft unchanged. It does not undo work already
+performed by routines. Publication metadata is separate from the older panel-only
+`page versions`/`page rollback` history.
+
+```sh
+crewship page action health/health refresh --publication 2 --idempotency-key check-20260908
+crewship page project action-status health PENDING_ID
+```
+
+`page action --publication` uses the published application action endpoint. The
+version must still be current and the Page declaration must match the publication.
+The existing routine RBAC/policy still applies. Reuse the same key for an explicit
+retry; a receipt means **queued**, not completed. `action-status` returns only the
+current user's pending/run identifiers and states, never another reader's run.
+A network timeout does not mean execution stopped.
+
+`page export` automatically uses `crewship-page-bundle/v2` for a Page with source:
+one YAML contains the authored definition, sources, lockfile and small assets.
+Import accepts v1/v2 JSON or YAML, revalidates bindings and creates an inert draft.
+It does not transfer grants, credentials, run data, Git history, build artifacts
+or trusted publication status. The referenced crews/routines must exist at the
+destination. Export is not a backup of the complete project history.
 
 ## Related
 
@@ -935,3 +1369,92 @@ unknown `--level`, both of which are checked there and not here.
 - [`crewship routine`](/cli/routine) — the usual producer behind a panel.
 - [`crewship automation`](/cli/automation) — what a panel's `wake` gate compiles to.
 - [Internal IPC API](/api-reference/internal) — the sidecar trust boundary `page set` uses inside a container.
+
+## Agent chat: custom Page sources
+
+Agents use the `page_project` tool on the existing `crewship-routines` MCP
+server. The sidecar supplies the workspace, crew and acting agent from its
+configuration and per-agent token. No human CLI/API token is needed in a crew.
+The operator must configure the protected projects directory, Git and the
+optional pinned build image described in the Pages Apps build profile.
+
+1. Create the operational Page using `save_page`; use its returned slug.
+2. Call `page_project` with `operation: "init"`, `slug` and
+   `expected_revision: 0` to create the supported React/TypeScript starter.
+3. Use `operation: "read"` to inspect the current revision, file list, Page
+   definition, Studio path and exact `@crewship/pages` SDK source. Add `path`
+   to read one source file. The starter imports `src/style.css`; arbitrary
+   design can be written in TSX/CSS within the supported dependency profile.
+4. Save a batch of whole-file replacements with the revision just read:
+
+```json
+{
+  "operation": "save",
+  "slug": "health",
+  "expected_revision": 1,
+  "files": [
+    {"path": "src/style.css", "encoding": "utf8", "content": "body { font-family: system-ui; margin: 2rem; }"}
+  ]
+}
+```
+
+`delete_paths` removes existing files. `definition` optionally replaces the
+complete portable Page definition in the draft. The complete MCP request must
+fit in 1 MiB; use small batches, each against the latest returned revision.
+A conflict returns an error: read, reconcile and save again. Never initialize
+an existing project to reset it. Source writes create Git checkpoints; the
+published Page is unchanged.
+
+5. Call `build` with `expected_revision`, then poll `status` for
+   `running`, `ready`, `failed` or `interrupted`. One build runs per instance;
+   a busy worker refuses another request. Status returns diagnostics and build
+   identity without retransmitting compiled JavaScript.
+6. Call `check` with the returned `build_id` and source `expected_revision`.
+   Report the revision/build and Studio path to the user for preview and review.
+   A successful static check does not replace browser or source security review.
+
+Source initialization, saving and builds obey `page_create` autonomy policy;
+held or denied operations do not mutate a draft or start a build. Reads and
+checks require the Page's exact owning crew and a current agent in that crew.
+The onboarding setup crew must explicitly name the target `crew`, following
+`save_page` delegation rules. Revisions/builds retain the actual author and the
+target owner separately. Run attribution is not inferred from an unverified ID.
+
+There is no publish operation in this agent tool. An authorized user publishes
+the reviewed build through Studio or `crewship page project publish`.
+After a transport timeout the outcome can be unknown; inspect the current
+revision and build status before retrying. Data producers keep pushing through
+the existing panel API/`page.write` path independently of source edits.
+
+### `crewship page project publications <slug>`
+
+List immutable application publication receipts and the current publication
+counter. Pass `--before <version>` for older receipts (50 per request). Use
+`page project get <slug> --revision <source-revision>` to inspect exact source
+before a reviewed rollback.
+
+### `crewship page project unpublish <slug>`
+
+Withdraw the custom application for all viewers:
+
+```bash
+crewship page project unpublish health --expected-publication 3 --yes
+```
+
+Requires Page ownership or workspace administration. Panels, source and retained
+publication history remain available. The version counter does not reset; stale
+requests return 409. Withdrawal does not cancel routines already queued.
+
+## `crewship page project compact`
+
+Runs workspace-wide Page storage maintenance (OWNER or ADMIN required).
+Without flags, retains the configured recent history plus current draft/live/running
+roots. `--discard-history --yes` explicitly discards optional history across all
+Pages in this workspace while keeping those protected roots. This cannot recover
+space occupied entirely by protected current content.
+
+## `crewship page project fsck <slug>`
+
+Checks referenced sources, checkpoint contents, artifacts and reachable Git
+objects with Page edit permission. Returns `healthy`, object counts and failures;
+the command exits nonzero when unhealthy. It does not repair or publish anything.

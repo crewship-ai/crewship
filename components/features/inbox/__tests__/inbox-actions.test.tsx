@@ -260,6 +260,7 @@ describe("each kind reaches its own endpoint", () => {
     })
     const body = JSON.parse((apiFetch.mock.calls[0]?.[1] as { body: string }).body)
     expect(body).toEqual({ inputs: { a: 1 }, triggered_via: "manual" })
+    expect(new Headers((apiFetch.mock.calls[0]?.[1] as RequestInit).headers).get("Prefer")).toBe("respond-async")
   })
 
   it("re-enables a tripped breaker through the schedules endpoint", async () => {

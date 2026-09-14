@@ -120,6 +120,7 @@ export type RealtimeEventType =
   // Broadcast on the workspace channel after a workspace is cascade-deleted
   // (#866/#890). Lets other connected tabs/users of the now-gone workspace
   // redirect out instead of hammering dead endpoints.
+  | "workspace.updated"
   | "workspace.deleted"
   | "agent.log"
   | "file.event"
@@ -157,7 +158,13 @@ export type RealtimeEventType =
   // client re-reads through the normal authorised path so the per-panel
   // permission filter cannot be bypassed by a broadcast reaching a subscriber
   // who should not see the data (docs/prd/pages.md §10b.5b).
+  | "page.updated"
+  | "page.deleted"
   | "page.panel.updated"
+  // A folder was created, renamed, recoloured, deleted, or a page moved in or
+  // out of it (#2527). Carries `{slug}` and no folder body: the client re-reads
+  // the folder list and the page list through the authorised path.
+  | "page.folder.updated"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -273,6 +280,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
   // Without this in the allowlist, workspace.deleted is dropped by
   // handleMessage and the redirect-on-delete listener never fires (#890).
+  "workspace.updated",
   "workspace.deleted",
   "agent.log", "file.event", "container.stats",
   "provision.started", "provision.progress", "provision.event", "provision.completed", "provision.failed",
@@ -294,7 +302,10 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   // Pages liveness. handleMessage drops any type missing from this set, so
   // without the entry an open page would simply never update — the exact
   // "easy to forget" step docs/prd/pages.md §10b.5b calls out by name.
+  "page.updated",
+  "page.deleted",
   "page.panel.updated",
+  "page.folder.updated",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so

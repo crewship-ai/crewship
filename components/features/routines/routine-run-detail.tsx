@@ -1,5 +1,8 @@
 "use client"
 
+import { formatRoutineTime } from "@/lib/routine-time"
+
+import { describeStep } from "@/lib/routine-step-describe"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -30,14 +33,23 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
-import { FileText, Activity, Square, Clock, CheckCircle2, AlertCircle, History } from "lucide-react"
-import { DetailCard, Pill, StatStrip } from "@/components/ui/detail"
+import {
+  FileText,
+  Activity,
+  Square,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  History,
+} from "lucide-react"
+import { DetailCard, Pill } from "@/components/ui/detail"
 import { RoutineIdentityHeader } from "./routine-identity-header"
-import { RoutineNavigation, routineViewHref } from "./routine-navigation"
+import { routineViewHref } from "./routine-navigation"
 import {
   routineRunPresentation,
   routineResultLabel,
   routineRunExplanation,
+  routineStoppingPointLabel,
 } from "@/lib/routine-run-presentation"
 import type { RoutineDetail } from "./routines-detail-panel"
 
@@ -46,7 +58,12 @@ import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 const EMPTY = new Map()
 
 /** Shared run surface: every entry point loads the run directly, including old runs. */
-export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; runId: string }) {
+interface RoutineRunDetailProps {
+  workspaceId: string
+  runId: string
+}
+
+export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
@@ -90,17 +107,18 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
   )
   const [starting, setStarting] = useState(false)
   const [selectedVersion, setSelectedVersion] = useState("current")
+  const [runDefinition, setRunDefinition] = useState<Record<string, unknown> | null>(null)
   const [inputSpecs, setInputSpecs] = useState<RoutineInputSpec[] | null>(null)
   const [stopping, setStopping] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [confirmStop, setConfirmStop] = useState(false)
-  const [showAttempts, setShowAttempts] = useState(false)
-  const [showActivity, setShowActivity] = useState(false)
+  // One disclosure holds every piece of evidence a finished run leaves behind;
+  // both lazy lists inside it mount on the first open.
+  const [showTechnical, setShowTechnical] = useState(false)
   useEffect(() => {
     setSelectedStep(null)
     setConfirmStop(false)
-    setShowAttempts(false)
-    setShowActivity(false)
+    setShowTechnical(false)
   }, [runId])
   const tokens = useMemo(
     () =>
@@ -113,8 +131,8 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     return (
       <div className="p-6">
         <p className="mb-4 text-sm text-muted-foreground">
-          No routine execution record is available for this activity. Recorded events are shown
-          below.
+          No routine execution record is available for this activity. Recorded events are
+          shown below.
         </p>
         <RunActivityTimeline
           workspaceId={workspaceId}
@@ -150,7 +168,8 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/runs/${encodeURIComponent(runId)}/cancel`,
         { method: "POST" },
       )
-      if (!res.ok) throw new Error("Could not stop this run. It may already have finished.")
+      if (!res.ok)
+        throw new Error("Could not stop this run. It may already have finished.")
       setConfirmStop(false)
       await refresh()
       await approval.refresh()
@@ -164,7 +183,9 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/run`
     const body = {
       inputs,
-      ...(selectedVersion !== "current" ? { pinned_version: Number(selectedVersion) } : {}),
+      ...(selectedVersion !== "current"
+        ? { pinned_version: Number(selectedVersion) }
+        : {}),
     }
     const attempt = startIntent.current.begin(url, body)
     if (!attempt) return
@@ -212,6 +233,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           ? { ...spec, default: run.inputs![spec.name] }
           : spec,
       )
+      setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
       setInputSpecs(specs)
     } catch (e) {
@@ -233,6 +255,9 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
   const presentation = routineRunPresentation(run)
   const currentStep = dsl?.steps?.find((s) => s.id === run.current_step_id)
   const active = ["queued", "running", "waiting", "paused"].includes(run.status)
+  // A run that ended badly on its own merits (failed, interrupted, result
+  // failed); a stopped run is not offered a fix because nothing broke.
+  const failed = !active && presentation.tone === "destructive"
   const explanation = routineRunExplanation(
     run,
     active ? (approval.waitpoint ? "approval" : currentStep?.wait?.kind) : undefined,
@@ -241,7 +266,10 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
   const identity =
     routine?.slug === run.pipeline_slug
       ? routine
-      : { slug: run.pipeline_slug, name: run.pipeline_name || run.pipeline_slug }
+      : {
+          slug: run.pipeline_slug,
+          name: run.pipeline_name || run.pipeline_slug,
+        }
   const activityHref = `/activity?${new URLSearchParams({ pipeline: run.pipeline_slug, run: runId })}`
   const StatusIcon =
     presentation.tone === "destructive" || presentation.tone === "warn"
@@ -262,7 +290,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
       } as Record<string, string>
     )[run.triggered_via] || readableFieldName(run.triggered_via || "Unknown trigger")
   const resultPanel = run.output && (
-    <DetailCard title="Recorded result" icon={FileText}>
+    <DetailCard title="Results" icon={FileText}>
       {declaredResult && <p className="mb-3 text-sm font-medium">{declaredResult}</p>}
       {["true", "false"].includes(run.output.trim()) && !declaredResult && (
         <p className="mb-3 text-xs text-muted-foreground">
@@ -295,6 +323,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
     outputsAvailable: run.step_outputs_available !== false,
     subSpans: run.sub_spans as Record<string, unknown> | undefined,
     currentStepId: run.current_step_id,
+    failedStepId: run.failed_at_step,
     active,
     executionsError: executions.error,
     executionsTruncated: executions.truncated,
@@ -306,6 +335,26 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
   const mapHeight = Math.min(560, Math.max(300, (dsl?.steps?.length ?? 1) * 78))
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4">
+      {/* A run reached by a deep link (Inbox banner, a shared URL) needs a way
+        back to its routine and to the list; the layout's breadcrumb bar only
+        renders around the routine detail. */}
+      <nav
+        aria-label="Run location"
+        className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
+      >
+        <Link className="hover:text-foreground" href="/routines">
+          Routines
+        </Link>
+        <span aria-hidden>›</span>
+        <Link
+          className="font-medium text-foreground/85 hover:text-foreground"
+          href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug })}`}
+        >
+          {run.pipeline_name || run.pipeline_slug}
+        </Link>
+        <span aria-hidden>›</span>
+        <span>Run</span>
+      </nav>
       <RoutineIdentityHeader
         routine={identity}
         workspaceId={workspaceId}
@@ -337,13 +386,31 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         }
       >
         <Pill tone={presentation.tone}>{presentation.label}</Pill>
-        {run.pipeline_version != null && (
-          <span className="text-xs text-muted-foreground">
-            Viewing run of recipe v{run.pipeline_version}
-          </span>
-        )}
+        {/* The facts of this run as one sentence: what used to be a four-cell
+          stat strip below a second row of tabs. */}
+        <span className="text-xs text-muted-foreground" data-testid="run-facts">
+          started <span className="font-mono">{formatRoutineTime(run.started_at)}</span>
+          {" · "}
+          {triggerLabel}
+          {!active && run.duration_ms != null && (
+            <>
+              {" · "}took{" "}
+              <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
+            </>
+          )}
+          {" · "}
+          {run.pipeline_version != null ? (
+            <Link
+              className="text-primary hover:underline"
+              href={`${routineViewHref(run.pipeline_slug, "versions")}&version=${run.pipeline_version}`}
+            >
+              recipe v{run.pipeline_version} ↗
+            </Link>
+          ) : (
+            "recipe version unavailable"
+          )}
+        </span>
       </RoutineIdentityHeader>
-      <RoutineNavigation slug={run.pipeline_slug} view="run" runId={runId} />
 
       {/* The verdict, then the facts. Both used to sit inside a card called Run
         summary, above a second row of tabs — three levels of chrome before the
@@ -357,10 +424,9 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-medium">{explanation.title}</h2>
-            <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="cursor-pointer hover:text-foreground">What this means</summary>
-              <p className="mt-2 max-w-[85ch] leading-relaxed">{explanation.detail}</p>
-            </details>
+            <p className="mt-1 max-w-[85ch] text-xs leading-relaxed text-muted-foreground">
+              {explanation.detail}
+            </p>
           </div>
           <Link
             className="inline-flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline"
@@ -370,16 +436,57 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
             Open in Activity ↗
           </Link>
         </div>
-        {run.error_message && (
-          <details className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
-            <summary className="cursor-pointer text-destructive">
-              Recorded error
-              {run.failed_at_step ? ` · ${readableFieldName(run.failed_at_step)}` : ""}
-            </summary>
-            <p className="mt-2 whitespace-pre-wrap break-words" role="alert">
-              {run.error_message}
-            </p>
-          </details>
+        {(run.error_message || run.failed_at_step) && (
+          <div className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
+            {run.failed_at_step && (
+              <p className="font-medium text-destructive">
+                {routineStoppingPointLabel(run)}:{" "}
+                {dsl?.steps?.some((step) => step.id === run.failed_at_step)
+                  ? describeStep(
+                      dsl.steps.find((step) => step.id === run.failed_at_step),
+                      1,
+                    ).title
+                  : "Name unavailable"}
+                <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
+                  {run.failed_at_step}
+                </span>
+              </p>
+            )}
+            {run.error_message && (
+              <p className="mt-1 whitespace-pre-wrap break-words" role="alert">
+                {run.error_message}
+              </p>
+            )}
+          </div>
+        )}
+        {failed && (
+          <p className="text-xs text-muted-foreground" data-testid="run-next-step">
+            What you can do: fix the step in{" "}
+            {roleAtLeast(role, "MANAGER") ? (
+              <Link
+                className="text-primary hover:underline"
+                href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, view: "edit" })}`}
+              >
+                Edit recipe
+              </Link>
+            ) : (
+              "the recipe (a manager can edit it)"
+            )}
+            , then{" "}
+            {roleAtLeast(role, "MEMBER") ? (
+              <button
+                type="button"
+                className="text-primary hover:underline disabled:opacity-60"
+                disabled={starting}
+                onClick={() => void prepareAgain()}
+              >
+                run again
+              </button>
+            ) : (
+              "run again"
+            )}
+            .
+          </p>
         )}
         {run.issue_identifier && (
           <Link
@@ -390,48 +497,45 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           </Link>
         )}
       </div>
-      <StatStrip
-        items={[
-          {
-            label: "Started",
-            value: new Date(run.started_at).toLocaleString("en-GB", {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-          },
-          { label: "Duration", value: formatDurationMs(run.duration_ms) },
-          { label: "Started by", value: triggerLabel },
-          {
-            label: "Recipe",
-            value:
-              run.pipeline_version != null ? (
-                <Link
-                  className="text-primary"
-                  href={`${routineViewHref(run.pipeline_slug, "versions")}&version=${run.pipeline_version}`}
-                >
-                  Executed v{run.pipeline_version} ↗
-                </Link>
-              ) : (
-                "Version unavailable"
-              ),
-          },
-        ]}
-      />
+      {approval.waitpoint && (
+        <div className="space-y-2">
+          <RoutineApprovalBanner
+            waitpoint={approval.waitpoint}
+            deciding={approval.deciding}
+            onDecide={approval.decide}
+          />
+          {approval.waitpoint.inbox_item_id && (
+            <Link
+              className="text-xs text-primary"
+              href={`/inbox?item=${encodeURIComponent(approval.waitpoint.inbox_item_id)}`}
+            >
+              Open the same decision in Inbox ↗
+            </Link>
+          )}
+        </div>
+      )}
+      {approval.error && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not load or update the decision.{" "}
+          <button onClick={approval.refresh}>Retry</button>
+        </p>
+      )}
 
       <Dialog open={confirmStop} onOpenChange={setConfirmStop}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Stop this run?</DialogTitle>
             <DialogDescription>
-              Pending and active work will be asked to stop. Recorded results remain available.
-              Actions that already happened are not rolled back.
+              Pending and active work will be asked to stop. Recorded results remain
+              available. Actions that already happened are not rolled back.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmStop(false)} disabled={stopping}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmStop(false)}
+              disabled={stopping}
+            >
               Keep running
             </Button>
             <Button variant="destructive" onClick={stop} disabled={stopping}>
@@ -441,6 +545,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         </DialogContent>
       </Dialog>
       <RoutineRunInputsDialog
+        definition={runDefinition}
         versionChoices={[
           { value: "current", label: "Current recipe" },
           ...(run.pipeline_version != null
@@ -475,56 +580,26 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           <button onClick={refresh}>Retry</button>
         </p>
       )}
-      {approval.waitpoint && (
-        <div className="space-y-2">
-          <RoutineApprovalBanner
-            waitpoint={approval.waitpoint}
-            deciding={approval.deciding}
-            onDecide={approval.decide}
-          />
-          {approval.waitpoint.inbox_item_id && (
-            <Link
-              className="text-xs text-primary"
-              href={`/inbox?item=${encodeURIComponent(approval.waitpoint.inbox_item_id)}`}
-            >
-              Open the same decision in Inbox ↗
-            </Link>
-          )}
-        </div>
-      )}
-      {approval.error && (
-        <p role="alert" className="text-sm text-destructive">
-          Could not load or update the decision. <button onClick={approval.refresh}>Retry</button>
-        </p>
-      )}
-
       {run.step_outputs_available === false && (
         <p
           role="alert"
           className="rounded-xl border border-destructive/20 bg-card px-4 py-3 text-sm text-destructive"
         >
-          Step outputs could not be loaded for this run, so the per-step responses below are
-          missing.{" "}
+          Step outputs could not be loaded for this run, so the per-step responses below
+          are missing.{" "}
           <button className="underline" onClick={refresh}>
             Retry
           </button>
         </p>
       )}
       {resultPanel}
-      {!run.output && (
-        <DetailCard title="Recorded result" icon={FileText}>
-          <p className="text-sm text-muted-foreground">
-            No final response has been recorded{active ? " yet" : ""}. Step responses and files
-            below may still hold the work.
-          </p>
-        </DetailCard>
-      )}
       <RoutineRunArtifacts
         key={`artifacts-${runId}`}
         workspaceId={workspaceId}
         runId={runId}
         active={active}
         compact
+        noFinalResult={!run.output && run.step_outputs_available !== false}
       />
 
       {dsl ? (
@@ -532,7 +607,7 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
           workspaceId={workspaceId}
           definition={dsl}
           record={spineRecord}
-          initialLimit={8}
+          initialLimit={12}
           map={({ openStep }) => (
             <div className="overflow-hidden" style={{ height: mapHeight }}>
               <TraceCanvas
@@ -556,16 +631,18 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
         />
       ) : (
         <p className="rounded-xl border border-border/60 bg-card p-4 text-sm text-muted-foreground">
-          The historical recipe is unavailable. Recorded outputs and activity remain accessible.
+          The historical recipe is unavailable. Recorded outputs and activity remain
+          accessible.
         </p>
       )}
 
       <RoutineSavedInputs key={`inputs-${runId}`} values={run.inputs} definition={dsl} />
 
-      {/* Live work is what the reader came for while a run is going; the event
-        log of a finished run is evidence, and evidence belongs behind a
-        disclosure rather than filling the page under the readable result. */}
-      {active ? (
+      {/* Live work is what the reader came for while a run is going, so it stays
+        on the page; the event log, the attempt list and the identifiers of a
+        finished run are evidence, and evidence lives behind ONE disclosure
+        rather than three, under the readable result. */}
+      {active && (
         <DetailCard title="Activity" icon={Activity} subtitle="live" bare>
           <RunActivityTimeline
             workspaceId={workspaceId}
@@ -577,57 +654,60 @@ export function RoutineRunDetail({ workspaceId, runId }: { workspaceId: string; 
             showControls
           />
         </DetailCard>
-      ) : (
-        <details
-          onToggle={(e) => setShowActivity(e.currentTarget.open)}
-          className="overflow-hidden rounded-xl border border-border/60 bg-card"
-        >
-          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-xs text-muted-foreground">
-            <Activity className="h-4 w-4" />
-            Activity · recorded events from this run
-          </summary>
-          <div className="border-t border-hairline">
-            {showActivity && (
-              <RunActivityTimeline
+      )}
+      <details
+        data-testid="run-technical-details"
+        onToggle={(e) => setShowTechnical(e.currentTarget.open)}
+        className="overflow-hidden rounded-xl border border-border/60 bg-card text-xs"
+      >
+        <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 text-muted-foreground">
+          <History className="h-4 w-4" />
+          Technical details · activity, attempts, recorded executions
+        </summary>
+        <div className="space-y-4 border-t border-hairline px-4 py-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-muted-foreground">
+            <dt>Run</dt>
+            <dd className="break-all font-mono">{run.id}</dd>
+            <dt>Recipe hash</dt>
+            <dd className="break-all font-mono">{run.definition_hash || "unavailable"}</dd>
+            <dt>Cost</dt>
+            <dd className="font-mono">${run.cost_usd.toFixed(4)}</dd>
+            <dt>Mode</dt>
+            <dd>{run.mode}</dd>
+          </dl>
+          {!active && (
+            <section data-testid="run-activity-section">
+              <h3 className="mb-2 flex items-center gap-2 text-muted-foreground">
+                <Activity className="h-4 w-4" />
+                Activity · recorded events from this run
+              </h3>
+              {showTechnical && (
+                <RunActivityTimeline
+                  workspaceId={workspaceId}
+                  params={{ run_id: runId }}
+                  title="Run activity"
+                  card={false}
+                  hideWhenEmpty={false}
+                  showControls
+                />
+              )}
+            </section>
+          )}
+          <section data-testid="run-executions-section">
+            <h3 className="mb-2 flex items-center gap-2 text-muted-foreground">
+              <History className="h-4 w-4" />
+              All recorded executions and attempts
+            </h3>
+            {showTechnical && (
+              <RoutineExecutionHistory
+                key={`executions-${runId}`}
                 workspaceId={workspaceId}
-                params={{ run_id: runId }}
-                title="Run activity"
-                card={false}
-                hideWhenEmpty={false}
-                showControls
+                runId={runId}
+                active={active}
               />
             )}
-          </div>
-        </details>
-      )}
-
-      <details
-        onToggle={(e) => setShowAttempts(e.currentTarget.open)}
-        className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs"
-      >
-        <summary className="flex cursor-pointer items-center gap-2 text-muted-foreground">
-          <History className="h-4 w-4" />
-          All recorded executions and attempts
-        </summary>
-        <div className="mt-4">
-          {showAttempts && (
-            <RoutineExecutionHistory
-              key={`executions-${runId}`}
-              workspaceId={workspaceId}
-              runId={runId}
-              active={active}
-            />
-          )}
+          </section>
         </div>
-      </details>
-      <details className="text-xs text-muted-foreground">
-        <summary className="cursor-pointer">Technical details</summary>
-        <dl className="mt-2 space-y-1">
-          <div>Run: {run.id}</div>
-          <div>Definition: {run.definition_hash || "unavailable"}</div>
-          <div>Cost: ${run.cost_usd.toFixed(4)}</div>
-          <div>Mode: {run.mode}</div>
-        </dl>
       </details>
     </div>
   )

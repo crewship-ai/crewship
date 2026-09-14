@@ -128,6 +128,16 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  /** A published application exists. See `has_project` for source that is not published yet. */
+  has_application?: boolean
+  /**
+   * Application source exists — a draft, whether or not anything has been
+   * published from it. The two are different questions, and the review
+   * screen needs this one: a first publication has no live application, so
+   * `has_application` is false while the whole candidate is what must be read.
+   */
+  has_project?: boolean
+  publication_version?: number
   id?: string | null
   slug?: string | null
   name?: string | null
@@ -136,6 +146,14 @@ export interface WirePage {
   owner?: string | null
   owner_crew_slug?: string | null
   owner_crew_name?: string | null
+  /**
+   * Every path by which the CALLER reaches this page — `owner`, `role`,
+   * `crew:<slug>`, `panel_crew:<slug>`, `grant` (collections analysis §7,
+   * P0b). Says nothing about anyone else. Optional because the server side is
+   * landing separately: a list without it is an older server, not a page
+   * nobody reaches, and everything that reads it has to tell the two apart.
+   */
+  reach?: string[] | null
   /** An array on the detail route; a count on the index (both are read). */
   panels?: WirePanel[] | number | null
   panel_count?: number | null
@@ -156,6 +174,28 @@ export interface WirePage {
    *  today has not necessarily received data today. */
   last_produced_at?: string | null
   updated_at?: string | null
+  /**
+   * The folder this page is filed in, or null (#2527). Absent on a server
+   * that predates folders — and an absent field is not an empty folder: the
+   * rail reads `folder === undefined` on every row as "this server does not
+   * say", and groups by owner instead.
+   */
+  folder?: WirePageFolderRef | null
+  /**
+   * The page's membership version — bumped on every move in or out of a
+   * folder. A move sends it back and the server refuses a stale one with a
+   * 409, so two people cannot both file the same page on the strength of a
+   * list neither has refreshed.
+   */
+  pages_version?: number | null
+}
+
+/** The folder as it rides on a page row: enough to draw the header, no more. */
+export interface WirePageFolderRef {
+  slug?: string | null
+  name?: string | null
+  icon?: string | null
+  color?: string | null
 }
 
 // ── Normalising ────────────────────────────────────────────────────────────
@@ -428,6 +468,8 @@ export interface PageView {
   ownerRef: string | null
   /** What the OWNER facet prints. */
   ownerLabel: string | null
+  /** The caller's `reach`, or null when the server did not send one. */
+  reach: string[] | null
   /** Present on the detail route; null on an index that sent only counts. */
   panels: PanelView[] | null
   tally: PanelTally
@@ -436,6 +478,34 @@ export interface PageView {
   /** Newest payload across the page, in the sense of §4 — not the spec's mtime. */
   lastProducedAt: Date | null
   updatedAt: Date | null
+  /**
+   * The folder the page is filed in; null when unfiled; `undefined` when the
+   * server sent no `folder` field at all — an older server, not an empty
+   * folder, and the rail tells the two apart (#2527).
+   */
+  folder: PageFolderRef | null | undefined
+  /** The membership version a move must send back, or null when unknown. */
+  pagesVersion: number | null
+}
+
+/** A folder reference as every Pages surface consumes it (#2527). */
+export interface PageFolderRef {
+  slug: string
+  name: string
+  icon: string | null
+  color: string | null
+}
+
+export function toPageFolderRef(raw: WirePageFolderRef | null | undefined): PageFolderRef | null {
+  if (!raw || typeof raw !== "object") return null
+  const slug = trimmed(raw.slug)
+  if (!slug) return null
+  return {
+    slug,
+    name: trimmed(raw.name) ?? slug,
+    icon: trimmed(raw.icon),
+    color: trimmed(raw.color),
+  }
 }
 
 function toDate(value: unknown): Date | null {
@@ -456,6 +526,11 @@ function ownerLabelOf(raw: WirePage): string | null {
   // on every row and spends width saying nothing.
   const cut = ref.indexOf("/")
   return cut >= 0 ? ref.slice(cut + 1) || ref : ref
+}
+
+function reachOf(raw: WirePage): string[] | null {
+  if (!Array.isArray(raw.reach)) return null
+  return raw.reach.map(trimmed).filter((r): r is string => r != null)
 }
 
 function ownerRefOf(raw: WirePage): string | null {
@@ -529,11 +604,17 @@ export function toPageView(raw: WirePage): PageView {
     description: trimmed(raw.description),
     ownerRef: ownerRefOf(raw),
     ownerLabel: ownerLabelOf(raw),
+    reach: reachOf(raw),
     panels,
     tally,
     state,
     lastProducedAt: newest,
     updatedAt: toDate(raw.updated_at),
+    folder: raw.folder === undefined ? undefined : toPageFolderRef(raw.folder),
+    pagesVersion:
+      typeof raw.pages_version === "number" && Number.isFinite(raw.pages_version)
+        ? raw.pages_version
+        : null,
   }
 }
 
@@ -620,12 +701,30 @@ export function summarisePages(pages: readonly PageView[], now: Date = new Date(
 export interface PageFilters {
   states: PanelState[]
   owners: string[]
+  /** Only pages reached through a grant and nothing else — "shared with me". */
+  shared: boolean
 }
 
-export const EMPTY_PAGE_FILTERS: PageFilters = { states: [], owners: [] }
+export const EMPTY_PAGE_FILTERS: PageFilters = { states: [], owners: [], shared: false }
 
 export function pageFilterCount(f: PageFilters): number {
-  return f.states.length + f.owners.length
+  return f.states.length + f.owners.length + (f.shared ? 1 : 0)
+}
+
+/**
+ * "Shared with me" is a reach that is ONLY a grant. A page I also reach as
+ * its owner, through a role or through a crew is mine to see regardless of
+ * the grant, so it is not the thing this facet looks for. A server that did
+ * not send `reach` cannot answer the question, and the answer to a question
+ * that cannot be asked is "no", never "everything".
+ */
+export function isSharedWithMe(page: PageView): boolean {
+  return page.reach != null && page.reach.length > 0 && page.reach.every((r) => r === "grant")
+}
+
+/** Whether ANY page in the list carries a reach — i.e. the server sends one. */
+export function hasReach(pages: readonly PageView[]): boolean {
+  return pages.some((p) => p.reach != null)
 }
 
 export function togglePageFilter<T extends string>(list: readonly T[], value: T): T[] {
@@ -646,7 +745,9 @@ export function matchesPageFilters(
 ): boolean {
   const q = search.trim().toLowerCase()
   if (q) {
-    const hay = [page.name, page.slug, page.description ?? "", page.ownerLabel ?? ""]
+    // The folder's name is in the haystack too: "ops" finds every page filed
+    // under Ops, and the rail opens that folder to them (#2527).
+    const hay = [page.name, page.slug, page.description ?? "", page.ownerLabel ?? "", page.folder?.name ?? ""]
       .join(" ")
       .toLowerCase()
     if (!hay.includes(q)) return false
@@ -658,6 +759,7 @@ export function matchesPageFilters(
   if (filters.owners.length > 0) {
     if (!page.ownerRef || !filters.owners.includes(page.ownerRef)) return false
   }
+  if (filters.shared && !isSharedWithMe(page)) return false
   return true
 }
 
@@ -688,6 +790,186 @@ export function ownerFacets(pages: readonly PageView[]): OwnerFacet[] {
     else map.set(p.ownerRef, { ref: p.ownerRef, label: p.ownerLabel ?? p.ownerRef, count: 1 })
   }
   return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label))
+}
+
+// ── Grouping by owner (#2523, collections analysis §7 P0a) ─────────────────
+
+export type PageGroupKind = "mine" | "crew" | "others" | "unowned" | "folder" | "unfiled"
+
+export interface PageGroup {
+  /** `mine`, `crew/<slug>`, `others`, `unowned`, `folder/<slug>` or `unfiled`
+   *  — the collapse-state key. */
+  key: string
+  kind: PageGroupKind
+  /** What the section header prints. */
+  label: string
+  /** Set on a crew group when the caller's reach says they belong to it. */
+  member: boolean
+  pages: PageView[]
+  /** On a `folder` group: the folder itself, for its icon and colour. */
+  folder?: PageFolderRef
+  /**
+   * On a `folder` group: how many of its pages the caller reaches, as the
+   * SERVER counts them. Undefined when the folder is known only from a page
+   * row, which happens while the folder list is still loading.
+   */
+  pageCount?: number
+}
+
+const CREW_PREFIX = "crew/"
+const USER_PREFIX = "user/"
+
+/**
+ * The crews the caller belongs to, read off the pages' own `reach`: a
+ * `crew:<slug>` entry is the server saying "you reach this through your
+ * membership of <slug>". It is the only membership signal the list carries.
+ * The crews list answers with a member COUNT and nothing about who, and a
+ * roster call per crew is the second request this rail must not make. On a
+ * server that sends no reach the set is empty and every crew sorts as
+ * "other" — alphabetically, which is the honest order when nothing is known.
+ */
+export function crewMembershipFromReach(pages: readonly PageView[]): Set<string> {
+  const crews = new Set<string>()
+  for (const p of pages) {
+    for (const r of p.reach ?? []) {
+      if (r.startsWith("crew:")) {
+        const slug = r.slice("crew:".length)
+        if (slug) crews.add(slug)
+      }
+    }
+  }
+  return crews
+}
+
+/**
+ * Mine, then the crews I belong to, then the other crews, then the personal
+ * pages of other people, each A→Z inside its tier. Pages keep the order they
+ * arrived in within a group. A group with nothing in it is not returned, so
+ * a rail never draws an empty header.
+ *
+ * `membership` is read from EVERY page the caller can see, not from the
+ * `pages` being grouped: the rail groups the filtered list, and a filter that
+ * hides the one page carrying `crew:<slug>` must not demote the crew's other
+ * pages — reached through a role — from "my crews" to "other crews". Pass the
+ * unfiltered list, or the set already derived from it.
+ */
+export function groupPagesByOwner(
+  pages: readonly PageView[],
+  currentUserId: string | null | undefined,
+  membership: readonly PageView[] | ReadonlySet<string> = pages,
+): PageGroup[] {
+  const me = currentUserId ? `${USER_PREFIX}${currentUserId}` : null
+  const members = membership instanceof Set ? membership : crewMembershipFromReach(membership as readonly PageView[])
+
+  const mine: PageView[] = []
+  const others: PageView[] = []
+  const unowned: PageView[] = []
+  const crews = new Map<string, PageGroup>()
+
+  for (const p of pages) {
+    const ref = p.ownerRef
+    if (!ref) {
+      unowned.push(p)
+    } else if (ref.startsWith(CREW_PREFIX)) {
+      const slug = ref.slice(CREW_PREFIX.length)
+      const cur = crews.get(ref)
+      if (cur) cur.pages.push(p)
+      else
+        crews.set(ref, {
+          key: ref,
+          kind: "crew",
+          label: p.ownerLabel ?? slug,
+          member: members.has(slug),
+          pages: [p],
+        })
+    } else if (me && ref === me) {
+      mine.push(p)
+    } else {
+      others.push(p)
+    }
+  }
+
+  const byLabel = (a: PageGroup, b: PageGroup) => a.label.localeCompare(b.label)
+  const crewGroups = Array.from(crews.values())
+  const out: PageGroup[] = []
+  if (mine.length) out.push({ key: "mine", kind: "mine", label: "Mine", member: true, pages: mine })
+  out.push(...crewGroups.filter((g) => g.member).sort(byLabel))
+  out.push(...crewGroups.filter((g) => !g.member).sort(byLabel))
+  if (others.length)
+    out.push({ key: "others", kind: "others", label: "Owned by others", member: false, pages: others })
+  if (unowned.length)
+    out.push({ key: "unowned", kind: "unowned", label: "Unowned", member: false, pages: unowned })
+  return out
+}
+
+// ── Grouping by folder (#2527, collections analysis §3 S-1) ────────────────
+
+/** What the folder grouping needs to know about a folder the caller may read. */
+export interface PageFolderLike extends PageFolderRef {
+  pageCount: number
+}
+
+export const UNFILED_GROUP_KEY = "unfiled"
+
+export function folderGroupKey(slug: string): string {
+  return `folder/${slug}`
+}
+
+/** True when the server describes folders at all: every row carries the field,
+ *  null or not. One row without it is an older server, and the rail must not
+ *  draw a single "Unfiled" section over a list that was never filed. */
+export function hasFolders(pages: readonly PageView[]): boolean {
+  return pages.length > 0 && pages.every((p) => p.folder !== undefined)
+}
+
+/**
+ * One group per folder, A→Z by name, then Unfiled last for the pages that
+ * are in none. Every folder the caller may read is a group, INCLUDING one
+ * with no page in it — those are the person's own folders, and a folder that
+ * only appears once something is filed in it cannot be filed into. Unfiled is
+ * drawn only when something is in it. A page whose folder is not in the
+ * folder list (the list is still loading, or the two reads raced) still gets
+ * its group, built from the reference on the row.
+ */
+export function groupPagesByFolder(
+  pages: readonly PageView[],
+  folders: readonly PageFolderLike[],
+): PageGroup[] {
+  const groups = new Map<string, PageGroup>()
+  for (const f of folders) {
+    groups.set(f.slug, {
+      key: folderGroupKey(f.slug),
+      kind: "folder",
+      label: f.name,
+      member: false,
+      pages: [],
+      folder: { slug: f.slug, name: f.name, icon: f.icon, color: f.color },
+      pageCount: f.pageCount,
+    })
+  }
+  const unfiled: PageView[] = []
+  for (const p of pages) {
+    const ref = p.folder ?? null
+    if (!ref) {
+      unfiled.push(p)
+      continue
+    }
+    const cur = groups.get(ref.slug)
+    if (cur) cur.pages.push(p)
+    else
+      groups.set(ref.slug, {
+        key: folderGroupKey(ref.slug),
+        kind: "folder",
+        label: ref.name,
+        member: false,
+        pages: [p],
+        folder: ref,
+      })
+  }
+  const out = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label))
+  if (unfiled.length)
+    out.push({ key: UNFILED_GROUP_KEY, kind: "unfiled", label: "Unfiled", member: false, pages: unfiled })
+  return out
 }
 
 // ── Query keys ─────────────────────────────────────────────────────────────

@@ -28,6 +28,19 @@ export function routineRunPresentation(run: { status?: string; outcome?: string 
   }
 }
 
+/** The lead-in above the recorded reason must agree with the verdict beside
+ * it. A cancelled run already reads "Run stopped" in the header and "Stopped"
+ * in the pill, so calling the same step a failed one contradicts the screen
+ * twice over — and a cancellation is exactly the case where the reader most
+ * needs to know the step did not fail on the merits. */
+export function routineStoppingPointLabel(run: { status?: string; outcome?: string }): string {
+  const status = (run.status ?? "").toLowerCase()
+  if (["cancelled", "canceled"].includes(status) || run.outcome === "CANCELLED")
+    return "Stopped at step"
+  if (status === "interrupted") return "Interrupted at step"
+  return "Failed step"
+}
+
 /** Only the saved author's mapping may give a primitive result business meaning. */
 export function routineResultLabel(output: string, definition: unknown): string | null {
   if (!definition || typeof definition !== "object") return null

@@ -1,0 +1,5 @@
+=== RUN   TestPageProjectPublicationAtomicCASRollbackAndReach
+    pages_project_publish_test.go:90: COUNTERCHECK stale retry: HTTP 200 receipt=2 live=3
+--- PASS: TestPageProjectPublicationAtomicCASRollbackAndReach (4.74s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/api	4.797s

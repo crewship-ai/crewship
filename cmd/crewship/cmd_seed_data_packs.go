@@ -22,6 +22,7 @@ import (
 	"os"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
+	pagesdemo "github.com/crewship-ai/crewship/examples/pages-apps"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -52,6 +53,15 @@ func seedPackFiles(ctx context.Context, client *cli.Client, crewIDs map[string]s
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Delivering demo pack files...")
+	// Operations Lab is a local container example, independent of the external-service packs.
+	if crewID := crewIDs["ops"]; crewID != "" {
+		if err := putBytes(ctx, client, crewFileSavePath(crewID, "shared/scripts/pages-operations-sample.mjs"), bytes.NewReader(pagesdemo.Collector)); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Operations Lab collector: %v\n", err)
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "  ! Operations Lab collector: Ops crew not seeded")
+	}
+
 	saved, failed := 0, 0
 	for _, p := range seeddata.Packs {
 		crewID, ok := crewIDs[p.CrewSlug]

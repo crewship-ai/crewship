@@ -1,0 +1,52 @@
+import React, { useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import { usePageSnapshot, usePanel, runAction, getActionStatus, getPanelHistory } from '@crewship/pages'
+import './style.css'
+
+function Operations() {
+  const page = usePageSnapshot()
+  const panel = usePanel('health')
+  const [pending, setPending] = useState('')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [key, setKey] = useState('')
+  async function start() {
+    const idempotencyKey = key || Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+    setKey(idempotencyKey); setBusy(true)
+    try {
+      const receipt = await runAction('health', 'refresh', {}, { idempotencyKey })
+      setPending(receipt.pending_id)
+      setMessage(`Queued: ${receipt.pending_id}. Execution has not been confirmed yet.`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+  async function status() {
+    setBusy(true)
+    try {
+      const result = await getActionStatus(pending)
+      setMessage(`Queue: ${result.pending_status}. Run: ${result.run_id || 'not assigned'} ${result.run_status}`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+  async function history() {
+    setBusy(true)
+    try {
+      const result = await getPanelHistory('health', { limit: 10 })
+      setMessage(`History: ${result.items.length} snapshots available.`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+  return <main>
+    <header><span className="eyebrow">OPERATIONS</span><h1>{page?.name ?? 'Connecting…'}</h1><p>Collectors run in the crew independently of viewers.</p></header>
+    <article><h2>{panel?.title ?? 'Waiting for an authorized panel'}</h2>
+      <p>Snapshot: {panel?.state ?? 'unknown'} · Produced: {panel?.producedAt ? new Date(panel.producedAt).toLocaleString() : 'never'}</p>
+      <pre>{JSON.stringify(panel?.data ?? null, null, 2)}</pre>
+      <button disabled={busy || !panel || !!pending} onClick={start}>{busy ? 'Waiting…' : key ? 'Retry the same request' : 'Run check'}</button>
+      <button disabled={busy || !panel} onClick={history}>Load recent snapshots</button>
+      {pending && <button disabled={busy} onClick={status}>Check my run</button>}
+      {key && <button disabled={busy} onClick={() => { setKey(''); setPending(''); setMessage('A new click will create a new request.') }}>Prepare a new request</button>}
+      <p role="status">{message}</p>
+    </article>
+  </main>
+}
+createRoot(document.getElementById('root')!).render(<Operations />)

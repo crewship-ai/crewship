@@ -1,0 +1,5 @@
+=== RUN   TestCountercheckWorkspaceBuildQuotaSurvivesRetention
+    pages_project_retention_test.go:132: COUNTERCHECK after retention: 512 failed builds remain, new build HTTP 507: {"error":"Page build history quota reached"}
+--- PASS: TestCountercheckWorkspaceBuildQuotaSurvivesRetention (4.22s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/api	4.257s

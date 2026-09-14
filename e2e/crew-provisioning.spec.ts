@@ -102,14 +102,10 @@ test.describe("Toolbar provisioning popover — end-to-end", () => {
 
   test("badge is absent when all crews are clean", async ({ page }) => {
     await page.goto("/")
-    // If any crews are dirty (likely on a freshly-modified dev VM) this
-    // test is informational — not a failure. We assert the *negative*
-    // case only when the world is clean.
+    // A dirty fixture is a failed precondition, not evidence this negative
+    // case passed. Keep it visible in the measured drift report until the
+    // provisioning suite owns a deterministic clean workspace.
     const badge = page.locator('button[aria-label^="Crew images:"]')
-    const count = await badge.count()
-    if (count > 0) {
-      test.skip(true, "Workspace has dirty crews — negative-case test only meaningful on clean state.")
-    }
     await expect(badge).toHaveCount(0)
   })
 })

@@ -743,7 +743,7 @@ export function KindActions({
                     `/api/v1/workspaces/${encodeURIComponent(item.workspace_id)}/pipelines/${encodeURIComponent(slug)}/run`,
                     {
                       method: "POST",
-                      headers: { "Content-Type": "application/json" },
+                      headers: { "Content-Type": "application/json", Prefer: "respond-async" },
                       body: JSON.stringify({ inputs, triggered_via: "manual" }),
                     },
                   )

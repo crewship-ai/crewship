@@ -744,7 +744,7 @@ func (h *PageHandler) journalActionDispatch(ctx context.Context, wsID string, ac
 
 // ── The authoring gate's action half (§10b.1) ──────────────────────────────
 
-// resolveActionRoutines is the second half of the authoring gate applied to
+// resolveActionRoutinesIn is the second half of the authoring gate applied to
 // actions: every routine a `call` names must EXIST, exactly as every declared
 // producer must (resolveReferences in pages_handler.go, which calls this).
 //
@@ -753,8 +753,11 @@ func (h *PageHandler) journalActionDispatch(ctx context.Context, wsID string, ac
 // panels and nobody would know why", with a button the same argument is
 // stronger because the operator only finds out mid-incident.
 //
-// Reports whether the document may be stored; writes the refusal itself.
-func (h *PageHandler) resolveActionRoutines(w http.ResponseWriter, r *http.Request, wsID string, doc *pages.Document) bool {
+// A routine that does not resolve is a *pageReferenceError naming the panel,
+// the action and the routine; a query failure is anything else. It writes no
+// reply: resolvePanelReferences is the one caller, and whether the sentence
+// may be shown is decided there by the path the document came through.
+func (h *PageHandler) resolveActionRoutinesIn(ctx context.Context, wsID string, doc *pages.Document) error {
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
 		for j := range p.Actions {
@@ -763,21 +766,19 @@ func (h *PageHandler) resolveActionRoutines(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
 				wsID, a.Routine).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
+				return newPageReferenceError(p,
 					"panel %q action %q runs routine/%s, and no such routine exists here — "+
 						"the spec is the allow-list a click resolves against (§8b.2), so it cannot name "+
-						"a routine nobody answers to", p.ID, a.ID, a.Routine))
-				return false
+						"a routine nobody answers to", p.ID, a.ID, a.Routine)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve page action routine", err)
-				return false
+				return fmt.Errorf("resolve page action routine: %w", err)
 			}
 		}
 	}
-	return true
+	return nil
 }

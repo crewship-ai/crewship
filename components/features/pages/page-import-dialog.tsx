@@ -36,6 +36,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { FileJson, Upload, Wand2 } from "lucide-react"
 
+import { parsePageBundle, MAX_PAGE_BUNDLE_BYTES } from "@/lib/pages/parse-bundle"
 import { Input } from "@/components/ui/input"
 import {
   CreateSurface,
@@ -61,7 +62,7 @@ export interface PageImportDialogProps {
   onImported: (slug: string) => void
 }
 
-const BUNDLE_FORMAT = "crewship-page-bundle/v1"
+const BUNDLE_FORMATS = new Set(["crewship-page-bundle/v1", "crewship-page-bundle/v2"])
 
 export function PageImportDialog({ workspaceId, onClose, onImported }: PageImportDialogProps) {
   const [bundle, setBundle] = React.useState<WirePageBundle | null>(null)
@@ -96,11 +97,12 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
     setUnresolved([])
     setFileName(file.name)
     try {
-      const parsed = JSON.parse(await file.text()) as WirePageBundle
+      if (file.size > MAX_PAGE_BUNDLE_BYTES) throw new Error("Page bundle exceeds the import size limit.")
+      const parsed = parsePageBundle(await file.text())
       // Checked here rather than left to the server, because handing a page
       // DOCUMENT to an importer is the likely mistake and the local answer can
       // name the right command instead of a format string.
-      if (parsed?.format !== BUNDLE_FORMAT) {
+      if (!BUNDLE_FORMATS.has(parsed?.format)) {
         setBundle(null)
         setRefusal(
           `That is not an export bundle — it declares format ${
@@ -126,9 +128,9 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
       setBundle(parsed)
       setSlug(parsed.page?.slug ?? "")
       setBind({})
-    } catch {
+    } catch (error) {
       setBundle(null)
-      setRefusal("That file is not JSON.")
+      setRefusal(error instanceof Error ? `Could not read the JSON/YAML bundle: ${error.message}` : "That file is not valid JSON or YAML.")
     }
   }
 
@@ -185,7 +187,7 @@ export function PageImportDialog({ workspaceId, onClose, onImported }: PageImpor
           id="page-import-file"
           icon={FileJson}
           accent="green"
-          accept="application/json,.json"
+          accept="application/json,.json,.yaml,.yml"
           fileName={fileName || null}
           placeholder="Choose a bundle written by Export"
           onFile={(f) => void readFile(f)}

@@ -42,7 +42,10 @@ describe("useAutomations", () => {
     const { result } = renderHook(() => useAutomations("ws1"))
     await waitFor(() => expect(result.current.automations).toHaveLength(1))
     expect(result.current.error).toBeNull()
-    expect(mockFetch).toHaveBeenCalledWith("/api/v1/automations", expect.anything())
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/v1\/automations\?workspace_id=/),
+      expect.anything(),
+    )
   })
 
   it("returns an empty list — not a throw — when the caller may not read them", async () => {

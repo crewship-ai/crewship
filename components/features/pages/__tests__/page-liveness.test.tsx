@@ -14,6 +14,7 @@
  * heartbeat: a heartbeat passes "it animates" and fails "the same payload does
  * not flash".
  */
+import { createRef } from "react"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, cleanup, act } from "@testing-library/react"
 
@@ -77,8 +78,11 @@ function arrival(container: HTMLElement): string | null {
 }
 
 describe("panelArrivalSignature", () => {
-  const sig = (over: Parameters<typeof wire>[0]) =>
-    panelArrivalSignature(toPanelView(wire(over).panels![0]))
+  const sig = (over: Parameters<typeof wire>[0]) => {
+    const panels = wire(over).panels
+    if (!Array.isArray(panels) || !panels[0]) throw new Error("fixture must contain a panel")
+    return panelArrivalSignature(toPanelView(panels[0]))
+  }
 
   it("is the payload, and only the payload", () => {
     // Same numbers, a later run: the same signature, because a producer that
@@ -352,4 +356,15 @@ describe("PageView header", () => {
       container.querySelector("[data-slot='page-liveness']")!.getAttribute("data-liveness"),
     ).toBe("live")
   })
+})
+
+
+it("keeps a real focus destination when the loaded Page has no panels", () => {
+  const heading = createRef<HTMLHeadingElement>()
+  render(<PageView page={toPageView({ ...wire({}), panels: [] })} slug="flotila"
+    loading={false} error={null} notFound={false} onBack={vi.fn()} now={NOW} headingRef={heading} />)
+  expect(screen.getByText("This page declares no panels")).toBeInTheDocument()
+  expect(heading.current).toBe(screen.getByRole("heading", { name: "Flotila" }))
+  act(() => heading.current?.focus())
+  expect(document.activeElement).toBe(heading.current)
 })

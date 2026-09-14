@@ -244,6 +244,17 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	// HasProject and HasApplication answer DIFFERENT questions, and the editor
+	// needs both. HasApplication is "an application is published and running";
+	// HasProject is "this Page has application source at all", published or
+	// not. A first publication is precisely the case where the second is true
+	// and the first is false, and it is the case the review screen exists for
+	// — keying the editor off HasApplication alone hides the review from every
+	// Page whose application has never shipped.
+	//
+	// Neither carries omitempty: a client must not have to treat an absent
+	// field as a third state.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -254,6 +265,11 @@ type pageWire struct {
 	Panels             []any  `json:"panels"`
 	CreatedAt          string `json:"created_at"`
 	UpdatedAt          string `json:"updated_at"`
+	// Folder is the folder this page is filed in, or null — never omitted, so
+	// a client cannot mistake "unfiled" for "this build does not say". A move
+	// carries PagesVersion as its fence (pages_folders.go).
+	Folder       *pageFolderRef `json:"folder"`
+	PagesVersion int64          `json:"pages_version"`
 
 	// Authored says the panels below carry their authored half — `public`,
 	// `actions`, `wake`, `on_failure`, `refresh` — because this caller may
@@ -289,6 +305,8 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	// See pageWire.HasProject: source that exists versus source that is live.
+	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
 	PublicationVersion int64  `json:"publication_version"`
 	ID                 string `json:"id"`
@@ -309,6 +327,20 @@ type pageListWire struct {
 	LastProducedAt string         `json:"last_produced_at,omitempty"`
 	CreatedAt      string         `json:"created_at"`
 	UpdatedAt      string         `json:"updated_at"`
+	// Reach names the paths by which the CALLER reaches this page — `owner`,
+	// `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`, in that order
+	// (pageReach, pages_authz.go). It is never empty and never omitted: a row
+	// is in the index because the caller reaches it somehow, and a client
+	// reading a missing key could not tell "reached, reason unsent" from "this
+	// build does not say". It describes the caller and nobody else — a row
+	// that named the other subjects on a page would be the ACL, and the ACL
+	// has its own endpoint with its own gate (ListGrants).
+	Reach []string `json:"reach"`
+	// Folder and PagesVersion are the same two fields pageWire carries, for
+	// the same reasons: the rail groups rows by folder, and a move from the
+	// rail needs the fence without a second read.
+	Folder       *pageFolderRef `json:"folder"`
+	PagesVersion int64          `json:"pages_version"`
 }
 
 // zeroPanelStates is the rollup's fixed shape (§11b decision 15).
@@ -340,6 +372,7 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	HasProject         bool
 	HasApplication     bool
 	PublicationVersion int64
 	ID                 string
@@ -348,6 +381,8 @@ type pageRecord struct {
 	Description        string
 	OwnerUserID        string
 	OwnerCrewID        string
+	FolderID           string
+	PagesVersion       int64
 	CreatedAt          string
 	UpdatedAt          string
 }
@@ -413,16 +448,65 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
-		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
-		       p.created_at, p.updated_at, COALESCE(l.published,0), COALESCE(l.version,0)
-		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
-		WHERE p.workspace_id = ?
-		ORDER BY p.updated_at DESC, p.slug ASC`, wsID)
+	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "load page viewer", err)
+		return
+	}
+	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
 	if err != nil {
 		replyInternalError(w, h.logger, "list pages", err)
 		return
+	}
+	out := make([]pageListWire, 0, len(index.rows))
+	for i := range index.rows {
+		out = append(out, h.pageListRow(&index.rows[i], index.folders, viewer))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// pageIndex is what the index and the folder readers share: every page in
+// scope that the CALLER reaches, with the panels, owner slug and reach the
+// listing row is rendered from, plus the workspace's folders keyed by id.
+//
+// It is one function so the statement count is one number. Every load in it
+// is a bulk load — the pages, the viewer's grants, the panels, the crew slugs,
+// the folders — never one per page, and TestPagesList_QueryCountDoesNotGrowWithPages
+// holds it there whatever the page count and however many folders there are.
+// A page the caller cannot reach is not in `rows` at all: the same "sealed
+// rather than visible-but-denied" posture §11b decision 14 takes for panels,
+// and the verdict Get reaches through canSeePage. An empty reach IS that
+// verdict.
+type pageIndex struct {
+	rows    []pageIndexRow
+	folders map[string]*pageFolderRecord
+	// acl is every folder's permission entries, keyed by folder id, loaded
+	// once (loadFolderACLIn) — the folder arm of reach and the `shared`
+	// label are decided from it in memory.
+	acl map[string][]pageFolderACLRecord
+}
+
+type pageIndexRow struct {
+	rec           pageRecord
+	panels        []*panelRecord
+	ownerCrewSlug string
+	reach         []string
+}
+
+func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
+	args := append([]any{wsID}, scope.args...)
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
+		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
+		       COALESCE(p.folder_id, ''), p.pages_version,
+		       p.created_at, p.updated_at,
+		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
+		       COALESCE(l.published,0), COALESCE(l.version,0)
+		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
+		WHERE p.workspace_id = ? AND `+scope.where+`
+		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -430,89 +514,116 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
-			&p.OwnerUserID, &p.OwnerCrewID, &p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion); err != nil {
-			replyInternalError(w, h.logger, "scan page", err)
-			return
+			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
+			return nil, err
 		}
 		records = append(records, p)
 	}
 	if err := rows.Err(); err != nil {
-		replyInternalError(w, h.logger, "rows iteration (pages)", err)
-		return
+		return nil, err
 	}
 
-	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "load page viewer", err)
-		return
-	}
-
-	// Every grant in the workspace, in ONE query, with its use-time verdict
-	// already decided by the single reader (pages_grants_authz.go). Asking per
-	// row would make the ACL check cost one statement per page, and a listing
+	// Every grant in scope, in ONE query, with its use-time verdict already
+	// decided by the single reader (pages_grants_authz.go). Asking per row
+	// would make the ACL check cost one statement per page, and a listing
 	// whose permission check is the slow part is a permission check somebody
 	// deletes later.
-	grantsByPage, err := h.loadPageGrantRecordsIn(r.Context(), wsID, "")
+	grantsByPage, err := h.loadPageGrantRecordsIn(ctx, wsID, scope.page)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page grants", err)
-		return
+		return nil, err
 	}
 	mine := pageViewerGrantMatch(viewer)
 
-	out := make([]pageListWire, 0, len(records))
-	for i := range records {
-		rec := &records[i]
-		panels, err := h.loadPanels(r.Context(), wsID, rec.ID)
-		if err != nil {
-			replyInternalError(w, h.logger, "load page panels", err)
-			return
-		}
-		// A page this caller cannot reach is not listed as a locked row — it is
-		// not listed at all, the same "sealed rather than visible-but-denied"
-		// posture §11b decision 14 takes for panels, and the same verdict Get
-		// reaches through canSeePage.
-		if !h.pageReachedWithoutGrant(rec, panels, viewer) &&
-			!anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)) {
-			continue
-		}
-		row := pageListWire{
-			HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
-			ID:          rec.ID,
-			Slug:        rec.Slug,
-			Name:        rec.Name,
-			Description: rec.Description,
-			Owner:       h.ownerRef(r.Context(), rec),
-			PanelCount:  len(panels),
-			PanelStates: zeroPanelStates(),
-			CreatedAt:   rec.CreatedAt,
-			UpdatedAt:   rec.UpdatedAt,
-		}
-		if rec.OwnerCrewID != "" {
-			row.OwnerCrewSlug = strings.TrimPrefix(row.Owner, "crew/")
-		}
-		// The rollup counts only the panels this viewer may see. A sealed
-		// panel contributes to panel_count (the grid draws it) and to nothing
-		// else: reporting its state would disclose the health of data the
-		// viewer is not entitled to read.
-		var newest time.Time
-		for _, panel := range panels {
-			if !h.canSeePanel(viewer, panel) {
-				continue
-			}
-			v := h.verdict(panel)
-			row.PanelStates[string(v.State)]++
-			if panel.HasData && panel.ProducedAt.After(newest) {
-				newest = panel.ProducedAt
-			}
-		}
-		row.State = string(worstPanelState(row.PanelStates))
-		if !newest.IsZero() {
-			row.LastProducedAt = newest.UTC().Format(time.RFC3339)
-		}
-		out = append(out, row)
+	// The same holds for panels, for the owning crews' slugs and for the
+	// folders: one statement each for the scope, never one per page.
+	panelsByPage, err := h.loadPanelsIn(ctx, wsID, scope)
+	if err != nil {
+		return nil, err
+	}
+	crewSlugs, err := h.loadCrewSlugs(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	folders, err := h.loadFoldersIn(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	acl, err := h.loadFolderACLIn(ctx, wsID)
+	if err != nil {
+		return nil, err
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	out := &pageIndex{folders: folders, acl: acl, rows: make([]pageIndexRow, 0, len(records))}
+	for i := range records {
+		rec := records[i]
+		panels := panelsByPage[rec.ID]
+		// Rendered the way ownerRef renders it: the slug when the crew row is
+		// there, the id when it is not.
+		ownerCrewSlug := ""
+		if rec.OwnerCrewID != "" {
+			ownerCrewSlug = crewSlugs[rec.OwnerCrewID]
+			if ownerCrewSlug == "" {
+				ownerCrewSlug = rec.OwnerCrewID
+			}
+		}
+		reach := h.pageReach(&rec, ownerCrewSlug, panels, viewer,
+			folderReachSlug(&rec, folders, acl, viewer),
+			anyGrantReachesPage(liveGrantsIn(grantsByPage[rec.ID], mine)))
+		if len(reach) == 0 {
+			if !scope.keepUnreached {
+				continue
+			}
+			reach = []string{}
+		}
+		out.rows = append(out.rows, pageIndexRow{rec: rec, panels: panels, ownerCrewSlug: ownerCrewSlug, reach: reach})
+	}
+	return out, nil
+}
+
+// pageListRow renders one index row for this viewer. It costs no statement:
+// everything it reads was loaded in bulk by loadPageIndex.
+func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
+	rec := &row.rec
+	out := pageListWire{
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		ID:           rec.ID,
+		Slug:         rec.Slug,
+		Name:         rec.Name,
+		Description:  rec.Description,
+		Owner:        "user/" + rec.OwnerUserID,
+		PanelCount:   len(row.panels),
+		PanelStates:  zeroPanelStates(),
+		CreatedAt:    rec.CreatedAt,
+		UpdatedAt:    rec.UpdatedAt,
+		Reach:        row.reach,
+		Folder:       folders[rec.FolderID].ref(),
+		PagesVersion: rec.PagesVersion,
+	}
+	if rec.OwnerCrewID != "" {
+		out.Owner = "crew/" + row.ownerCrewSlug
+		out.OwnerCrewSlug = row.ownerCrewSlug
+	}
+	// The rollup counts only the panels this viewer may see. A sealed
+	// panel contributes to panel_count (the grid draws it) and to nothing
+	// else: reporting its state would disclose the health of data the
+	// viewer is not entitled to read.
+	var newest time.Time
+	for _, panel := range row.panels {
+		if !h.canSeePanel(viewer, panel) {
+			continue
+		}
+		v := h.verdict(panel)
+		out.PanelStates[string(v.State)]++
+		if panel.HasData && panel.ProducedAt.After(newest) {
+			newest = panel.ProducedAt
+		}
+	}
+	out.State = string(worstPanelState(out.PanelStates))
+	if !newest.IsZero() {
+		out.LastProducedAt = newest.UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 // worstPanelState mirrors hooks/use-pages.ts worstPanelState: the page reports
@@ -808,8 +919,13 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			"a page's slug is its address; create a new page rather than renaming this one")
 		return
 	}
-	base, ok := h.currentDocument(w, rec)
+	base, originalSpec, ok := h.currentDocumentSnapshot(r.Context(), w, rec)
 	if !ok {
+		return
+	}
+	// Metadata-only edits remain available to partial readers. Replacing the
+	// panel list requires visibility of both the old and submitted documents.
+	if req.Panels != nil && !h.requireProjectDefinitions(w, r, base) {
 		return
 	}
 	// The arrangement as it stands, taken BEFORE the patch is applied to it —
@@ -829,17 +945,37 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		base.Spec.Panels = panels
+		if !h.requireProjectDefinitions(w, r, base) {
+			return
+		}
 	}
 	if err := base.Validate(); err != nil {
 		writeSpecError(w, err)
 		return
 	}
-	resolved, ok := h.resolveReferences(w, r, wsID, base)
-	if !ok {
+	authorizer, err := h.reviewDefinitionAuthorizer(r.Context(), wsID)
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize page update", err)
 		return
 	}
-	gates, ok := h.resolveGates(w, r, wsID, base)
-	if !ok {
+	replyUpdateResolution := func(what string, err error) {
+		var ref *pageReferenceError
+		if errors.As(err, &ref) && !authorizer.visible(ref.Owner) {
+			replyError(w, http.StatusForbidden, "A panel you cannot read does not currently validate. Ask a workspace administrator to resolve it before updating this Page.")
+			return
+		}
+		h.replyResolution(w, what, err)
+	}
+	// A metadata-only editor may not read an existing panel. Its validation
+	// failures need the same neutral response as project check/publication.
+	resolved, err := h.resolvePanelReferences(r.Context(), wsID, base)
+	if err != nil {
+		replyUpdateResolution("resolve page update references", err)
+		return
+	}
+	gates, err := h.resolveGatePlan(r.Context(), wsID, base)
+	if err != nil {
+		replyUpdateResolution("resolve page update gates", err)
 		return
 	}
 
@@ -871,10 +1007,18 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ?`,
-		base.Metadata.Name, base.Metadata.Description, string(specJSON), now, rec.ID); err != nil {
+	result, err := tx.ExecContext(r.Context(),
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
+		base.Metadata.Name, base.Metadata.Description, string(specJSON), now, rec.ID, originalSpec)
+	if err != nil {
 		replyInternalError(w, h.logger, "update page", err)
+		return
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		replyInternalError(w, h.logger, "check page update", err)
+		return
+	} else if n != 1 {
+		replyError(w, http.StatusConflict, "Page definition changed before the update; reload before saving")
 		return
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
@@ -951,7 +1095,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
-	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, nil))
+	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
 // ── 5. Delete — DELETE /api/v1/pages/{slug} ────────────────────────────────
@@ -1008,12 +1152,15 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 	err := h.db.QueryRowContext(ctx, `
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
+		       COALESCE(folder_id, ''), pages_version,
 		       created_at, updated_at,
+ EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasApplication, &p.PublicationVersion)
+		&p.FolderID, &p.PagesVersion,
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -1034,8 +1181,56 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 // on the page. A page is a fixed structure, and silently shrinking it would
 // mean the page lies about what it is supposed to show.
 func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*panelRecord, error) {
+	byPage, err := h.loadPanelsIn(ctx, wsID, pageOnly(pageID))
+	if err != nil {
+		return nil, err
+	}
+	return byPage[pageID], nil
+}
+
+// pageScope narrows the panel readers to one page or to a whole workspace. It
+// is a WHERE clause over the `pages` alias p, and it is the ONLY thing that
+// differs between the single-page read and the index's bulk read: both run
+// the same three statements through loadPanelsIn, so the two cannot disagree
+// about what a panel is, which crew owns it, or which payload is newest.
+type pageScope struct {
+	where string
+	args  []any
+	// page is set when the scope IS one page, so the grant reader can narrow
+	// to it; empty means "the workspace's grants", which is what the index
+	// wants anyway.
+	page string
+	// keepUnreached keeps a row the viewer reaches by no path, with an empty
+	// reach. Only the answer to a removal wants it (pages_folders.go): a `w`
+	// holder taking a foreign page out of the folder has just taken their own
+	// path away, and the row they get back says so rather than 404.
+	keepUnreached bool
+}
+
+func pageOnly(pageID string) pageScope { return pageScope{"p.id = ?", []any{pageID}, pageID, false} }
+
+// pageOnlyEvenUnreached is pageOnly for the one caller that renders a row the
+// viewer may no longer reach.
+func pageOnlyEvenUnreached(pageID string) pageScope {
+	return pageScope{"p.id = ?", []any{pageID}, pageID, true}
+}
+func pagesInWorkspace(wsID string) pageScope {
+	return pageScope{"p.workspace_id = ?", []any{wsID}, "", false}
+}
+func pagesInFolder(folderID string) pageScope {
+	return pageScope{"p.folder_id = ?", []any{folderID}, "", false}
+}
+
+// loadPanelsIn is loadPanels over a scope, keyed by page id. A page with no
+// panels has no entry. Three statements whatever the scope holds: the panel
+// rows, the newest payload per panel, and the specs (for order, icons, tabs
+// and wake gates) — never one statement per page, because the index calls
+// this for the whole workspace and a list whose cost grows with its length
+// is a list somebody stops refreshing.
+func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageScope) (map[string][]*panelRecord, error) {
+	args := append([]any{wsID, wsID}, scope.args...)
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT pp.id, pp.panel_id, pp.schema, COALESCE(pp.title, ''),
+		SELECT pp.page_id, pp.id, pp.panel_id, pp.schema, COALESCE(pp.title, ''),
 		       pp.owner_crew_id, c.slug, c.name, c.deleted_at IS NOT NULL,
 		       pp.producer_kind, pp.producer_ref, pp.sla_seconds, pp.span,
 		       CASE pp.producer_kind
@@ -1044,6 +1239,7 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 		            ELSE 1
 		       END AS producer_alive
 		FROM page_panels pp
+		JOIN pages p ON p.id = pp.page_id
 		JOIN crews c ON c.id = pp.owner_crew_id
 		LEFT JOIN pipelines pl
 		       ON pp.producer_kind = 'routine' AND pl.workspace_id = ?
@@ -1051,18 +1247,23 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 		LEFT JOIN agents ag
 		       ON pp.producer_kind = 'agent' AND ag.workspace_id = ?
 		      AND ag.slug = pp.producer_ref AND ag.deleted_at IS NULL
-		WHERE pp.page_id = ?`, wsID, wsID, pageID)
+		WHERE `+scope.where, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	byPanelID := map[string]*panelRecord{}
-	var order []*panelRecord
+	// Panel ids are unique per page, not per workspace; row ids are unique
+	// outright. The spec walk keys on the former, the payload join on the
+	// latter.
+	byPageAndPanel := map[string]map[string]*panelRecord{}
+	byRowID := map[string]*panelRecord{}
+	order := map[string][]*panelRecord{}
 	for rows.Next() {
 		var p panelRecord
+		var pageID string
 		var crewGone, producerAlive bool
-		if err := rows.Scan(&p.RowID, &p.PanelID, &p.Schema, &p.Title, &p.OwnerCrewID, &p.OwnerCrew, &p.OwnerCrewName,
+		if err := rows.Scan(&pageID, &p.RowID, &p.PanelID, &p.Schema, &p.Title, &p.OwnerCrewID, &p.OwnerCrew, &p.OwnerCrewName,
 			&crewGone, &p.ProducerKind, &p.ProducerRef, &p.SLASeconds, &p.Span, &producerAlive); err != nil {
 			return nil, err
 		}
@@ -1073,40 +1274,39 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 			p.Fault = fmt.Sprintf("producer %s %q no longer exists", p.ProducerKind, p.ProducerRef)
 		}
 		rec := p
-		byPanelID[p.PanelID] = &rec
-		order = append(order, &rec)
+		if byPageAndPanel[pageID] == nil {
+			byPageAndPanel[pageID] = map[string]*panelRecord{}
+		}
+		byPageAndPanel[pageID][p.PanelID] = &rec
+		byRowID[p.RowID] = &rec
+		order[pageID] = append(order[pageID], &rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if len(order) == 0 {
-		return nil, nil
+		return map[string][]*panelRecord{}, nil
 	}
 
-	// Newest payload per panel. One statement rather than one per panel: the
-	// page read is the hot path and a page carries up to 24 panels.
-	ids := make([]any, 0, len(order))
-	for _, p := range order {
-		ids = append(ids, p.RowID)
-	}
+	// Newest payload per panel, in one statement for the whole scope rather
+	// than one per panel or per page: the page read is the hot path, a page
+	// carries up to 24 panels, and the index reads every page at once.
 	dataRows, err := h.db.QueryContext(ctx, `
 		SELECT d.panel_id, d.seq, d.payload_json, d.produced_at,
 		       COALESCE(d.producer_run_id, ''), d.state
 		FROM page_panel_data d
 		JOIN (
-			SELECT panel_id, MAX(seq) AS seq
-			FROM page_panel_data
-			WHERE panel_id IN (`+sqlPlaceholders(len(ids))+`)
-			GROUP BY panel_id
-		) newest ON newest.panel_id = d.panel_id AND newest.seq = d.seq`, ids...)
+			SELECT d2.panel_id, MAX(d2.seq) AS seq
+			FROM page_panel_data d2
+			JOIN page_panels pp ON pp.id = d2.panel_id
+			JOIN pages p ON p.id = pp.page_id
+			WHERE `+scope.where+`
+			GROUP BY d2.panel_id
+		) newest ON newest.panel_id = d.panel_id AND newest.seq = d.seq`, scope.args...)
 	if err != nil {
 		return nil, err
 	}
 	defer dataRows.Close()
-	byRowID := map[string]*panelRecord{}
-	for _, p := range order {
-		byRowID[p.RowID] = p
-	}
 	for dataRows.Next() {
 		var rowID, payload, producedAt, runID, state string
 		var seq int64
@@ -1130,44 +1330,89 @@ func (h *PageHandler) loadPanels(ctx context.Context, wsID, pageID string) ([]*p
 
 	// Spec order. A panel present in the table but absent from the spec (a
 	// reconciliation that raced an edit) still renders, at the end, rather than
-	// disappearing — §10b.4: a panel never disappears quietly.
-	var specDoc pages.Document
-	var specJSON string
-	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, pageID).Scan(&specJSON); err == nil {
-		_ = json.Unmarshal([]byte(specJSON), &specDoc)
+	// disappearing — §10b.4: a panel never disappears quietly. A spec that will
+	// not parse orders nothing and the whole page falls into that tail, which
+	// is what a per-page read used to do too.
+	specs := map[string]pages.Document{}
+	specRows, err := h.db.QueryContext(ctx, `SELECT p.id, p.spec_json FROM pages p WHERE `+scope.where, scope.args...)
+	if err != nil {
+		return nil, err
 	}
-	// The same spec carries each panel's wake gates and on_failure block
-	// (§5, §4 rule 4). Attached here, off a document that is already parsed,
-	// so the sensor costs the read path nothing — see pages_wake.go.
-	attachPanelGates(&specDoc, byPanelID)
-	ordered := make([]*panelRecord, 0, len(order))
-	seen := map[string]bool{}
-	for _, ps := range specDoc.Spec.Panels {
-		if p, ok := byPanelID[ps.ID]; ok && !seen[ps.ID] {
-			// The icon comes off the spec for the same reason the gates do:
-			// it is authored, it is not part of the panel's contract, and the
-			// document is already parsed here. A panel in the table but not in
-			// the spec (the racing-edit case below) simply keeps its schema's
-			// icon, which is what it had before it declared one.
-			p.Icon = string(ps.Icon)
-			// The tab travels the same road, for the same reason. A panel in
-			// the table but not in the spec keeps no tab and therefore lands on
-			// the first one — it is already rendering at the end of the page
-			// rather than disappearing (§10b.4), and a visible panel on the
-			// wrong tab is a better failure than a panel on no tab at all.
-			p.Tab = ps.Tab
-			ordered = append(ordered, p)
-			seen[ps.ID] = true
+	defer specRows.Close()
+	for specRows.Next() {
+		var pageID, specJSON string
+		if err := specRows.Scan(&pageID, &specJSON); err != nil {
+			return nil, err
 		}
-	}
-	rest := make([]*panelRecord, 0)
-	for _, p := range order {
-		if !seen[p.PanelID] {
-			rest = append(rest, p)
+		if _, has := order[pageID]; !has {
+			continue
 		}
+		var doc pages.Document
+		_ = json.Unmarshal([]byte(specJSON), &doc)
+		specs[pageID] = doc
 	}
-	sort.SliceStable(rest, func(i, j int) bool { return rest[i].PanelID < rest[j].PanelID })
-	return append(ordered, rest...), nil
+	if err := specRows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string][]*panelRecord, len(order))
+	for pageID, unordered := range order {
+		specDoc := specs[pageID]
+		byPanelID := byPageAndPanel[pageID]
+		// The same spec carries each panel's wake gates and on_failure block
+		// (§5, §4 rule 4). Attached here, off a document that is already
+		// parsed, so the sensor costs the read path nothing — see pages_wake.go.
+		attachPanelGates(&specDoc, byPanelID)
+		ordered := make([]*panelRecord, 0, len(unordered))
+		seen := map[string]bool{}
+		for _, ps := range specDoc.Spec.Panels {
+			if p, ok := byPanelID[ps.ID]; ok && !seen[ps.ID] {
+				// The icon comes off the spec for the same reason the gates do:
+				// it is authored, it is not part of the panel's contract, and the
+				// document is already parsed here. A panel in the table but not in
+				// the spec (the racing-edit case below) simply keeps its schema's
+				// icon, which is what it had before it declared one.
+				p.Icon = string(ps.Icon)
+				// The tab travels the same road, for the same reason. A panel in
+				// the table but not in the spec keeps no tab and therefore lands on
+				// the first one — it is already rendering at the end of the page
+				// rather than disappearing (§10b.4), and a visible panel on the
+				// wrong tab is a better failure than a panel on no tab at all.
+				p.Tab = ps.Tab
+				ordered = append(ordered, p)
+				seen[ps.ID] = true
+			}
+		}
+		rest := make([]*panelRecord, 0)
+		for _, p := range unordered {
+			if !seen[p.PanelID] {
+				rest = append(rest, p)
+			}
+		}
+		sort.SliceStable(rest, func(i, j int) bool { return rest[i].PanelID < rest[j].PanelID })
+		out[pageID] = append(ordered, rest...)
+	}
+	return out, nil
+}
+
+// loadCrewSlugs maps every crew id in the workspace to its slug, deleted crews
+// included — a page owned by a soft-deleted crew still renders `crew/<slug>`,
+// exactly as ownerRef renders it one page at a time.
+func (h *PageHandler) loadCrewSlugs(ctx context.Context, wsID string) (map[string]string, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT id, slug FROM crews WHERE workspace_id = ?`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, slug string
+		if err := rows.Scan(&id, &slug); err != nil {
+			return nil, err
+		}
+		out[id] = slug
+	}
+	return out, rows.Err()
 }
 
 // parsePageTime reads a stored timestamp. Everything Pages writes is RFC 3339
@@ -1307,7 +1552,7 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	out := pageWire{
-		HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,
@@ -1317,6 +1562,10 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		CreatedAt:   rec.CreatedAt,
 		UpdatedAt:   rec.UpdatedAt,
 		Authored:    authored,
+		// One statement, only for a filed page; the index never comes
+		// through here (it renders from loadPageIndex's bulk load).
+		Folder:       h.folderRefFor(ctx, rec),
+		PagesVersion: rec.PagesVersion,
 	}
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
@@ -1488,21 +1737,27 @@ func panelSpecsFrom(w http.ResponseWriter, in []pagePanelWire) ([]pages.PanelSpe
 }
 
 // currentDocument reads the stored spec so a PATCH can be applied to it.
-func (h *PageHandler) currentDocument(w http.ResponseWriter, rec *pageRecord) (*pages.Document, bool) {
+func (h *PageHandler) currentDocument(ctx context.Context, w http.ResponseWriter, rec *pageRecord) (*pages.Document, bool) {
+	doc, _, ok := h.currentDocumentSnapshot(ctx, w, rec)
+	return doc, ok
+}
+
+// Return the exact bytes alongside the parsed document for atomic replacement.
+func (h *PageHandler) currentDocumentSnapshot(ctx context.Context, w http.ResponseWriter, rec *pageRecord) (*pages.Document, string, bool) {
 	var specJSON string
-	if err := h.db.QueryRow(`SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
+	if err := h.db.QueryRowContext(ctx, `SELECT spec_json FROM pages WHERE id = ?`, rec.ID).Scan(&specJSON); err != nil {
 		replyInternalError(w, h.logger, "read stored page spec", err)
-		return nil, false
+		return nil, "", false
 	}
 	var doc pages.Document
 	if err := json.Unmarshal([]byte(specJSON), &doc); err != nil {
 		replyInternalError(w, h.logger, "decode stored page spec", err)
-		return nil, false
+		return nil, "", false
 	}
 	doc.APIVersion = pages.DocumentAPIVersion
 	doc.Kind = pages.DocumentKind
 	doc.Metadata.Slug = rec.Slug
-	return &doc, true
+	return &doc, specJSON, true
 }
 
 // writeSpecError maps a pages.ValidationError onto HTTP.
@@ -1536,6 +1791,50 @@ type resolvedPanel struct {
 	Ref         string
 }
 
+// pageReferenceError is a declared reference on one panel that does not
+// resolve — an owner crew, a producer, a `call` routine, a gate target — or a
+// declaration on that panel that will not parse.
+//
+// Typed rather than formatted, because the sentence names the panel and the
+// reference, and whether a caller may READ that sentence is a question the
+// resolver cannot answer: on the authoring paths the caller wrote the document
+// and sees all of it, but on the publish and check paths the caller may be a
+// Page owner who is not entitled to one of its panels, and the panel this
+// error is about may be exactly that one. Carrying the panel and its owner as
+// fields lets the caller decide with canSeePanel; formatting them into a
+// string decided for it.
+type pageReferenceError struct {
+	// PanelID and Owner identify the panel the reference belongs to; Owner is
+	// the declared "crew/<slug>", which is the panel's ACL.
+	PanelID string
+	Owner   string
+	// Message is the full sentence, for a caller entitled to it.
+	Message string
+}
+
+func (e *pageReferenceError) Error() string { return e.Message }
+
+func newPageReferenceError(p *pages.PanelSpec, format string, args ...any) error {
+	return &pageReferenceError{PanelID: p.ID, Owner: p.Owner, Message: fmt.Sprintf(format, args...)}
+}
+
+// replyResolution writes the reply for a resolver's error the way the
+// authoring paths always have: a reference problem is a 400 carrying its
+// sentence, a shape problem goes through writeSpecError, and anything else is
+// a storage failure.
+func (h *PageHandler) replyResolution(w http.ResponseWriter, what string, err error) {
+	var ref *pageReferenceError
+	var ve *pages.ValidationError
+	switch {
+	case errors.As(err, &ref):
+		replyError(w, http.StatusBadRequest, ref.Message)
+	case errors.As(err, &ve):
+		writeSpecError(w, err)
+	default:
+		replyInternalError(w, h.logger, what, err)
+	}
+}
+
 // resolveReferences is the second half of the authoring gate: every declared
 // owner and producer must EXIST. Cheap, synchronous, no render run.
 //
@@ -1543,71 +1842,79 @@ type resolvedPanel struct {
 // table of scripts, and inventing one would be the datasource a page is not
 // allowed to have. Their authority is checked at push time instead
 // (pages_data.go).
+//
+// This is the authoring-path shape: it writes the reply. The candidate paths
+// call resolvePanelReferences directly, because whether the sentence may be
+// shown to that caller is their decision.
 func (h *PageHandler) resolveReferences(w http.ResponseWriter, r *http.Request, wsID string, doc *pages.Document) (map[string]resolvedPanel, bool) {
+	out, err := h.resolvePanelReferences(r.Context(), wsID, doc)
+	if err != nil {
+		h.replyResolution(w, "resolve panel references", err)
+		return nil, false
+	}
+	return out, true
+}
+
+// resolvePanelReferences is resolveReferences without the reply. A reference
+// that does not resolve comes back as *pageReferenceError; only a real query
+// failure is anything else.
+func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, doc *pages.Document) (map[string]resolvedPanel, error) {
 	out := make(map[string]resolvedPanel, len(doc.Spec.Panels))
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
 		crewSlug, err := p.OwnerCrewSlug()
 		if err != nil {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", p.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(p, "panel %q: %v", p.ID, err)
 		}
 		var crewID string
-		err = h.db.QueryRowContext(r.Context(),
+		err = h.db.QueryRowContext(ctx,
 			`SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, crewSlug).Scan(&crewID)
 		if errors.Is(err, sql.ErrNoRows) {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf(
+			return nil, newPageReferenceError(p,
 				"panel %q is owned by crew/%s, which does not exist in this workspace — "+
-					"the owner is the panel's ACL, so it cannot be a name nobody answers to", p.ID, crewSlug))
-			return nil, false
+					"the owner is the panel's ACL, so it cannot be a name nobody answers to", p.ID, crewSlug)
 		}
 		if err != nil {
-			replyInternalError(w, h.logger, "resolve panel owner crew", err)
-			return nil, false
+			return nil, fmt.Errorf("resolve panel owner crew: %w", err)
 		}
 
 		kind, ref, err := p.ProducerParts()
 		if err != nil {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", p.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(p, "panel %q: %v", p.ID, err)
 		}
 		switch kind {
 		case pages.ProducerRoutine:
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
-					"panel %q names routine/%s as its producer, and no such routine exists here", p.ID, ref))
-				return nil, false
+				return nil, newPageReferenceError(p,
+					"panel %q names routine/%s as its producer, and no such routine exists here", p.ID, ref)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve panel producer routine", err)
-				return nil, false
+				return nil, fmt.Errorf("resolve panel producer routine: %w", err)
 			}
 		case pages.ProducerAgent:
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, ref).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
-					"panel %q names agent/%s as its producer, and no such agent exists here", p.ID, ref))
-				return nil, false
+				return nil, newPageReferenceError(p,
+					"panel %q names agent/%s as its producer, and no such agent exists here", p.ID, ref)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve panel producer agent", err)
-				return nil, false
+				return nil, fmt.Errorf("resolve panel producer agent: %w", err)
 			}
 		}
 		out[p.ID] = resolvedPanel{OwnerCrewID: crewID, Kind: string(kind), Ref: ref}
 	}
 	// The same gate applied to the routines a `call` action names — see
-	// resolveActionRoutines in pages_actions.go for why a button that resolves
-	// only at click time is the worse half of this failure.
-	if !h.resolveActionRoutines(w, r, wsID, doc) {
-		return nil, false
+	// resolveActionRoutinesIn in pages_actions.go for why a button that
+	// resolves only at click time is the worse half of this failure.
+	if err := h.resolveActionRoutinesIn(ctx, wsID, doc); err != nil {
+		return nil, err
 	}
-	return out, true
+	return out, nil
 }
 
 // ── Writing panels ─────────────────────────────────────────────────────────

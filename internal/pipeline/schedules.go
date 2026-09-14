@@ -226,7 +226,7 @@ func (s *ScheduleStore) Save(ctx context.Context, in SaveScheduleInput) (*Schedu
 	if in.ID == "" {
 		return createSchedule(ctx, s.db, in)
 	}
-	return s.update(ctx, in)
+	return updateSchedule(ctx, s.db, in)
 }
 
 // createSchedule validates in and inserts a new schedule row through x —
@@ -428,7 +428,7 @@ func nullIntIfPositive(n int) any {
 // routine-authoring path without also inheriting update's read-modify-write
 // shape (preserving a due next_run_at, the breaker reset CASEs, etc.),
 // which has no meaning for a row that doesn't exist yet.
-func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Schedule, error) {
+func updateSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput) (*Schedule, error) {
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" || in.CronExpr == "" {
 		return nil, errors.New("pipeline_schedules: workspace_id + target_pipeline_id + cron_expr required")
 	}
@@ -439,7 +439,7 @@ func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Sche
 	// ordinary "off" — the generic update path (and the `enable`/PATCH
 	// surfaces it backs) must not be able to flip it live behind that gate.
 	// Only Activate (which also resolves the approval item) may do that.
-	existingRow, gerr := s.GetByID(ctx, in.ID)
+	existingRow, gerr := getScheduleByID(ctx, x, in.ID)
 	if gerr != nil {
 		return nil, fmt.Errorf("update schedule: load existing: %w", gerr)
 	}
@@ -509,7 +509,7 @@ func (s *ScheduleStore) update(ctx context.Context, in SaveScheduleInput) (*Sche
 		existingRow.NextRunAt != nil && !existingRow.NextRunAt.After(time.Now()) {
 		nextRunToStore = *existingRow.NextRunAt
 	}
-	_, err = s.db.ExecContext(ctx, `
+	_, err = x.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
@@ -532,7 +532,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 	if err != nil {
 		return nil, fmt.Errorf("update schedule: %w", err)
 	}
-	return s.GetByID(ctx, in.ID)
+	return getScheduleByID(ctx, x, in.ID)
 }
 
 // GetByID returns a schedule by id, or ErrNotFound.
@@ -608,7 +608,11 @@ var ErrScheduleNotDraft = errors.New("pipeline_schedules: not awaiting activatio
 // schedule's enabled/activation columns (B8, #2359); the API handler pairs
 // this with resolving the review item proposeTriggerActivationInbox raised.
 func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, error) {
-	existing, err := s.GetByID(ctx, id)
+	return activateSchedule(ctx, s.db, id)
+}
+
+func activateSchedule(ctx context.Context, x sqlExecQuerier, id string) (*Schedule, error) {
+	existing, err := getScheduleByID(ctx, x, id)
 	if err != nil {
 		return nil, err
 	}
@@ -628,7 +632,7 @@ func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, err
 	// Whichever commits first flips the row; the second's UPDATE matches
 	// zero rows and correctly reports ErrScheduleNotDraft instead. Mirrors
 	// SoftDelete's guarded predicate + RowsAffected check in this same file.
-	res, err := s.db.ExecContext(ctx,
+	res, err := x.ExecContext(ctx,
 		`UPDATE pipeline_schedules SET enabled = 1, activation = NULL, next_run_at = ?, updated_at = ?
 		 WHERE id = ? AND deleted_at IS NULL AND activation = ?`,
 		tsformat.Format(nextRun), now, id, TriggerActivationDraft,
@@ -639,7 +643,7 @@ func (s *ScheduleStore) Activate(ctx context.Context, id string) (*Schedule, err
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrScheduleNotDraft
 	}
-	return s.GetByID(ctx, id)
+	return getScheduleByID(ctx, x, id)
 }
 
 // listDueSchedules returns enabled schedules whose next_run_at has

@@ -1,7 +1,8 @@
 "use client"
 
 /**
- * Page settings — who reaches this page, and what this page is.
+ * The Pages editor's card library — who reaches this page, and what this
+ * page is.
  *
  * PRD `docs/prd/pages.md` §7.1b (three verbs, three subject kinds), §7.1
  * rule 3 (who may issue), §10b.1 (versions and rollback), §9b (the visual
@@ -10,8 +11,24 @@
  * The whole grants model existed only behind `crewship page grants|grant|
  * revoke` — the multi-agent permission model of §7.1b was reachable from the
  * CLI and from nowhere a page owner looks. So was the answer to "who owns
- * this, and who changed it last". This is that surface, opened from the same
- * SubBar as Edit.
+ * this, and who changed it last".
+ *
+ * This file used to END in a `PageSettings` modal that stacked all six cards
+ * behind one toolbar button. That modal is gone: the editor
+ * (`lib/pages/editor-contract.ts`) gives each of these cards a *named section*
+ * to live in, so what is left here is a library and nothing else — no dialog,
+ * no overlay, no escape key of its own. The cards are deliberately still
+ * exported one at a time, because they no longer travel together:
+ *
+ *   · `PanelVersionsCard`                        → History
+ *   · `AccessCard`, `WebhooksCard`, `SharingCard`, `ExportCard`, `DangerCard`
+ *                                                → Access
+ *
+ * A `GeneralCard` stacking the first two survived the modal for a while, so
+ * that splitting them would not break an importer. Nothing imported it: the
+ * sections mount the halves directly, a whole section apart. It is deleted
+ * rather than kept "in case" — an export with no caller is a component
+ * nobody maintains and everybody has to read.
  *
  * Four things here are load-bearing and none of them are decoration:
  *
@@ -43,27 +60,31 @@
  *     nothing on screen: no row disappears, no field is cleared, because
  *     #1563 rule 3 is that a retry must still have what it needs.
  *
- * It is deliberately NOT part of `page-editor.tsx`. The editor owns one
- * document and its buffer; this owns rows in two other tables that no document
- * can express, and merging them would put a destructive ACL change one stray
- * Save away from a YAML edit.
+ * Nothing here is ever part of a draft. The editor's `SaveEffect` vocabulary
+ * calls every write on these cards `immediate-grant`, and that is not a
+ * rounding: a grant, a token and a public link are rows in tables no page
+ * document can express, so they can neither be staged with a panel edit nor
+ * carried by a publication.
  */
 
 import * as React from "react"
+import { stringify as stringifyYaml } from "yaml"
 import {
   AlertTriangle,
+  Bot,
+  Building2,
   Copy,
   Download,
   Globe,
   History,
-  Info,
   KeyRound,
   Loader2,
   Plus,
   Trash2,
   Undo2,
+  User,
+  Users,
   Webhook,
-  X,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -77,7 +98,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -92,18 +112,16 @@ import {
   type WirePublicLink,
   type WireWebhook,
 } from "@/hooks/use-page-sharing"
-import { SectionCard } from "@/components/ui/section-card"
+import { DetailCard, EntityChip, FieldLabel, Pill, type DetailTone } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/layout/empty-state"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import {
-  PAGE_GRANT_LEVELS,
   PAGE_GRANT_LEVEL_MEANING,
   PAGE_SUBJECT_TYPES,
-  pagePanelCount,
-  toPageOwner,
+  PAGE_SUBJECT_TYPE_LABEL,
+  pageGrantLevelsFor,
   usePageGrantRevoke,
   usePageGrantWrite,
   usePageGrants,
@@ -121,51 +139,11 @@ import {
 // "Small icon + uppercase tracked label on the left, right-aligned muted status
 // word. The right-hand word is always the ANSWER, never a repeat of the label."
 //
-// The two sizes that used to be written out here are `.type-page-label` and
-// `.type-page-meta` from the Pages register (`app/globals.css`). §9b.2 says
-// what the idiom IS; the register says how big it is, once.
-
-function CardLabel({ icon: Icon, children }: { icon: React.ElementType; children: React.ReactNode }) {
-  return (
-    <span className="type-page-label inline-flex items-center gap-1.5 text-foreground/70">
-      <Icon className="h-3.5 w-3.5 text-muted-foreground-soft" />
-      {children}
-    </span>
-  )
-}
-
-function CardAnswer({ children }: { children: React.ReactNode }) {
-  return <span className="type-page-meta text-muted-foreground">{children}</span>
-}
-
-/** One label/answer line. Same idiom, one row deep. */
-function Fact({
-  label,
-  mono,
-  children,
-}: {
-  label: string
-  mono?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <div
-      data-slot="page-fact"
-      data-fact={label.toLowerCase()}
-      className="flex items-baseline justify-between gap-4 border-b border-border/40 py-2 last:border-b-0"
-    >
-      <span className="type-page-label shrink-0 text-muted-foreground-soft">
-        {label}
-      </span>
-      <span
-        data-slot="fact-value"
-        className={cn("min-w-0 text-right text-xs text-muted-foreground", mono && "font-mono")}
-      >
-        {children}
-      </span>
-    </div>
-  )
-}
+// The cards below say that with `DetailCard` from `ui/detail` — the title
+// band is the label, `subtitle` is the answer — so the issue detail and the
+// Pages editor are one design instead of two that rhyme. The pre-kit spelling
+// (`CardLabel`, `CardAnswer`, a `Fact` row) is gone with the "General" table
+// it existed for; the facts are a `StatStrip` under the editor's header now.
 
 /**
  * The server's refusal, in its own words.
@@ -174,7 +152,7 @@ function Fact({
  * quietly rendered as a toast that scrolls away — a 403 on the ACL is an
  * answer the reader has to keep looking at, not a notification.
  */
-function Refusal({ children }: { children: React.ReactNode }) {
+export function Refusal({ children }: { children: React.ReactNode }) {
   return (
     <div
       role="alert"
@@ -185,6 +163,45 @@ function Refusal({ children }: { children: React.ReactNode }) {
       <span className="min-w-0">{children}</span>
     </div>
   )
+}
+
+/**
+ * Why a control is not on screen.
+ *
+ * Deliberately not `Refusal`. That one is `role="alert"` and carries the
+ * SERVER's sentence about a request that was actually made and turned down.
+ * This one is the editor declining, up front, to offer a control the
+ * capabilities say would be refused — nothing was attempted, so nothing has
+ * gone wrong, and an Access section a reader may only *read* would otherwise
+ * open with three red failures on it.
+ *
+ * It always says which right is missing. "You cannot do this" with no reason
+ * is the state that sends somebody to the CLI to find out why.
+ */
+export function ControlRefusal({ children }: { children: React.ReactNode }) {
+  return (
+    <p
+      data-slot="control-refusal"
+      className="type-page-meta rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-muted-foreground"
+    >
+      {children}
+    </p>
+  )
+}
+
+/**
+ * The panel ids on a page, for the produce scope and the token form.
+ *
+ * A sealed panel still has an id (§11b.14 keeps `panel_id`) and is still a
+ * legitimate scope target, so both shapes are read. It lives here rather than
+ * in each section because two sections need the same list and a second copy
+ * is a second chance to forget the sealed arc.
+ */
+export function pagePanelIDs(page: WirePageDetail | null): string[] {
+  if (!Array.isArray(page?.panels)) return []
+  return page.panels
+    .map((p) => (typeof p.id === "string" && p.id) || (typeof p.panel_id === "string" && p.panel_id) || "")
+    .filter(Boolean)
 }
 
 /** The em-dash rule (§9b.4): `—` is "no basis", never a guess. */
@@ -213,12 +230,37 @@ function when(iso: string | null | undefined): string {
  */
 type RevokeTarget = { kind: "one"; grant: PageGrant } | { kind: "all"; subject: PageGrant; levels: number }
 
-function GrantRow({
+/**
+ * One glyph per subject kind, so a row's chip says what the subject IS before
+ * its name is read. Exported for the sibling cards that list subjects
+ * (Effective access, From folder) — three copies of "user → User" is three
+ * places for a fourth kind to be missing.
+ */
+export const PAGE_SUBJECT_ICON: Record<PageSubjectType, React.ComponentType<{ className?: string }>> = {
+  user: User,
+  crew: Users,
+  agent: Bot,
+  workspace: Building2,
+}
+
+export function pageSubjectIcon(kind: string): React.ComponentType<{ className?: string }> | undefined {
+  return (PAGE_SUBJECT_ICON as Record<string, React.ComponentType<{ className?: string }>>)[kind]
+}
+
+/**
+ * The level as a pill tone. Three verbs, three tints — `read` is the neutral
+ * one because it is the floor, not because it does nothing (see rule 3 in
+ * the file comment).
+ */
+const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", write: "blue", produce: "purple" }
+
+export function GrantRow({
   grant,
   onRevoke,
   onRevokeAll,
   siblingLevels,
   disabled,
+  readOnly = false,
 }: {
   grant: PageGrant
   onRevoke: () => void
@@ -226,6 +268,12 @@ function GrantRow({
   onRevokeAll?: () => void
   siblingLevels: number
   disabled: boolean
+  /**
+   * The viewer may read the ACL but not change it. The row keeps every fact
+   * on it and simply loses its verbs — a permanently disabled Revoke would
+   * say "later, maybe", which is not what a missing right means.
+   */
+  readOnly?: boolean
 }) {
   return (
     <div
@@ -238,36 +286,39 @@ function GrantRow({
       )}
     >
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 font-mono leading-none">
-          {grant.subjectType}
-        </Badge>
-        <span className="min-w-0 truncate text-xs font-medium text-foreground" title={grant.subject}>
-          {grant.subject}
-        </span>
-        <Badge
-          variant="secondary"
-          className="h-4 shrink-0 px-1.5 leading-none"
+        {/* The subject as a chip: kind as the glyph and the muted note, the
+            reference as the label. A workspace grant has no reference — the
+            kind IS the subject — so the chip says who that is. */}
+        <EntityChip
+          icon={pageSubjectIcon(grant.subjectType)}
+          label={grant.subject || (grant.subjectType === "workspace" ? PAGE_SUBJECT_TYPE_LABEL.workspace : DASH)}
+          note={grant.subjectType}
+        />
+        <span
+          className="shrink-0"
           title={PAGE_GRANT_LEVEL_MEANING[grant.level as PageGrantLevel] ?? grant.level}
         >
-          {grant.level}
-        </Badge>
+          <Pill tone={LEVEL_TONE[grant.level as PageGrantLevel] ?? "default"}>{grant.level}</Pill>
+        </span>
         <div className="flex-1" />
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onRevoke}
-          disabled={disabled}
-          className="type-page-meta h-6 shrink-0 gap-1 px-2 text-muted-foreground hover:text-destructive"
-          aria-label={`Revoke ${grant.level} from ${grant.subjectType}/${grant.subject}`}
-        >
-          <Trash2 className="h-3 w-3" />
-          Revoke
-        </Button>
+        {!readOnly && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRevoke}
+            disabled={disabled}
+            className="type-page-meta h-6 shrink-0 gap-1 px-2 text-muted-foreground hover:text-destructive"
+            aria-label={`Revoke ${grant.level} from ${grant.subjectType}/${grant.subject}`}
+          >
+            <Trash2 className="h-3 w-3" />
+            Revoke
+          </Button>
+        )}
         {/* Offered only where it is a different act from the button beside it.
             On a subject holding one level, "revoke all" IS "revoke", and two
             controls that do the same thing make a reader stop and work out
             which is which. */}
-        {onRevokeAll && (
+        {!readOnly && onRevokeAll && (
           <Button
             size="sm"
             variant="ghost"
@@ -319,14 +370,33 @@ const SELECT_CLASS =
   "h-8 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none " +
   "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
 
-function AccessCard({
+export function AccessCard({
   workspaceId,
   slug,
   panelIDs,
+  title = "Access",
+  canManage = true,
+  manageRefusal,
+  footer,
 }: {
   workspaceId: string
   slug: string
   panelIDs: string[]
+  /** Re-titled by the section that mounts it — "People and crews" in Access. */
+  title?: string
+  /**
+   * `PageCapabilities.mayManageAccess`. False hides the WRITES and nothing
+   * else: the grant list is what tells a reader who reaches this page, and it
+   * is the half they may still legitimately have.
+   */
+  canManage?: boolean
+  manageRefusal?: string
+  /**
+   * The one muted line under the card — what a grant means in practice. The
+   * section that mounts it supplies it, because the sentence is about the
+   * section's save model (`SaveEffect`), not about this card alone.
+   */
+  footer?: React.ReactNode
 }) {
   const { grants, inertCount, loading, refusal, error } = usePageGrants(workspaceId, slug)
 
@@ -377,10 +447,13 @@ function AccessCard({
             inertCount > 0 ? ` · ${inertCount} inert` : ""
           }`
 
+  const forWorkspace = subjectType === "workspace"
+  const levels = pageGrantLevelsFor(subjectType)
+
   const onIssue = (e: React.FormEvent) => {
     e.preventDefault()
-    const ref = subject.trim()
-    if (!ref) {
+    const ref = forWorkspace ? "" : subject.trim()
+    if (!ref && !forWorkspace) {
       // The server says this too; saying it here costs a round trip nobody
       // learns anything from.
       setWriteRefusal("Name the subject: an email for a user, a slug for a crew or an agent.")
@@ -403,17 +476,13 @@ function AccessCard({
   }
 
   return (
-    <SectionCard
-      title={<CardLabel icon={KeyRound}>Access</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
-    >
+    <DetailCard title={title} icon={KeyRound} subtitle={answer} footer={footer}>
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
         {error && <Refusal>{error}</Refusal>}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s grants…
           </div>
@@ -424,7 +493,14 @@ function AccessCard({
             size="inline"
             icon={KeyRound}
             title="No grants on this page"
-            description={`It is reachable by its owner, by workspace admins, and by the crews that own its panels. Widen it with the form below, or run crewship page grant ${slug} --crew <slug> --level read.`}
+            description={
+              canManage
+                ? `It is reachable by its owner, by workspace admins, and by the crews that own its panels. Widen it with the form below, or run crewship page grant ${slug} --crew <slug> --level read.`
+                // Pointing a reader at a form that is not rendered for them
+                // makes the missing right read as a missing feature. The
+                // refusal below already names what they do not have.
+                : "It is reachable by its owner, by workspace admins, and by the crews that own its panels."
+            }
           />
         )}
 
@@ -443,6 +519,7 @@ function AccessCard({
                   key={`${g.subjectType}:${g.subjectId}:${g.level}`}
                   grant={g}
                   disabled={busy}
+                  readOnly={!canManage}
                   onRevoke={() => setRevokeTarget({ kind: "one", grant: g })}
                   siblingLevels={levels}
                   onRevokeAll={
@@ -458,50 +535,65 @@ function AccessCard({
 
         {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
 
+        {!canManage && manageRefusal && <ControlRefusal>{manageRefusal}</ControlRefusal>}
+
         {/* Issuing. Refused for a caller who is not the owner or an admin, and
             refused for any agent whatever its grants (§7.1b rule 1) — both by
             the server, whose sentence lands in the banner above. */}
-        {!refusal && (
+        {!refusal && canManage && (
           <form onSubmit={onIssue} className="flex flex-col gap-2 rounded-md border border-border/50 p-2.5">
+            {/* The labels are for assistive technology and `getByLabelText`;
+                the row reads as one sentence (kind · who · level · Grant) and
+                a visible label per control would break it into four. */}
             <div className="flex flex-wrap items-center gap-2">
-              <label className="sr-only" htmlFor="grant-subject-type">
+              <FieldLabel className="sr-only" htmlFor="grant-subject-type">
                 Subject kind
-              </label>
+              </FieldLabel>
               <select
                 id="grant-subject-type"
                 className={SELECT_CLASS}
                 value={subjectType}
                 onChange={(e) => {
-                  setSubjectType(e.target.value as PageSubjectType)
+                  const next = e.target.value as PageSubjectType
+                  setSubjectType(next)
+                  // The workspace never produces; a level the new kind may
+                  // not hold is not left standing in the select.
+                  if (!pageGrantLevelsFor(next).includes(level)) setLevel("read")
                   touch()
                 }}
               >
                 {PAGE_SUBJECT_TYPES.map((k) => (
                   <option key={k} value={k}>
-                    {k}
+                    {PAGE_SUBJECT_TYPE_LABEL[k]}
                   </option>
                 ))}
               </select>
 
-              <label className="sr-only" htmlFor="grant-subject">
-                Subject
-              </label>
-              <Input
-                id="grant-subject"
-                value={subject}
-                onChange={(e) => {
-                  setSubject(e.target.value)
-                  touch()
-                }}
-                placeholder={
-                  subjectType === "user" ? "ada@example.com" : subjectType === "crew" ? "lookout" : "watcher"
-                }
-                className="h-8 min-w-[10rem] flex-1 text-xs"
-              />
+              {/* Everyone in this workspace has no reference to type: the
+                  kind IS the subject. */}
+              {!forWorkspace && (
+                <>
+                  <FieldLabel className="sr-only" htmlFor="grant-subject">
+                    Subject
+                  </FieldLabel>
+                  <Input
+                    id="grant-subject"
+                    value={subject}
+                    onChange={(e) => {
+                      setSubject(e.target.value)
+                      touch()
+                    }}
+                    placeholder={
+                      subjectType === "user" ? "ada@example.com" : subjectType === "crew" ? "lookout" : "watcher"
+                    }
+                    className="h-8 min-w-[10rem] flex-1 text-xs"
+                  />
+                </>
+              )}
 
-              <label className="sr-only" htmlFor="grant-level">
+              <FieldLabel className="sr-only" htmlFor="grant-level">
                 Level
-              </label>
+              </FieldLabel>
               <select
                 id="grant-level"
                 className={SELECT_CLASS}
@@ -511,7 +603,7 @@ function AccessCard({
                   touch()
                 }}
               >
-                {PAGE_GRANT_LEVELS.map((l) => (
+                {levels.map((l) => (
                   <option key={l} value={l}>
                     {l}
                   </option>
@@ -529,9 +621,9 @@ function AccessCard({
                 400, so the field is not offered where it would be a lie. */}
             {level === "produce" && (
               <div className="flex flex-col gap-1">
-                <label className="sr-only" htmlFor="grant-panels">
+                <FieldLabel className="sr-only" htmlFor="grant-panels">
                   Panels
-                </label>
+                </FieldLabel>
                 <Input
                   id="grant-panels"
                   value={panels}
@@ -612,13 +704,13 @@ function AccessCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
 // ── General information ────────────────────────────────────────────────────
 
-function VersionRow({
+export function VersionRow({
   version,
   onRollback,
   disabled,
@@ -650,9 +742,9 @@ function VersionRow({
         </span>
       </div>
       {version.current ? (
-        <Badge variant="outline" className="h-4 shrink-0 px-1.5 leading-none">
+        <Pill tone="success" className="shrink-0">
           current
-        </Badge>
+        </Pill>
       ) : (
         <Button
           size="sm"
@@ -660,27 +752,30 @@ function VersionRow({
           onClick={onRollback}
           disabled={disabled}
           className="type-page-meta h-6 shrink-0 gap-1 px-2 text-muted-foreground hover:text-foreground"
-          aria-label={`Roll back to version ${version.seq}`}
+          // Named for its own effect. History offers three restores and the
+          // other two do something different (a draft; a new publication), so
+          // no two of them may share a verb.
+          aria-label={`Restore panel version ${version.seq}`}
         >
           <Undo2 className="h-3 w-3" />
-          Roll back
+          Restore panel version
         </Button>
       )}
     </div>
   )
 }
 
-function GeneralCard({
+export function PanelVersionsCard({
   workspaceId,
   slug,
-  page,
+  title = "Panel definitions",
+  mayRestore = true,
 }: {
   workspaceId: string
   slug: string
-  page: WirePageDetail | null
+  title?: string
+  mayRestore?: boolean
 }) {
-  const owner = toPageOwner(page)
-  const panelCount = pagePanelCount(page)
   const { versions, loading, refusal, error } = usePageVersions(workspaceId, slug)
 
   const [target, setTarget] = React.useState<PageVersion | null>(null)
@@ -688,7 +783,7 @@ function GeneralCard({
 
   const rollback = usePageRollback(workspaceId, slug, {
     onOk: (v) => {
-      toast.success(`Rolled ${slug} back to version ${v.to}`, {
+      toast.success(`Restored ${slug} to panel version ${v.to}`, {
         description: "Restored panels arrive with no data — old payloads are never resurrected as current.",
       })
       setRollbackRefusal(null)
@@ -701,88 +796,62 @@ function GeneralCard({
   })
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Info}>General</CardLabel>}
-      actions={
-        <CardAnswer>
-          {panelCount} {panelCount === 1 ? "panel" : "panels"}
-        </CardAnswer>
+    <DetailCard
+      title={title}
+      icon={History}
+      subtitle={
+        refusal
+          ? "not yours to read"
+          : loading
+            ? "loading"
+            : versions.length === 0
+              ? "no versions"
+              : `${versions.length} retained`
       }
-      className="gap-4 py-4"
+      // The effect, stated on the card rather than only in the confirm:
+      // somebody scanning History has to be able to tell these rows from the
+      // application rows below without opening a dialog.
+      footer={
+        <>
+          Restoring a panel version writes the <strong>live</strong> definition immediately. A panel
+          whose shape changed loses its data and waits for the next push.
+        </>
+      }
     >
-      <div className="flex flex-col gap-4">
-        <div data-slot="page-general" className="flex flex-col">
-          {/* §7.1 rule 1: owner_user_id XOR owner_crew_id. Which arc it is
-              changes what "the owner" means — a crew-owned page survives the
-              person leaving — so the kind is printed, never trimmed off. */}
-          <Fact label="Owner">
-            {owner ? (
-              <>
-                <span className="text-muted-foreground-soft">{owner.kind}</span>{" "}
-                <span className="text-foreground/85">{owner.label}</span>
-              </>
-            ) : (
-              DASH
-            )}
-          </Fact>
-          <Fact label="Slug" mono>
-            {slug}
-          </Fact>
-          <Fact label="Description">{dashed(page?.description)}</Fact>
-          <Fact label="Panels">{panelCount}</Fact>
-          <Fact label="Created">{when(page?.created_at)}</Fact>
-          {/* §10 defines updated_at as the SPEC's mtime — when the
-              arrangement last changed, not when data last arrived. */}
-          <Fact label="Spec changed">{when(page?.updated_at)}</Fact>
-        </div>
+      <div className="flex flex-col gap-2">
+        {refusal && <Refusal>{refusal}</Refusal>}
+        {error && <Refusal>{error}</Refusal>}
+        {rollbackRefusal && <Refusal>{rollbackRefusal}</Refusal>}
+        {!mayRestore && <ControlRefusal>Restoring a live definition requires access to every panel.</ControlRefusal>}
 
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <CardLabel icon={History}>History</CardLabel>
-            <CardAnswer>
-              {refusal
-                ? "not yours to read"
-                : loading
-                  ? "loading"
-                  : versions.length === 0
-                    ? "no versions"
-                    : `${versions.length} retained`}
-            </CardAnswer>
+        {loading && !refusal && (
+          <div className="type-meta flex items-center gap-2 py-3 text-muted-foreground">
+            <Spinner className="h-3.5 w-3.5" />
+            Reading the version log…
           </div>
+        )}
 
-          {refusal && <Refusal>{refusal}</Refusal>}
-          {error && <Refusal>{error}</Refusal>}
-          {rollbackRefusal && <Refusal>{rollbackRefusal}</Refusal>}
+        {!loading && !refusal && !error && versions.length === 0 && (
+          <EmptyState
+            size="inline"
+            icon={History}
+            title="No versions yet"
+            description={`Every save is a version. Edit this page, or run crewship page update ${slug} --file page.yaml, and the history starts here.`}
+          />
+        )}
 
-          {loading && !refusal && (
-            <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
-              <Spinner className="h-3.5 w-3.5" />
-              Reading the version log…
-            </div>
-          )}
-
-          {!loading && !refusal && !error && versions.length === 0 && (
-            <EmptyState
-              size="inline"
-              icon={History}
-              title="No versions yet"
-              description={`Every save is a version. Edit this page, or run crewship page update ${slug} --file page.yaml, and the history starts here.`}
-            />
-          )}
-
-          {!refusal && versions.length > 0 && (
-            <div data-slot="page-versions">
-              {versions.map((v) => (
-                <VersionRow
-                  key={v.seq}
-                  version={v}
-                  disabled={rollback.isPending}
-                  onRollback={() => setTarget(v)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        {!refusal && versions.length > 0 && (
+          <div data-slot="page-versions">
+            {versions.map((v) => (
+              <VersionRow
+                key={v.seq}
+                version={v}
+                disabled={!mayRestore || rollback.isPending}
+                onRollback={() => setTarget(v)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       <AlertDialog open={target != null} onOpenChange={(open) => !open && setTarget(null)}>
@@ -790,42 +859,35 @@ function GeneralCard({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-sm">
               <AlertTriangle className="h-4 w-4 text-destructive" />
-              Roll back to version {target?.seq}
+              Restore panel version {target?.seq}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-xs">
-              This replaces the current spec of <strong>{slug}</strong>. A panel this brings back or redefines
-              arrives with no data — old payloads are never resurrected and shown as current. The rollback is
-              itself a save, so it appends a new version rather than erasing the ones after {target?.seq}.
+              This writes the live definition of <strong>{slug}</strong> — everyone who can see the
+              page sees it change. A panel this brings back or redefines arrives with no data: old
+              payloads are never resurrected and shown as current, so it waits for the next push.
+              The restore is itself a save, so it appends a new version rather than erasing the ones
+              after {target?.seq}. Nothing about this Page&rsquo;s application, its grants or its
+              tokens moves with it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="h-7 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
-              disabled={rollback.isPending}
+              disabled={!mayRestore || rollback.isPending}
               onClick={() => {
-                if (!target) return
+                if (!mayRestore || !target) return
                 rollback.mutate({ to: target.seq })
               }}
             >
               {rollback.isPending && <Spinner className="mr-1.5 h-3 w-3" />}
-              Roll back
+              Restore panel version
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
-}
-
-// ── The surface ────────────────────────────────────────────────────────────
-
-export interface PageSettingsProps {
-  workspaceId: string
-  slug: string
-  /** The page exactly as it came off the wire — `usePage(...).raw`. */
-  page: WirePageDetail | null
-  onClose: () => void
 }
 
 // ── Sharing outward ────────────────────────────────────────────────────────
@@ -838,7 +900,7 @@ export interface PageSettingsProps {
  * convenience banner: it is the only moment the value exists on this screen,
  * and dismissing it is the user saying they have it. It stays until they do.
  */
-function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
+export function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
   // Three states, not two. A clipboard write can be REFUSED — an insecure
   // origin, a denied permission — and the old version set "Copied" without
   // waiting for the promise, so the one moment this value exists on screen
@@ -887,12 +949,15 @@ function OneTimeSecret({ url, onDone }: { url: string; onDone: () => void }) {
 }
 
 /** One public link, live or withdrawn. */
-function LinkRow({
+export function LinkRow({
   link,
   onRevoke,
+  readOnly = false,
 }: {
   link: WirePublicLink
   onRevoke: () => void
+  /** Read the links, but not withdraw them. The facts stay; the verb goes. */
+  readOnly?: boolean
 }) {
   return (
     <div
@@ -903,16 +968,8 @@ function LinkRow({
       <div className="min-w-0 flex-1">
         <div className="type-page-value flex flex-wrap items-center gap-1.5">
           <span className="type-page-stamp text-foreground/90">{link.id}</span>
-          {link.has_password && (
-            <Badge variant="outline" className="type-page-label h-4 px-1">
-              password
-            </Badge>
-          )}
-          {link.show_provenance ? (
-            <Badge variant="outline" className="type-page-label h-4 px-1">
-              provenance shown
-            </Badge>
-          ) : null}
+          {link.has_password && <Pill>password</Pill>}
+          {link.show_provenance ? <Pill>provenance shown</Pill> : null}
         </div>
         <div className="type-page-meta text-muted-foreground">
           {link.live ? `Expires ${when(link.expires_at)}` : `Withdrawn ${when(link.revoked_at)}`}
@@ -931,9 +988,13 @@ function LinkRow({
       </div>
       <div className="shrink-0">
         {link.live ? (
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onRevoke}>
-            Withdraw
-          </Button>
+          readOnly ? (
+            <span className="type-page-meta text-muted-foreground-soft">live</span>
+          ) : (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onRevoke}>
+              Withdraw
+            </Button>
+          )
         ) : (
           <span className="type-page-meta text-muted-foreground-soft">revoked</span>
         )}
@@ -950,7 +1011,18 @@ function LinkRow({
  * in a place they had no reason to look. It belongs next to Access, because
  * the two together are the whole answer to who reaches this page.
  */
-function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+export function SharingCard({
+  workspaceId,
+  slug,
+  canManage = true,
+  manageRefusal,
+}: {
+  workspaceId: string
+  slug: string
+  /** `PageCapabilities.mayManageAccess`. The list stays; the form goes. */
+  canManage?: boolean
+  manageRefusal?: string
+}) {
   const { links, loading, refusal, error } = usePagePublicLinks(workspaceId, slug)
   const [minted, setMinted] = React.useState<string | null>(null)
   const [writeRefusal, setWriteRefusal] = React.useState<string | null>(null)
@@ -990,10 +1062,22 @@ function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string 
       : `${liveCount} live link${liveCount === 1 ? "" : "s"}`
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Globe}>Public links</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
+    <DetailCard
+      title="Public links"
+      icon={Globe}
+      subtitle={answer}
+      // What a link actually exposes, on the card itself. The two halves are
+      // separate facts and both get misread: a link serves the panels that
+      // declare `public: true` and nothing else, and PUBLISHING a custom
+      // application is a different act entirely — the public DTO carries
+      // panels, never the application artifact.
+      footer={
+        <>
+          A public link exposes the <strong>panels marked public</strong> on this Page, to anyone
+          holding the link. Publishing a custom application is not the same thing: it does not put
+          the application outside this workspace, and a public link never serves it.
+        </>
+      }
     >
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
@@ -1002,7 +1086,7 @@ function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string 
         {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s links…
           </div>
@@ -1020,12 +1104,19 @@ function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string 
         {links.length > 0 && (
           <div className="flex flex-col">
             {links.map((l) => (
-              <LinkRow key={l.id} link={l} onRevoke={() => setRevokeTarget(l)} />
+              <LinkRow
+                key={l.id}
+                link={l}
+                readOnly={!canManage}
+                onRevoke={() => setRevokeTarget(l)}
+              />
             ))}
           </div>
         )}
 
-        {!refusal && (
+        {!canManage && manageRefusal && <ControlRefusal>{manageRefusal}</ControlRefusal>}
+
+        {!refusal && canManage && (
           <div className="flex flex-col gap-2 rounded-md border border-border/50 bg-background/40 p-2.5">
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -1105,26 +1196,57 @@ function SharingCard({ workspaceId, slug }: { workspaceId: string; slug: string 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
 /**
- * Panel webhooks — the door for a producer that cannot run the binary.
+ * Producer tokens — the door for a producer that cannot run the binary.
  *
- * A token is bound to exactly ONE panel, and that is the property worth
- * putting on screen: a leaked token writes that panel and nothing else. The
- * form therefore makes the panel a required choice rather than an optional
- * scope, which is the same shape the server enforces.
+ * This card lives in **Access**, not in Data & actions, and that is a
+ * decision rather than a filing convenience: minting a token IS issuing a
+ * credential, and a credential is a permission question. Data & actions links
+ * here rather than growing a second mint form.
+ *
+ * Two properties the backend really has, and which an admin's mental model is
+ * wrong without (independent review §7):
+ *
+ *  1. **A token is bound to exactly ONE panel.** A leaked token writes that
+ *     panel and nothing else, so the form makes the panel a required choice
+ *     rather than an optional scope — the same shape the server enforces.
+ *
+ *  2. **A token carries no authority of its own.** The server re-derives the
+ *     issuer's *current* rights on every single write, so revoking the
+ *     issuer's grant narrows the token immediately, with no token rotation.
+ *     This is the sentence that changes what an admin thinks they must
+ *     police, which is why it sits with the list and not in a tooltip.
+ *
+ * Hence the status word. A live row says **"Not revoked"**, never a green
+ * "Working": the column knows only that nobody has revoked the row. It does
+ * not know the issuer still has rights, and it cannot promise the next push
+ * will be accepted. "Last accepted" is a record of one past success for the
+ * same reason.
+ *
+ * There is deliberately no expiry, no rotation and no way back to the secret.
+ * The server offers none of the three, and a control for a thing that does
+ * not exist is worse than its absence.
  */
-function WebhooksCard({
+export function WebhooksCard({
   workspaceId,
   slug,
   panelIDs,
+  title = "Webhooks",
+  canManage = true,
+  manageRefusal,
 }: {
   workspaceId: string
   slug: string
   panelIDs: string[]
+  /** "Producer tokens" in the editor's Access section. */
+  title?: string
+  /** `PageCapabilities.mayManageAccess`. Minting is issuing a credential. */
+  canManage?: boolean
+  manageRefusal?: string
 }) {
   const { webhooks, loading, refusal, error } = usePageWebhooks(workspaceId, slug)
   const [minted, setMinted] = React.useState<string | null>(null)
@@ -1160,13 +1282,24 @@ function WebhooksCard({
   })
 
   const liveCount = webhooks.reduce((n, w) => (w.live ? n + 1 : n), 0)
-  const answer = loading ? "…" : liveCount === 0 ? "none" : `${liveCount} live`
+  // Counted in the only word the list can stand behind. "N live" would be the
+  // same overclaim as a green "Working" on the row.
+  const answer = loading ? "…" : liveCount === 0 ? "none" : `${liveCount} not revoked`
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Webhook}>Webhooks</CardLabel>}
-      actions={<CardAnswer>{answer}</CardAnswer>}
-      className="gap-4 py-4"
+    <DetailCard
+      title={title}
+      icon={Webhook}
+      subtitle={answer}
+      // The two truths, on the card the list is in. Not a tooltip: this is
+      // the sentence that changes what an admin thinks they must police.
+      footer={
+        <span data-slot="token-truths">
+          Each token is bound to <strong>one panel</strong> and writes nothing else. A token
+          carries no authority of its own — the server rechecks the issuer&rsquo;s rights on every
+          write, so revoking the issuer&rsquo;s grant narrows the token immediately.
+        </span>
+      }
     >
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
@@ -1175,7 +1308,7 @@ function WebhooksCard({
         {minted && <OneTimeSecret url={minted} onDone={() => setMinted(null)} />}
 
         {loading && !refusal && (
-          <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
+          <div className="type-meta flex items-center gap-2 py-4 text-muted-foreground">
             <Spinner className="h-3.5 w-3.5" />
             Reading this page&rsquo;s tokens…
           </div>
@@ -1185,7 +1318,7 @@ function WebhooksCard({
           <EmptyState
             size="inline"
             icon={Webhook}
-            title="No webhook tokens"
+            title="No producer tokens"
             description="Mint one for a system that cannot run the CLI — a cron on somebody else's box, a CI step, a gateway. Each token writes exactly one panel."
           />
         )}
@@ -1202,22 +1335,29 @@ function WebhooksCard({
                 <div className="min-w-0 flex-1">
                   <div className="type-page-value flex flex-wrap items-center gap-1.5">
                     <span className="font-medium text-foreground/90">{dashed(w.name)}</span>
-                    <Badge variant="outline" className="type-page-label h-4 px-1">
-                      {w.panel}
-                    </Badge>
+                    <Pill className="font-mono">{w.panel}</Pill>
+                    {/* The status word is what the column KNOWS. "Not
+                        revoked" is the whole of it: it does not say the
+                        issuer still has rights, and it does not promise the
+                        next write is accepted — which is why the live pill
+                        is the neutral tone and never the success green. */}
+                    <span data-slot="token-status">
+                      <Pill tone={w.live ? "default" : "warn"}>{w.live ? "Not revoked" : "Revoked"}</Pill>
+                    </span>
                   </div>
                   <div className="type-page-meta text-muted-foreground">
                     {w.live ? `Minted ${when(w.created_at)}` : `Revoked ${when(w.revoked_at)}`}
                     {" · "}
+                    {/* A past success, named as one. */}
                     {w.fire_count > 0
-                      ? `fired ${w.fire_count}×, last ${when(w.last_fired_at)}`
-                      : "never fired"}
-                    {" · by "}
+                      ? `${w.fire_count} accepted, last accepted ${when(w.last_fired_at)}`
+                      : "no write accepted yet"}
+                    {" · issued by "}
                     {dashed(w.created_by)}
                   </div>
                 </div>
                 <div className="shrink-0">
-                  {w.live ? (
+                  {w.live && !canManage ? null : w.live ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -1226,16 +1366,16 @@ function WebhooksCard({
                     >
                       Revoke
                     </Button>
-                  ) : (
-                    <span className="type-page-meta text-muted-foreground-soft">revoked</span>
-                  )}
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {!refusal && panelIDs.length > 0 && (
+        {!canManage && manageRefusal && <ControlRefusal>{manageRefusal}</ControlRefusal>}
+
+        {!refusal && canManage && panelIDs.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-background/40 p-2.5">
             <select
               value={panel}
@@ -1298,7 +1438,7 @@ function WebhooksCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1311,7 +1451,7 @@ function WebhooksCard({
  * page's, not the producer's — and the confirm says so, because a producer
  * pushing every thirty seconds does not make the history it wrote recoverable.
  */
-function DangerCard({
+export function DangerCard({
   workspaceId,
   slug,
   onDeleted,
@@ -1337,30 +1477,32 @@ function DangerCard({
   })
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Trash2}>Delete</CardLabel>}
-      className="gap-4 border-destructive/30 py-4"
+    <DetailCard
+      title="Delete this Page"
+      icon={Trash2}
+      tone="destructive"
+      action={
+        <Button
+          size="xs"
+          variant="outline"
+          className="border-destructive/50 text-destructive hover:bg-destructive/10"
+          onClick={() => {
+            setTyped("")
+            setOpen(true)
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+          Delete this Page
+        </Button>
+      }
+      footer="There is no undo — a rollback restores a spec, not a deleted page."
     >
       <div className="flex flex-col gap-3">
         {writeRefusal && <Refusal>{writeRefusal}</Refusal>}
-        <p className="type-page-meta text-muted-foreground">
+        <p className="type-page-value text-muted-foreground">
           Deletes the page, its panels and every payload they hold. Grants, public links and webhook
-          tokens go with it. There is no undo — a rollback restores a spec, not a deleted page.
+          tokens go with it.
         </p>
-        <div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 border-destructive/50 px-3 text-xs text-destructive hover:bg-destructive/10"
-            onClick={() => {
-              setTyped("")
-              setOpen(true)
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-            Delete this page
-          </Button>
-        </div>
       </div>
 
       <AlertDialog open={open} onOpenChange={setOpen}>
@@ -1396,7 +1538,7 @@ function DangerCard({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SectionCard>
+    </DetailCard>
   )
 }
 
@@ -1414,128 +1556,64 @@ function DangerCard({
  * a monitored page and imports a silent one should learn that here and not
  * from a panel that never fired.
  */
-function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+export function ExportCard({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const [busy, setBusy] = React.useState(false)
   const [refusal, setRefusal] = React.useState<string | null>(null)
 
   return (
-    <SectionCard
-      title={<CardLabel icon={Download}>Export</CardLabel>}
-      className="gap-4 py-4"
+    <DetailCard
+      title="Export"
+      icon={Download}
+      footer={
+        <>
+          Wake gates, on-failure routes, actions and publication do <strong>not</strong> travel:
+          they would arrive as automations and links nobody there approved.
+        </>
+      }
+      action={
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true)
+            setRefusal(null)
+            try {
+              const bundle = await fetchPageBundle(workspaceId, slug)
+              // Held only long enough for the browser to take it. Revoked
+              // straight after, because an object URL keeps the whole blob
+              // alive for the life of the document otherwise.
+              const sourceProject = bundle.format === "crewship-page-bundle/v2"
+              const filename = `${slug}.bundle.${sourceProject ? "yaml" : "json"}`
+              const blob = new Blob([sourceProject ? stringifyYaml(bundle) : JSON.stringify(bundle, null, 2)], {
+                type: sourceProject ? "application/yaml" : "application/json",
+              })
+              const href = URL.createObjectURL(blob)
+              const a = document.createElement("a")
+              a.href = href
+              a.download = filename
+              a.click()
+              URL.revokeObjectURL(href)
+              toast.success("Exported", { description: filename })
+            } catch (err) {
+              setRefusal(err instanceof Error ? err.message : "Export failed")
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          {busy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
+          Download bundle
+        </Button>
+      }
     >
       <div className="flex flex-col gap-3">
         {refusal && <Refusal>{refusal}</Refusal>}
-        <p className="type-page-meta text-muted-foreground">
+        <p className="type-page-value text-muted-foreground">
           Downloads this page as a portable bundle — its panels, their owners and producers, and the
-          references another workspace has to bind. Wake gates, on-failure routes, actions and
-          publication do <strong>not</strong> travel: they would arrive as automations and links
-          nobody there approved.
+          references another workspace has to bind.
         </p>
-        <div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 gap-1.5 px-3 text-xs"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setRefusal(null)
-              try {
-                const bundle = await fetchPageBundle(workspaceId, slug)
-                // Held only long enough for the browser to take it. Revoked
-                // straight after, because an object URL keeps the whole blob
-                // alive for the life of the document otherwise.
-                const blob = new Blob([JSON.stringify(bundle, null, 2)], {
-                  type: "application/json",
-                })
-                const href = URL.createObjectURL(blob)
-                const a = document.createElement("a")
-                a.href = href
-                a.download = `${slug}.bundle.json`
-                a.click()
-                URL.revokeObjectURL(href)
-                toast.success("Exported", { description: `${slug}.bundle.json` })
-              } catch (err) {
-                setRefusal(err instanceof Error ? err.message : "Export failed")
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            {busy ? <Spinner className="h-3 w-3" /> : <Download className="h-3 w-3" />}
-            Download bundle
-          </Button>
-        </div>
       </div>
-    </SectionCard>
-  )
-}
-
-export function PageSettings({ workspaceId, slug, page, onClose }: PageSettingsProps) {
-  // Panel ids, for the produce-scope placeholder. A sealed panel still has an
-  // id (§11b.14 keeps `panel_id`), and it is still a legitimate scope target.
-  const panelIDs = React.useMemo(() => {
-    if (!Array.isArray(page?.panels)) return []
-    return page.panels
-      .map((p) => (typeof p.id === "string" && p.id) || (typeof p.panel_id === "string" && p.panel_id) || "")
-      .filter(Boolean)
-  }, [page])
-
-  const title = `Settings for ${slug}`
-
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Escape closes — unless a confirm dialog is open above this, which
-      // takes the key first and only dismisses itself.
-      if (e.key === "Escape" && !document.querySelector("[data-slot='alert-dialog-content']")) {
-        onClose()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [onClose])
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-8">
-      <button
-        type="button"
-        aria-label="Close page settings"
-        onClick={onClose}
-        className="absolute inset-0 bg-background/70 backdrop-blur-md"
-      />
-      <div
-        role="dialog"
-        aria-label={title}
-        className="relative flex h-full max-h-[92dvh] w-full max-w-[720px] flex-col overflow-hidden rounded-xl border border-border/60 bg-card shadow-2xl"
-      >
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-card/30 px-4 py-2.5">
-          <div className="type-page-meta flex min-w-0 items-center gap-2.5 text-muted-foreground">
-            <CONCEPT_ICON.pages className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-            <span className="font-medium text-foreground">Page settings</span>
-            <span className="opacity-60">·</span>
-            <span className="type-page-stamp truncate">{slug}</span>
-          </div>
-          <Button size="sm" variant="ghost" onClick={onClose} className="h-8 gap-1.5 px-2.5 text-xs">
-            <X className="h-3.5 w-3.5" />
-            Close
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-auto">
-          <div className="flex flex-col gap-4 p-4">
-            <AccessCard workspaceId={workspaceId} slug={slug} panelIDs={panelIDs} />
-            {/* Access and Public links sit together on purpose: they are the two
-                halves of one question — who reaches this page — and splitting
-                them across surfaces is what sent people to the CLI to answer
-                the second half. */}
-            <SharingCard workspaceId={workspaceId} slug={slug} />
-            <WebhooksCard workspaceId={workspaceId} slug={slug} panelIDs={panelIDs} />
-            <GeneralCard workspaceId={workspaceId} slug={slug} page={page} />
-            <ExportCard workspaceId={workspaceId} slug={slug} />
-            <DangerCard workspaceId={workspaceId} slug={slug} onDeleted={onClose} />
-          </div>
-        </div>
-      </div>
-    </div>
+    </DetailCard>
   )
 }

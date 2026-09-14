@@ -41,6 +41,7 @@ export type StepStatus = "pending" | "running" | "waiting" | "success" | "failed
 // templated form. Anyone editing this file should keep that
 // invariant — never persist or log resolved values on the client.
 export interface TraceStep {
+  name?: string
   id: string
   type: StepKind
   needs?: string[]
@@ -111,6 +112,7 @@ export interface TraceStep {
 }
 
 export interface PipelineDSL {
+  parallelism?: string
   steps?: TraceStep[]
 }
 

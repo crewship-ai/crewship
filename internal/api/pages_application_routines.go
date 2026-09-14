@@ -1,37 +1,15 @@
 package api
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
-
-	"github.com/crewship-ai/crewship/internal/pages"
 )
 
 func pageRoutineDigest(definition string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(definition)))
-}
-
-// A publication records the routine definitions observed during review. These
-// hashes are provenance, not a promise to freeze routine scripts or execution.
-func (h *PageHandler) pageRoutineDigests(ctx context.Context, ws string, doc *pages.Document) (map[string]string, error) {
-	result := map[string]string{}
-	for _, panel := range doc.Spec.Panels {
-		for _, action := range panel.Actions {
-			if action.Kind != pages.ActionCall || result[action.Routine] != "" {
-				continue
-			}
-			var definition string
-			if err := h.db.QueryRowContext(ctx, `SELECT definition_json FROM pipelines WHERE workspace_id=? AND slug=? AND deleted_at IS NULL`, ws, action.Routine).Scan(&definition); err != nil {
-				return nil, fmt.Errorf("read action routine %q: %w", action.Routine, err)
-			}
-			result[action.Routine] = pageRoutineDigest(definition)
-		}
-	}
-	return result, nil
 }
 
 type pageRoutineChecks struct {

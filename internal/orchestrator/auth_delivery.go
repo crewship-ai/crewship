@@ -164,16 +164,14 @@ func fileLogin(req AgentRunRequest) (AuthDelivery, Credential, bool) {
 	return d, cred, ok
 }
 
-// codexHomeDir is the CODEX_HOME an agent runs with: its own HOME's .codex.
-// Codex would default to the same place; naming it pins the login and the MCP
-// config to one directory even if HOME ever moves.
-func codexHomeDir(agentSlug string) string {
-	return agentHomeDir(agentSlug) + "/" + codexauth.HomeRel
-}
-
-// agentHomeDir is the HOME baseAgentEnv gives every agent.
-func agentHomeDir(agentSlug string) string {
-	return "/crew/agents/" + agentSlug
+// codexHomeDir is the CODEX_HOME one RUN of an agent works in: that run's own
+// HOME's .codex. Codex would default to the same place; naming it pins the
+// login and the MCP config to one directory even if HOME ever moves — and
+// under E0 HOME moves every run, which is the point. Two concurrent Codex runs
+// of one agent used to share this directory, so the one that refreshed its
+// login rewrote the file the other was authenticating with.
+func codexHomeDir(agentSlug, runID string) string {
+	return agentHomeDir(agentSlug, runID) + "/" + codexauth.HomeRel
 }
 
 // syncLoginFile makes the adapter's login file reflect this run's
@@ -218,10 +216,10 @@ func syncLoginFile(
 		if err != nil {
 			return err
 		}
-		return writeFileViaContainer(ctx, container, containerID, agentHomeDir(req.AgentSlug), d.File, string(body), containerFileSecret, logger)
+		return writeFileViaContainer(ctx, container, containerID, agentHomeDir(req.AgentSlug, req.RunID), d.File, string(body), containerFileSecret, logger)
 	}
 	if !ok {
-		return removeLoginFile(ctx, container, containerID, req.AgentSlug, d.File, logger)
+		return removeLoginFile(ctx, container, containerID, req.AgentSlug, req.RunID, d.File, logger)
 	}
 	var body []byte
 	var err error
@@ -246,7 +244,7 @@ func syncLoginFile(
 	if err != nil {
 		return fmt.Errorf("%s login %s: %w", req.CLIAdapter, login.ID, err)
 	}
-	if err := writeFileViaContainer(ctx, container, containerID, agentHomeDir(req.AgentSlug), d.File, string(body), containerFileSecret, logger); err != nil {
+	if err := writeFileViaContainer(ctx, container, containerID, agentHomeDir(req.AgentSlug, req.RunID), d.File, string(body), containerFileSecret, logger); err != nil {
 		return err
 	}
 	if logger != nil {
@@ -265,14 +263,14 @@ func removeLoginFile(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
-	agentSlug string,
+	agentSlug, runID string,
 	fileRel string,
 	logger *slog.Logger,
 ) error {
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         []string{"sh", "-c", "rm -f " + shellJoin(fileRel)},
-		WorkingDir:  agentHomeDir(agentSlug),
+		WorkingDir:  agentHomeDir(agentSlug, runID),
 		User:        "1001:1001",
 	}
 	if err := runOrBatch(ctx, container, "rm:"+fileRel, cfg); err != nil {

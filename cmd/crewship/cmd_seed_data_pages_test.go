@@ -235,6 +235,13 @@ func TestSeedPages_EveryRoutineProducedPanelIsWrittenByItsRoutine(t *testing.T) 
 			// a plain string elsewhere — so the STRUCTURE is still pinned here
 			// while the runtime value is pinned by the script's own unit tests
 			// and by `crewship seed verify` reading the panel back.
+			// Whole-object collector outputs are validated by TestOperationsCollectorPayloads.
+			if routine.Slug == "pages-operations-sample" {
+				if args["data"] != "{{ steps.collect.output."+panelID+" }}" {
+					t.Errorf("unexpected collector projection: %v", args["data"])
+				}
+				continue
+			}
 			raw, err := json.Marshal(sampleTemplatedLeaves(args["data"], ""))
 			if err != nil {
 				t.Errorf("routine %s, %s/%s: data is not JSON-encodable: %v",
@@ -572,6 +579,12 @@ func TestSeedOnePage_ExistingPageIsUpdatedRatherThanSkipped(t *testing.T) {
 
 	for _, page := range seeddata.Pages {
 		calls := s.CallsFor("PATCH", "/api/v1/pages/"+page.Slug)
+		if page.Project != nil {
+			if len(calls) != 0 {
+				t.Error("custom app definition overwritten")
+			}
+			continue
+		}
 		if len(calls) != 1 {
 			t.Errorf("page %s: %d PATCH calls, want exactly 1", page.Slug, len(calls))
 			continue

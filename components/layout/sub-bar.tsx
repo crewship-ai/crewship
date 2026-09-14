@@ -103,7 +103,7 @@ export function SubBar<T extends string = string>({
       <div className={cn(ROW, "gap-2", SCROLL_X)} aria-label={ariaLabel}>
         {leading && <div className="flex items-center shrink-0">{leading}</div>}
 
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 max-sm:shrink-0">
           {Icon && <Icon className="h-3.5 w-3.5 text-foreground/70 shrink-0" />}
           {/* One <h1> spanning the whole path, so the accessible name of the
               page is "Admin Console / Users" rather than a bare section label

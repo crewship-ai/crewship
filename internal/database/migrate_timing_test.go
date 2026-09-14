@@ -113,7 +113,9 @@ func TestMigrationChainStaysWithinBudget(t *testing.T) {
 		t.Logf("  %-14d %-46s %s", m.version, m.name, m.duration.Round(time.Millisecond))
 	}
 
-	if total > migrationChainBudget {
+	if raceEnabled {
+		t.Log("race instrumentation enabled: production wall-time budget is enforced by the non-race CI suite")
+	} else if total > migrationChainBudget {
 		t.Errorf("full migration chain took %s, over the %s budget — an upgrade is downtime, "+
 			"so check the slowest entries above before raising this",
 			total.Round(time.Millisecond), migrationChainBudget)

@@ -3,9 +3,10 @@ package sidecar
 import (
 	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"syscall"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // MemoryReadResponse is the success envelope for GET /memory/read.
@@ -23,6 +24,25 @@ type MemoryReadResponse struct {
 	// binary memory is not a supported tier. Empty file → empty
 	// string + Bytes=0, NOT a 404.
 	Content string `json:"content"`
+
+	// ContentSHA256 hashes the exact bytes on disk. §8's read returns it so
+	// a client can pass it back as expected_sha256 on the write it derives
+	// from this read, turning a lost update into a 409 instead of silence.
+	ContentSHA256 string `json:"content_sha256"`
+	// Revision is §8's monotonic per-key revision; RevisionChecked says
+	// whether it means anything. Inside an agent container there is no
+	// handle to the mutation ledger, so it is 0 and false. Reporting it is
+	// how a caller avoids treating an unversioned read as a versioned one.
+	Revision        int64 `json:"revision"`
+	RevisionChecked bool  `json:"revision_checked"`
+	// Canonical is false when the bytes on disk are not in the contract's
+	// canonical form — invalid UTF-8, or CRLF that has never been imported.
+	// §8 forbids normalising on read, so the content above is the real
+	// bytes and this flag is the warning.
+	Canonical bool `json:"canonical"`
+	// AuditPath is the host ledger's canonical identity for the file, present
+	// when the read was served by the host.
+	AuditPath string `json:"audit_path,omitempty"`
 }
 
 // handleMemoryRead serves GET /memory/read?file=...&scope=...
@@ -80,17 +100,62 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Open the resolved target with O_NOFOLLOW (see readRegularNoFollow):
+	// The host's canonical read first, when this call carries a per-run
+	// capability and the sidecar has a host channel: it is the only read that
+	// can return a revision anchor, which is what a conditional write needs.
+	// A host that cannot be reached before anything was sent leaves the local
+	// read below as the declared fallback, which answers revision 0 and
+	// revision_checked=false — true of it.
+	if _, ready := s.mcpHostBridgeReady(r); ready {
+		if _, known := memoryFileCap(file); known {
+			canon, out, ok := s.readCanonicalOnHostFull(r, scope, file)
+			switch {
+			case ok && !canon.Exists:
+				writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+				return
+			case ok:
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Memory-Bytes", strconv.Itoa(canon.Bytes))
+				writeJSONResponse(w, http.StatusOK, MemoryReadResponse{
+					Path:            target,
+					Scope:           scope,
+					Bytes:           canon.Bytes,
+					Content:         canon.Content,
+					ContentSHA256:   canon.ContentSHA256,
+					Revision:        canon.Revision,
+					RevisionChecked: canon.LedgerRecorded,
+					Canonical:       canon.Canonical,
+					AuditPath:       canon.AuditPath,
+				})
+				return
+			case out.relay != nil:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(out.relay.status)
+				_, _ = w.Write(out.relay.body)
+				return
+			}
+		}
+	}
+
+	// memory.ReadCanonical, not a bare read: it reads the CANONICAL FILE
+	// (never the search index, which is what makes read-after-write true by
+	// construction rather than by timing), hashes the exact bytes without
+	// normalising them, and reports whether those bytes are in the form the
+	// write contract can diff.
+	//
+	// It keeps the same O_NOFOLLOW open underneath (readRegularNoFollow):
 	// safeJoinUnder validated the path lexically, but a symlink swapped in at
 	// the final component between that check and this read would otherwise
-	// redirect the read outside the tier base. The no-follow open closes that
-	// TOCTOU gap; a symlink/FIFO/dir target is refused, not followed.
-	content, err := readRegularNoFollow(target)
+	// redirect the read outside the tier base. A symlink/FIFO/dir target is
+	// refused, not followed.
+	//
+	// The ledger is nil for the same reason it is nil on the write path, so
+	// Revision is 0 and RevisionChecked is false.
+	res, err := memory.ReadCanonical(r.Context(), nil, memory.ReadRequest{
+		Path:      target,
+		AuditPath: scope + ":" + file,
+	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
-			return
-		}
 		if errors.Is(err, syscall.ELOOP) {
 			// Final component was a symlink — treat as an illegal path, same
 			// stance as safeJoinUnder's traversal rejection (no path echo).
@@ -101,13 +166,21 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "read failed"})
 		return
 	}
+	if !res.Exists {
+		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("X-Memory-Bytes", strconv.Itoa(len(content)))
+	w.Header().Set("X-Memory-Bytes", strconv.Itoa(res.Bytes))
 	writeJSONResponse(w, http.StatusOK, MemoryReadResponse{
-		Path:    target,
-		Scope:   scope,
-		Bytes:   len(content),
-		Content: string(content),
+		Path:            target,
+		Scope:           scope,
+		Bytes:           res.Bytes,
+		Content:         string(res.Content),
+		ContentSHA256:   res.ContentSHA256,
+		Revision:        res.Revision,
+		RevisionChecked: res.LedgerRecorded,
+		Canonical:       res.Canonical,
 	})
 }

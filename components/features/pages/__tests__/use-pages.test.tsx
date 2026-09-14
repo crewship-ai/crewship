@@ -15,6 +15,11 @@ import { renderHook, waitFor, act } from "@testing-library/react"
 
 import {
   EMPTY_PAGE_FILTERS,
+  crewMembershipFromReach,
+  groupPagesByFolder,
+  groupPagesByOwner,
+  hasFolders,
+  hasReach,
   matchesPageFilters,
   normalizePage,
   normalizePageList,
@@ -270,22 +275,22 @@ describe("facets (§9b.1)", () => {
   it("matches a STATUS pick on ANY panel, not on the page's worst state", () => {
     // "Fleet" is ranked stale, but a filter looking for fresh panels must
     // still find it — otherwise the facet hides the row it was asked for.
-    expect(matchesPageFilters(pages[0], { states: ["fresh"], owners: [] }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: ["stale"], owners: [] }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: ["failed"], owners: [] }, "")).toBe(false)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["fresh"] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["stale"] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: ["failed"] }, "")).toBe(false)
   })
 
   it("is multi-select: two states are a union, not a replacement", () => {
-    expect(matchesPageFilters(pages[1], { states: ["stale", "fresh"], owners: [] }, "")).toBe(true)
+    expect(matchesPageFilters(pages[1], { ...EMPTY_PAGE_FILTERS, states: ["stale", "fresh"] }, "")).toBe(true)
     expect(togglePageFilter(["stale"], "fresh")).toEqual(["stale", "fresh"])
     expect(togglePageFilter(["stale", "fresh"], "stale")).toEqual(["fresh"])
   })
 
   it("combines STATUS and OWNER instead of letting one clear the other (#1776)", () => {
     const f = { states: ["fresh"] as const, owners: ["crew/finance"] }
-    expect(matchesPageFilters(pages[1], { states: [...f.states], owners: f.owners }, "")).toBe(true)
-    expect(matchesPageFilters(pages[0], { states: [...f.states], owners: f.owners }, "")).toBe(false)
-    expect(pageFilterCount({ states: ["fresh", "stale"], owners: ["crew/finance"] })).toBe(3)
+    expect(matchesPageFilters(pages[1], { ...EMPTY_PAGE_FILTERS, states: [...f.states], owners: f.owners }, "")).toBe(true)
+    expect(matchesPageFilters(pages[0], { ...EMPTY_PAGE_FILTERS, states: [...f.states], owners: f.owners }, "")).toBe(false)
+    expect(pageFilterCount({ states: ["fresh", "stale"], owners: ["crew/finance"], shared: false })).toBe(3)
     expect(pageFilterCount(EMPTY_PAGE_FILTERS)).toBe(0)
   })
 
@@ -302,6 +307,88 @@ describe("facets (§9b.1)", () => {
       { ref: "crew/finance", label: "finance", count: 1 },
       { ref: "crew/lookout", label: "lookout", count: 1 },
     ])
+  })
+})
+
+// ── groups and reach (#2523) ────────────────────────────────────────────────
+
+describe("groups by owner (#2523)", () => {
+  const ME = "u1"
+  const pages = [
+    toPageView(wirePage({ slug: "finance-close", name: "Nightly close", owner: "crew/finance", reach: ["role"] })),
+    toPageView(wirePage({ slug: "anna", name: "Anna's board", owner: "user/u2", reach: ["grant"] })),
+    toPageView(wirePage({ slug: "fleet", name: "Fleet", owner: "crew/lookout", reach: ["crew:lookout"] })),
+    toPageView(wirePage({ slug: "notes", name: "My notes", owner: `user/${ME}`, reach: ["owner"] })),
+    toPageView(wirePage({ slug: "alpha", name: "Alpha ops", owner: "crew/alpha", reach: ["role"] })),
+    toPageView(wirePage({ slug: "orphan", name: "Orphan", owner: null, owner_crew_slug: null })),
+  ]
+
+  it("reads `reach` off the wire and leaves it null when a server does not send it", () => {
+    expect(toPageView(wirePage({ reach: [" grant ", "role"] })).reach).toEqual(["grant", "role"])
+    expect(toPageView(wirePage({ reach: undefined })).reach).toBeNull()
+    expect(hasReach(pages)).toBe(true)
+    expect(hasReach([toPageView(wirePage({}))])).toBe(false)
+  })
+
+  it("derives the crews I belong to from `crew:<slug>` in my reach — no second request", () => {
+    expect([...crewMembershipFromReach(pages)]).toEqual(["lookout"])
+    expect(crewMembershipFromReach([toPageView(wirePage({}))]).size).toBe(0)
+  })
+
+  it("orders Mine, then my crews, then other crews A→Z, then Owned by others", () => {
+    const groups = groupPagesByOwner(pages, ME)
+    expect(groups.map((g) => [g.key, g.pages.map((p) => p.slug)])).toEqual([
+      ["mine", ["notes"]],
+      ["crew/lookout", ["fleet"]],
+      ["crew/alpha", ["alpha"]],
+      ["crew/finance", ["finance-close"]],
+      ["others", ["anna"]],
+      ["unowned", ["orphan"]],
+    ])
+    expect(groups.map((g) => g.label)).toEqual([
+      "Mine",
+      "lookout",
+      "alpha",
+      "finance",
+      "Owned by others",
+      "Unowned",
+    ])
+  })
+
+  it("keeps a crew under my crews when the page that proved membership is filtered out", () => {
+    // `fleet` carries `crew:lookout`; a page of the same crew reached through
+    // a role carries no such evidence of its own.
+    const viaRole = toPageView(wirePage({ slug: "lookout-role", owner: "crew/lookout", owner_crew_name: "lookout", reach: ["role"] }))
+    const all = [...pages, viaRole]
+    const displayed = all.filter((p) => p.slug !== "fleet")
+    // Grouping the filtered list alone loses the membership signal…
+    expect(groupPagesByOwner(displayed, ME).find((g) => g.key === "crew/lookout")?.member).toBe(false)
+    // …reading membership from the whole list keeps it, and the tier with it.
+    const groups = groupPagesByOwner(displayed, ME, all)
+    expect(groups.find((g) => g.key === "crew/lookout")?.member).toBe(true)
+    expect(groups.map((g) => g.key).indexOf("crew/lookout")).toBeLessThan(groups.map((g) => g.key).indexOf("crew/alpha"))
+    // A precomputed set is accepted too, so a caller that already has it need not rescan.
+    expect(groupPagesByOwner(displayed, ME, new Set(["lookout"])).find((g) => g.key === "crew/lookout")?.member).toBe(true)
+  })
+
+  it("never renders an empty group, and files nothing under Mine without a signed-in user", () => {
+    const groups = groupPagesByOwner(pages, null)
+    expect(groups.find((g) => g.key === "mine")).toBeUndefined()
+    // Without an identity every personal page is somebody else's.
+    expect(groups.find((g) => g.key === "others")?.pages.map((p) => p.slug)).toEqual(["anna", "notes"])
+    expect(groupPagesByOwner([], ME)).toEqual([])
+  })
+
+  it("'Shared with me' is a reach that is ONLY a grant", () => {
+    const shared = { ...EMPTY_PAGE_FILTERS, shared: true }
+    expect(matchesPageFilters(pages[1], shared, "")).toBe(true)
+    // Reached through a role as well: not "shared with me", it is mine to see anyway.
+    expect(matchesPageFilters(toPageView(wirePage({ reach: ["grant", "role"] })), shared, "")).toBe(false)
+    // A server that sends no reach can not answer the question, so nothing matches.
+    expect(matchesPageFilters(toPageView(wirePage({})), shared, "")).toBe(false)
+    expect(matchesPageFilters(toPageView(wirePage({ reach: [] })), shared, "")).toBe(false)
+    expect(pageFilterCount(shared)).toBe(1)
+    expect(pageFilterCount(EMPTY_PAGE_FILTERS)).toBe(0)
   })
 })
 
@@ -388,5 +475,65 @@ describe("usePages / usePage", () => {
     const other = renderHook(() => usePage("ws-1", "boom"), { wrapper: makeWrapper(qc) })
     await waitFor(() => expect(other.result.current.error).not.toBeNull())
     expect(other.result.current.notFound).toBe(false)
+  })
+})
+
+
+// ── folders (#2527) ─────────────────────────────────────────────────────────
+
+describe("folders on the wire", () => {
+  it("tells 'no folder' from 'this server does not say', and reads the reference", () => {
+    expect(toPageView({ slug: "a" }).folder).toBeUndefined()
+    expect(toPageView({ slug: "a", folder: null }).folder).toBeNull()
+    expect(toPageView({ slug: "a", folder: { slug: "ops", name: " Ops ", icon: "", color: "amber" } }).folder).toEqual({
+      slug: "ops",
+      name: "Ops",
+      icon: null,
+      color: "amber",
+    })
+    // A reference without a slug names nothing.
+    expect(toPageView({ slug: "a", folder: { name: "Ops" } }).folder).toBeNull()
+    expect(toPageView({ slug: "a", pages_version: 3 }).pagesVersion).toBe(3)
+    expect(toPageView({ slug: "a", pages_version: null }).pagesVersion).toBeNull()
+  })
+
+  it("knows folders only when every row carries the field", () => {
+    expect(hasFolders([toPageView({ slug: "a", folder: null })])).toBe(true)
+    expect(hasFolders([toPageView({ slug: "a", folder: null }), toPageView({ slug: "b" })])).toBe(false)
+    expect(hasFolders([])).toBe(false)
+  })
+
+  it("matches a search against the folder's name", () => {
+    const filed = toPageView({ slug: "a", name: "Fleet", folder: { slug: "ops", name: "Ops" } })
+    expect(matchesPageFilters(filed, EMPTY_PAGE_FILTERS, "ops")).toBe(true)
+    expect(matchesPageFilters(filed, EMPTY_PAGE_FILTERS, "finance")).toBe(false)
+  })
+})
+
+describe("groupPagesByFolder", () => {
+  const ops = { slug: "ops", name: "Ops", icon: "rocket", color: "amber", pageCount: 2 }
+  const archive = { slug: "archive", name: "Archive", icon: null, color: null, pageCount: 0 }
+  const pages = [
+    toPageView({ id: "1", slug: "a", name: "A", folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" } }),
+    toPageView({ id: "2", slug: "b", name: "B", folder: null }),
+    toPageView({ id: "3", slug: "c", name: "C", folder: { slug: "ops", name: "Ops", icon: "rocket", color: "amber" } }),
+    // In a folder the folder list does not carry — the two reads raced.
+    toPageView({ id: "4", slug: "d", name: "D", folder: { slug: "zed", name: "Zed", icon: null, color: null } }),
+  ]
+
+  it("orders folders A→Z, keeps an empty one, builds a missing one from the row, and puts Unfiled last", () => {
+    const groups = groupPagesByFolder(pages, [ops, archive])
+    expect(groups.map((g) => [g.key, g.kind, g.label, g.pages.map((p) => p.slug), g.pageCount])).toEqual([
+      ["folder/archive", "folder", "Archive", [], 0],
+      ["folder/ops", "folder", "Ops", ["a", "c"], 2],
+      ["folder/zed", "folder", "Zed", ["d"], undefined],
+      ["unfiled", "unfiled", "Unfiled", ["b"], undefined],
+    ])
+    expect(groups[1].folder).toEqual({ slug: "ops", name: "Ops", icon: "rocket", color: "amber" })
+  })
+
+  it("draws no Unfiled when nothing is unfiled, and no group at all for an empty list without folders", () => {
+    expect(groupPagesByFolder(pages.filter((p) => p.folder), [ops]).map((g) => g.key)).toEqual(["folder/ops", "folder/zed"])
+    expect(groupPagesByFolder([], [])).toEqual([])
   })
 })

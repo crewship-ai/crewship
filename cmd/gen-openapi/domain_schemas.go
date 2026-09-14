@@ -116,7 +116,8 @@ func executionSchemaComponents() map[string]any {
 	// deliberately answers 200 with just the two written values rather than
 	// failing a change that already applied.
 	appearanceRoutine := obj(map[string]any{
-		"id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(),
+		"step_count": integer(),
+		"id":         str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(),
 		"definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(),
 		"invocation_count": integer(), "last_invocation_status": str(), "last_invoked_at": timeString(),
 		"icon": str(), "color": str(), "author_crew_id": str(), "author_agent_id": str(),

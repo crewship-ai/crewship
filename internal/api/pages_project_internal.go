@@ -157,6 +157,9 @@ func (h *PageHandler) InternalProject(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "read agent project", err)
 			return
 		}
+		if !h.requireProjectDefinitions(w, r, &draft.Definition) {
+			return
+		}
 		if req.Operation == "read" {
 			w.Header().Set("Cache-Control", "no-store")
 			if req.Path != "" {

@@ -1,0 +1,29 @@
+dsl_version: "1.0"
+name: pages-operations-sample
+description: Read a bounded cgroup sample inside Ops and publish it to Operations Lab. No LLM or external access.
+concurrency_key: pages-operations-sample
+steps:
+  - id: collect
+    type: script
+    timeout_seconds: 10
+    script:
+      path: scripts/pages-operations-sample.mjs
+      interpreter: node
+  - id: services
+    type: crewship
+    timeout_seconds: 10
+    needs: [collect]
+    action: page.write
+    args:
+      page: custom-operations
+      panel: services
+      data: "{{ steps.collect.output.services }}"
+  - id: memory
+    type: crewship
+    timeout_seconds: 10
+    needs: [services]
+    action: page.write
+    args:
+      page: custom-operations
+      panel: memory
+      data: "{{ steps.collect.output.memory }}"

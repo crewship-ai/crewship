@@ -121,10 +121,19 @@ func TestAcceptanceRoutineTypedDecisionHTTP(t *testing.T) {
 			}
 			return
 		}
-		if run["status"] == "failed" {
-			t.Fatalf("approved run failed: %v", run)
+		// Every terminal status, not just "failed". A run that ends
+		// "cancelled" or "interrupted" would otherwise poll out and report
+		// "did not resume", which says nothing about what actually
+		// happened — and those are exactly the states a resume can land in
+		// when the process is shutting down underneath it.
+		switch run["status"] {
+		case "failed", "cancelled", "interrupted", "dry_run":
+			t.Fatalf("approved run ended %v instead of resuming: error=%v failed_at=%v outcome=%v",
+				run["status"], run["error_message"], run["failed_at_step"], run["outcome"])
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("approved run did not resume")
+	last := decode(request("GET", "/api/v1/workspaces/"+config.Workspace+"/pipeline-runs/"+runID, "", true, 200))
+	t.Fatalf("approved run did not resume within 10s; last seen status=%v current_step=%v error=%v",
+		last["status"], last["current_step_id"], last["error_message"])
 }

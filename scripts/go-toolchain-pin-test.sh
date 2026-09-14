@@ -338,6 +338,14 @@ expect "a mismatch found in >64KiB of output is still asserted" 1 \
   "ci\.yml:3 names 1\.26\.6," "$BIG"
 
 echo
+# Native builder options must not hide either a pin or a stage policy.
+PLATFORM="$TMPROOT/platform"
+make_tree "$PLATFORM" 1.27.0 1.27.0 local 1.27.0 1.27.0
+sed -i 's/^FROM golang:/FROM --platform=$BUILDPLATFORM golang:/' "$PLATFORM/Dockerfile"
+expect "native cross-build stage is checked" 0 "all Go toolchain pins agree" "$PLATFORM"
+sed -i 's/golang:1.27.0/golang:1.28.0/' "$PLATFORM/Dockerfile"
+expect "native cross-build pin mismatch is rejected" 1 "names 1\.28\.0" "$PLATFORM"
+
 echo "against the repo as committed:"
 
 # One case reads the real tree, so this suite keeps saying something about

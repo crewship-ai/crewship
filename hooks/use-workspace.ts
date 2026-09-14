@@ -1,9 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useSyncExternalStore } from "react"
+
+import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
+  pages_theme?: Partial<import("@/lib/pages/theme").PageTheme> | null
   id: string
   name: string
   slug: string
@@ -74,7 +77,8 @@ function persistId(id: string | null) {
 
 function loadWorkspaces(): Promise<void> {
   if (inflight) return inflight
-  setSnapshot({ ...snapshot, loading: true })
+  // Background settings refresh must not unmount active Pages/forms.
+  if (snapshot.workspaces.length === 0) setSnapshot({ ...snapshot, loading: true })
   inflight = (async () => {
     try {
       const res = await apiFetch("/api/v1/workspaces")
@@ -149,9 +153,14 @@ export function useWorkspace(): UseWorkspaceReturn {
     }
   }, [])
 
-  const setWorkspaceId = useCallback((id: string) => {
+  const setWorkspaceId = useCallback(function setWorkspaceId(id: string) {
     if (!snapshot.workspaces.some((w) => w.id === id)) return
     if (snapshot.currentId === id) return
+    // A surface holding unsaved work refuses here and asks the person itself,
+    // then calls this again once they agree. Switching workspaces is not a
+    // navigation and does not reload, so without this the editor was simply
+    // re-keyed and typed edits vanished with no prompt.
+    if (!navigationAllowed(() => setWorkspaceId(id))) return
     persistId(id)
     setSnapshot({ ...snapshot, currentId: id })
   }, [])
@@ -179,5 +188,30 @@ export function _resetWorkspaceStoreForTests() {
   snapshot = INITIAL
   fetched = false
   inflight = null
+  settingsRefresh = null
+  settingsRefreshWanted = false
   listeners.clear()
+}
+
+/** Read only: Pages reuse the workspace list already loaded by Studio. */
+export function useWorkspacePagesTheme(workspaceId?: string) {
+  return useSyncExternalStore(subscribe,
+    () => snapshot.workspaces.find(w => w.id === workspaceId)?.pages_theme,
+    () => undefined)
+}
+let settingsRefresh: Promise<void> | null = null
+let settingsRefreshWanted = false
+export function refreshWorkspaceSettings(): Promise<void> {
+  settingsRefreshWanted = true
+  if (settingsRefresh) return settingsRefresh
+  settingsRefresh = (async () => {
+    // An older request may have started before the mutation committed.
+    if (inflight) await inflight
+    // Coalesce bursts while guaranteeing a read after the latest invalidation.
+    while (settingsRefreshWanted) {
+      settingsRefreshWanted = false
+      await loadWorkspaces()
+    }
+  })().finally(() => { settingsRefresh = null })
+  return settingsRefresh
 }

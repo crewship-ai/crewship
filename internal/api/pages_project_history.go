@@ -13,10 +13,17 @@ import (
 )
 
 type pageProjectRevision struct {
-	Revision   int64  `json:"revision" yaml:"revision"`
-	Digest     string `json:"digest"`
-	GitCommit  string `json:"git_commit"`
-	Actor      string `json:"actor,omitempty"`
+	Revision  int64  `json:"revision" yaml:"revision"`
+	Digest    string `json:"digest"`
+	GitCommit string `json:"git_commit"`
+	// Actor is the historical opaque string: a user id OR an agent id, with
+	// nothing in it that says which. Kept verbatim for existing callers.
+	Actor string `json:"actor,omitempty"`
+	// ActorKind is what Actor could never carry: "user", "agent", "crew" or
+	// "unknown", read from the same actor_json the review snapshot reads. A
+	// list that flattens a person and a container into one string cannot be
+	// rendered honestly, and guessing from the id's shape is guessing.
+	ActorKind  string `json:"actor_kind"`
 	CreatedAt  string `json:"created_at"`
 	Restorable bool   `json:"restorable"`
 }
@@ -40,7 +47,18 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,source_digest,git_commit,COALESCE(actor_user_id,json_extract(actor_json,'$.agent_id'),''),created_at,spec_json!='' FROM page_project_revisions WHERE page_id=? AND (?=0 OR revision<?) ORDER BY revision DESC LIMIT 51`, rec.ID, before, before)
+	auth, err := h.reviewDefinitionAuthorizer(r.Context(), WorkspaceIDFromContext(r.Context()))
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize source history", err)
+		return
+	}
+	var liveSpec, draftSpec string
+	if err := h.db.QueryRowContext(r.Context(), `SELECT p.spec_json,COALESCE(d.spec_json,'') FROM pages p LEFT JOIN page_project_drafts d ON d.page_id=p.id WHERE p.id=?`, rec.ID).Scan(&liveSpec, &draftSpec); err != nil {
+		replyInternalError(w, h.logger, "read source restore authorization", err)
+		return
+	}
+	canReplace := projectDefinitionVisible(liveSpec, auth) && projectDefinitionVisible(draftSpec, auth)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,source_digest,git_commit,COALESCE(actor_user_id,json_extract(actor_json,'$.agent_id'),''),COALESCE(actor_user_id,''),actor_json,created_at,spec_json FROM page_project_revisions WHERE page_id=? AND (?=0 OR revision<?) ORDER BY revision DESC LIMIT 51`, rec.ID, before, before)
 	if err != nil {
 		replyInternalError(w, h.logger, "read project history", err)
 		return
@@ -49,10 +67,15 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 	result := make([]pageProjectRevision, 0)
 	for rows.Next() {
 		var v pageProjectRevision
-		if err := rows.Scan(&v.Revision, &v.Digest, &v.GitCommit, &v.Actor, &v.CreatedAt, &v.Restorable); err != nil {
+		var actorUser, actorJSON, archivedSpec string
+		if err := rows.Scan(&v.Revision, &v.Digest, &v.GitCommit, &v.Actor, &actorUser, &actorJSON, &v.CreatedAt, &archivedSpec); err != nil {
 			replyInternalError(w, h.logger, "read project revision", err)
 			return
 		}
+		// Kind only: this list renders no labels, and resolving one would be a
+		// directory read per row whose result is then discarded.
+		v.Restorable = canReplace && projectDefinitionVisible(archivedSpec, auth)
+		v.ActorKind = reviewActorKind(actorUser, actorJSON).Kind
 		result = append(result, v)
 	}
 	if err := rows.Err(); err != nil {
@@ -109,6 +132,10 @@ func (h *PageHandler) projectRevision(w http.ResponseWriter, r *http.Request, re
 	return &d, true
 }
 func (h *PageHandler) GetProjectRevision(w http.ResponseWriter, r *http.Request) {
+	h.getProjectRevision(w, r, false)
+}
+
+func (h *PageHandler) getProjectRevision(w http.ResponseWriter, r *http.Request, sourceOnly bool) {
 	rec, ok := h.projectPage(w, r)
 	if !ok {
 		return
@@ -128,6 +155,13 @@ func (h *PageHandler) GetProjectRevision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if sourceOnly {
+		writeJSON(w, 200, projectSource(d))
+		return
+	}
+	if !h.requireProjectDefinitions(w, r, &d.Definition) {
+		return
+	}
 	writeJSON(w, 200, d)
 }
 func (h *PageHandler) RestoreProject(w http.ResponseWriter, r *http.Request) {

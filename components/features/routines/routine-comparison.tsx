@@ -121,7 +121,11 @@ export function RoutineComparison({
                 inputs: job.case.inputs,
                 pinned_version: job.config.version.version,
                 tier_override: job.config.tier,
-                metadata: { comparison_id: batch.current, case_id: job.case.id, side: job.side },
+                metadata: {
+                  comparison_id: batch.current,
+                  case_id: job.case.id,
+                  side: job.side,
+                },
               }),
             },
           )
@@ -185,15 +189,15 @@ export function RoutineComparison({
     <section className="space-y-4 rounded-2xl border border-hairline p-5">
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-medium">Compare published recipes and tiers</h3>
+          <h3 className="font-medium">Compare versions</h3>
           <span className="rounded-full bg-warn/10 px-2.5 py-1 text-xs text-warn">
             Live · real actions and costs
           </span>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          Run the same dataset against two archived versions or worker tiers. These are real runs
-          with real effects and costs. A completed run alone does not prove output quality. Changes
-          in the current draft are not part of this comparison.
+          Run the same dataset against two archived versions or worker tiers. These are real
+          runs with real effects and costs. A completed run alone does not prove output quality.
+          Changes in the current draft are not part of this comparison.
         </p>
       </div>
       <Button
@@ -220,11 +224,21 @@ export function RoutineComparison({
                   {versions.map((v) => (
                     <option key={v.version} value={v.version}>
                       v{v.version}
-                      {v.is_head ? " · published" : ""} · {v.definition_hash.slice(0, 10)}
+                      {v.is_head ? " · published" : ""}
                     </option>
                   ))}
                 </select>
               </label>
+              {(side === "A" ? a : b) && (
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer">Technical details</summary>
+                  <p className="mt-1 break-all">
+                    Recipe hash:{" "}
+                    {versions.find((v) => String(v.version) === (side === "A" ? a : b))
+                      ?.definition_hash || "unavailable"}
+                  </p>
+                </details>
+              )}
               <label className="block text-sm">
                 Side {side} worker tier
                 <select
@@ -252,9 +266,9 @@ export function RoutineComparison({
           />
         </label>
         <p className="text-xs text-muted-foreground">
-          1–20 cases, each with a unique id and typed inputs. Optional expected_output checks exact
-          text equality; omit it to leave quality ungraded. Tier overrides use the recipe's existing
-          routing policy.
+          1–20 cases, each with a unique id and typed inputs. Optional expected_output checks
+          exact text equality; omit it to leave quality ungraded. Tier overrides use the
+          recipe's existing routing policy.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -283,7 +297,8 @@ export function RoutineComparison({
                 if (!file) return
                 setLoading(true)
                 try {
-                  if (file.size > 1024 * 1024) throw new Error("Dataset file must be under 1 MB.")
+                  if (file.size > 1024 * 1024)
+                    throw new Error("Dataset file must be under 1 MB.")
                   const text = await file.text()
                   parseComparisonCases(text)
                   if (mounted.current) setDataset(text)
@@ -332,9 +347,9 @@ export function RoutineComparison({
             </Button>
           )}
           <p className="text-xs text-muted-foreground">
-            Pending runs may need an Inbox decision. Continue reads the accepted run before starting
-            the next case. Leaving this Test view stops the remaining queue, not runs already
-            started.
+            Pending runs may need an Inbox decision. Continue reads the accepted run before
+            starting the next case. Leaving this Test view stops the remaining queue, not runs
+            already started.
           </p>
         </div>
       )}
@@ -412,7 +427,8 @@ export function RoutineComparison({
                         job.result.status.toLowerCase(),
                       ),
                   ),
-                grading: "Exact text when expected_output is supplied; otherwise quality ungraded",
+                grading:
+                  "Exact text when expected_output is supplied; otherwise quality ungraded",
                 rows: jobs,
               })
             }

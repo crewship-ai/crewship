@@ -1,0 +1,54 @@
+{
+  "name": "repeated_lines_keep_prefix",
+  "why": "The same principle when the target is a suffix of the repeats: base a,a,a -\u003e target a,a keeps lines 1,2 and deletes line 3.",
+  "base": "a\na\na\n",
+  "target": "a\na\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "a\n",
+        "a\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "a\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 3,
+      "line_count": 1,
+      "old_sha256": "87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7"
+    }
+  ],
+  "applied": "a\na\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 3,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

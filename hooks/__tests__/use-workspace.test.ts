@@ -6,6 +6,8 @@ vi.stubGlobal("fetch", mockFetch)
 
 import {
   useCurrentWorkspaceId,
+  useWorkspacePagesTheme,
+  refreshWorkspaceSettings,
   useWorkspace,
   _resetWorkspaceStoreForTests,
 } from "@/hooks/use-workspace"
@@ -36,6 +38,49 @@ describe("useWorkspace", () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it("reads Page colors without starting another workspace request", () => {
+    const { result } = renderHook(() => useWorkspacePagesTheme("ws-a"))
+    expect(result.current).toBeUndefined()
+    expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it("coalesces palette events and reads again after an older request", async () => {
+    type Reply = { ok: boolean; json: () => Promise<unknown> }
+    let first!: (value: Reply) => void
+    let second!: (value: Reply) => void
+    mockFetch.mockReturnValueOnce(new Promise<Reply>(resolve => { first = resolve }))
+    mockFetch.mockReturnValueOnce(new Promise<Reply>(resolve => { second = resolve }))
+    const { result } = renderHook(() => useWorkspacePagesTheme("ws-a"))
+    await act(async () => {
+      const initial = refreshWorkspaceSettings()
+      const latest = refreshWorkspaceSettings()
+      expect(latest).toBe(initial)
+      first({ ok: true, json: async () => [{ ...WS_A, pages_theme: { accent: "#111111" } }] })
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
+      second({ ok: true, json: async () => [{ ...WS_A, pages_theme: { accent: "#abcdef" } }] })
+      await latest
+    })
+    expect(result.current?.accent).toBe("#abcdef")
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the active workspace mounted during a background palette refresh", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: true, json: async () => [WS_A] })
+    const { result } = renderHook(() => useWorkspace())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let complete!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
+    mockFetch.mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    let refreshed!: Promise<void>
+    act(() => { refreshed = refreshWorkspaceSettings() })
+    expect(result.current.loading).toBe(false)
+    expect(result.current.workspaceId).toBe("ws-a")
+    await act(async () => {
+      complete({ ok: true, json: async () => [{ ...WS_A, pages_theme: { accent: "#abcdef" } }] })
+      await refreshed
+    })
+    expect(result.current.workspace?.pages_theme?.accent).toBe("#abcdef")
   })
 
   it("starts in loading state", () => {

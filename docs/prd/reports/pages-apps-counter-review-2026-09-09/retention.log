@@ -1,0 +1,5 @@
+=== RUN   TestCountercheckRetentionKeepsAncestorAndCanShrink
+    project_git_test.go:104: COUNTERCHECK retained only newest pin: earliest ancestor readable; bytes 111085 -> 50931
+--- PASS: TestCountercheckRetentionKeepsAncestorAndCanShrink (10.59s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/pages	10.596s

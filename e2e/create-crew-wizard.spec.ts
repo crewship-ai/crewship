@@ -142,10 +142,10 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // Egress is open, and the allowlist is one switch away rather than the
     // default. An allowlist that is still maturing fails as a silent timeout
     // deep inside a run.
-    await expect(page.getByText("Open egress")).toBeVisible()
-    await page.getByRole("switch", { name: /allowlist/i }).click()
+    await expect(page.getByRole("radio", { name: /^Open network/ })).toBeChecked()
+    await page.getByRole("radio", { name: /^Selected hosts/ }).check()
     await expect(page.getByText(/Allowed hosts/)).toBeVisible()
-    await page.getByRole("switch", { name: /allowlist/i }).click()
+    await page.getByRole("radio", { name: /^Open network/ }).check()
 
     // Sizing is an administrator's question: collapsed, with its values in
     // the summary so nothing is hidden, only folded.
@@ -242,13 +242,13 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     // default now, which is the point of the click.
     await expect(page.getByLabel("Step 3: Review")).toHaveAttribute("aria-current", "step")
     await page.getByRole("button", { name: /Environment and runtime/ }).click()
-    await page.getByRole("switch", { name: /allowlist/i }).click()
+    await page.getByRole("radio", { name: /^Selected hosts/ }).check()
     const domainInput = page.locator('input[placeholder*="github.com"]').first()
     await domainInput.fill("github.com")
     await domainInput.press("Enter")
     // Chip text matches "github.com" exactly (the placeholder hint contains the
     // same string, so use exact: true to disambiguate).
-    await expect(page.getByText("github.com", { exact: true })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Remove github.com", exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: /^Size/ }).click()
     await page.getByRole("button", { name: "8 GB" }).click()
@@ -262,7 +262,7 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await expect(page.getByText("8 GB")).toBeVisible()
     await expect(page.getByText("TTL: 24 h")).toBeVisible()
     await expect(page.getByText("restricted")).toBeVisible()
-    await expect(page.getByText("github.com", { exact: true })).toBeVisible()
+    await expect(page.getByText("github.com", { exact: true }).last()).toBeVisible()
 
     // Submit
     await page.getByRole("button", { name: /Create crew/ }).click()

@@ -42,6 +42,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -146,9 +147,22 @@ type gatePlanPanel struct {
 // same reason: a gate pointing at crew/devpos is a gate that would compile, be
 // saved, match forever and wake nobody.
 func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID string, doc *pages.Document) (*gatePlan, bool) {
-	if err := pages.ValidateGates(doc); err != nil {
-		writeSpecError(w, err)
+	plan, err := h.resolveGatePlan(r.Context(), wsID, doc)
+	if err != nil {
+		h.replyResolution(w, "resolve gate crew", err)
 		return nil, false
+	}
+	return plan, true
+}
+
+// resolveGatePlan is resolveGates without the reply. A shape problem comes back
+// as the *pages.ValidationError ValidateGates or ValidateRefresh produced, a
+// crew that does not exist as a *pageReferenceError naming the panel, and a
+// query failure as anything else. The candidate paths call this directly,
+// because whether a sentence naming a panel may be shown is their decision.
+func (h *PageHandler) resolveGatePlan(ctx context.Context, wsID string, doc *pages.Document) (*gatePlan, error) {
+	if err := pages.ValidateGates(doc); err != nil {
+		return nil, err
 	}
 	// `refresh:` on the same terms and for the same reason (pages_refresh.go).
 	// Document.Validate already ran it on both write paths; running it again
@@ -156,8 +170,7 @@ func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID 
 	// nothing reaches the compiler that has not just been checked, whichever
 	// door the document came through.
 	if err := pages.ValidateRefresh(doc); err != nil {
-		writeSpecError(w, err)
-		return nil, false
+		return nil, err
 	}
 	// pages.ValidateGates ran above and Document.Validate runs validatePageRefresh
 	// straight after it, so by here every declaration below is known to name a
@@ -165,19 +178,18 @@ func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID 
 	// could fire from.
 	plan := &gatePlan{refresh: pages.RefreshTriggers(doc)}
 	crewIDs := map[string]string{}
-	resolve := func(slug string) (string, bool) {
+	resolve := func(slug string) (bool, error) {
 		if id, ok := crewIDs[slug]; ok {
-			return id, id != ""
+			return id != "", nil
 		}
 		var id string
-		err := h.db.QueryRowContext(r.Context(),
+		err := h.db.QueryRowContext(ctx,
 			`SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`, wsID, slug).Scan(&id)
-		if err != nil && err != sql.ErrNoRows {
-			replyInternalError(w, h.logger, "resolve gate crew", err)
-			return "", false
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("resolve gate crew: %w", err)
 		}
 		crewIDs[slug] = id
-		return id, id != ""
+		return id != "", nil
 	}
 
 	for i := range doc.Spec.Panels {
@@ -187,32 +199,32 @@ func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID 
 			// Unreachable: ValidateGates compiled the same panels a moment
 			// ago. Reported rather than ignored, because "unreachable" is a
 			// claim about today's call order.
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", spec.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(&spec, "panel %q: %v", spec.ID, err)
 		}
 		onFailure, err := pages.OnFailureCrewSlug(spec.OnFailure)
 		if err != nil {
-			replyError(w, http.StatusBadRequest, fmt.Sprintf("panel %q: %v", spec.ID, err))
-			return nil, false
+			return nil, newPageReferenceError(&spec, "panel %q: %v", spec.ID, err)
 		}
 		if onFailure != "" {
-			if _, ok := resolve(onFailure); !ok {
-				if w.Header().Get("Content-Type") == "" {
-					replyError(w, http.StatusBadRequest, fmt.Sprintf(
-						"panel %q declares on_failure: {issue: crew/%s}, and no such crew exists here",
-						spec.ID, onFailure))
-				}
-				return nil, false
+			exists, err := resolve(onFailure)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, newPageReferenceError(&spec,
+					"panel %q declares on_failure: {issue: crew/%s}, and no such crew exists here",
+					spec.ID, onFailure)
 			}
 		}
 		for _, g := range gates {
-			if _, ok := resolve(g.CrewSlug); !ok {
-				if w.Header().Get("Content-Type") == "" {
-					replyError(w, http.StatusBadRequest, fmt.Sprintf(
-						"panel %q wake gate %d names agent: crew/%s, and no such crew exists here",
-						spec.ID, g.Index, g.CrewSlug))
-				}
-				return nil, false
+			exists, err := resolve(g.CrewSlug)
+			if err != nil {
+				return nil, err
+			}
+			if !exists {
+				return nil, newPageReferenceError(&spec,
+					"panel %q wake gate %d names agent: crew/%s, and no such crew exists here",
+					spec.ID, g.Index, g.CrewSlug)
 			}
 		}
 		if len(gates) == 0 {
@@ -220,7 +232,7 @@ func (h *PageHandler) resolveGates(w http.ResponseWriter, r *http.Request, wsID 
 		}
 		plan.panels = append(plan.panels, gatePlanPanel{panelID: spec.ID, gates: gates})
 	}
-	return plan, true
+	return plan, nil
 }
 
 // ── Compiling to automations rows ──────────────────────────────────────────

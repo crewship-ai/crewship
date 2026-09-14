@@ -162,14 +162,15 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 // through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// Claim the row first so a second tick (or replica) can't double-fire.
-	claimed, err := d.store.MarkFired(ctx, pr.ID, "")
+	claimed, err := d.store.ClaimDue(ctx, pr.ID, time.Now().UTC())
 	if err != nil {
 		d.logger.Warn("pending dispatcher: claim", "error", err, "pending_id", pr.ID)
 		return
 	}
-	if !claimed {
-		return // already fired/cancelled/expired by someone else
+	if claimed == nil {
+		return // already claimed, cancelled, expired or postponed
 	}
+	pr = *claimed
 
 	// Prewarm the crew's container off the critical path: kick provisioning at
 	// claim so the run's first agent step finds it warm instead of paying cold

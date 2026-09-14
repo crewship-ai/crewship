@@ -812,6 +812,87 @@ which is precisely what the sealed placeholder is designed not to disclose.
 Every dispatch is journalled with who clicked, which action, and which routine
 the server resolved it to.
 
+## Folders
+
+A **folder** is a named group of pages owned by one crew, with an icon from
+the same set crews use and an optional colour. One level only, and a page is
+in at most one folder; every page outside one sits under **Unfiled**.
+
+The Pages list groups by folder when the server has them: one section per
+folder you may read, its icon and colour in the header and beside them the
+number of its pages you can open — never the number that exist. A folder with
+nothing in it is still drawn, with its zero, because a folder that only
+appears once something is filed in it cannot be filed into. The filter panel
+offers **Group by: Folder | Owner**; Owner is the grouping described below,
+and the choice is remembered with the folds.
+
+Every row has a **⋯** menu — on hover, on focus, and on Shift+F10 or the
+ContextMenu key — with **Move to folder…** and, for a filed page, **Remove
+from folder**. The move dialog lists every folder and Unfiled; the same
+dialog opens from **Change…** on the Folder line of the editor's **Properties**
+card. A move carries the page's membership version and the target
+folder's permission version, and the server refuses a stale one: if somebody
+else moved the page or changed the folder's sharing meanwhile, the dialog
+re-reads both — and the target's sharing — says *The folder or the page
+changed; try again*, and asks again with a fresh preview. It never retries
+on your behalf.
+
+To move several pages at once, press **Select** in the rail's toolbar: every
+row gains a checkbox, Space toggles the focused row, Shift+click takes a
+range, and **Move to folder…** files them all in one request — all or
+nothing. A refusal names the page it was about.
+
+### Folder sharing
+
+A folder's permissions are inherited by every page that is in it right now,
+including pages added later, and they change when a page is moved. A page's
+own grants can add to that and never take from it. Panels owned by another
+crew stay sealed whatever the folder says.
+
+**Sharing…** on a folder's header menu opens the folder's sharing. A manager
+of the owning crew, or a workspace admin, sees the table: the owning crew
+first, whose managers administer the folder — being in that crew does not by
+itself open the pages in it; then each person or crew with a two-state
+control, **Can view** or **Can edit** — editing implies viewing, there is no
+third state; then **Everyone in this workspace**, off until you turn it on.
+*Can edit* means renaming the folder, changing its icon and colour, editing
+the pages in it, and removing pages from it — which takes the inherited
+access away from everyone else, and the sentence above the table says so.
+Nobody edits a folder's sharing but the owning crew's managers and admins;
+anyone who needs to becomes a manager in that crew. An entry stays until a
+manager changes it, even after the person who set it has left.
+
+Everyone else sees, instead of the table, which of three things the folder
+is — *Only the owning crew and workspace admins*, *Shared with named people*,
+*Shared with named crews*, *Shared with named people and crews*, *Shared with
+everyone in this workspace* — the product's own sentence about who may see more, and,
+when a page in the folder is open, their own paths to it. A folder shared
+with the whole workspace carries a small globe in the rail, titled *Shared
+with everyone in this workspace*.
+
+The move dialog shows **After the move** for whatever target is chosen: a
+manager of the target's crew reads it with names (*Visible to crew Support
+and everyone in this workspace; crew Ops can edit*), everyone else in
+general (*Visible to everyone in this workspace*, *Visible to members of the
+shared crews*, *Visible to the owning crew only*). There is no "restore
+sharing": moving a page back is another move, with the same preview.
+
+The editor's Access section gains a read-only **From folder** card under the
+page's own lists: for a manager, the folder's entries and a way to its
+Sharing; for everyone else, the marker and their own paths. And a page's own
+grants accept **Everyone in this workspace** as a subject, for read and write
+only — the workspace never produces.
+
+Who may do what: creating a folder takes a manager's standing in the owning
+crew or a workspace admin; renaming and recolouring the same, or *Can edit*
+on the folder; changing the folder's sharing is the owning crew's managers'
+and admins' alone; moving a page in takes both the page's owner (or an
+admin) and *Can edit* on the target (or a manager's standing in its crew) —
+the refusal names who can, and *Can edit* alone never lets you take somebody
+else's page; removing a page from a folder is the page owner's, an admin's,
+or anyone with *Can edit* on the folder; deleting a folder is allowed only
+when it is empty, counting pages you cannot see, and the refusal says so.
+
 ## Permission model
 
 Permissions are per **panel**, not per page — this is the property most
@@ -832,6 +913,15 @@ thing worth reading this section slowly for:
 - **Can you read a panel on it?** Only if you are in that panel's owning crew
   (or are an admin). Nothing else opens a panel — not ownership of the page,
   and not any grant.
+
+The Pages list in the browser is drawn from the first answer. It is grouped by
+owner — **Mine**, then the crews you belong to, then the other crews, then
+**Owned by others** for the personal pages of other people that reach you —
+with the owner named once in each group's header. Groups fold and remember it
+per user and workspace; a search opens every group that has a match and hides the
+rest; the arrow keys walk the rows, and Left and Right fold and unfold. When
+the server reports *how* you reach each page, the filter also offers **Shared
+with me**: the pages you reach through a grant and nothing else.
 
 ### Panel visibility is crew membership
 
@@ -978,8 +1068,8 @@ crewship page grants fleet-201
 
 See the [Page commands](/cli/page) reference for the full flag surface.
 
-The same ACL is editable in the browser: open a page and press **Settings**
-in the bar beside **Edit**. The Access card lists every grant with the human
+The same ACL is editable in the browser: open a page and press **Edit**; the
+editor's **Access** card lists every grant with the human
 who issued it and the server's use-time verdict — a grant whose issuer has
 since left the workspace, or lost ADMIN, is shown **inert** with the reason
 rather than hidden, because "the grant you added is doing nothing" is exactly
@@ -994,9 +1084,10 @@ behind them.
 
 ### What a page is, and what changed it
 
-The same Settings surface answers the other half: the page's owner (a user or
-a crew), its slug, description and panel count, when it was created and when
-its spec last changed — and the retained version history, each version
+The same editor answers the other half: its header and **Properties** card
+give the page's owner (a user or a crew), its slug, description and panel
+count, when it was created and when its spec last changed — and the
+**History** card holds the retained version history, each version
 credited to the human or agent that saved it. Any version can be restored
 from there, with the same confirmation `crewship page rollback` deserves: a
 panel a rollback brings back arrives with no data, because old payloads are
@@ -1244,7 +1335,7 @@ agent holding `write` can rebuild the page freely and can never widen who
 reaches it — otherwise "grant my agent access" would be a privilege-escalation
 primitive.
 
-The same three verbs are in the page's settings panel in the app, with each
+The same three verbs are in the editor's **Access** card in the app, with each
 grant showing who issued it and whether it is still live.
 
 ## Seeing one without building one
@@ -1364,3 +1455,42 @@ crews deleted.
 - [Crew Journal](/guides/crew-journal) — where a page's history actually lives.
 - [Roles & Permissions](/security/rbac) — the workspace-role layer a page's
   grants sit on top of.
+
+
+### Writing a complete collector payload from a routine
+
+A `crewship` step with `action: page.write` can use a whole-object template for
+`args.data`, for example `data: "{{ steps.collect.output.services }}"`. The result
+must be a JSON object. Numbers, arrays and booleans inside that object retain
+their types; a missing reference, invalid JSON, `null`, array or scalar fails
+before the write. Normal authored data objects remain supported. This conversion
+is limited to the complete `page.write` data template; other verbs keep ordinary
+string interpolation. See `examples/pages-apps/custom-operations.routine.yaml`.
+
+
+## Shared company colors
+
+Workspace administrators can set custom Page colors under **Settings → General
+→ Pages appearance**. The React starter uses the workspace palette through
+`--crewship-page-accent`, `--crewship-page-background`, `--crewship-page-surface`,
+`--crewship-page-text`, `--crewship-page-muted` and `--crewship-page-border`.
+The SDK also exposes `usePageTheme()` and a derived contrasting button text token,
+`--crewship-page-on-accent`. These are optional design tokens: your Page retains
+its own components and layout.
+
+A palette update reaches open Pages without rebuilding their code. Older
+applications must first adopt the tokens and be built with the supporting SDK.
+Importing a Page inherits the destination workspace palette; it does not change
+that company's settings. Workspace color updates require OWNER/ADMIN and are
+audited. Custom animations should honor `prefers-reduced-motion`, as the seeded
+Operations Lab does.
+
+### Opening custom applications
+
+Studio keeps a loading surface in the workspace background color until the
+runtime has received the first snapshot and had two rendering opportunities.
+The application then fades in over 300 ms. Normal data updates do not replay
+this transition, and reduced-motion preferences disable it. If initialization
+does not finish within 20 seconds in a visible tab, close and reopen the
+application to retry. This loading signal is not an application health check;
+a custom app remains responsible for its own asynchronous content and errors.

@@ -168,12 +168,16 @@ type pageListRowJSON struct {
 	Slug           string         `json:"slug"`
 	Name           string         `json:"name"`
 	Owner          string         `json:"owner"`
-	PanelCount     int            `json:"panel_count"`
+	PanelCount     int            `json:"panel_count" yaml:"panel_count"`
 	Panels         json.Number    `json:"panels"`
-	PanelStates    map[string]int `json:"panel_states"`
+	PanelStates    map[string]int `json:"panel_states" yaml:"panel_states"`
 	State          string         `json:"state"`
-	LastProducedAt string         `json:"last_produced_at"`
-	UpdatedAt      string         `json:"updated_at"`
+	LastProducedAt string         `json:"last_produced_at" yaml:"last_produced_at"`
+	UpdatedAt      string         `json:"updated_at" yaml:"updated_at"`
+	// Reach is how the caller reaches the page (owner, role, crew:<slug>,
+	// panel_crew:<slug>, grant) — the server's answer about the caller,
+	// repeated, never derived here from the owner column.
+	Reach []string `json:"reach"`
 }
 
 // slaLabel renders the panel's SLA. `sla_seconds` is canonical (§11b decision
@@ -326,10 +330,11 @@ var pageListCmd = &cobra.Command{
 		for _, row := range rows {
 			out = append(out, []string{
 				row.Slug, row.Name, fmt.Sprintf("%d", row.panelCount()),
-				pageDash(row.State), pageDash(row.Owner), pageDash(row.LastProducedAt),
+				pageDash(row.State), pageDash(row.Owner), pageDash(strings.Join(row.Reach, ", ")),
+				pageDash(row.LastProducedAt),
 			})
 		}
-		f.Table([]string{"SLUG", "NAME", "PANELS", "STATE", "OWNER", "LAST DATA"}, out)
+		f.Table([]string{"SLUG", "NAME", "PANELS", "STATE", "OWNER", "REACH", "LAST DATA"}, out)
 		return nil
 	},
 }

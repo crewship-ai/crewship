@@ -75,6 +75,12 @@ func seedPages(ctx context.Context, client *cli.Client) error {
 			continue
 		}
 		created++
+		if page.Project != nil {
+			if err := seedPageApp(ctx, client, page); err != nil {
+				fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
+				failed++
+			}
+		}
 		for _, panel := range page.Panels {
 			if panel.Demo == nil {
 				continue
@@ -265,6 +271,9 @@ func seedOnePage(client *cli.Client, wsID string, page seeddata.PageDef) error {
 	// re-seed that silently reassigned a page somebody had since handed to
 	// another crew would be a permission change nobody asked for.
 	if resp.StatusCode == http.StatusConflict {
+		if page.Project != nil {
+			return nil
+		} // A custom app may have been edited by its owner.
 		return seedUpdateOnePage(client, wsID, page.Slug, body)
 	}
 	if resp.StatusCode >= 400 {

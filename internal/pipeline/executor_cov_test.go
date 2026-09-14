@@ -351,19 +351,29 @@ func TestExecutor_CtxCancelledBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if res.Status != "FAILED" || res.FailedAtStep != "s1" {
-		t.Errorf("expected FAILED at s1 (last completed), got %+v", res)
+	// CANCELLED, not FAILED: the run stopped because its context died, and
+	// runWasCancelled classifies that the same way whether the cancel came
+	// through the RunRegistry or through the caller's own context. This
+	// assertion read FAILED while the classification was registry-only —
+	// the same run reached the journal labelled CANCELLED (emitRunFailed
+	// classifies off ctx.Err()), so the row and the journal disagreed.
+	if res.Status != "CANCELLED" || res.FailedAtStep != "s1" {
+		t.Errorf("expected CANCELLED at s1 (where it stopped), got %+v", res)
 	}
 
-	// Pre-cancelled ctx fails before the first step.
+	// Pre-cancelled ctx stops before the first step — still a cancellation,
+	// and the message must not claim the step was running.
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	cancel2()
 	res, err = exec.RunDefinition(ctx2, dsl, RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_a", Mode: ModeRun})
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
-	if res.Status != "FAILED" || res.FailedAtStep != "s1" {
+	if res.Status != "CANCELLED" || res.FailedAtStep != "s1" {
 		t.Errorf("pre-cancelled: %+v", res)
+	}
+	if res.ErrorMessage != "run cancelled at step s1" {
+		t.Errorf("pre-cancelled reason = %q, want a readable one that claims no progress", res.ErrorMessage)
 	}
 }
 

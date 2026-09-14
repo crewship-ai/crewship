@@ -124,13 +124,17 @@ func TestLogVersions_NonPositiveLimitDefaultsTo20(t *testing.T) {
 	}
 }
 
-func TestAtomicRestoreWrite_TempWriteFailure_ReadOnlyDir(t *testing.T) {
+// Restore no longer has its own fs-only writer: it goes through Mutate, which
+// ends at writeFileDurable like every other supported write. These three tests
+// kept their coverage by moving down onto that shared primitive and up onto
+// Mutate, rather than pinning a helper that no longer exists.
+func TestRestoreWrite_TempWriteFailure_ReadOnlyDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
-	if err := atomicRestoreWrite(filepath.Join(dir, "AGENT.md"), []byte("c")); err == nil {
+	if err := writeFileDurable(filepath.Join(dir, "AGENT.md"), []byte("c"), 0o644); err == nil {
 		t.Fatal("expected tempfile write error in read-only dir")
 	}
 }
@@ -223,28 +227,45 @@ func TestRestore_CanonicalPathIsDirectory_WriteFails(t *testing.T) {
 	}
 }
 
-func TestAtomicRestoreWrite_MkdirFailure(t *testing.T) {
+func TestMutate_MkdirFailure(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "file")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicRestoreWrite(filepath.Join(blocker, "sub", "AGENT.md"), []byte("c")); err == nil {
-		t.Fatal("expected mkdir error when parent chain crosses a regular file")
+	_, err := Mutate(context.Background(), nil, MutateRequest{
+		Profile:     ProfileLegacy,
+		OperationID: "op_mkdir",
+		Path:        filepath.Join(blocker, "sub", "AGENT.md"),
+		AuditPath:   "agent:a/AGENT.md",
+		Op:          OpAppend,
+		Content:     "c",
+	})
+	if err == nil || !strings.Contains(err.Error(), "mkdir parent") {
+		t.Fatalf("expected mkdir error when parent chain crosses a regular file, got %v", err)
 	}
 }
 
-func TestAtomicRestoreWrite_RenameFailure_CleansTemp(t *testing.T) {
+func TestRestoreWrite_RenameFailure_CleansTemp(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "AGENT.md")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicRestoreWrite(target, []byte("c")); err == nil {
+	if err := writeFileDurable(target, []byte("c"), 0o644); err == nil {
 		t.Fatal("expected rename error when target is a directory")
 	}
-	if _, err := os.Stat(target + ".restore.tmp"); !os.IsNotExist(err) {
-		t.Errorf("temp file leaked after failed rename")
+	// The tempfile carries a random suffix, so assert on the SHAPE rather
+	// than on one name — the old assertion named ".restore.tmp", a suffix
+	// this code has never produced, and so could not have failed.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp.") {
+			t.Errorf("temp file leaked after failed rename: %s", e.Name())
+		}
 	}
 }
 

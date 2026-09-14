@@ -115,6 +115,7 @@ func sampleMCPInputs() AgentRunRequest {
 	}`
 	return AgentRunRequest{
 		AgentSlug:         "agent-x",
+		RunID:             "run-1",
 		CrewMCPConfigJSON: crew,
 	}
 }
@@ -565,7 +566,7 @@ func TestWriteMCPCodex_RealOutput(t *testing.T) {
 	if cw.path != ".codex/config.toml" {
 		t.Errorf("want .codex/config.toml, got %q", cw.path)
 	}
-	if cw.workingDir != "/crew/agents/agent-x" {
+	if cw.workingDir != "/crew/runs/agent-x/run-1" {
 		t.Errorf("Codex MCP MUST be HOME-located (project-scoped requires interactive trust); got workingDir=%q", cw.workingDir)
 	}
 	body := cw.body
@@ -594,6 +595,7 @@ func TestWriteMCPCodex_GenericHeader(t *testing.T) {
 	cap := &captureContainer{}
 	req := AgentRunRequest{
 		AgentSlug:         "agent-x",
+		RunID:             "run-1",
 		CrewMCPConfigJSON: `{"mcpServers":{"notion":{"type":"http","url":"https://api.notion.com/mcp","headers":{"X-API-Key":"${NOTION_KEY}","X-Custom":"literal-value"}}}}`,
 	}
 	if err := writeMCPCodex(context.Background(), cap, "container-1", req, "/work", slog.Default()); err != nil {

@@ -305,7 +305,39 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dispatcher := memory.NewDispatcher(ac, memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)))
+	// The host bridge first: with a host channel and a per-run capability the
+	// three memory tools go to the host's guaranteed ledger, under the same
+	// audit path the HTTP route uses, and the model gets the revision back.
+	// handled=false means the call is not the bridge's (a local-only tier, no
+	// run capability, or a host that was unreachable before anything was sent)
+	// and the local path below answers as it always did.
+	if hostRes, handled := s.memoryMCPViaHost(r, params.Name, params.Arguments); handled {
+		result, _ := json.Marshal(hostRes)
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{JSONRPC: "2.0", ID: req.ID, Result: result})
+		return
+	}
+
+	// The local MCP dispatcher has no host ledger. A runtime that requires
+	// guaranteed memory must therefore fail closed on BOTH writers when the
+	// bridge could not serve the call; the requirement cannot be bypassed by
+	// choosing MCP instead of HTTP.
+	if memoryGuaranteedRequiredByRuntime() && (params.Name == "memory.write" || params.Name == "memory.append_daily") {
+		result, _ := json.Marshal(memoryMCPToolCallResult{
+			IsError: true,
+			Content: []memoryMCPToolCallContent{{Type: "text", Text: `{"error_code":"memory_guaranteed_unavailable","message":"Guaranteed memory is unavailable on this tool surface; no write was performed."}`}},
+		})
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			JSONRPC: "2.0", ID: req.ID, Result: result,
+		})
+		return
+	}
+
+	// Compatible serial deployments keep the local legacy dispatcher. R6's
+	// host bridge must preserve its path checks, injection screen, quarantine
+	// and cap guidance before this path can offer guaranteed writes.
+	dispatcher := memory.NewDispatcher(ac,
+		memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)),
+		memory.WithMutationProfile(memory.ProfileLegacy))
 	toolRes, err := dispatcher.Dispatch(r.Context(), memory.ToolCall{
 		Name: params.Name,
 		Args: params.Arguments,

@@ -46,6 +46,6 @@ it("preserves malformed JSON for repair instead of overwriting it", () => {
     />,
   )
   expect(screen.getByRole("alert")).toHaveTextContent("Enter a JSON object")
-  expect(screen.getByLabelText("Captured upstream outputs · JSON")).toHaveValue("{broken")
+  expect(screen.getByLabelText("Sample results · JSON")).toHaveValue("{broken")
   expect(save).not.toHaveBeenCalled()
 })

@@ -285,9 +285,43 @@ A duplicate returns `202` with `status: "DEDUPED"`, the original `run_id`, and
 | `400` | Body too large/unreadable |
 | `401` | Missing or invalid HMAC/timestamp |
 | `404` | Unknown, disabled, or deleted token (deliberately indistinguishable) |
-| `409` | Target routine is not active, or its pinned version is unavailable |
-| `429` | Per-token/concurrency limit; includes `Retry-After` |
-| `503` | Dispatch dependencies are not wired |
+| `409` | Target routine is not active, its pinned version is unavailable, or the same delivery identifier arrived with a different body (`delivery_conflict`; the original record is kept) |
+| `429` | Per-token/concurrency limit for **new** deliveries; includes `Retry-After`. A redelivery of an already-accepted delivery is answered `202 DEDUPED` with its original `run_id` even while the limit is exhausted |
+| `503` | Dispatch dependencies are not wired, or the receipt ledger could not be read; includes `Retry-After`. Never a guessed duplicate |
 
 Dispatch does not accept session/JWT authentication, and it never falls back to
 an unsigned request.
+
+### Routine webhook receipts
+
+A routine delivery is executed by the pipeline engine and never produces a
+work item. What it leaves behind is a **receipt**: its identity, the body's
+fingerprint and the run it produced. Two read routes answer "did you receive
+this one, and what ran" without re-sending the delivery.
+
+| Method | Path | Auth | Request | Response | Status |
+|---|---|---|---|---|---|
+| GET | `/api/v1/workspaces/{workspaceId}/routine-webhook-receipts` | member (`read`) | No body; optional `?webhook_id=`, `?source_delivery_id=`, `?after=` | `{ items[], next_cursor }` | `200`, `400`, `401`, `403`, `500` |
+| GET | `/api/v1/workspaces/{workspaceId}/routine-webhook-receipts/{receiptId}` | member (`read`) | No body | One receipt | `200`, `401`, `403`, `404`, `500` |
+
+Receipt identity is `(workspace, webhook, source delivery id)` — the
+`Idempotency-Key` / `X-Crewship-Event-ID` the sender supplied, or the synthetic
+key derived from the signed bytes. Passing `?webhook_id=` **and**
+`?source_delivery_id=` asks that identity question and answers with a page of
+zero or one; `?source_delivery_id=` on its own is a `400`.
+
+`run_id` is the real pipeline run (poll
+`/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`); `run_status` is that
+run's current status and is `null` when no run record is available. The
+receipt is written and the `202` sent before execution starts, so `null` can
+mean the run has not started yet just as well as a dispatch that failed before
+a record was written, or a record removed by run retention — the absence does
+not say which, and neither does the API. The raw payload is never returned;
+`body_sha256` and `body_bytes` identify it.
+
+**Dedup window and retention.** A receipt deduplicates redeliveries of its
+identifier for 30 days from acceptance (`dedup_expires_at`). A daily sweeper
+removes expired receipts; from then on the same identifier is **new work and
+runs again** — the contract promises no replay suppression past the window.
+Receipts recorded before the window existed were dated from the upgrade and
+keep the full 30 days from there.
