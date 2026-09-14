@@ -1067,21 +1067,23 @@ describe("EditorApplicationReview", () => {
     expect(container.querySelector('pre[role="region"][aria-label="Diff of src/Restart.tsx"]')).toBeTruthy()
   })
 
-  it("gives the heading focus is moved to a focus indicator that fires for a programmatic move", () => {
-    // `:focus-visible` does not reliably match an element focused by script
-    // with tabIndex={-1}, so a `focus-visible:` ring would be silent in the
-    // one case this heading is ever focused. happy-dom computes no Tailwind,
-    // so what is asserted is the rule that will be emitted — plus that the
-    // move itself lands, which is the behaviour the ring has to accompany.
+  it("gives the heading focus is moved a focus indicator that shows for keyboard users only", () => {
+    // The ring is on `:focus-visible`. Browsers carry the input modality
+    // across a scripted focus: a person who reached the preview by keyboard
+    // sees the ring on the heading afterwards, a person who clicked with the
+    // mouse does not — on `:focus` the page's title lit up after every
+    // click and read as a text field (2026-09-12). happy-dom computes no
+    // Tailwind, so what is asserted is the rule that will be emitted, plus
+    // that the move itself lands, which is the behaviour the ring accompanies.
     const { rerender } = render(<EditorApplicationReview {...props} pane="preview" />)
     rerender(<EditorApplicationReview {...props} pane="section" />)
     const headings = document.querySelectorAll("#application-review-heading")
     expect(headings).toHaveLength(1)
     const heading = headings[0] as HTMLElement
     expect(document.activeElement).toBe(heading)
-    expect(heading.className).toMatch(/focus:ring-2/)
-    expect(heading.className).toMatch(/focus:ring-ring/)
-    expect(heading.className).not.toMatch(/focus-visible:ring/)
+    expect(heading.className).toMatch(/focus-visible:ring-2/)
+    expect(heading.className).toMatch(/focus-visible:ring-ring/)
+    expect(heading.className).not.toMatch(/(^|\s)focus:ring/)
   })
 
   it("renders source diffs as text and never as markup", () => {

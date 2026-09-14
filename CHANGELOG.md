@@ -44,9 +44,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **`crewship work get -f yaml` no longer panics**, and the work commands print the same keys in YAML as in JSON. The detail payload embedded an unexported type, which yaml.v3 cannot reflect into, and the field names were being lowercased rather than read from their json tags — so a script written against one machine format silently disagreed with the other.
 ### Security
 
+- **Legacy Page panel updates and rollback could overwrite panels the caller could not read.** Both current and target declarations now require visibility, concurrent definition changes return 409, and metadata replies retain sealed placeholders. Project check no longer names routines called only by hidden panels (#2502).
+
 - **Page draft, archived definition and export reads could reveal panels hidden from the caller.** Whole-document authoring now requires visibility of every panel, including for agent project reads. Partial readers review source through separate endpoints that omit the definition; saves cannot silently remove withheld panels. ⚠️ **Behaviour change:** a Page write grant alone no longer permits these complete-document reads or replacements (#2502).
 
 ### Fixed
+
+- **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
 
 - **Routines rollback and re-enabling a plan now reject incompatible presets.** Rollback leaves HEAD unchanged on conflict; schedule writes and draft activation validate within their transaction, including wake inputs, and an expired run deadline stays failed in both the run and journal. Publish requires a change review and confirmation; live plans and budgets are managed outside the draft editor. Run discloses possible effects and schedule times name their zone (#2473).
 
@@ -55,10 +59,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Changed
 
+- **Routines is one list, a three-answer routine, a one-sentence run and a full-page editor** (#2519) — `/routines` showed a routine as seven cards, a Run tab next to the Run button, and an editor in a modal with the steps below the fold. Beside the explorer sidebar, the page now opens on one dense list whose row says what the routine does, how it went last time and how it runs, with a waiting decision as a banner first; a routine opens on What it does · Last time · Before you run, with the status chrome, metadata and access folded into one Technical details; the tabs read Overview / History / Plan / Versions and the run is an item of History; a run leads with its verdict and, when it failed, what to do next, with activity and attempts in one disclosure; Edit opens the recipe as a page (`?view=edit`) with the document in reading order and nothing live until Publish is confirmed. The Health tab is gone; the explorer sidebar stays, and the main panel no longer repeats its search and filters.
+
+- **The dashboard fits one screen** (#2539) — it needed two: a hero heading that repeated the sub-bar, results as 90 px cards with an avatar and three lines each, three crew cards with sparklines, four KPI tiles mostly showing a dash, and a 220 px chart. Every tile keeps its facts in less height: Results & review are one-line rows (id, state, title, who and when, action); Your crews are rows in the column beside them; the agent run summary is one strip of four numbers; the run-volume chart is shorter; cards use 12 px padding and 12 px gaps. Nothing was removed except the heading, which the sub-bar already said.
+
+- **The Pages list is grouped by owner.** The rail folds into Mine, the crews you belong to, the other crews and Owned by others, each with its count in the header and the owner named there once rather than on every row. Groups collapse and remember it per user and workspace; a search opens every group that matches and hides the rest until it is cleared; opening a page unfolds its group; and the arrow keys walk the rows, with Left and Right folding and unfolding. When the server reports how you reach each page, the filter gains a Shared with me switch (#2523).
+
+- **Edit takes over the whole Page.** Pressing Edit now slides the editor in over the page instead of adding a row of tabs under its header: the sections sit in a rail on the left with one line under each name, the open section fills the rest, and the header names the way back and what viewers see meanwhile. The Pages list stays where it was, scroll and filters included, and returns on Back to page. The "Stop application / show panels" bar under an application Page is gone; the header carries an **Application | Panels** switch instead, shown only while an application is on screen — Panels closes the application in this tab and stops nothing for anyone else (#2515).
+
 - **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
 
 ### Added
 
+- `page project get --source-only`, also with `--revision`, reads shared source without requesting the full panel declaration.
+
+- **The Pages list says how you reach each page.** Every row now carries `reach` — `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant` — so a client can group pages by ownership or show the ones shared with you, and `crewship page list` prints it as a `REACH` column. It describes you and nobody else. Listing a workspace now runs a fixed number of database statements whatever its page count (#2524).
 - **One editor for a Page, and a screen for reviewing what an agent changed** (#2491) — the Pages toolbar carried five separate doors into one job: Settings, Edit, App preview, Source history and Publications, side by side, three of them behind the same icon. None of them was where the work happens, and for a Page with a custom application the actual work — deciding whether an agent's change goes live — had no screen at all. `Edit` now opens a routed editor in the page's content column with four named sections (Content / Data & actions / Access / History) and the Pages list still beside it; the address carries the section, so reload, Back, Forward and a shared link all land where they should. A Page whose application has a candidate newer than its live publication opens on a review of that change: definition changes derived by comparing the two documents (never a summary the agent wrote), a per-file source diff, a warning naming any routine whose definition moved since the last publication, the candidate's build state, and a consent that is bound to one candidate and one set of baselines and resets, visibly and with a reason, when any of them changes. An ordinary panel Page is a complete case rather than the same screen with features switched off: no empty application headings and no Publish that can never be pressed.
 
 ### Changed

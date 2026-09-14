@@ -220,6 +220,11 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	current, originalSpec, ok := h.currentDocumentSnapshot(r.Context(), w, rec)
+	if !ok || !h.requireProjectDefinitions(w, r, current) {
+		return
+	}
+
 	body, ok := readCapped(w, r, 4<<10, "rollback request")
 	if !ok {
 		return
@@ -269,6 +274,9 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "decode stored page version", err)
 		return
 	}
+	if !h.requireProjectDefinitions(w, r, &doc) {
+		return
+	}
 	doc.APIVersion = pages.DocumentAPIVersion
 	doc.Kind = pages.DocumentKind
 	// The slug is the page's address and a rollback never moves it — the same
@@ -306,10 +314,6 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The arrangement being replaced, read before anything is written.
-	current, ok := h.currentDocument(w, rec)
-	if !ok {
-		return
-	}
 	beforeArrangement := pageArrangementFingerprint(current)
 
 	live, err := h.livePanelShapes(r.Context(), rec.ID)
@@ -333,10 +337,18 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ?`,
-		doc.Metadata.Name, doc.Metadata.Description, string(restored), now, rec.ID); err != nil {
+	result, err := tx.ExecContext(r.Context(),
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
+		doc.Metadata.Name, doc.Metadata.Description, string(restored), now, rec.ID, originalSpec)
+	if err != nil {
 		replyInternalError(w, h.logger, "update page for rollback", err)
+		return
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		replyInternalError(w, h.logger, "check page rollback", err)
+		return
+	} else if n != 1 {
+		replyError(w, http.StatusConflict, "Page definition changed before rollback; reload before restoring")
 		return
 	}
 	if err := reconcilePanels(r.Context(), tx, rec.ID, &doc, resolved, now); err != nil {
@@ -393,7 +405,7 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"page_id": updated.ID, "slug": updated.Slug})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"page":           h.pageDocument(r.Context(), updated, panels, nil),
+		"page":           h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)),
 		"rolled_back_to": target,
 		"version":        seq,
 		// The panels a viewer is about to find dimmed, named — so the operator
