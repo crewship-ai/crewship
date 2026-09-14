@@ -203,7 +203,7 @@ describe("shared routine editor", () => {
     h.linkedExisting = true
     render(<RoutineCreateDialog {...props} />)
     await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(props.onClose).toHaveBeenCalledOnce()
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
@@ -212,12 +212,12 @@ describe("shared routine editor", () => {
     render(<RoutineCreateDialog {...props} />)
     await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Saved name" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await screen.findByText(/Saved draft · Publish/)
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(props.onClose).toHaveBeenCalledOnce()
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved name" } })
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(props.onClose).toHaveBeenCalledOnce()
     expect(screen.getByRole("alertdialog")).toHaveTextContent(/saved draft.*remain/i)
   })
@@ -279,9 +279,9 @@ describe("shared routine editor", () => {
     })
     expect(screen.queryByText("Existing schedules")).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Continue", exact: true }),
+      screen.queryByRole("button", { name: "Continue" }),
     ).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
     expect(screen.getByLabelText("Name")).toHaveValue("Draft name")
     expect(
@@ -359,7 +359,7 @@ describe("shared routine editor", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Unfinished draft" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await screen.findByText(/Saved draft/)
     expect(
       h.calls.some(
@@ -381,7 +381,7 @@ describe("shared routine editor", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Keep my edit" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await screen.findByText(/Another editor saved this draft/)
     expect(screen.getByLabelText("Name")).toHaveValue("Keep my edit")
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)
@@ -422,7 +422,7 @@ describe("shared routine editor", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"),
     )
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await waitFor(() =>
       expect(h.calls.some((c) => c.url.endsWith("/drafts") && c.body.document)).toBe(
         true,
@@ -447,8 +447,8 @@ describe("shared routine editor", () => {
       />,
     )
     await screen.findByText(/draft link is no longer current/)
-    expect(screen.getByRole("button", { name: "Save draft", exact: true })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Publish", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
   })
   it("opens a historical version as an unsaved draft", () => {
     render(

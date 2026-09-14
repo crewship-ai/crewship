@@ -212,3 +212,19 @@ Tato část popisuje nový stav, nemění výsledky výše. Claim #2473 drží
 
 V této chvíli se ještě netvrdí merge, nasazení ani dokončení následné přejímky.
 Výsledky konečných kontrol budou doplněny po jejich skutečném dokončení.
+
+Kontroly opravy před mergem (#2553): frontend 385 testů / 51 souborů,
+plný Go vet, lint (0 chyb, 30 existujících varování) a produkční frontend build
+prošly. Prohlížeč nad exportem opravované větve a API dev1 potvrdil uložení,
+znovunačtení, pravdivé potvrzení zahození pozdějších změn a návrat fokusu,
+včetně šířky 390 px. Nejde o důkaz nasazení nové Go binárky.
+Test návratu fokusu po odstranění produkčního `.focus()` zčervenal.
+První opakování browser sondy mělo vlastní chyby: očekávalo 200 místo 204
+při úklidu a nečekalo na dokončení načtení draftu. Po opravě synchronizace
+prošel celý průchod a vlastní fixture byla odstraněna.
+
+CI odhalilo nepovolený `exact` parametr v nových Testing Library selektorech;
+běhové testy jej ignorovaly. Testovací zápis je opraven, samostatná typová
+kontrola není nahrazena úspěšným frontend buildem. První úplný Go běh
+překročil výchozí 10minutový limit balíčku API při průběžném provádění testů;
+balíček se opakuje s 15minutovým limitem používaným v CI.

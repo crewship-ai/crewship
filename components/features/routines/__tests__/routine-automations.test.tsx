@@ -160,13 +160,13 @@ beforeEach(() => {
 
 it("returns keyboard focus to Edit after leaving the editor page", async () => {
   renderCard()
-  const opener = screen.getByRole("button", { name: "Edit", exact: true })
+  const opener = screen.getByRole("button", { name: "Edit" })
   opener.focus()
   fireEvent.click(opener)
   const close = await screen.findByRole("button", { name: "Close editor" })
   close.focus()
   fireEvent.click(close)
-  await waitFor(() => expect(screen.getByRole("button", { name: "Edit", exact: true })).toHaveFocus())
+  await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toHaveFocus())
 })
 
 /** Automations live in Plan, next to schedules and webhooks (#2519). */
