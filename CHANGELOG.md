@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Agent turn-limit failures could appear only as a generic process exit.** Structured terminal failures now retain their original cause even with a nonzero exit, and the execution journal preserves the subtype and turn count when the raw output exceeds its capture limit (#2544).
+
 - **Routines rollback and re-enabling a plan now reject incompatible presets.** Rollback leaves HEAD unchanged on conflict; schedule writes and draft activation validate within their transaction, including wake inputs, and an expired run deadline stays failed in both the run and journal. Publish requires a change review and confirmation; live plans and budgets are managed outside the draft editor. Run discloses possible effects and schedule times name their zone (#2473).
 
 - **Closing the Pages editor on an empty Page could leave keyboard focus on the document body.** Empty Pages now keep the same focusable heading as populated Pages.
