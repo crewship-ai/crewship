@@ -49,16 +49,23 @@
  * small". Reported on Settings, where focusing the section search did exactly
  * that (#2483).
  *
- * This is a floor, not a size: `max(16px, 1em)` leaves anything already larger
- * alone. It is `!important` because it has to beat the ~80 call sites that set
- * `text-xs` on an input directly, and a class selector outranks an element one
- * — a rule without it would silently lose to the very markup it exists to
- * correct. Checkboxes, radios, ranges and colour swatches are excluded: they
- * render no text and their box is sized by other means. */
+ * This is a floor, not a size. `1em` here is the PARENT's font size, not the
+ * field's own — CSS has no way to say "the size this element would otherwise
+ * have" — so a field that asks for more than 16px itself would be pulled down
+ * to the floor. Those sizes are excluded by class so they keep what they ask
+ * for; nothing in the tree uses them on a field today, and the exclusion is
+ * what keeps that true if something does. It is `!important` because it has
+ * to beat the ~80 call sites that set `text-xs` on an input directly, and a
+ * class selector outranks an element one — a rule without it would silently
+ * lose to the very markup it exists to correct. Checkboxes, radios, ranges and
+ * colour swatches are excluded: they render no text and their box is sized by
+ * other means. */
 @media (pointer: coarse) {
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-  select,
-  textarea {
+  :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+    select,
+    textarea
+  ):not(.text-lg, .text-xl, .text-2xl, .text-3xl) {
     font-size: max(16px, 1em) !important;
   }
 }
