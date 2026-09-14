@@ -315,6 +315,19 @@ and `run_id`.
 | `pipeline.step.failed` | Step failed terminally | `{ step_id, error_class, error_message_preview }` |
 | `pipeline.step.validation_failed` | Step output failed a validation gate | `{ step_id, reason, action }` |
 
+#### Pages
+
+Pages broadcast on the workspace channel. Every payload is a refresh hint —
+the client re-reads through the authorised path, so the per-panel permission
+filter lives in one place — and carries no page data of its own.
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `page.updated` | A page's definition, metadata or folder membership changed — an edit, a rollback, a publication, a move into or out of a folder | `{ page_id, slug }` |
+| `page.deleted` | A page was deleted | `{ page_id, slug }` |
+| `page.panel.updated` | A producer pushed one panel's payload | `{ page_id, slug, panel_id }` |
+| `page.folder.updated` | A folder itself changed — created, renamed, re-iconed or recoloured, deleted, or its sharing set or removed. A page moved into or out of the folder broadcasts that page's `page.updated` instead | `{ slug, folder_id }` |
+
 #### Configuration & inbox
 
 | Event Type | Description | Payload |

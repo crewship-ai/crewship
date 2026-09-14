@@ -40,6 +40,9 @@ type MemoryReadResponse struct {
 	// §8 forbids normalising on read, so the content above is the real
 	// bytes and this flag is the warning.
 	Canonical bool `json:"canonical"`
+	// AuditPath is the host ledger's canonical identity for the file, present
+	// when the read was served by the host.
+	AuditPath string `json:"audit_path,omitempty"`
 }
 
 // handleMemoryRead serves GET /memory/read?file=...&scope=...
@@ -95,6 +98,43 @@ func (s *Server) handleMemoryRead(w http.ResponseWriter, r *http.Request) {
 			"error": "unsupported file path; allowed: AGENT.md, CREW.md, pins.md, daily/<name>.md",
 		})
 		return
+	}
+
+	// The host's canonical read first, when this call carries a per-run
+	// capability and the sidecar has a host channel: it is the only read that
+	// can return a revision anchor, which is what a conditional write needs.
+	// A host that cannot be reached before anything was sent leaves the local
+	// read below as the declared fallback, which answers revision 0 and
+	// revision_checked=false — true of it.
+	if _, ready := s.mcpHostBridgeReady(r); ready {
+		if _, known := memoryFileCap(file); known {
+			canon, out, ok := s.readCanonicalOnHostFull(r, scope, file)
+			switch {
+			case ok && !canon.Exists:
+				writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+				return
+			case ok:
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Memory-Bytes", strconv.Itoa(canon.Bytes))
+				writeJSONResponse(w, http.StatusOK, MemoryReadResponse{
+					Path:            target,
+					Scope:           scope,
+					Bytes:           canon.Bytes,
+					Content:         canon.Content,
+					ContentSHA256:   canon.ContentSHA256,
+					Revision:        canon.Revision,
+					RevisionChecked: canon.LedgerRecorded,
+					Canonical:       canon.Canonical,
+					AuditPath:       canon.AuditPath,
+				})
+				return
+			case out.relay != nil:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(out.relay.status)
+				_, _ = w.Write(out.relay.body)
+				return
+			}
+		}
 	}
 
 	// memory.ReadCanonical, not a bare read: it reads the CANONICAL FILE

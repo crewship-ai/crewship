@@ -234,13 +234,26 @@ export function Pill({ tone = "default", children, className, "data-testid": tes
   )
 }
 
-export interface FieldLabelProps {
+export interface FieldLabelProps extends Omit<React.ComponentProps<"label">, "className" | "children"> {
   children: React.ReactNode
   className?: string
 }
 
-export function FieldLabel({ children, className }: FieldLabelProps) {
-  return <label className={cn("type-section block text-muted-foreground", className)}>{children}</label>
+/**
+ * The label over a form control, in the same register as a card's title band.
+ *
+ * It takes `htmlFor` (and anything else a `<label>` takes) so a form can use
+ * it without giving up the label-to-control association that assistive
+ * technology and `getByLabelText` both depend on. Without that, every form
+ * that wanted the shared register had to fall back to `ui/label` and restyle
+ * it by hand.
+ */
+export function FieldLabel({ children, className, ...props }: FieldLabelProps) {
+  return (
+    <label className={cn("type-section block text-muted-foreground", className)} {...props}>
+      {children}
+    </label>
+  )
 }
 
 export interface EmptyStateProps {
