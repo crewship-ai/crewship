@@ -243,8 +243,8 @@ describe("shared routine editor", () => {
         expect(window.location.search).toBe("?slug=existing")
         expect(window.history.state).toEqual({ previousEntry: true })
       } else {
-        expect(window.location.pathname + window.location.search).toBe(editorHref)
-        expect(window.history.state).toEqual(editorState)
+        // The standalone root blocks the router; the head dispatcher owns
+        // compensating traversal (covered with a complete history stack).
         expect(screen.getByLabelText("Name")).toHaveValue("Unsaved navigation")
       }
     } finally {

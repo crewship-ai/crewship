@@ -268,3 +268,22 @@ skutečný reload a odmítnutá navigace do Inboxu. Uložený serverový draft
 zůstal shodný a vlastní fixture byly odstraněné. Předchozí CI hlavy a29269952
 bylo zrušeno jako nahrazené touto opravou; nový commit musí mít vlastní CI
 výsledek a nové review. Nasazení se stále netvrdí.
+
+
+Další review hlavy `21d559fc6` správně odhalilo, že odmítnutý Back
+obnovoval editor přes `pushState` a tím mazal existující položky Vpřed.
+Předchozí test simuloval popstate bez skutečného zásobníku historie,
+takže tuto ztrátu nemohl odhalit. Dispatcher nyní čísluje položky historie,
+vrátí se kompenzačním `history.go(delta)` na původní položku a potlačí
+jen návratovou událost před routerem. Nevytváří náhradní položku.
+
+Test se čtyřmi položkami ověřuje odmítnutý Back, skok o dvě položky i
+Forward, zachování celého zásobníku a následné dosažení původní položky
+Forward. Proti starému dispatcheru všechny tři případy selhaly; oprava
+prošla. Chromium navíc vytvořilo původní Forward položku před neuloženou
+úpravou: odmítlo Back, zachovalo text a dosáhlo téže Forward položky
+včetně jejího router stavu. Celkem 11 browser scénářů prošlo bez page
+errors; vlastní rutina a draft byly odstraněné. Lokálně 416 testů / 53
+souborů, build, lint a typová kontrola bez nových diagnostik prošly.
+CI hlavy `21d559fc6` bylo zrušeno jako nahrazené opravou. Finální CI,
+schválení a nasazení stále čekají; tento odstavec je nenahrazuje.

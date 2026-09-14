@@ -2,13 +2,38 @@
 export const HISTORY_NAVIGATION_GUARD_SCRIPT = `(() => {
   if (window.__crewshipHistoryGuards) return;
   const guards = window.__crewshipHistoryGuards = new Set();
+  const history = window.history;
+  const key = "__crewshipHistoryIndex";
+  let current = Number.isInteger(history.state?.[key]) ? history.state[key] : 0;
+  let restoring = false;
+  const push = history.pushState.bind(history);
+  const replace = history.replaceState.bind(history);
+  replace({ ...history.state, [key]: current }, "");
+  history.pushState = (state, title, url) => {
+    push({ ...state, [key]: current + 1 }, title, url);
+    current += 1;
+  };
+  history.replaceState = (state, title, url) => {
+    replace({ ...state, [key]: current }, title, url);
+  };
   window.addEventListener("popstate", event => {
+    if (restoring) {
+      restoring = false;
+      event.stopImmediatePropagation();
+      return;
+    }
+    const target = event.state?.[key];
     for (const guard of Array.from(guards).reverse()) {
       if (guard(event) === false) {
         event.stopImmediatePropagation();
+        if (Number.isInteger(target) && target !== current) {
+          restoring = true;
+          history.go(current - target);
+        }
         return;
       }
     }
+    if (Number.isInteger(target)) current = target;
   }, true);
 })();`
 

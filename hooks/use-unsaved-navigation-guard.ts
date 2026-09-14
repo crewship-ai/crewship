@@ -12,7 +12,6 @@ export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
   useLayoutEffect(() => {
     if (!enabled) return
     let editorHref = window.location.href
-    let editorState: unknown = window.history.state
     const beforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ""
@@ -23,14 +22,11 @@ export function useUnsavedNavigationGuard(enabled: boolean, message: string) {
       // editor mounted. Let that navigation keep its normal behaviour.
       if (window.location.pathname + window.location.search === editor.pathname + editor.search) {
         editorHref = window.location.href
-        editorState = window.history.state
         return true
       }
       if (allow()) return true
-      // popstate arrives after history has moved. Restore the editor entry
-      // before Next or selection listeners can unmount it. Only a refused
-      // navigation writes history; accepting Back/Forward leaves it intact.
-      window.history.pushState(editorState, "", editorHref)
+      // The early dispatcher returns to this existing history entry and
+      // suppresses the compensating popstate, preserving Forward history.
       return false
     }
     window.addEventListener("beforeunload", beforeUnload)
