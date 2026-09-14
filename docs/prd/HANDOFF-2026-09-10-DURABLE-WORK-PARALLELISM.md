@@ -1330,3 +1330,46 @@ these tests. The reviewer's `review_journal_absence_test.go` constructs a
 launch state by hand (location + returned, no gate); under this protocol that
 state cannot arise, so the equivalent is the queued/failed-journal pair above,
 driven through the protocol.
+## 2026-09-14 — R6, first bounded PR (feat/r6-agent-guaranteed-memory)
+
+Branch off `feat/durable-work-parallelism` in its own worktree; independent of
+the four open PRs. What it delivers, all verified through a real
+`api.NewRouter` host + the production sidecar (`NewServer`) + agtv2 run tokens
+derived as the orchestrator derives them + migrated SQLite + a real storage
+directory (`internal/sidecar/memory_r6_host_test.go`):
+
+- MCP `memory.write` / `memory.append_daily` / `memory.read` route to the host
+  mutation and canonical routes when the sidecar has a host channel and the
+  call carries a per-run capability (`memory_mcp_host.go`). Same forwarded
+  bearer, same credential screen, same R5 sent/unknown discipline. Tiers the
+  host does not serve, calls with no run capability, and a host unreachable
+  BEFORE sending stay on the local dispatcher.
+- One namespace: everything anchors on the host's `agent:<slug>/<file>`. An
+  HTTP replace against revision 1 gives revision 2, and the MCP read sees 2.
+- Metadata to the model: a second text content item with revision,
+  content_sha256, operation_id, mutation_id, audit_path, idempotent,
+  retry_safe (and date/at for append_daily). Errors are JSON with §8's
+  `error_code`; host envelopes are relayed verbatim.
+- Run identity from the capability, on both surfaces: the HTTP route fills
+  `run_id` from the bearer and refuses a body naming another run
+  (`memory_run_substitution`); the host derives the attempt's generation when
+  the request omits it (`attemptGeneration`) and `authorizeRun` still verifies
+  it under the file lock.
+- Stable retry identity: `operation_id` required under the guaranteed
+  requirement (`operation_id_required`), synthesised otherwise and reported as
+  `retry_safe: false`; `append_daily` takes `operation_id`/`date`/`at` and
+  `memory.ResolveAppendDaily` derives identical bytes on both surfaces.
+- First write: `first_write: true` on a replace is the explicit "revision 0
+  expected" precondition (`MutateRequest.FirstWrite`); the CAS makes the
+  second concurrent first write lose with `memory_conflict`. A missing
+  precondition is `expected_revision_required` before any round trip.
+- Lost response: a dropping proxy between sidecar and host — the tool answers
+  `memory_mutation_unknown`, nothing local is written, the retry under the same
+  operation_id is answered idempotently and the ledger holds one row.
+- Ended run refused by the host (no local fallback); a second attempt on the
+  same sidecar writes under its own run id.
+
+Mutants: a bridge that never engages, and a sidecar that accepts a substituted
+run id, both fail the acceptance. Not done in this PR: an agent-side retry
+loop (the model retries), R7 on the LLM proxy, global run-authority
+enforcement, the memory recovery sweeper, and the `PERSONA`/`peers` tiers.

@@ -177,8 +177,16 @@ type MemoryMutationRequest struct {
 	// the durable work ledger, not merely recorded — see authorizeRun. A
 	// caller may supply a run it does not own or a stale generation; both are
 	// refused, so forging these buys nothing the caller did not already have.
-	RunID      string `json:"run_id"`
-	Generation int64  `json:"generation"`
+	RunID string `json:"run_id"`
+	// Generation is optional. The run capability already binds the attempt;
+	// when it is omitted (0) the attempt's own generation is used, verified
+	// against the work item as always. A caller that does supply one must
+	// supply the live one — a stale term is a superseded worker, refused.
+	Generation int64 `json:"generation"`
+	// FirstWrite is the explicit first-write precondition for a replace: the
+	// caller states that no revision exists for this key yet. Without it a
+	// replace needs expected_revision (or expected_sha256 at the sidecar).
+	FirstWrite bool `json:"first_write"`
 
 	// Source is free-form provenance for the audit trail.
 	Source string `json:"source,omitempty"`
@@ -354,6 +362,22 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusServiceUnavailable, "memory versions blob root is not configured; the durable intent has nowhere to park the target content")
 		return
 	}
+	if op == memory.OpReplace && req.FirstWrite && req.ExpectedRevision != 0 {
+		replyError(w, http.StatusBadRequest, "first_write states that no revision exists yet; it cannot be combined with a non-zero expected_revision")
+		return
+	}
+	// The capability names the run; the ledger names its generation. A
+	// caller that omits the generation gets the attempt's own, so the
+	// provenance recorded on the mutation is the live term rather than zero.
+	// authorizeRun re-verifies it under the file lock, against the work item.
+	generation := req.Generation
+	if generation == 0 {
+		var err error
+		if generation, err = h.attemptGeneration(r.Context(), req.RunID); err != nil {
+			replyError(w, http.StatusForbidden, "memory mutation refused: run is not the current live attempt for this agent: "+err.Error())
+			return
+		}
+	}
 
 	source := strings.TrimSpace(req.Source)
 	if source == "" {
@@ -369,7 +393,7 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		ActorType:   "agent",
 		ActorID:     target.agentID,
 		RunID:       req.RunID,
-		Generation:  req.Generation,
+		Generation:  generation,
 		Source:      source,
 		Tier:        target.tier,
 		Scope:       target.ledgerKey,
@@ -383,6 +407,7 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		ExpectedRevision: req.ExpectedRevision,
 		ExpectedSHA256:   req.ExpectedSHA256,
 		Removals:         req.Removals,
+		FirstWrite:       req.FirstWrite,
 
 		// A replace discards the base, so importing a non-canonical one
 		// changes no bytes on disk; it only lets the declared-removal check
@@ -390,7 +415,7 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		Import: op == memory.OpReplace,
 
 		// I4. Not a closure that returns nil — see authorizeRun.
-		Authorize: h.authorizeRun(wsID, target.agentID, req.RunID, req.Generation),
+		Authorize: h.authorizeRun(wsID, target.agentID, req.RunID, generation),
 
 		BlobRoot: h.blobRoot,
 		Cfg: memory.WriteConfig{
@@ -749,6 +774,22 @@ func (h *MemoryMutationHandler) authorizeRun(wsID, agentID, runID string, genera
 		}
 		return nil
 	}
+}
+
+// attemptGeneration answers the generation of a run's attempt, for a caller
+// that presented the run capability but not the term. It is a lookup, not an
+// authorization: authorizeRun still verifies the attempt is open, the work
+// item live, and the two generations equal, under the file lock.
+func (h *MemoryMutationHandler) attemptGeneration(ctx context.Context, runID string) (int64, error) {
+	var generation int64
+	err := h.db.QueryRowContext(ctx, `SELECT generation FROM work_attempts WHERE run_id = ?`, runID).Scan(&generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("run %q is not in the work ledger", runID)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read the attempt's generation: %w", err)
+	}
+	return generation, nil
 }
 
 // memoryRunStateIsLive is the set of work_items states in which an attempt may

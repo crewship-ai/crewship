@@ -246,7 +246,15 @@ echo "## New Fact\nUser prefers dark mode" >> ~/.memory/AGENT.md
 echo "## Decision\nUse PostgreSQL 16 for all DBs" >> /crew/shared/.memory/CREW.md
 ```
 
-The preferred write surface is the `memory.write` tool the sidecar exposes over MCP. It is **durable and fail-closed**:
+The preferred write surface is the `memory.write` tool the sidecar exposes over MCP. When the agent runs under a per-run capability (every orchestrated run does) and the sidecar has its host channel, `memory.write`, `memory.append_daily` and `memory.read` go to the **host's guaranteed ledger** — the same revision history the HTTP `/memory/write` route uses, keyed `agent:<slug>/<file>` — and the tool result carries a second text item with the write's metadata as JSON: `revision`, `content_sha256`, `operation_id`, `mutation_id`, `audit_path`, `idempotent`, `retry_safe`. The rules a model needs:
+
+- **Pass `operation_id`** (mint one, e.g. a UUID) and reuse it verbatim on a retry: the same id with the same content returns the original result and writes nothing again; the same id with other content is `operation_conflict`.
+- **A replace needs a precondition**: `expected_revision` (or `expected_sha256`) from `memory.read`, plus `removals` (pass `[]` when it deletes nothing) — or `first_write: true` when `memory.read` returned revision 0 for a file you are writing for the first time. Two concurrent first writes have one winner.
+- **`memory.append_daily`** accepts `operation_id`, `date` (`YYYY-MM-DD`) and `at` (RFC 3339); pass the same three on a retry and the entry is written once. The result echoes the `date` and `at` it used.
+- **`memory_mutation_unknown`** means the write was sent and the host's answer was lost: nothing was written locally, and the remedy is a retry under the same `operation_id`.
+- Tiers the host does not serve (`PERSONA`, `peers`, `lessons`) and calls without a run capability still use the in-container writer, which reports `revision 0` and is not revision-checked.
+
+It is **durable and fail-closed**:
 
 - A successful `memory.write` is `fsync`'d and atomically renamed into place before it returns — a write the tool reports as done is on stable storage, never merely in the page cache.
 - If the persist cannot complete, the tool returns an **`isError` result** (the model sees the failure and reports it) instead of a false "done". Success therefore *means* durability.
@@ -779,14 +787,16 @@ every agent-side write, whatever the caller asked for.
 It is set on the container from outside precisely so that nothing **inside** the
 container can clear it: a correctness rule an agent may opt out of is not a rule.
 
-**Leave it off until the agent-facing guaranteed path is fully wired.** Run
-capabilities already reach agent executions, but the memory HTTP bridge still
-expects run identity in the request body and does not bind it to that capability.
-The MCP dispatcher has no host ledger bridge: with this flag enabled, both MCP
-writers return a tool error (`memory_guaranteed_unavailable`) without writing
-locally. HTTP writes that cannot meet the guaranteed preconditions return `503`
-instead of falling back. This fail-closed behavior protects the requirement; it
-does not establish that agent-facing guaranteed memory is complete.
+Both agent-facing writers now reach the host ledger under the run capability
+the orchestrator injects: the HTTP route derives the run from the bearer token
+(a body naming another run is refused as `memory_run_substitution`), and the
+MCP tools go through the same host routes with the same forwarded capability.
+With this flag enabled, a call the host path cannot serve — no host channel,
+no run capability, a missing `operation_id`, a replace without a precondition —
+returns a tool error (`memory_guaranteed_unavailable`, `operation_id_required`,
+`expected_revision_required`) or a `503` without writing locally. Leave it off
+on deployments whose agents run without a per-run capability (a token-less
+crew); there the in-container writer is the only one available.
 
 ## Load-time injection scan
 

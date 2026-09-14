@@ -86,6 +86,13 @@ type MemoryWriteRequest struct {
 	// under that exact hash (see hostExpectedRevision), which is what makes
 	// the guaranteed profile usable without a second sidecar route.
 	ExpectedRevision int64 `json:"expected_revision,omitempty"`
+	// FirstWrite is the explicit first-write precondition for a replace: no
+	// revision is expected to exist for this key yet. It is what lets a key
+	// that has never been written under the contract be REPLACED under the
+	// guaranteed profile, instead of having to be appended to first to
+	// establish revision 1. A concurrent first write to the same key loses
+	// with memory_conflict.
+	FirstWrite bool `json:"first_write,omitempty"`
 
 	// RunID and Generation are I4's fencing pair. The host does not merely
 	// record them: it refuses the write unless the run is this agent's, still
@@ -154,7 +161,12 @@ type MemoryWriteResponse struct {
 	// host returned a PRIOR operation's stored result and wrote nothing.
 	MutationID   string `json:"mutation_id,omitempty"`
 	BaseRevision int64  `json:"base_revision,omitempty"`
-	Idempotent   bool   `json:"idempotent,omitempty"`
+	// AuditPath is the host ledger's canonical identity for the file
+	// (`agent:<slug>/<file>`), the key the MCP tools and the canonical read
+	// anchor to as well — one revision history whichever surface wrote it.
+	AuditPath        string `json:"audit_path,omitempty"`
+	RemovalsVerified bool   `json:"removals_verified,omitempty"`
+	Idempotent       bool   `json:"idempotent,omitempty"`
 }
 
 // MemoryWriteUnknown is the 503 envelope for R5's third outcome: the host
@@ -389,6 +401,25 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 	// fallback off — and per R5 that decision belongs to the runtime
 	// (memoryGuaranteedRequiredByRuntime) rather than to an optional field
 	// the model may simply omit.
+	// The run is named by the capability the caller authenticated with, not
+	// by the body. A body that names no run inherits the token's; a body that
+	// names a DIFFERENT run is a substitution attempt and is refused here,
+	// before any host round trip — the host refuses it too, but a clear
+	// answer at the first boundary beats a relayed 403.
+	if _, _, tokenRun, present, ok := s.actingRunIdentity(r); present && ok && tokenRun != "" {
+		switch strings.TrimSpace(req.RunID) {
+		case "":
+			req.RunID = tokenRun
+		case tokenRun:
+		default:
+			writeJSONResponse(w, http.StatusForbidden, map[string]string{
+				"error":  "run_id does not match the authenticated run capability",
+				"code":   "memory_run_substitution",
+				"detail": "a write is attributed to the run whose token authenticated it; naming another run is refused",
+			})
+			return
+		}
+	}
 	degradeReason := s.hostMutationBlocker(r, req, op)
 	if degradeReason == "" {
 		// Screen with THIS sidecar's scrubber before forwarding. The host runs
@@ -420,16 +451,18 @@ func (s *Server) handleMemoryWrite(w http.ResponseWriter, r *http.Request) {
 			return
 		case out.ok:
 			s.finishMemoryWrite(w, r, engine, req.Scope, req.File, MemoryWriteResponse{
-				BytesWritten:    out.res.BytesWritten,
-				Path:            target,
-				ContentSHA256:   out.res.ContentSHA256,
-				Revision:        out.res.Revision,
-				RevisionChecked: out.res.LedgerRecorded,
-				OperationID:     operationID,
-				Profile:         out.res.Profile,
-				MutationID:      out.res.MutationID,
-				BaseRevision:    out.res.BaseRevision,
-				Idempotent:      out.res.Idempotent,
+				BytesWritten:     out.res.BytesWritten,
+				Path:             target,
+				ContentSHA256:    out.res.ContentSHA256,
+				Revision:         out.res.Revision,
+				RevisionChecked:  out.res.LedgerRecorded,
+				OperationID:      operationID,
+				Profile:          out.res.Profile,
+				MutationID:       out.res.MutationID,
+				AuditPath:        out.res.AuditPath,
+				RemovalsVerified: out.res.RemovalsVerified,
+				BaseRevision:     out.res.BaseRevision,
+				Idempotent:       out.res.Idempotent,
 			})
 			return
 		case out.unknown != "":
@@ -915,8 +948,9 @@ func (s *Server) hostMutationBlocker(r *http.Request, req MemoryWriteRequest, op
 		if req.Removals == nil {
 			return "a guaranteed replace must declare its removals; a missing array means undeclared, an empty one means it deletes nothing"
 		}
-		if req.ExpectedRevision <= 0 && strings.TrimSpace(req.ExpectedSHA256) == "" {
-			return "a guaranteed replace must carry expected_revision, or expected_sha256 for this handler to derive it from the host"
+		if req.ExpectedRevision <= 0 && strings.TrimSpace(req.ExpectedSHA256) == "" && !req.FirstWrite {
+			return "a guaranteed replace must carry expected_revision, or expected_sha256 for this handler to derive it from the host, " +
+				"or first_write to state that no revision exists yet"
 		}
 	}
 	return ""
@@ -956,14 +990,17 @@ type hostMutationRelay struct {
 // share the type (internal/api's own tests import internal/sidecar-adjacent
 // code and the edge would be a cycle), so the JSON tags are the contract.
 type hostMutationSuccess struct {
-	Profile        string `json:"profile"`
-	Revision       int64  `json:"revision"`
-	ContentSHA256  string `json:"content_sha256"`
-	LedgerRecorded bool   `json:"ledger_recorded"`
-	BytesWritten   int    `json:"bytes_written"`
-	MutationID     string `json:"mutation_id"`
-	BaseRevision   int64  `json:"base_revision"`
-	Idempotent     bool   `json:"idempotent"`
+	Profile          string `json:"profile"`
+	Revision         int64  `json:"revision"`
+	ContentSHA256    string `json:"content_sha256"`
+	LedgerRecorded   bool   `json:"ledger_recorded"`
+	BytesWritten     int    `json:"bytes_written"`
+	MutationID       string `json:"mutation_id"`
+	AuditPath        string `json:"audit_path"`
+	BaseRevision     int64  `json:"base_revision"`
+	BaseSHA256       string `json:"base_sha256"`
+	Idempotent       bool   `json:"idempotent"`
+	RemovalsVerified bool   `json:"removals_verified"`
 }
 
 // hostMutationOutcome is exactly one of four things, and the fourth is the
@@ -1004,7 +1041,7 @@ type hostCanonicalRead struct {
 // declared contract.
 func (s *Server) mutateOnHost(r *http.Request, req MemoryWriteRequest, op memory.MutateOp, operationID string) hostMutationOutcome {
 	expectedRevision := req.ExpectedRevision
-	if op == memory.OpReplace && expectedRevision <= 0 {
+	if op == memory.OpReplace && expectedRevision <= 0 && !req.FirstWrite {
 		// The loop-closing read. The caller told us the hash it diffed
 		// against; ask the host which revision that hash IS. If the file has
 		// moved on since the caller read it the hashes disagree and this is a
@@ -1049,6 +1086,7 @@ func (s *Server) mutateOnHost(r *http.Request, req MemoryWriteRequest, op memory
 		"expected_revision": expectedRevision,
 		"expected_sha256":   req.ExpectedSHA256,
 		"removals":          req.Removals,
+		"first_write":       req.FirstWrite,
 		"run_id":            runID,
 		"generation":        generation,
 		"source":            "sidecar:/memory/write",
