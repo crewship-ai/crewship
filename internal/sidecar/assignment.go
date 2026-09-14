@@ -122,7 +122,7 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		"task":         req.Task,
 		"crew_id":      targetCrewID,
 		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.ipc.ChatID,
+		"chat_id":      s.requestChatID(r),
 		// Who is dispatching, resolved above from the bearer token. chat_id
 		// cannot answer that: the crew shares one sidecar and its IPC chat is
 		// the boot agent's.

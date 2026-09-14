@@ -406,7 +406,7 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
+		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID, s.requestChatID(r))
 	case "page_project":
 		var project pageProjectToolRequest
 		if err := pages.DecodeProjectJSON(params.Arguments, &project); err != nil {

@@ -1,0 +1,54 @@
+{
+  "name": "trailing_newline_present",
+  "why": "Last line 'gamma\\n' is hashed WITH its LF. Compare trailing_newline_absent: same visible line, different hash.",
+  "base": "alpha\nbeta\ngamma\n",
+  "target": "alpha\nbeta\n",
+  "ops": [
+    {
+      "kind": "equal",
+      "start_line": 1,
+      "line_count": 2,
+      "lines": [
+        "alpha\n",
+        "beta\n"
+      ]
+    },
+    {
+      "kind": "delete",
+      "start_line": 3,
+      "line_count": 1,
+      "lines": [
+        "gamma\n"
+      ]
+    }
+  ],
+  "removals": [
+    {
+      "start_line": 3,
+      "line_count": 1,
+      "old_sha256": "ae9a6306a205417afddd14316cc1d0d5e04a98f1be10865dce643925ee070ce2"
+    }
+  ],
+  "applied": "alpha\nbeta\n",
+  "verify": {
+    "derived_removals_accepted": true
+  },
+  "rejected_declarations": [
+    {
+      "why": "declaring nothing while the diff removes lines",
+      "declared": [],
+      "code": "undeclared_removal"
+    },
+    {
+      "why": "a declaration whose old_sha256 does not match the base",
+      "declared": [
+        {
+          "start_line": 3,
+          "line_count": 1,
+          "old_sha256": "00000000000000000000000000000000000000000000000000000000000000ff"
+        }
+      ],
+      "code": "hash_mismatch"
+    }
+  ]
+}

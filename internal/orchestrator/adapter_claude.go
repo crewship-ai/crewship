@@ -140,7 +140,7 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// the model native memory.read / write / search / append_daily tool
 	// calls. Pre-PR-A we gated this on a non-empty MCP source list, which
 	// would have stranded memory tools for agents with no other MCP servers.
-	cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
+	cmd = append(cmd, "--mcp-config", agentHomeDir(req.AgentSlug, req.RunID)+"/.mcp.json")
 	// Pass the user message as a positional argument guarded by `--` (which
 	// stops Claude Code from re-parsing message tokens starting with `-` as
 	// flags) — UNLESS it is large enough to risk execve's E2BIG, in which case

@@ -73,11 +73,17 @@ func TestBuildAssignmentRunRequest_ThroughBuilder(t *testing.T) {
 	}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", CrewSlug: "ops"}
 
-	req, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true)
+	req, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true)
 	if err != nil {
 		t.Fatalf("builder returned error: %v", err)
 	}
 
+	// E0: the run id is a builder PARAMETER, so an assignment request cannot
+	// reach the orchestrator without one (a sub-agent run reuses the
+	// delegating chat's id, so ChatID never distinguished two live runs).
+	if req.RunID != "run-assign-1" {
+		t.Errorf("RunID = %q, want run-assign-1", req.RunID)
+	}
 	if fr.gotAgentID != "agent-1" || fr.gotWorkspaceID != "ws-1" {
 		t.Errorf("resolver called with (%q,%q), want (agent-1,ws-1)", fr.gotAgentID, fr.gotWorkspaceID)
 	}
@@ -126,11 +132,15 @@ func TestBuildPeerQueryRequest_ThroughBuilder(t *testing.T) {
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", CrewSlug: "ops"}
 
 	peerBlock := "[PEER QUERY from @sam]\nAnswer concisely."
-	req, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", peerBlock)
+	req, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", peerBlock, "run-peer-1")
 	if err != nil {
 		t.Fatalf("builder returned error: %v", err)
 	}
 
+	// E0: same for the peer path, which also reuses the caller's ChatID.
+	if req.RunID != "run-peer-1" {
+		t.Errorf("RunID = %q, want run-peer-1", req.RunID)
+	}
 	if !strings.Contains(req.SystemPrompt, "[SKILLS AVAILABLE]") {
 		t.Errorf("SystemPrompt lost the assembled prompt: %q", req.SystemPrompt)
 	}
@@ -159,7 +169,7 @@ func TestBuildAssignmentRunRequest_NoResolverFailsClosed(t *testing.T) {
 	body := createAssignmentBody{Task: "t", CrewID: "c", ChatID: "chat-1", AuthorAgentID: "a"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva", SystemPrompt: "legacy", CLIAdapter: "CLAUDE_CODE"}
 
-	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true); err == nil {
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true); err == nil {
 		t.Fatal("expected an error with no resolver wired (fail closed), got nil")
 	}
 }
@@ -174,7 +184,7 @@ func TestBuildAssignmentRunRequest_ResolverErrorFailsClosed(t *testing.T) {
 	body := createAssignmentBody{Task: "t", CrewID: "c", WorkspaceID: "ws-1", ChatID: "chat-1"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva"}
 
-	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", true); err == nil {
+	if _, err := h.buildAssignmentRunRequest(context.Background(), body, target, "cid-1", "AGENT", "run-assign-1", true); err == nil {
 		t.Fatal("resolver error must fail closed (no legacy degrade), got nil error")
 	}
 }
@@ -187,7 +197,7 @@ func TestBuildPeerQueryRequest_ResolverErrorFailsClosed(t *testing.T) {
 	body := createQueryBody{TargetSlug: "eva", Question: "q", FromSlug: "sam", CrewID: "c", WorkspaceID: "ws-1", ChatID: "chat-1"}
 	target := targetAgentInfo{ID: "agent-1", Slug: "eva"}
 
-	if _, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", "[PEER QUERY]"); err == nil {
+	if _, err := h.buildPeerQueryRequest(context.Background(), body, target, "cid-1", "[PEER QUERY]", "run-peer-1"); err == nil {
 		t.Fatal("resolver error must fail closed (no legacy degrade), got nil error")
 	}
 }

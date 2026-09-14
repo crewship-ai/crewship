@@ -62,9 +62,13 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /mcp/memory/":    guardMemoryChokepoint,
 
 	// --- routes that resolve the acting agent inside the handler -------
-	"POST /query":        guardHandlerIdentity,
-	"POST /escalate":     guardHandlerIdentity,
-	"POST /issue/create": guardHandlerIdentity,
+	// E0 run lifecycle. handleRunEnd resolves the acting identity itself and
+	// ends only the run its OWN token binds, so there is no "end that other
+	// run" verb here to guard against in the first place.
+	"POST /agent/run/end": guardHandlerIdentity,
+	"POST /query":         guardHandlerIdentity,
+	"POST /escalate":      guardHandlerIdentity,
+	"POST /issue/create":  guardHandlerIdentity,
 	// The rest of the issue surface (issue_verbs.go). READS are on this list
 	// deliberately: the board is crew data, and a sibling that omits its
 	// header must not fall back to the boot agent's identity to read it.
@@ -332,6 +336,15 @@ func packageHandlerBodies(t *testing.T) map[string]string {
 var identityHelpers = []string{
 	"actingAgentID(r)",
 	"actingIdentity(r)",
+	// E0. actingRunIdentity is the resolver the other two now delegate to; it
+	// returns the RUN alongside the agent. It has to be named here explicitly
+	// because this list is matched as literal substrings and
+	// "actingIdentity(r)" does not occur inside "actingRunIdentity(r)" — a
+	// handler that resolved identity only through the new helper would
+	// otherwise read as resolving none, which is precisely the
+	// under-reporting this guard exists to prevent.
+	"actingRunIdentity(r)",
+	"requestChatID(r)",
 	"tokenlessDowngrade(r)",
 	"refuseUnauthorizedMemory(w, r)",
 }

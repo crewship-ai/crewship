@@ -118,7 +118,7 @@ func TestRunAgent_AdapterExecError(t *testing.T) {
 				t.Errorf("err.Error() = %q, want it to contain %q", err.Error(), tc.wantErrMsgHas)
 			}
 
-			if got := covRunStatus(t, st, "chat1"); got != "error" {
+			if got := covRunStatus(t, st, covRunID); got != "error" {
 				t.Errorf("run status = %q, want error", got)
 			}
 		})

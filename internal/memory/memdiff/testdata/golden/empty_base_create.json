@@ -1,0 +1,22 @@
+{
+  "name": "empty_base_create",
+  "why": "Creating a file from nothing is a single insert anchored at 0 (before the first base line) and removes nothing.",
+  "base": "",
+  "target": "alpha\nbeta\n",
+  "ops": [
+    {
+      "kind": "insert",
+      "start_line": 0,
+      "line_count": 2,
+      "lines": [
+        "alpha\n",
+        "beta\n"
+      ]
+    }
+  ],
+  "removals": [],
+  "applied": "alpha\nbeta\n",
+  "verify": {
+    "derived_removals_accepted": true
+  }
+}

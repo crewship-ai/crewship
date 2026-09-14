@@ -120,6 +120,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"last_produced_at": map[string]any{"type": "string", "format": "date-time",
 			"description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\"."},
 		"created_at": timeString(), "updated_at": timeString(),
+		"reach": map[string]any{"type": "array", "items": str(),
+			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted: a page is listed because the caller reaches it. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
 	})
 
 	// The write half carries three fields the read half does not echo to an

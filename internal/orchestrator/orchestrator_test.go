@@ -231,6 +231,7 @@ func TestRunAgentExecError(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "test",
@@ -279,6 +280,7 @@ func TestRunAgentSuccess(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "test",
@@ -294,7 +296,7 @@ func TestRunAgentSuccess(t *testing.T) {
 	}
 
 	// Check state was persisted
-	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	data, _ := state.Get(context.Background(), "agent_runs", "run-s1")
 	if data == nil {
 		t.Fatal("expected run state to be persisted")
 	}
@@ -332,6 +334,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		TimeoutSecs: 5,
 	}, nil)
@@ -349,7 +352,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 		t.Errorf("error should reference the exit-code surface message, got: %v", err)
 	}
 
-	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	data, _ := state.Get(context.Background(), "agent_runs", "run-s1")
 	var run RunState
 	json.Unmarshal(data, &run)
 	if run.Status != "error" {
@@ -464,12 +467,13 @@ func TestValidSlugRe_AcceptsRealSlugsRejectsDangerousOnes(t *testing.T) {
 // turned away by assembleSystemPrompt before any container work happens.
 func TestRunAgent_SetupGuideSlugReachesRunAgent(t *testing.T) {
 	const setupAgentSlug = "_crewship-setup-guide" // must match internal/api/onboarding_setup_crew.go setupAgentSlug
+	const setupRunID = "run-setup-1"
 
 	reachedAgentExec := false
 	mc := &mockContainer{
 		execFn: func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 			joined := strings.Join(cfg.Cmd, " ")
-			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, TmuxSessionName(setupAgentSlug)) {
+			if strings.Contains(joined, "tmux new-session") && strings.Contains(joined, TmuxSessionName(setupAgentSlug, setupRunID)) {
 				reachedAgentExec = true
 				return &provider.ExecResult{ExecID: "exec-1", Reader: io.NopCloser(strings.NewReader("hello from setup guide\n"))}, nil
 			}
@@ -487,6 +491,7 @@ func TestRunAgent_SetupGuideSlugReachesRunAgent(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "setup-agent-id",
 		AgentSlug:   setupAgentSlug,
+		RunID:       setupRunID,
 		ChatID:      "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -501,7 +506,8 @@ func TestRunAgent_SetupGuideSlugReachesRunAgent(t *testing.T) {
 		t.Fatal("expected RunAgent to reach the agent CLI exec (tmux session for the setup slug), but it never did")
 	}
 
-	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	// E0: the run-state row is keyed by RUN id now, not chat id.
+	data, _ := state.Get(context.Background(), "agent_runs", setupRunID)
 	var run RunState
 	json.Unmarshal(data, &run)
 	if run.Status != "completed" {
@@ -570,6 +576,7 @@ func TestRunAgentScrubsCredentials(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CODEX_CLI", // non-JSON output for simplicity
 		UserMessage: "test",
@@ -629,6 +636,7 @@ func TestRunAgentWithSidecar(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CODEX_CLI",
 		UserMessage: "test",
@@ -692,6 +700,7 @@ func TestRunAgentCancelledContext(t *testing.T) {
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
 		ChatID:      "s1",
+		RunID:       "run-s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "test",
@@ -706,7 +715,7 @@ func TestRunAgentCancelledContext(t *testing.T) {
 	}
 
 	// Verify run state is "cancelled"
-	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	data, _ := state.Get(context.Background(), "agent_runs", "run-s1")
 	if data != nil {
 		var run RunState
 		json.Unmarshal(data, &run)

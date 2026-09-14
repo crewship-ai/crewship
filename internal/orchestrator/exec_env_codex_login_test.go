@@ -36,6 +36,7 @@ func codexLoginReq(t *testing.T) AgentRunRequest {
 	return AgentRunRequest{
 		AgentID:       "a1",
 		AgentSlug:     "reviewer",
+		RunID:         "run-1",
 		CLIAdapter:    "CODEX_CLI",
 		LLMProvider:   "OPENAI",
 		LLMModel:      "gpt-5.5",
@@ -68,7 +69,10 @@ func TestBuildEnvVarsSidecar_CodexLogin_IsNotAnEnvVar(t *testing.T) {
 	if _, ok := envValue(env, "CODEX_API_KEY"); ok {
 		t.Errorf("CODEX_API_KEY must never be set: it overrides auth.json")
 	}
-	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/agents/reviewer/.codex" {
+	// E0: CODEX_HOME follows HOME, which is per run. Two concurrent Codex
+	// runs of one agent used to share this directory — and the login file in
+	// it — so a refresh by one rewrote what the other was authenticating with.
+	if got, ok := envValue(env, "CODEX_HOME"); !ok || got != "/crew/runs/reviewer/run-1/.codex" {
 		t.Errorf("CODEX_HOME = %q (present=%v)", got, ok)
 	}
 	if got, _ := envValue(env, "CREWSHIP_BILLING_MODE"); got != "flat_rate" {

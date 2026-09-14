@@ -58,6 +58,9 @@ func inBandStreamMock(slug, stream string) *mockContainer {
 	}
 }
 
+// inBandRunID is the run id every case in this file dispatches under.
+const inBandRunID = "run-inband1"
+
 // runInBandCase drives one RunAgent invocation against the given adapter and
 // stream, and returns the persisted terminal run status plus RunAgent's error.
 func runInBandCase(t *testing.T, adapter, stream string, exitCodes ...int) (string, error) {
@@ -74,13 +77,16 @@ func runInBandCase(t *testing.T, adapter, stream string, exitCodes ...int) (stri
 		AgentID:     "a1",
 		AgentSlug:   slug,
 		ChatID:      "s1",
+		RunID:       inBandRunID,
 		ContainerID: "c1",
 		CLIAdapter:  adapter,
 		UserMessage: "test",
 		TimeoutSecs: 30,
 	}, nil)
 
-	data, getErr := state.Get(context.Background(), "agent_runs", "s1")
+	// Keyed by RUN id, not chat id (E0) — deliberately a different string so
+	// a regression to chat-id keying fails here.
+	data, getErr := state.Get(context.Background(), "agent_runs", inBandRunID)
 	if getErr != nil {
 		t.Fatalf("read run state: %v", getErr)
 	}

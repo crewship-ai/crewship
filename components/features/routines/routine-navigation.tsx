@@ -6,11 +6,15 @@ import { cn } from "@/lib/utils"
 
 export const ROUTINE_VIEWS = ["definition", "history", "versions", "plan"] as const
 export type RoutineView = (typeof ROUTINE_VIEWS)[number]
+// One word per place. "Recipe" and "Schedule" named the tabs after the
+// objects they hold; the reader looks for what the routine is (Overview) and
+// when it runs (Plan) — and the run itself is not a tab, it is an item of
+// History (#2519).
 const labels: Record<RoutineView, string> = {
-  definition: "Recipe",
+  definition: "Overview",
   history: "History",
   versions: "Versions",
-  plan: "Schedule",
+  plan: "Plan",
 }
 export const routineViewHref = (slug: string, view: RoutineView) =>
   `/routines?${new URLSearchParams({ slug, ...(view === "definition" ? {} : { view }) })}`
@@ -25,30 +29,18 @@ export function RoutineNavigation({
   slug,
   view,
   onChange,
-  runId,
 }: {
   slug: string
   view: string
   onChange?: (view: RoutineView) => void
-  runId?: string
 }) {
-  const items = ROUTINE_VIEWS.flatMap((v) => (v === "definition" && runId ? [v, "run"] : [v]))
   return (
     <nav
       aria-label="Routine detail"
       className="flex flex-wrap gap-2 border-b border-border pb-2"
     >
-      {items.map((v) =>
-        v === "run" ? (
-          <Link
-            key={v}
-            className={tabClass(view === v)}
-            href={`/routines?${new URLSearchParams({ slug, run: runId! })}`}
-            aria-current={view === v ? "page" : undefined}
-          >
-            Run
-          </Link>
-        ) : onChange ? (
+      {ROUTINE_VIEWS.map((v) =>
+        onChange ? (
           <button
             key={v}
             className={tabClass(view === v)}

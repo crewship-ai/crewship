@@ -7,7 +7,7 @@ package api
 //     assignment row the moment an exec starts (orchestrator.AgentRunRequest.
 //     OnExecStarted, wired in assignments_run.go).
 //   - Stop's ?hard=true path: end the run's own tmux session
-//     (orchestrator.TmuxSessionName(agentSlug)) — a container-visible
+//     (orchestrator.TmuxSessionName(agentSlug, runID)) — a container-visible
 //     identity — with a brand-new exec into the SAME container, escalating
 //     to a process-group KILL on the session's own pane pids after a grace
 //     period. #2365: the pre-fix path resolved execID to a pid via
@@ -35,13 +35,15 @@ import (
 )
 
 // seedSecondWorkerAgent adds a second, distinctly-slugged agent to the crew
-// newTestIssueHandler already seeded ("worker") — needed because Tier 2 now
-// signals by tmux session name (orchestrator.TmuxSessionName(agentSlug)):
-// two assignments for the SAME agent slug would collide on one session name,
-// which cannot happen for two genuinely live runs in production (setupTmuxExec
-// kills any prior session of that name before starting a new one). The §18
-// scenario 5b sibling must therefore be a different agent, exactly like two
-// real agents sharing a crew container each own a differently-named session.
+// newTestIssueHandler already seeded ("worker"). It is what §18 scenario 5b
+// needs: two agents sharing one crew container, each owning its own tmux
+// session, so stopping one provably cannot reach the other.
+//
+// Before E0 it was also a WORKAROUND — the session name was
+// "agent-<slug>", so two assignments for the same agent could not be modelled
+// as two live sessions at all. That is no longer true: a session is
+// "agent-<slug>-<runID>", and TestIssue_Stop_Hard_TwoRunsOfOneAgent below
+// exercises exactly the case this helper used to exist to avoid.
 func seedSecondWorkerAgent(t *testing.T, db *sql.DB, wsID, crewID string) string {
 	t.Helper()
 	id := "agent-worker2"
@@ -112,8 +114,8 @@ func TestIssue_Stop_Hard_TerminatesTargetNotSibling(t *testing.T) {
 	// name (or a process-group kill on its own pane pid) — see
 	// providertest.HoldSessionCmd's doc.
 	worker2ID := seedSecondWorkerAgent(t, h.db, wsID, crewID)
-	targetSession := orchestrator.TmuxSessionName("worker")
-	siblingSession := orchestrator.TmuxSessionName("worker2")
+	targetSession := orchestrator.TmuxSessionName("worker", "run-target")
+	siblingSession := orchestrator.TmuxSessionName("worker2", "run-sibling")
 	targetExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldSessionCmd(targetSession)})
 	if err != nil {
 		t.Fatalf("start target exec: %v", err)
@@ -224,6 +226,154 @@ func TestIssue_Stop_Hard_TerminatesTargetNotSibling(t *testing.T) {
 	}
 	if hardStopEntries != 1 {
 		t.Errorf("hard-stop journal entries = %d, want exactly 1", hardStopEntries)
+	}
+}
+
+// seedRunStartedEntry writes the journal row a real assignment dispatch
+// writes (assignments_run.go): trace_id IS the run id, and payload names the
+// assignment. It is how Tier 2 resolves an assignment to its RUN now that a
+// tmux session is named "agent-<slug>-<runID>" — assignments has no run_id
+// column and E0 adds no migration.
+func seedRunStartedEntry(t *testing.T, db *sql.DB, wsID, assignmentID, runID string) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO journal_entries (id, workspace_id, ts, entry_type, severity, actor_type, summary, payload, refs, trace_id)
+		VALUES (?, ?, ?, 'run.started', 'info', 'agent', 'run started', ?, '{}', ?)`,
+		"je-"+assignmentID, wsID, time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		`{"trigger_type":"ASSIGNMENT","assignment_id":"`+assignmentID+`"}`, runID); err != nil {
+		t.Fatalf("seed run.started journal entry: %v", err)
+	}
+}
+
+// TestIssue_Stop_Hard_TwoRunsOfOneAgent is the case that could not exist
+// before E0 and is now the whole point of it: ONE agent with TWO live runs in
+// one crew container (T07 — "Start/cleanup/cancel B během A ... A pokračuje").
+//
+// The session name used to be "agent-worker" for both, so a hard stop aimed at
+// one of them would have ended whichever was up. Now each run owns
+// "agent-worker-<runID>", the assignment resolves to its own run id through
+// the journal, and stopping one provably leaves the other running.
+func TestIssue_Stop_Hard_TwoRunsOfOneAgent(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	fp := providertest.NewFakeProvider()
+	h.SetContainer(fp)
+	const sharedContainerID = "crew-shared-container"
+
+	// Two runs of the SAME agent slug ("worker"), each under its own
+	// run-scoped session — exactly what setupTmuxExec now produces.
+	targetSession := orchestrator.TmuxSessionName("worker", "run-target")
+	otherSession := orchestrator.TmuxSessionName("worker", "run-other")
+	targetExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldSessionCmd(targetSession)})
+	if err != nil {
+		t.Fatalf("start target exec: %v", err)
+	}
+	otherExec, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: sharedContainerID, Cmd: providertest.HoldSessionCmd(otherSession)})
+	if err != nil {
+		t.Fatalf("start other exec: %v", err)
+	}
+	t.Cleanup(fp.Unblock)
+
+	targetMissionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-60", "IN_PROGRESS")
+	otherMissionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-61", "IN_PROGRESS")
+	seedRunningAssignmentWithExec(t, h.db, "a-run-target", wsID, targetMissionID, leadID, workerID, sharedContainerID, targetExec.ExecID)
+	seedRunningAssignmentWithExec(t, h.db, "a-run-other", wsID, otherMissionID, leadID, workerID, sharedContainerID, otherExec.ExecID)
+	seedRunStartedEntry(t, h.db, wsID, "a-run-target", "run-target")
+	seedRunStartedEntry(t, h.db, wsID, "a-run-other", "run-other")
+
+	req := httptest.NewRequest("POST", "/?hard=true", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-60")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if running, _, err := fp.ExecInspect(context.Background(), targetExec.ExecID); err != nil || running {
+		t.Errorf("the stopped run is still running: running=%v err=%v", running, err)
+	}
+	// The other run of the SAME agent must be untouched — this is the
+	// assertion the pre-E0 slug-keyed session name could not satisfy.
+	if running, _, err := fp.ExecInspect(context.Background(), otherExec.ExecID); err != nil || !running {
+		t.Errorf("the OTHER run of the same agent was killed by a hard stop aimed at its sibling: running=%v err=%v", running, err)
+	}
+
+	var targetResult, otherResult string
+	if err := h.db.QueryRow(`SELECT COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-run-target'`).Scan(&targetResult); err != nil {
+		t.Fatalf("query a-run-target: %v", err)
+	}
+	if err := h.db.QueryRow(`SELECT COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-run-other'`).Scan(&otherResult); err != nil {
+		t.Fatalf("query a-run-other: %v", err)
+	}
+	if targetResult != hardStopTerminatedTerm && targetResult != hardStopTerminatedKill {
+		t.Errorf("a-run-target.hard_stop_result = %q, want TERMINATED_TERM or TERMINATED_KILL", targetResult)
+	}
+	if otherResult != "" {
+		t.Errorf("a-run-other.hard_stop_result = %q, want empty — a different issue's run must not be touched", otherResult)
+	}
+}
+
+// TestIssue_Stop_Hard_AmbiguousRun_RefusesRatherThanGuess: no run id on the
+// assignment (a run predating E0, or a journal write that lost its race with a
+// very fast stop) AND two live runs of that agent. Tier 2 must refuse rather
+// than pick one — killing the wrong run of an agent is worse than not killing
+// one, and Tier 1's cancel_requested_at has landed either way.
+func TestIssue_Stop_Hard_AmbiguousRun_RefusesRatherThanGuess(t *testing.T) {
+	h, userID, wsID, crewID, leadID, workerID := newTestIssueHandler(t)
+	fp := providertest.NewFakeProvider()
+	h.SetContainer(fp)
+	const sharedContainerID = "crew-shared-container"
+
+	execA, err := fp.Exec(context.Background(), provider.ExecConfig{
+		ContainerID: sharedContainerID,
+		Cmd:         providertest.HoldSessionCmd(orchestrator.TmuxSessionName("worker", "run-a")),
+	})
+	if err != nil {
+		t.Fatalf("start exec A: %v", err)
+	}
+	execB, err := fp.Exec(context.Background(), provider.ExecConfig{
+		ContainerID: sharedContainerID,
+		Cmd:         providertest.HoldSessionCmd(orchestrator.TmuxSessionName("worker", "run-b")),
+	})
+	if err != nil {
+		t.Fatalf("start exec B: %v", err)
+	}
+	t.Cleanup(fp.Unblock)
+
+	missionID := seedIssue(t, h.db, wsID, crewID, leadID, "ENG-62", "IN_PROGRESS")
+	// Deliberately NO seedRunStartedEntry — this row cannot be resolved to a
+	// run, and the container has two candidates.
+	seedRunningAssignmentWithExec(t, h.db, "a-ambiguous", wsID, missionID, leadID, workerID, sharedContainerID, execA.ExecID)
+
+	req := httptest.NewRequest("POST", "/?hard=true", nil)
+	req.SetPathValue("crewId", crewID)
+	req.SetPathValue("identifier", "ENG-62")
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	rr := httptest.NewRecorder()
+	h.Stop(rr, req)
+
+	if rr.Code != 200 {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var cancelAt, hardResult string
+	if err := h.db.QueryRow(`SELECT COALESCE(cancel_requested_at,''), COALESCE(hard_stop_result,'') FROM assignments WHERE id='a-ambiguous'`).
+		Scan(&cancelAt, &hardResult); err != nil {
+		t.Fatalf("query a-ambiguous: %v", err)
+	}
+	// Tier 1 always lands — the run still ends CANCELLED when it next checks.
+	if cancelAt == "" {
+		t.Error("cancel_requested_at not stamped (Tier 1 must fire regardless of Tier 2's refusal)")
+	}
+	if hardResult != hardStopError {
+		t.Errorf("hard_stop_result = %q, want %q (refused: several live runs, no run id)", hardResult, hardStopError)
+	}
+	// Neither run was signalled. Guessing is the failure mode this refuses.
+	for name, execID := range map[string]string{"run-a": execA.ExecID, "run-b": execB.ExecID} {
+		if running, _, err := fp.ExecInspect(context.Background(), execID); err != nil || !running {
+			t.Errorf("%s was signalled despite the ambiguity: running=%v err=%v", name, running, err)
+		}
 	}
 }
 
@@ -388,7 +538,7 @@ func TestIssue_Stop_Hard_RunningWithoutExecYet_CatchesLateExecStart(t *testing.T
 	// workerID's slug is "worker" (newTestIssueHandler) — register the hold
 	// exec under that agent's own tmux session name so the production
 	// session-based signal (not a bare pid) actually reaches it.
-	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: "late-container", Cmd: providertest.HoldSessionCmd(orchestrator.TmuxSessionName("worker"))})
+	execRes, err := fp.Exec(context.Background(), provider.ExecConfig{ContainerID: "late-container", Cmd: providertest.HoldSessionCmd(orchestrator.TmuxSessionName("worker", "run-late"))})
 	if err != nil {
 		t.Fatalf("start exec: %v", err)
 	}

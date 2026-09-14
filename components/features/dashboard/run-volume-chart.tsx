@@ -40,7 +40,7 @@ export function RunVolumeChart({
 
   if (buckets.length === 0 || series.length === 0) {
     return (
-      <div className="flex h-[220px] items-center justify-center text-label text-muted-foreground-soft">
+      <div className="flex h-[160px] items-center justify-center text-label text-muted-foreground-soft">
         No run activity in this window
       </div>
     )
@@ -48,7 +48,7 @@ export function RunVolumeChart({
 
   return (
     <div>
-      <ChartContainer config={config} className="h-[220px] w-full aspect-auto">
+      <ChartContainer config={config} className="h-[160px] w-full aspect-auto">
         <BarChart accessibilityLayer data={buckets} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}>
           <CartesianGrid vertical={false} strokeDasharray="2 4" stroke="rgba(255,255,255,0.055)" />
           <XAxis

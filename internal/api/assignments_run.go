@@ -566,11 +566,20 @@ func (h *AssignmentHandler) runAssignment(
 	// matching chatbridge.Bridge's per-chat guard on the chat-send door (see
 	// chatbridge.AgentRunLock's doc). Two runAssignment calls for the SAME
 	// agent — from /assign, an @mention, or a chat send racing an
-	// assignment — would otherwise both reach setupTmuxExec and race the
-	// identical tmux session name + /tmp scratch files
-	// (orchestrator.TmuxSessionName is keyed by agent slug alone, with no
-	// chat/run/mission component), so the second exec's `tmux kill-session`
-	// tears down the first run's live session mid-turn. Claimed FIRST,
+	// assignment — would otherwise both reach setupTmuxExec.
+	//
+	// The reason the lock originally gave for that being fatal is GONE as of
+	// E0: the two runs no longer race an identical tmux session name and an
+	// identical /tmp scratch set, because TmuxSessionName is now
+	// (agentSlug, runID) and every derived file with it, so the second exec's
+	// opening `tmux kill-session` names its OWN session and cannot tear down
+	// the first run mid-turn (internal/orchestrator/orchestrator_exec_env.go).
+	//
+	// The lock stays regardless. E0 removed the runtime-path collision, not
+	// the admission decision about how many runs of one agent may be live at
+	// once — that is the parallel profile's call to make, deliberately not
+	// this file's, and lifting the lock here would silently enable
+	// concurrency nothing else has budgeted for. Claimed FIRST,
 	// before the pre_task_delegation hook or any DB write, so a losing call
 	// spends nothing beyond this check — same "cheapest check first"
 	// placement as the hook comment below.
@@ -985,7 +994,7 @@ func (h *AssignmentHandler) runAssignment(
 		skipSidecar = false
 	}
 
-	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, skipSidecar)
+	req, buildErr := h.buildAssignmentRunRequest(ctx, body, target, containerID, agentRole, runID, skipSidecar)
 	if buildErr != nil {
 		// Fail closed: the single builder could not assemble the request (no
 		// resolver / resolve failure). Surface it as an assignment failure
@@ -1083,11 +1092,17 @@ func joinAssignmentOutput(parts []string) string {
 // silent-degrade on resolve error — this removes it.) Production always wires
 // the resolver; the error path exists so a resolver blip surfaces instead of
 // quietly shipping a broken agent.
+// runID is the id this handler already minted for the journal (trace_id) and
+// is threaded in as a PARAMETER rather than set by the caller afterwards, so a
+// future dispatch path cannot build an assignment request that reaches the
+// orchestrator without one. It matters more here than on most paths: a
+// sub-agent run deliberately reuses the DELEGATING chat's id (body.ChatID), so
+// ChatID has never distinguished two live runs on this path.
 func (h *AssignmentHandler) buildAssignmentRunRequest(
 	ctx context.Context,
 	body createAssignmentBody,
 	target targetAgentInfo,
-	containerID, agentRole string,
+	containerID, agentRole, runID string,
 	skipSidecar bool,
 ) (orchestrator.AgentRunRequest, error) {
 	if h.resolver == nil {
@@ -1112,6 +1127,7 @@ func (h *AssignmentHandler) buildAssignmentRunRequest(
 		CreatedByUserID: body.CreatedByUserID,
 	})
 	req.MissionID = body.MissionID
+	req.RunID = runID // E0 run identity — see the doc comment above.
 
 	// Dispatch-specific fields. AgentRole/SkipSidecar are decided by the caller
 	// (LEAD planning vs. worker), not the agent's stored role; SkipConvHistory
