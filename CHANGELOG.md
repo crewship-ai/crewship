@@ -31,6 +31,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **The database now commits with `synchronous=FULL`.** Work we have answered `202` for has to survive a power cut, and the previous setting only promised to survive a process crash. Measured cost is about 21 ms of fsync per acceptance commit, against a 500 ms budget.
 
 ### Fixed
+- Pages folder Sharing now reports an unknown sharing state when refreshing the folder list fails, and restores the current audience after recovery.
 - **Motion respects the system's reduced-motion setting.** Every Radix overlay — sheet, dialog, dropdown, select, popover, tooltip — animates through utilities that carried their own keyframes and so ignored the preference entirely. The pipeline graph's edge animations, the only continuous ones in the app, now stop as well.
 - **The navigation drawer opens in 240ms rather than 500ms**, which was the slowest transition in the app on the gesture a phone repeats most. The two hand-copied drawer springs are now the shared one, and their backdrops fade with the panel instead of settling at their own rate.
 - The crew bottom dock's tab strip fits the screen and scrolls; its scroll container had never activated because the row would not shrink below its contents. Its height is also capped to the viewport, so a tall panel chosen on a desktop no longer arrives on a phone taller than the screen with the canvas collapsed to nothing.

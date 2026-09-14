@@ -527,6 +527,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           open
           onOpenChange={(open) => !open && closeFolderDialog()}
           folder={folderOf(folderDialog.slug)}
+          marker={folders.error !== null ? "unknown" : (folderOf(folderDialog.slug)?.shared ?? "unknown")}
           // A reader who may not see the table is shown their own paths to
           // the page that is open, when it is in this folder.
           pageSlug={
