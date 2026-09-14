@@ -15,7 +15,12 @@ import {
   EyeOff,
   Check,
 } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   SidebarToolbar,
   SidebarSearch,
@@ -25,7 +30,7 @@ import {
   SidebarCollapseButton,
 } from "@/components/layout/sidebar-kit"
 import { cn } from "@/lib/utils"
-import { matchesRoutineFilters } from "@/lib/routine-filters"
+import { matchesRoutineFilters, routineFilterInput } from "@/lib/routine-filters"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
@@ -64,7 +69,12 @@ const dropdownAnim = {
 
 type StatusBucket = RoutineFilters["status"]
 
-const STATUS_BUCKETS: { id: StatusBucket; label: string; icon: typeof ScrollText; tone: string }[] = [
+const STATUS_BUCKETS: {
+  id: StatusBucket
+  label: string
+  icon: typeof ScrollText
+  tone: string
+}[] = [
   { id: "all", label: "All", icon: ScrollText, tone: "text-foreground/70" },
   // Live buckets first. A routine parked on a human is the only state on
   // this page that is waiting for the person reading it — burying that
@@ -168,21 +178,7 @@ export function RoutinesExplorer({
   const displayed = useMemo(
     () =>
       routines.filter((p) =>
-        matchesRoutineFilters(
-          {
-            slug: p.slug,
-            name: p.name,
-            description: p.description,
-            authorAgentId: p.author_agent_id,
-            authorAgentName: p.author_agent_name,
-            invocationCount: p.invocation_count,
-            lastStatus: p.last_invocation_status,
-            ephemeral: p.ephemeral,
-          },
-          filters,
-          liveBySlug,
-          search,
-        ),
+        matchesRoutineFilters(routineFilterInput(p), filters, liveBySlug, search),
       ),
     [routines, search, filters, liveBySlug],
   )
@@ -215,13 +211,18 @@ export function RoutinesExplorer({
           <AnimatePresence>
             {filterDropdownOpen && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setFilterDropdownOpen(false)} />
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setFilterDropdownOpen(false)}
+                />
                 <motion.div
                   {...dropdownAnim}
                   role="menu"
                   className="absolute right-0 top-9 z-50 min-w-[220px] max-h-[360px] overflow-y-auto rounded-lg border border-white/[0.08] bg-card/95 py-1 shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
                 >
-                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">Usage</div>
+                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
+                    Usage
+                  </div>
                   {(["all", "popular", "fresh"] as RoutineFilters["invocations"][]).map((v) => (
                     <button
                       key={v}
@@ -238,9 +239,15 @@ export function RoutinesExplorer({
                     >
                       {v === "popular" && <Flame className="h-3.5 w-3.5 shrink-0" />}
                       {v === "fresh" && <Sparkles className="h-3.5 w-3.5 shrink-0" />}
-                      {v === "all" && <ScrollText className="h-3.5 w-3.5 shrink-0 opacity-60" />}
+                      {v === "all" && (
+                        <ScrollText className="h-3.5 w-3.5 shrink-0 opacity-60" />
+                      )}
                       <span className="flex-1">
-                        {v === "all" ? "All usage" : v === "popular" ? "Popular (10+)" : "Fresh (no runs)"}
+                        {v === "all"
+                          ? "All usage"
+                          : v === "popular"
+                            ? "Popular (10+)"
+                            : "Fresh (no runs)"}
                       </span>
                       {filters.invocations === v && <Check className="h-3 w-3 shrink-0" />}
                     </button>
@@ -265,7 +272,9 @@ export function RoutinesExplorer({
                       >
                         <Users className="h-3.5 w-3.5 shrink-0 opacity-60" />
                         <span className="flex-1">All authors</span>
-                        {filters.authorAgentId === null && <Check className="h-3 w-3 shrink-0" />}
+                        {filters.authorAgentId === null && (
+                          <Check className="h-3 w-3 shrink-0" />
+                        )}
                       </button>
                       {agents.map((a) => (
                         <button
@@ -287,8 +296,12 @@ export function RoutinesExplorer({
                             style={{ backgroundImage: `url(${getAgentAvatarUrl(a.id)})` }}
                           />
                           <span className="truncate flex-1">{a.name}</span>
-                          <span className="text-[10px] tabular-nums text-muted-foreground-soft">{a.count}</span>
-                          {filters.authorAgentId === a.id && <Check className="h-3 w-3 shrink-0" />}
+                          <span className="text-[10px] tabular-nums text-muted-foreground-soft">
+                            {a.count}
+                          </span>
+                          {filters.authorAgentId === a.id && (
+                            <Check className="h-3 w-3 shrink-0" />
+                          )}
                         </button>
                       ))}
                     </>
@@ -297,9 +310,21 @@ export function RoutinesExplorer({
                   <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                     Visibility
                   </div>
-                  <button onClick={() => onChange({ ...filters, showTestRoutines: !filters.showTestRoutines })} aria-pressed={!!filters.showTestRoutines} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"><EyeOff className="h-3.5 w-3.5" /><span className="flex-1">Show test recipes</span>{filters.showTestRoutines && <Check className="h-3 w-3" />}</button>
                   <button
-                    onClick={() => onChange({ ...filters, showEphemeral: !filters.showEphemeral })}
+                    onClick={() =>
+                      onChange({ ...filters, showTestRoutines: !filters.showTestRoutines })
+                    }
+                    aria-pressed={!!filters.showTestRoutines}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+                  >
+                    <EyeOff className="h-3.5 w-3.5" />
+                    <span className="flex-1">Show test recipes</span>
+                    {filters.showTestRoutines && <Check className="h-3 w-3" />}
+                  </button>
+                  <button
+                    onClick={() =>
+                      onChange({ ...filters, showEphemeral: !filters.showEphemeral })
+                    }
                     className={cn(
                       "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                       filters.showEphemeral
@@ -318,7 +343,9 @@ export function RoutinesExplorer({
             )}
           </AnimatePresence>
         </div>
-        {onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />}
+        {onToggleCollapse && (
+          <SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} />
+        )}
       </SidebarToolbar>
 
       {/* ── Status ── (single-select bucket) */}
@@ -345,7 +372,11 @@ export function RoutinesExplorer({
                   column read as a wall — and the ones with something
                   in them are the only ones worth a click. */}
               <IconComp
-                className={cn("h-3.5 w-3.5 shrink-0", b.tone, count === 0 && !isSelected && "opacity-40")}
+                className={cn(
+                  "h-3.5 w-3.5 shrink-0",
+                  b.tone,
+                  count === 0 && !isSelected && "opacity-40",
+                )}
               />
               <span
                 className={cn(
@@ -468,6 +499,9 @@ export function RoutinesExplorer({
                         </span>
                         <span className="min-w-0 flex-1 text-foreground/80">
                           <span className="block truncate">{routine.name || routine.slug}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {routine.description}
+                          </span>
                           {/* The sub-line grows the row from one line to
                               two. Popping that in doubles the row's
                               height between two frames and shoves every
@@ -489,7 +523,7 @@ export function RoutinesExplorer({
                               >
                                 {liveAwaiting
                                   ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
-                                  : `▶ ${liveRun.current_step_id || "starting…"} · ${formatElapsedSince(liveRun.started_at)}`}
+                                  : `▶ Running · ${formatElapsedSince(liveRun.started_at)}`}
                               </motion.span>
                             )}
                           </AnimatePresence>
@@ -500,10 +534,10 @@ export function RoutinesExplorer({
                           </span>
                         )}
                         {routine.author_agent_id && (
-                          <span
-                            aria-hidden
-                            className="h-4 w-4 rounded-full bg-cover bg-center shrink-0"
-                            style={{ backgroundImage: `url(${getAgentAvatarUrl(routine.author_agent_id)})` }}
+                          <img
+                            alt=""
+                            src={getAgentAvatarUrl(routine.author_agent_id)}
+                            className="h-4 w-4 shrink-0 rounded-full object-cover"
                           />
                         )}
                       </SidebarRow>
@@ -514,7 +548,9 @@ export function RoutinesExplorer({
                       <div className="font-medium">{routine.name || routine.slug}</div>
                       <div className="text-[10px] font-mono opacity-70">{routine.slug}</div>
                       {routine.description && (
-                        <div className="text-[10px] opacity-80 max-w-[260px]">{routine.description}</div>
+                        <div className="text-[10px] opacity-80 max-w-[260px]">
+                          {routine.description}
+                        </div>
                       )}
                     </div>
                   </TooltipContent>

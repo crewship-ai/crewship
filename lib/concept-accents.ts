@@ -102,6 +102,10 @@ export const CONCEPT_ACCENT = {
   // ── Run ──
   activity: "amber",
   journal: "gold",
+  // Accepted work waiting for, or holding, an execution slot. It sits beside
+  // activity and the journal because all three answer "what is this server
+  // doing right now", and it shares activity's amber for the same reason.
+  work: "amber",
 
   // ── Build ──
   crews: "purple",

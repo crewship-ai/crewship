@@ -73,6 +73,11 @@ type PipelineHandler struct {
 	// tests) drain in-flight dispatches via WaitWebhookDispatches
 	// instead of orphaning them mid-write.
 	webhookDispatchWG sync.WaitGroup
+	// webhookDispatchBarrier, when non-nil, holds every async webhook run
+	// before the executor is entered — before any run record exists. Tests
+	// use it to observe the window between the 202 and the run record;
+	// production leaves it nil.
+	webhookDispatchBarrier <-chan struct{}
 
 	// verdictWG is the shared group every executor this handler builds
 	// (newExecutor) — plus the boot-time executors that opt in via
@@ -342,6 +347,7 @@ func (h *PipelineHandler) DrainVerdicts(timeout time.Duration) bool {
 // flatten + camelCase the persistent struct here so the on-disk
 // schema can evolve without breaking the API.
 type pipelineResponse struct {
+	StepCount            *int    `json:"step_count,omitempty"`
 	HeadVersion          *int    `json:"head_version,omitempty"`
 	LastRecordedRunID    string  `json:"last_recorded_run_id,omitempty"`
 	LastRunOutcome       string  `json:"last_run_outcome,omitempty"`
@@ -448,6 +454,8 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 	// a malformed definition just leaves the field empty (the executor /
 	// validators own reporting that elsewhere).
 	if dsl, err := pipeline.Parse([]byte(p.DefinitionJSON)); err == nil {
+		count := len(dsl.Steps)
+		out.StepCount = &count
 		out.IntegrationsRequired = dsl.NormalizedIntegrationsRequired()
 		// The manifest is the heavier derived view — only compute + attach
 		// it on detail responses (includeDefinition), where the caller is

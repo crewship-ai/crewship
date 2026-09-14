@@ -3,6 +3,19 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Touch sizing belongs to the input device, not to the window width.
+ *
+ * The repo's touch-target rules were written as `max-sm:` (below 640px), while
+ * `useIsMobile` calls anything under 768px a phone. That leaves 640–767px —
+ * a large phone in landscape, an iPad mini in portrait — running the mobile
+ * layout with desktop-sized 32px controls (#2483). Widening the breakpoint
+ * only moves the seam; the honest axis is the pointer, which is what
+ * `.kit-tap` below already uses.
+ *
+ * `coarse:` is that axis as a variant, so a control can ask for a real 44px
+ * target on every touch device including tablets, at any width. */
+@custom-variant coarse (@media (pointer: coarse));
+
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */
@@ -40,6 +53,7 @@
 
   --border: oklch(0.9212 0.0033 17.2170);
   --input: oklch(0.8452 0 0);
+  --control-border: oklch(0.56 0 0);
   --ring: #0E6BE8;
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
@@ -193,6 +207,9 @@
 
   --border: oklch(0.24 0.010 285);
   --input: oklch(0.30 0.010 285);
+  /* Operable form boundaries need more contrast than decorative separators.
+   * Keep --input as the existing fill; brightening it also lifts backgrounds. */
+  --control-border: oklch(0.54 0.010 285);
   --ring: #1E7BFE;
 
   /* Chart palette — dark-ground tuning. Was byte-identical to the :root
@@ -302,6 +319,7 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-control-border: var(--control-border);
   --color-ring: var(--ring);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -1165,5 +1183,16 @@ body {
   [data-slot="panel-age"] {
     opacity: 1 !important;
     color: var(--foreground) !important;
+  }
+}
+
+/* Preserve the state and loading label without requiring motion to read it.
+ * Covers CSS spinners and Radix enter/exit animations, including pseudo-elements. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
 }

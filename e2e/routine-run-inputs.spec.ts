@@ -262,12 +262,16 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
     await dialog.getByRole("button", { name: /^Run$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
-    // Inline first: the panel surfaces the run it just started, which is what
-    // makes the button feel like it did something.
-    await expect(page.getByTestId("run-activity").first()).toBeVisible({ timeout: TIMEOUT })
-
-    // And on the workspace-wide surface, named.
-    await page.goto("/activity")
+    // Starting now opens the run detail. Follow its actual Activity link so
+    // this still verifies the user-visible handoff, including run identity.
+    await expect(page).toHaveURL(/run=run_[^&]+/, { timeout: TIMEOUT })
+    const activity = page.getByRole("link", { name: "Open in Activity ↗" })
+    await expect(activity).toBeVisible({ timeout: TIMEOUT })
+    const detailUrl = new URL(page.url())
+    const activityUrl = new URL(await activity.getAttribute("href") ?? "", detailUrl)
+    expect(activityUrl.searchParams.get("pipeline")).toBe(SLUG)
+    expect(activityUrl.searchParams.get("run")).toBe(detailUrl.searchParams.get("run"))
+    await activity.click()
     await expect(page.getByText(SLUG).first()).toBeVisible({ timeout: TIMEOUT })
   })
 

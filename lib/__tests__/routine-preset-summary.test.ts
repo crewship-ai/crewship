@@ -1,0 +1,34 @@
+import { describe, expect, it } from "vitest"
+import { routinePresetSummary } from "../routine-preset-summary"
+
+describe("routine preset summary", () => {
+  it("distinguishes empty inputs from unavailable data", () => {
+    expect(routinePresetSummary({})).toBe("No inputs")
+    expect(routinePresetSummary(null)).toBe("Inputs unavailable")
+    expect(routinePresetSummary(undefined)).toBe("Inputs unavailable")
+  })
+  it("shows primitives and counts remaining fields without serializing objects", () => {
+    expect(routinePresetSummary({ count: 0, enabled: false, details: { content: "hidden" }, list: [1], extra: 3 })).toBe("Inputs: count: 0 · enabled: false · +3 more")
+  })
+  it("clips long keys and first lines in the actual text", () => {
+    const text = routinePresetSummary({ ["k".repeat(300)]: "x".repeat(1000) + "\nsecond line" })
+    expect(text.length).toBeLessThan(120)
+    expect(text).toContain("…")
+    expect(text).not.toContain("second line")
+  })
+  it("does not mistake profile text for file contents", () => {
+    expect(routinePresetSummary({ profile: "public", inputFile: "private bytes" })).toBe("Inputs: profile: public · inputFile: File")
+  })
+  it("hides credential-like text even under neutral keys and accepts redacted projections", () => {
+    expect(routinePresetSummary({ message: "ghp_" + "x".repeat(36) })).toBe("Inputs: message: Hidden")
+    expect(routinePresetSummary({ message: { type: "redacted" } })).toBe("Inputs: message: Hidden")
+  })
+  it.each(["data:", "file:", "blob:"])("hides %s payloads after whitespace and invisible characters", (prefix) => {
+    expect(routinePresetSummary({ message: " \t\u200b" + prefix.slice(0, 2) + "\u200b" + prefix.slice(2) + "private-content" })).toBe("Inputs: message: File")
+  })
+  it("hides secrets and summarizes credentials and files by type", () => {
+    expect(routinePresetSummary({ api_key: "secret-value", credential: "vault-private-id" })).toBe("Inputs: api_key: Hidden · credential: Credential reference")
+    expect(routinePresetSummary({ file: { name: "invoice.pdf", content: "private-content" } })).toBe("Inputs: file: File")
+    expect(routinePresetSummary({ attachment: "data:text/plain;base64,c2VjcmV0" })).not.toContain("c2VjcmV0")
+  })
+})

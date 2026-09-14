@@ -239,3 +239,29 @@ describe("buildTraceGraph — edge routing", () => {
     for (const edge of seq) expect(edge.type).toBe("traceRouted")
   })
 })
+
+
+describe("buildTraceGraph — scheduler dependency modes", () => {
+  const steps: NonNullable<PipelineDSL["steps"]> = [
+    { id: "left", type: "transform" },
+    { id: "right", type: "transform" },
+    { id: "join", type: "transform", needs: ["left", "right"] },
+  ]
+  const pairs = (definition: PipelineDSL) => buildTraceGraph(makeRun(), definition)
+    .edges.map((edge) => `${edge.source}->${edge.target}`).sort()
+  it("keeps independent DAG roots independent", () => {
+    expect(pairs({steps})).toEqual(["__trigger__->left", "__trigger__->right", "left->join", "right->join"])
+  })
+  it("honours forced sequential mode despite declared dependencies", () => {
+    expect(pairs({steps, parallelism:"off"})).toEqual(["__trigger__->left", "left->right", "right->join"])
+  })
+  it("derives auto dependencies from references without ordering independent roots", () => {
+    expect(pairs({parallelism:"auto", steps:[
+      steps[0], steps[1], {id:"join",type:"transform",if:"steps.left.ok && steps.right.ok"},
+    ]})).toEqual(["__trigger__->left", "__trigger__->right", "left->join", "right->join"])
+  })
+  it("keeps auto mode sequential when a called routine requires it", () => {
+    expect(pairs({parallelism:"auto", steps:[steps[0], {id:"child",type:"call_pipeline"}, steps[1]]}))
+      .toEqual(["__trigger__->left", "child->right", "left->child"])
+  })
+})

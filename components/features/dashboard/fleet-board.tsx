@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { motion, useReducedMotion } from "motion/react"
 import { Users, ChevronRight } from "lucide-react"
 
 import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
@@ -14,7 +13,6 @@ import { entityHref } from "@/lib/entity-links"
 import { formatStatus } from "@/lib/format-status"
 import { cn } from "@/lib/utils"
 import type { FleetHealthRow } from "./dashboard-overview"
-import { Sparkline } from "@/components/ui/sparkline"
 import type { RunVolumeBucket } from "./run-volume-chart"
 
 export interface FleetCard {
@@ -92,88 +90,67 @@ export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string
 }
 
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
-  const reduce = useReducedMotion()
   const [showAll, setShowAll] = React.useState(false)
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
   if (cards.length === 0) return null
   const featured = cards.slice(0, FLEET_CARD_LIMIT)
   const rest = cards.slice(FLEET_CARD_LIMIT)
   const restNeedingAttention = rest.filter((c) => c.row.tone === "danger" || c.row.tone === "warn").length
+  // One row per crew instead of a card each: the same facts (state, agents,
+  // runs) in a fifth of the height, so the board fits beside the results
+  // instead of pushing everything below the fold (#2539).
   return (
-    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="flex flex-col gap-2.5">
-      <div className="flex items-center justify-between px-0.5">
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-xl border border-border/60 bg-card p-3">
+      <div className="mb-2.5 flex items-center justify-between">
         <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
-          <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews · {cards.length} {cards.length === 1 ? "crew" : "crews"}
+          <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews
         </h2>
-        <Link href="/crews" className="font-mono text-[10px] text-primary-hover hover:underline">Crews →</Link>
+        <span className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+          {cards.length} {cards.length === 1 ? "crew" : "crews"}
+          <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
+        </span>
       </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {featured.map((card, index) => {
+      <div className="flex flex-col divide-y divide-border/50">
+        {featured.map((card) => {
           const { row } = card
-          const color = crewColor(row.crew.color)
           return (
-            <motion.div
+            <div
               key={row.crew.id}
-              initial={reduce ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1], delay: reduce ? 0 : Math.min(index * 0.03, 0.1) }}
-              className="group flex flex-col gap-3 rounded-xl border border-t-[3px] border-border/60 bg-card p-4 transition-colors hover:border-border"
+              className="group flex items-center gap-2.5 rounded-md px-1 py-1.5 transition-colors hover:bg-foreground/[0.025]"
               data-testid="dashboard-fleet-card"
             >
-              <div className="flex items-center gap-3">
-                <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="lg" />
-                <span className="min-w-0 flex-1">
-                  <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="block truncate text-body font-semibold tracking-tight text-foreground hover:underline">
-                    {row.crew.name}
-                  </Link>
-                  <span className="block truncate text-label text-muted-foreground">
-                    {card.agents.length} {card.agents.length === 1 ? "agent" : "agents"} · {row.detail}
-                  </span>
-                </span>
-                <StatusPill tone={row.tone} label={row.status} live={row.tone === "blue"} />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5">
-                  {card.agents.slice(0, 6).map((agent) => (
-                    <Link key={agent.id} href={entityHref({ kind: "chat", agentSlug: agent.slug })} title={`${agent.name} · ${formatStatus(agent.status).label}`} className="relative">
-                      <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-9 w-9 rounded-xl bg-muted ring-1 ring-border" />
-                      <span className={cn("absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card", AGENT_DOT[agent.status] ?? "bg-muted-foreground")} aria-hidden />
-                    </Link>
-                  ))}
-                  {card.agents.length > 6 && <span className="text-micro text-muted-foreground">+{card.agents.length - 6}</span>}
-                </span>
-                <span className="ml-1 truncate text-label text-muted-foreground">
-                  {fleetAgentStatus(card.agents)}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3 border-t border-border/50 pt-3">
-                <Sparkline values={card.runSeries} color={color} width={110} height={26} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-body font-medium tabular-nums">
-                    {card.spendUsd == null ? `${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}` : `${formatCost(card.spendUsd)} · ${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}`}
-                  </span>
-                  <span className="block truncate text-label text-muted-foreground">
-                    {row.services.checked ? row.services.total > 0 ? `${row.services.running}/${row.services.total} services` : "No extra services" : "services unchecked"}
-                  </span>
-                </span>
-                <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
-                  Open <ChevronRight className="h-3.5 w-3.5" />
+              <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="sm" />
+              <span className="min-w-0 flex-1">
+                <Link href={entityHref({ kind: "crew", slug: row.crew.slug })} className="block truncate text-body font-medium text-foreground hover:underline">
+                  {row.crew.name}
                 </Link>
-              </div>
-            </motion.div>
+                <span className="block truncate text-label text-muted-foreground">
+                  {fleetAgentStatus(card.agents)} · {card.spendUsd == null ? `${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}` : `${formatCost(card.spendUsd)} · ${card.runsTotal} ${card.runsTotal === 1 ? "run" : "runs"}`}
+                  {row.services.checked && row.services.total > 0 ? ` · ${row.services.running}/${row.services.total} services` : ""}
+                </span>
+              </span>
+              <span className="hidden items-center gap-1 sm:flex">
+                {card.agents.slice(0, 5).map((agent) => (
+                  <Link key={agent.id} href={entityHref({ kind: "chat", agentSlug: agent.slug })} title={`${agent.name} · ${formatStatus(agent.status).label}`} className="relative">
+                    <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 rounded-md bg-muted ring-1 ring-border" />
+                    <span className={cn("absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-card", AGENT_DOT[agent.status] ?? "bg-muted-foreground")} aria-hidden />
+                  </Link>
+                ))}
+                {card.agents.length > 5 && <span className="text-micro text-muted-foreground">+{card.agents.length - 5}</span>}
+              </span>
+              <StatusPill tone={row.tone} label={row.status} live={row.tone === "blue"} className="shrink-0" />
+            </div>
           )
         })}
       </div>
 
       {rest.length > 0 && (
-        <div className="rounded-xl border border-border/60 bg-card" data-testid="dashboard-fleet-rest">
+        <div className="mt-2 rounded-lg border border-border/60" data-testid="dashboard-fleet-rest">
           <button
             type="button"
             onClick={() => setShowAll((v) => !v)}
             aria-expanded={showAll}
-            className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-label"
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-label"
           >
             <span className="text-muted-foreground">
               <span className="font-medium text-foreground/90">{rest.length} more {rest.length === 1 ? "crew" : "crews"}</span>
@@ -186,7 +163,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
             </span>
           </button>
           {showAll && (
-            <div className="grid grid-cols-1 gap-x-4 border-t border-border/50 px-2 py-2 md:grid-cols-2 xl:grid-cols-3">
+            <div className="flex flex-col border-t border-border/50 px-1 py-1">
               {rest.map((card) => (
                 <Link
                   key={card.row.crew.id}

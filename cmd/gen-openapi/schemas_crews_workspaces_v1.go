@@ -32,7 +32,18 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 
 	member := object(map[string]any{"user_id": str(), "user_name": str(), "email": str(), "role": str(), "capabilities": array(str()), "created_at": str()})
 	issue := object(map[string]any{"id": str(), "identifier": str(), "title": str(), "status": str(), "priority": str(), "description": str(), "created_at": str(), "updated_at": str(), "brief_revision": integer(), "client_review_required": boolean(), "execution": anyObject()})
-	pipeline := object(map[string]any{"id": str(), "workspace_id": str(), "name": str(), "slug": str(), "description": str(), "version": integer(), "enabled": boolean(), "created_at": str(), "updated_at": str()})
+	pipeline := object(map[string]any{
+		"step_count":   integer(),
+		"id":           str(),
+		"workspace_id": str(),
+		"name":         str(),
+		"slug":         str(),
+		"description":  str(),
+		"version":      integer(),
+		"enabled":      boolean(),
+		"created_at":   str(),
+		"updated_at":   str(),
+	})
 
 	add("/api/v1/crews/{crewId}/capabilities", "CrewCapabilitiesResponseV1", object(map[string]any{"crew_id": str(), "crew_slug": str(), "container": anyObject(), "integrations": array(anyObject()), "agents": array(object(map[string]any{"slug": str(), "name": str()})), "runtimes": anyObject(), "schema": anyObject()}))
 	add("/api/v1/crews/{crewId}/services", "CrewServicesResponseV1", object(map[string]any{"services": array(object(map[string]any{"name": str(), "image": str(), "type": str(), "status": str(), "ports": array(str())}))}))
@@ -73,7 +84,7 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	add("/api/v1/workspaces/{workspaceId}/pipelines/{slug}/export", "WorkspacePipelineExportResponseV1", object(map[string]any{"name": str(), "slug": str(), "definition": anyObject(), "version": integer()}))
 	add("/api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget", "WorkspacePipelineBudgetResponseV1", object(map[string]any{"slug": str(), "has_budget": boolean(), "monthly_budget_usd": number(), "month": str(), "spent_usd": number(), "pct_used": number(), "over_budget": boolean()}))
 	add("/api/v1/workspaces/{workspaceId}/pipelines/budget-summary", "WorkspacePipelineBudgetSummaryResponseV1", object(map[string]any{"month": str(), "total_budget_usd": number(), "total_spent_usd": number(), "pipelines": array(anyObject())}))
-	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", object(map[string]any{"id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "created_at": str()}))
+	addList("/api/v1/workspaces/{workspaceId}/pipelines/pending", "WorkspacePendingRunsResponseV1", object(map[string]any{"id": str(), "pipeline_slug": str(), "pinned_version": nullable("integer"), "debounce_key": str(), "priority": integer(), "fire_at": str(), "inputs": map[string]any{"type": "object", "additionalProperties": true, "description": "Read-only preset projection: safe primitives, type markers for credential/file/redacted values, empty containers for structured values. Not replay inputs."}}))
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-webhooks", "WorkspacePipelineWebhooksResponseV1", object(map[string]any{"id": str(), "workspace_id": str(), "name": str(), "target_pipeline_slug": str(), "token": str(), "signing_secret_set": boolean(), "inputs_template": anyObject(), "enabled": boolean(), "rate_limit_per_min": integer(), "created_at": str(), "updated_at": str()}))
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/changes", "WorkspacePipelineRunChangesResponseV1", object(map[string]any{"path": str(), "status": str(), "additions": integer(), "deletions": integer()}))
 	addList("/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/files", "WorkspacePipelineRunFilesResponseV1", object(map[string]any{"path": str(), "size": integer(), "modified_at": str()}))

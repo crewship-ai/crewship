@@ -12,19 +12,21 @@ import (
 	"text/tabwriter"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
 type waitpointRow struct {
-	Token          string `json:"token" yaml:"token"`
-	PipelineRunID  string `json:"pipeline_run_id" yaml:"pipeline_run_id"`
-	StepID         string `json:"step_id" yaml:"step_id"`
-	Kind           string `json:"kind" yaml:"kind"`
-	Prompt         string `json:"prompt" yaml:"prompt"`
-	InvokingCrewID string `json:"invoking_crew_id,omitempty" yaml:"invoking_crew_id,omitempty"`
-	TimeoutAt      string `json:"timeout_at" yaml:"timeout_at"`
-	CreatedAt      string `json:"created_at" yaml:"created_at"`
-	CallbackURL    string `json:"callback_url,omitempty" yaml:"callback_url,omitempty"`
+	DecisionForm   *pipeline.DecisionForm `json:"decision_form,omitempty" yaml:"decision_form,omitempty"`
+	Token          string                 `json:"token" yaml:"token"`
+	PipelineRunID  string                 `json:"pipeline_run_id" yaml:"pipeline_run_id"`
+	StepID         string                 `json:"step_id" yaml:"step_id"`
+	Kind           string                 `json:"kind" yaml:"kind"`
+	Prompt         string                 `json:"prompt" yaml:"prompt"`
+	InvokingCrewID string                 `json:"invoking_crew_id,omitempty" yaml:"invoking_crew_id,omitempty"`
+	TimeoutAt      string                 `json:"timeout_at" yaml:"timeout_at"`
+	CreatedAt      string                 `json:"created_at" yaml:"created_at"`
+	CallbackURL    string                 `json:"callback_url,omitempty" yaml:"callback_url,omitempty"`
 }
 
 var routineWaitpointsCmd = &cobra.Command{
@@ -34,7 +36,7 @@ var routineWaitpointsCmd = &cobra.Command{
 of kind=approval fires. Each waitpoint blocks the run goroutine until
 a decision arrives (approve / reject) or the timeout elapses. List
 shows all pending waitpoints in the workspace; approve/reject wakes
-the parked goroutine with the comment as the wait step's output.
+the parked run. Rich forms return action_id and typed data; legacy gates keep their approval marker.
 
 Examples:
   crewship routine waitpoints list
@@ -157,7 +159,11 @@ var routineWaitpointsShowCmd = &cobra.Command{
 					fmt.Fprintf(w, "Callback URL:\t%s\n", r.CallbackURL)
 				}
 				_ = w.Flush()
-				if r.CallbackURL != "" {
+				if r.DecisionForm != nil {
+					raw, _ := json.MarshalIndent(r.DecisionForm, "", "  ")
+					fmt.Printf("\nDecision form:\n%s\nUse --action <id> --input <JSON> with approve or reject to match the action.\n", raw)
+				}
+				if r.DecisionForm == nil && r.CallbackURL != "" {
 					fmt.Println("\nAn external system can complete this waitpoint with no auth via:")
 					fmt.Printf("  curl -X POST %s -d '{\"approved\":true,\"payload\":{}}'\n", r.CallbackURL)
 				}
@@ -171,11 +177,11 @@ var routineWaitpointsShowCmd = &cobra.Command{
 
 var routineWaitpointsApproveCmd = &cobra.Command{
 	Use:   "approve <token>",
-	Short: "Approve a pending waitpoint (run resumes with comment as wait output)",
+	Short: "Approve a pending waitpoint (run resumes with the accepted decision)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		comment, _ := cmd.Flags().GetString("comment")
-		return decideWaitpoint(args[0], true, comment)
+		return decideWaitpointWithForm(cmd, args[0], true, comment)
 	},
 }
 
@@ -185,11 +191,30 @@ var routineWaitpointsRejectCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		comment, _ := cmd.Flags().GetString("comment")
-		return decideWaitpoint(args[0], false, comment)
+		return decideWaitpointWithForm(cmd, args[0], false, comment)
 	},
 }
 
+func decideWaitpointWithForm(cmd *cobra.Command, token string, approved bool, comment string) error {
+	action, _ := cmd.Flags().GetString("action")
+	input, _ := cmd.Flags().GetString("input")
+	var data map[string]any
+	if input != "" {
+		var err error
+		data, err = parseInputFixture(input)
+		if err != nil {
+			return err
+		}
+		if action == "" {
+			return fmt.Errorf("--input requires --action")
+		}
+	}
+	return postWaitpointDecision(token, approved, comment, action, data)
+}
 func decideWaitpoint(token string, approved bool, comment string) error {
+	return postWaitpointDecision(token, approved, comment, "", nil)
+}
+func postWaitpointDecision(token string, approved bool, comment, action string, data map[string]any) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -201,8 +226,10 @@ func decideWaitpoint(token string, approved bool, comment string) error {
 	resp, err := client.Post(
 		fmt.Sprintf("/api/v1/workspaces/%s/pipelines/waitpoints/%s/approve", ws, token),
 		map[string]interface{}{
-			"approved": approved,
-			"comment":  comment,
+			"approved":  approved,
+			"comment":   comment,
+			"action_id": action,
+			"data":      data,
 		},
 	)
 	if err != nil {
@@ -221,10 +248,14 @@ func decideWaitpoint(token string, approved bool, comment string) error {
 }
 
 func init() {
+	for _, cmd := range []*cobra.Command{routineWaitpointsApproveCmd, routineWaitpointsRejectCmd} {
+		cmd.Flags().String("action", "", "named decision action ID")
+		cmd.Flags().String("input", "", "decision fields as JSON or @file.json")
+	}
 	routineWaitpointsListCmd.Flags().Bool("json", false, "Deprecated alias for --format json")
 
-	routineWaitpointsApproveCmd.Flags().String("comment", "", "decision comment forwarded to the parked run as the wait step's output")
-	routineWaitpointsRejectCmd.Flags().String("comment", "", "rejection reason forwarded to the parked run")
+	routineWaitpointsApproveCmd.Flags().String("comment", "", "comment stored with the accepted decision")
+	routineWaitpointsRejectCmd.Flags().String("comment", "", "rejection reason stored with the decision")
 
 	routineWaitpointsCmd.AddCommand(routineWaitpointsListCmd)
 	routineWaitpointsCmd.AddCommand(routineWaitpointsShowCmd)

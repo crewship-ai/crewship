@@ -120,16 +120,17 @@ type dispatchRequest struct {
 // page, so there is nothing here to withhold from somebody already entitled to
 // see the panel.
 type actionWire struct {
-	ID      string                    `json:"id"`
-	Kind    string                    `json:"kind"`
-	Label   string                    `json:"label"`
-	Style   string                    `json:"style"`
-	Confirm *pages.PanelActionConfirm `json:"confirm,omitempty"`
-	Routine string                    `json:"routine,omitempty"`
-	Params  map[string]any            `json:"params,omitempty"`
-	Inputs  []actionInputWire         `json:"inputs,omitempty"`
-	Target  []string                  `json:"target,omitempty"`
-	Ref     *pages.PanelEntityRef     `json:"ref,omitempty"`
+	RoutineChanged *bool                     `json:"routine_changed_since_publication,omitempty"`
+	ID             string                    `json:"id"`
+	Kind           string                    `json:"kind"`
+	Label          string                    `json:"label"`
+	Style          string                    `json:"style"`
+	Confirm        *pages.PanelActionConfirm `json:"confirm,omitempty"`
+	Routine        string                    `json:"routine,omitempty"`
+	Params         map[string]any            `json:"params,omitempty"`
+	Inputs         []actionInputWire         `json:"inputs,omitempty"`
+	Target         []string                  `json:"target,omitempty"`
+	Ref            *pages.PanelEntityRef     `json:"ref,omitempty"`
 }
 
 // actionInputWire is one collected parameter as the form renderer reads it.
@@ -292,6 +293,9 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	for i := range spec.Actions {
 		out = append(out, actionToWire(&spec.Actions[i]))
 	}
+	if !h.annotateApplicationRoutines(w, r, rec, out) {
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"page":    rec.Slug,
 		"panel":   panelID,
@@ -377,6 +381,9 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 	// on (pipeline_id, debounce_key) that backs the check also makes a genuinely
 	// concurrent pair coalesce rather than fire twice.
 	debounceKey := pageActionDebounceKey(res.page.ID, panelID, actionID)
+	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
+		debounceKey += fmt.Sprintf(":%s:%d", user.ID, fence.version)
+	}
 	if pendingID, busy, err := h.actionInFlight(r.Context(), pipelineID, debounceKey); err != nil {
 		replyInternalError(w, h.logger, "check page action in flight", err)
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
@@ -400,7 +407,7 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
 		return
 	}
-	pendingID, coalesced, err := pipeline.NewPendingRunStore(h.db).Enqueue(r.Context(), pipeline.PendingRun{
+	pendingID, coalesced, err := h.enqueuePageAction(r.Context(), pipeline.PendingRun{
 		ID:           keys.pendingID,
 		WorkspaceID:  wsID,
 		PipelineID:   pipelineID,
@@ -423,6 +430,10 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
+		if errors.Is(err, errPageApplicationChanged) {
+			replyError(w, 409, err.Error())
+			return
+		}
 		replyInternalError(w, h.logger, "enqueue page action run", err)
 		return
 	}
@@ -733,7 +744,7 @@ func (h *PageHandler) journalActionDispatch(ctx context.Context, wsID string, ac
 
 // ── The authoring gate's action half (§10b.1) ──────────────────────────────
 
-// resolveActionRoutines is the second half of the authoring gate applied to
+// resolveActionRoutinesIn is the second half of the authoring gate applied to
 // actions: every routine a `call` names must EXIST, exactly as every declared
 // producer must (resolveReferences in pages_handler.go, which calls this).
 //
@@ -742,8 +753,11 @@ func (h *PageHandler) journalActionDispatch(ctx context.Context, wsID string, ac
 // panels and nobody would know why", with a button the same argument is
 // stronger because the operator only finds out mid-incident.
 //
-// Reports whether the document may be stored; writes the refusal itself.
-func (h *PageHandler) resolveActionRoutines(w http.ResponseWriter, r *http.Request, wsID string, doc *pages.Document) bool {
+// A routine that does not resolve is a *pageReferenceError naming the panel,
+// the action and the routine; a query failure is anything else. It writes no
+// reply: resolvePanelReferences is the one caller, and whether the sentence
+// may be shown is decided there by the path the document came through.
+func (h *PageHandler) resolveActionRoutinesIn(ctx context.Context, wsID string, doc *pages.Document) error {
 	for i := range doc.Spec.Panels {
 		p := &doc.Spec.Panels[i]
 		for j := range p.Actions {
@@ -752,21 +766,19 @@ func (h *PageHandler) resolveActionRoutines(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			var one int
-			err := h.db.QueryRowContext(r.Context(),
+			err := h.db.QueryRowContext(ctx,
 				`SELECT 1 FROM pipelines WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL`,
 				wsID, a.Routine).Scan(&one)
 			if errors.Is(err, sql.ErrNoRows) {
-				replyError(w, http.StatusBadRequest, fmt.Sprintf(
+				return newPageReferenceError(p,
 					"panel %q action %q runs routine/%s, and no such routine exists here — "+
 						"the spec is the allow-list a click resolves against (§8b.2), so it cannot name "+
-						"a routine nobody answers to", p.ID, a.ID, a.Routine))
-				return false
+						"a routine nobody answers to", p.ID, a.ID, a.Routine)
 			}
 			if err != nil {
-				replyInternalError(w, h.logger, "resolve page action routine", err)
-				return false
+				return fmt.Errorf("resolve page action routine: %w", err)
 			}
 		}
 	}
-	return true
+	return nil
 }

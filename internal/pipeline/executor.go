@@ -647,6 +647,7 @@ type WaitpointStatusReader interface {
 // WaitpointApprovalRequest is the metadata stored alongside the
 // waitpoint so the inbox/UI can render a meaningful approval card.
 type WaitpointApprovalRequest struct {
+	DecisionForm  *DecisionForm
 	WorkspaceID   string
 	PipelineRunID string
 	StepID        string
@@ -745,7 +746,14 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// substituted, so the status gate above and the author-identity
 	// rules below still read the current row. A missing version is a
 	// hard, legible failure — see ErrPinnedVersionNotFound.
-	if in.PinnedVersion != nil {
+	if in.resume && in.resumeDefinitionJSON != "" {
+		// Resume the exact effective recipe captured before the first step. Keep
+		// current governance and identity fields, but do not reapply new overrides.
+		captured := *p
+		captured.DefinitionJSON = in.resumeDefinitionJSON
+		captured.DefinitionHash = in.resumeDefinitionHash
+		p = &captured
+	} else if in.PinnedVersion != nil {
 		v, verr := e.store.GetVersion(ctx, p.ID, *in.PinnedVersion)
 		if verr != nil {
 			if errors.Is(verr, ErrNotFound) {
@@ -771,7 +779,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// Apply per-step prompt/model overrides (v121) over the versioned
 	// DSL. No-op when the store isn't wired or has no rows for this
 	// pipeline — the run then executes exactly as authored.
-	if e.stepOverrides != nil {
+	if e.stepOverrides != nil && !(in.resume && in.resumeDefinitionJSON != "") {
 		if ov, oerr := e.stepOverrides.OverridesFor(ctx, in.PipelineID); oerr == nil {
 			applyStepOverrides(dsl.Steps, ov)
 		} else {
@@ -1108,6 +1116,7 @@ type RunInput struct {
 	// resume re-entry (the scan-time gate alone leaves a TOCTOU
 	// window — see resumeDefinitionDrift). Set only by runResumedRun.
 	resumeDefinitionHash string
+	resumeDefinitionJSON string
 	resumeCurrentStepID  string
 	// resumeReason names the resume cause for the journal summary:
 	// resumeReasonRestart (boot scan) or resumeReasonApproval
@@ -1182,6 +1191,56 @@ const negligibleBudget = 1e-9
 
 // runDSL is the actual step loop. depth bounds call_pipeline recursion
 // across nested invocations; the top-level Run starts depth at 0.
+// runWasCancelled reports whether a FAILED result is really a cancellation.
+//
+// Two causes, one contract. The RunRegistry answers for the cause #1426 2.1
+// was written against — a person pressing Cancel, which reaches the run
+// through Cancel(runID). ctx.Err() answers for every other cause, and those
+// are the ordinary ones: the default POST .../run hands exec.Run the
+// request's own context, so a caller hanging up mid-run (closed tab, proxy
+// timeout, the CLI's per-call deadline) cancels the run through a context
+// the registry never saw. Gating on the registry alone left those runs
+// labelled FAILED with "context canceled" as the reason, fingerprinted into
+// the errors view, paging the failure notifier and running on_failure —
+// while emitRunFailed, which classifies off ctx.Err(), had already written
+// CANCELLED into the journal for the same instant. The row and the journal
+// disagreed by construction.
+//
+// context.Canceled only, never DeadlineExceeded: a run that burned through
+// its own deadline failed on the merits and must keep saying so.
+//
+// A genuine step failure that races a cancel now labels CANCELLED. That
+// trade is not new — emitRunFailed already made it, deliberately, on the
+// grounds that it errs in the quiet direction the person asked for by
+// cancelling. This makes the persisted row agree with the journal rather
+// than choosing differently.
+func runWasCancelled(ctx context.Context, runs *RunRegistry, runID string) bool {
+	if runs != nil && runs.IsCancelRequested(runID) {
+		return true
+	}
+	return errors.Is(ctx.Err(), context.Canceled)
+}
+
+// cancelledRunMessage keeps a real reason and replaces a non-reason.
+//
+// "context canceled" is the Go sentinel, not an explanation: a run detail
+// showing it tells the reader neither that a cancellation happened nor where
+// the run stopped, which is exactly the empty-looking error PRD §9 asks not
+// to render. Any message the step loop actually composed is left alone.
+func cancelledRunMessage(current, failedAtStep string) string {
+	if current != "" && current != context.Canceled.Error() {
+		return current
+	}
+	if failedAtStep != "" {
+		// "at", not "during": a run cancelled before its first step ever
+		// dispatched reports the same step id as one killed mid-flight, and
+		// the row cannot tell those apart. Say where it stopped, claim
+		// nothing about how far in it got.
+		return "run cancelled at step " + failedAtStep
+	}
+	return "run cancelled"
+}
+
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
 	if depth >= MaxNestedPipelineDepth {
 		return nil, ErrMaxDepthExceeded
@@ -1332,13 +1391,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 		// failure-notification fan-out (TerminalNotifier skips CANCELLED), and
 		// no on_failure hook (runHooksAround gates it on FAILED).
 		defer func() {
-			if result != nil && result.Status == "FAILED" &&
-				e.runs != nil && e.runs.IsCancelRequested(runID) {
-				result.Status = "CANCELLED"
-				if result.ErrorMessage == "" {
-					result.ErrorMessage = "run cancelled"
-				}
+			if result == nil || result.Status != "FAILED" || !runWasCancelled(ctx, e.runs, runID) {
+				return
 			}
+			result.Status = "CANCELLED"
+			result.ErrorMessage = cancelledRunMessage(result.ErrorMessage, result.FailedAtStep)
 		}()
 	}
 
@@ -2196,20 +2253,9 @@ func (e *Executor) runCallPipelineStep(ctx context.Context, step Step, parent Ru
 		}
 	}
 
-	// Render nested input values against the parent's render context
-	// before handing them to the nested run. String values pass
-	// through Render (templates resolved); non-string values land
-	// verbatim. Maps/slices are not deep-rendered — DSL authors who
-	// need that should use a transform step (Phase 2). Today most
-	// nested-input use cases are scalar pass-through or single-level
-	// templated strings.
-	nestedInputs := make(map[string]any, len(step.NestedInputs))
-	for k, v := range step.NestedInputs {
-		if s, ok := v.(string); ok {
-			nestedInputs[k] = Render(s, parentRender)
-		} else {
-			nestedInputs[k] = v
-		}
+	nestedInputs, err := renderNestedInputs(step.NestedInputs, dsl.Inputs, parentRender)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("call_pipeline %q: %w", step.PipelineSlug, err)
 	}
 
 	nestedIn := buildNestedRunInput(parent, target, dsl, nestedInputs, parentRunID,

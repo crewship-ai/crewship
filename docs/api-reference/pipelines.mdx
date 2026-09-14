@@ -524,8 +524,10 @@ See [`crewship routine appearance`](/cli/routine) for the CLI equivalent.
 
 **Auth:** `member`. `200 OK` returns an array (never `null`) of at most 100
 pending deferred triggers. Each item contains `id`, `pipeline_slug`, optional
-`debounce_key`, `priority`, and RFC3339Nano `fire_at`. An unavailable database
-is `503`; listing failure is `500`.
+`debounce_key`, `priority`, RFC3339Nano `fire_at`, nullable `pinned_version`,
+and the read-only `inputs` preview (`{}` when empty). The preview retains safe primitives; credentials, files and known secrets become
+type-only markers, and other containers are empty. It must not be replayed as
+run inputs. An unavailable database is `503`; listing failure is `500`.
 
 #### `POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel`
 

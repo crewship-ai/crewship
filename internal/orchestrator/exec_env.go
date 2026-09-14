@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
@@ -26,7 +25,12 @@ import (
 // exact sequence.
 func baseAgentEnv(req AgentRunRequest) []string {
 	env := []string{
-		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
+		// E0: HOME is per RUN (/crew/runs/<slug>/<runID>), not per agent.
+		// .memory is symlinked back into it from the agent's durable
+		// /crew/agents/<slug>/.memory, so $HOME/.memory still resolves to the
+		// one shared tree every run of this agent writes to — see run_paths.go
+		// for why that one thing stays shared while the rest does not.
+		"HOME=" + agentHomeDir(req.AgentSlug, req.RunID),
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
@@ -34,7 +38,7 @@ func baseAgentEnv(req AgentRunRequest) []string {
 		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
 	if req.CLIAdapter == "OPENCODE" {
-		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug)+"/.local/share")
+		env = append(env, "XDG_DATA_HOME="+agentHomeDir(req.AgentSlug, req.RunID)+"/.local/share")
 	}
 	return env
 }
@@ -618,7 +622,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	//     the sidecar cannot meter it, so it is billed flat-rate, with the
 	//     plan read from the login's own token rather than hard-coded.
 	if req.CLIAdapter == "CODEX_CLI" {
-		env = append(env, "CODEX_HOME="+codexHomeDir(req.AgentSlug))
+		env = append(env, "CODEX_HOME="+codexHomeDir(req.AgentSlug, req.RunID))
 	}
 
 	// A file-delivered login (auth_delivery.go: Codex's auth.json, Gemini's

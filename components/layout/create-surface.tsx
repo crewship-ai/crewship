@@ -110,6 +110,14 @@ import {
  * generated at runtime: Tailwind's scanner reads source text, so a composed
  * class name is never emitted. Verbose, and the only version that works.
  *
+ * ── A surface that has outgrown the modal ────────────────────────────────
+ *
+ * `presentation="page"` mounts the same header/body/footer in a plain
+ * `<section>` filling its parent instead of a Dialog — no overlay, no focus
+ * trap, no Esc, no size class. The routine editor is the first user (#2519):
+ * a two-column step editor does not fit an 800px card. The discard guard
+ * and ⌘↵ come along unchanged; the title becomes the page's `<h1>`.
+ *
  * Pair it with `sub-bar.tsx`: SubBarPrimary/SubBarSecondary are the door,
  * CreateSurface is the room. Neither should be re-implemented per page.
  */
@@ -147,6 +155,15 @@ const SIZE_CLASS: Record<CreateSurfaceSize, string> = {
  * header for previews) is how the twelve surfaces got here in the first place.
  */
 const InDialog = React.createContext(true)
+
+/**
+ * Which element the header's title renders as.
+ *
+ * `h2` inside a dialog and inside a preview frame — both sit on a page that
+ * already has its own `h1`. A surface mounted as the PAGE (`presentation=
+ * "page"`) is that page's main content, so its title is the `h1`.
+ */
+const HeadingTag = React.createContext<"h1" | "h2">("h2")
 
 /**
  * Wraps a dismissal so the guard sees it.
@@ -216,6 +233,22 @@ export interface CreateSurfaceProps {
   onSubmit?: () => void
   /** Accessible name when the header title is not the whole story. */
   ariaLabel?: string
+  /** Restore the opener when the caller does not use a Radix DialogTrigger. */
+  restoreOpenerFocus?: boolean
+  /**
+   * How the surface is mounted.
+   *
+   * `"dialog"` (the default) is the Radix modal described above: overlay,
+   * focus trap, Esc, scroll lock. `"page"` renders the SAME header, body and
+   * footer chrome in a plain `<section>` that fills its parent — for a
+   * surface that has outgrown a modal and lives in a route's content area
+   * (the routine editor, #2519). No overlay, no focus trap, no Esc; ⌘↵ still
+   * submits, the discard guard still covers the header × and the footer
+   * Cancel (both reach `onOpenChange(false)`), and `size` does not apply —
+   * the parent decides the width. The header's title becomes the page's
+   * `<h1>`; the layout, not the surface, owns the breadcrumb.
+   */
+  presentation?: "dialog" | "page"
   className?: string
   children: React.ReactNode
 }
@@ -228,10 +261,13 @@ export function CreateSurface({
   size = "md",
   onSubmit,
   ariaLabel,
+  restoreOpenerFocus = false,
+  presentation = "dialog",
   className,
   children,
 }: CreateSurfaceProps) {
   const contentRef = React.useRef<HTMLDivElement>(null)
+  const openerRef = React.useRef<HTMLElement | null>(null)
   const [confirmingDiscard, setConfirmingDiscard] = React.useState(false)
   // What to run once the person confirms. Held in a ref rather than state so
   // confirming does not depend on a render landing first.
@@ -271,47 +307,20 @@ export function CreateSurface({
     [onSubmit],
   )
 
-  return (
-    <>
-    <Dialog open={open} onOpenChange={requestOpenChange}>
-      <DialogContent
-        ref={contentRef}
-        aria-label={ariaLabel}
-        // Radix's own opt-out for the missing-description warning. The header
-        // renders a description when it has one and nothing when it does not;
-        // echoing the title into an sr-only node to silence the warning is what
-        // made screen readers say "New project. New project.".
-        aria-describedby={undefined}
-        showCloseButton={false}
-        onKeyDown={handleKeyDown}
-        tabIndex={-1}
-        // Focus goes to the first real field, not to the close button, so the
-        // surface opens ready to type — but if the caller has no field to
-        // focus, focus must still land INSIDE the surface, or ⌘↵ never reaches
-        // the handler above and the shell's headline promise is silently false
-        // until the user clicks. A field's own autoFocus runs after this and
-        // wins, so this is a floor, not an override.
-        onOpenAutoFocus={(e) => {
-          e.preventDefault()
-          contentRef.current?.focus({ preventScroll: true })
-        }}
-        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
-      >
-        <SheetGrabber />
-        <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
-      </DialogContent>
-    </Dialog>
+  /* An AlertDialog, not a second CreateSurface: this is a decision with two
+     answers and no form, which is what AlertDialog is for. Keeping the
+     distinction is half of why there were three modal shells.
 
-    {/* An AlertDialog, not a second CreateSurface: this is a decision with two
-        answers and no form, which is what AlertDialog is for. Keeping the
-        distinction is half of why there were three modal shells.
+     It wears the surface's chrome all the same. Left on the primitive's
+     defaults it was a bg-background card with p-6, a 512px width and a
+     blue confirm — a different dialog language arriving on top of the one
+     the user is looking at, at the moment they are deciding whether to
+     lose work. Same card, same hairline header and footer, same paddings,
+     and the destructive answer is red because it destroys something.
 
-        It wears the surface's chrome all the same. Left on the primitive's
-        defaults it was a bg-background card with p-6, a 512px width and a
-        blue confirm — a different dialog language arriving on top of the one
-        the user is looking at, at the moment they are deciding whether to
-        lose work. Same card, same hairline header and footer, same paddings,
-        and the destructive answer is red because it destroys something. */}
+     Shared by both presentations: a page loses unsaved input exactly the
+     way a dialog does. */
+  const discardGuard = (
     <AlertDialog open={confirmingDiscard} onOpenChange={setConfirmingDiscard}>
       {/* The width override carries the primitive's own `data-[size=default]`
           variant. Without it the two rules tie on specificity and source order
@@ -335,7 +344,7 @@ export function CreateSurface({
             variant="ghost"
             size="sm"
             onClick={() => { pendingRef.current = null }}
-            className="mt-0 text-xs text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:text-sm"
+            className="mt-0 text-xs text-muted-foreground hover:text-foreground coarse:h-12 coarse:text-sm"
           >
             Keep editing
           </AlertDialogCancel>
@@ -348,13 +357,82 @@ export function CreateSurface({
               pendingRef.current = null
               run?.()
             }}
-            className="text-xs max-sm:h-12 max-sm:text-sm"
+            className="text-xs coarse:h-12 coarse:text-sm"
           >
             Discard
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+
+  if (presentation === "page") {
+    // Same open/closed contract as the dialog: closed renders nothing, so a
+    // caller can keep one `open` flag for both presentations.
+    if (!open) return null
+    return (
+      <>
+        <section
+          aria-label={ariaLabel}
+          data-slot="create-surface-page"
+          // Focusable so ⌘↵ has somewhere to land when no field has focus,
+          // but not auto-focused: a page does not steal focus on mount.
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          className={cn(SHELL_BASE, "h-full min-h-0 w-full outline-none", className)}
+        >
+          <InDialog.Provider value={false}>
+            <HeadingTag.Provider value="h1">
+              <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
+            </HeadingTag.Provider>
+          </InDialog.Provider>
+        </section>
+        {discardGuard}
+      </>
+    )
+  }
+
+  return (
+    <>
+    <Dialog open={open} onOpenChange={requestOpenChange}>
+      <DialogContent
+        ref={contentRef}
+        aria-label={ariaLabel}
+        // Radix's own opt-out for the missing-description warning. The header
+        // renders a description when it has one and nothing when it does not;
+        // echoing the title into an sr-only node to silence the warning is what
+        // made screen readers say "New project. New project.".
+        aria-describedby={undefined}
+        showCloseButton={false}
+        onKeyDown={handleKeyDown}
+        tabIndex={-1}
+        // Focus goes to the first real field, not to the close button, so the
+        // surface opens ready to type — but if the caller has no field to
+        // focus, focus must still land INSIDE the surface, or ⌘↵ never reaches
+        // the handler above and the shell's headline promise is silently false
+        // until the user clicks. A field's own autoFocus runs after this and
+        // wins, so this is a floor, not an override.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          openerRef.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
+          contentRef.current?.focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          if (restoreOpenerFocus && openerRef.current?.isConnected) {
+            e.preventDefault()
+            openerRef.current.focus({ preventScroll: true })
+          }
+        }}
+        className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, className)}
+      >
+        <SheetGrabber />
+        <CloseGuard.Provider value={guard}>{children}</CloseGuard.Provider>
+      </DialogContent>
+    </Dialog>
+
+    {discardGuard}
     </>
   )
 }
@@ -465,6 +543,7 @@ export function CreateSurfaceHeader({
 }: CreateSurfaceHeaderProps) {
   const inDialog = React.useContext(InDialog)
   const guard = React.useContext(CloseGuard)
+  const Heading = React.useContext(HeadingTag)
   const Title = inDialog ? DialogTitle : React.Fragment
   const titleProps = inDialog ? { asChild: true as const } : {}
 
@@ -477,7 +556,7 @@ export function CreateSurfaceHeader({
             size="icon-xs"
             onClick={onBack}
             aria-label="Back"
-            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -490,7 +569,7 @@ export function CreateSurfaceHeader({
         {/* One title element spanning the whole path. Two headings side by side
             would make the accessible name "IssuesNew issue". */}
         <Title {...titleProps}>
-          <h2 className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
+          <Heading className="flex min-w-0 items-center gap-1.5 text-sm font-medium leading-none">
             {context != null && (
               <>
                 <span
@@ -521,7 +600,7 @@ export function CreateSurfaceHeader({
               </>
             )}
             <span className="truncate text-foreground">{title}</span>
-          </h2>
+          </Heading>
         </Title>
 
         <div className="flex-1" />
@@ -537,7 +616,7 @@ export function CreateSurfaceHeader({
           size="icon-xs"
           onClick={() => guard(onClose)}
           aria-label="Close"
-          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground max-sm:h-12 max-sm:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
+          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground coarse:h-12 coarse:w-12 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:w-12"
         >
           <X className="h-4 w-4" />
         </Button>
@@ -722,7 +801,7 @@ export function CreateSurfaceBody({
  * 44.16px by hand — one of them landed on `h-11` (40.5px) doing it, which is
  * exactly the `--spacing: 0.23rem` trap this file warns about at the top.
  */
-export const CREATE_SURFACE_INPUT = "h-8 text-xs max-sm:h-12 max-sm:text-sm"
+export const CREATE_SURFACE_INPUT = "h-8 text-xs coarse:h-12 coarse:text-base"
 
 /* --------------------------------------------------------------------------
  * Structure inside the body — Section, Grid, Field, Choice, ToggleRow,
@@ -740,7 +819,8 @@ export function CreateSurfaceSection({
   accent,
   className,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"section">, "title"> & {
   title?: React.ReactNode
   hint?: React.ReactNode
   concept?: string
@@ -750,7 +830,7 @@ export function CreateSurfaceSection({
   children: React.ReactNode
 }) {
   return (
-    <section className={cn("flex flex-col gap-2.5", className)}>
+    <section className={cn("flex flex-col gap-2.5", className)} {...props}>
       {title != null && (
         <div className="flex items-center gap-1.5">
           {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
@@ -859,7 +939,7 @@ export function CreateSurfaceChoice<T extends string>({
             onClick={() => onChange(o.value)}
             className={cn(
               "h-8 rounded-md border px-2.5 text-xs font-medium transition-colors",
-              "max-sm:h-12 max-sm:flex-1 max-sm:px-3 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1",
+              "coarse:h-12 max-sm:flex-1 coarse:px-3 group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1",
               active
                 ? "border-primary/40 bg-primary/15 text-primary-hover"
                 : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:bg-foreground/[0.07] hover:text-foreground",
@@ -942,7 +1022,7 @@ export function CreateSurfaceDisclosure({
         // generous. `--spacing: 0.23rem` is why: py-3 is 11px a side, not 12,
         // and it is added to a 19px line rather than to 44. Callers cannot
         // patch it either; this component takes no className.
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] max-sm:min-h-12 max-sm:py-3 group-data-[mobile=true]/surface:min-h-12 group-data-[mobile=true]/surface:py-3"
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03] coarse:min-h-12 max-sm:py-3 group-data-[mobile=true]/surface:min-h-12 group-data-[mobile=true]/surface:py-3"
       >
         {(concept || icon) && <ConceptIcon concept={concept} icon={icon} accent={accent} size="sm" />}
         <span className="shrink-0 text-[13px] font-medium text-foreground">{label}</span>
@@ -1064,8 +1144,8 @@ export function CreateSurfacePill({
         // against the 44 every platform guideline asks for. h-11 does not
         // reach it either (40.5) — h-12 is the touch-target class in this
         // repo, and this is the control New issue and New project are made of.
-        "max-sm:px-3 max-sm:text-sm group-data-[mobile=true]/surface:px-3",
-        "max-sm:h-12 group-data-[mobile=true]/surface:h-12",
+        "coarse:px-3 coarse:text-sm group-data-[mobile=true]/surface:px-3",
+        "coarse:h-12 group-data-[mobile=true]/surface:h-12",
         !readOnly && "hover:bg-foreground/[0.08]",
         readOnly && "cursor-default",
         set ? "text-foreground/85" : "text-muted-foreground",
@@ -1314,7 +1394,7 @@ export function CreateSurfacePicker({
                 onClick={() => palette.onChange(c.id)}
                 style={{ backgroundColor: c.dot }}
                 className={cn(
-                  "h-7 w-7 rounded-lg transition-all max-sm:h-9 max-sm:w-9 group-data-[mobile=true]/surface:h-9 group-data-[mobile=true]/surface:w-9",
+                  "h-7 w-7 rounded-lg transition-all coarse:h-9 coarse:w-9 group-data-[mobile=true]/surface:h-9 group-data-[mobile=true]/surface:w-9",
                   palette.value === c.id
                     ? "ring-2 ring-ring ring-offset-2 ring-offset-card"
                     : "opacity-60 hover:opacity-100",
@@ -1337,7 +1417,7 @@ export function CreateSurfacePicker({
                 aria-pressed={active}
                 onClick={() => categories.onChange(active ? null : c)}
                 className={cn(
-                  "h-7 rounded-full border px-2.5 text-[11px] capitalize transition-colors max-sm:h-9 group-data-[mobile=true]/surface:h-9",
+                  "h-7 rounded-full border px-2.5 text-[11px] capitalize transition-colors coarse:h-9 group-data-[mobile=true]/surface:h-9",
                   active
                     ? "border-primary/40 bg-primary/15 text-primary-hover"
                     : "border-hairline bg-foreground/[0.03] text-muted-foreground hover:text-foreground",
@@ -1360,7 +1440,7 @@ export function CreateSurfacePicker({
               onChange={(e) => search.onChange(e.target.value)}
               placeholder={search.placeholder ?? "Search…"}
               aria-label={search.placeholder ?? "Search"}
-              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary max-sm:h-12 max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm"
+              className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs text-foreground outline-none transition-colors focus:border-primary coarse:h-12 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm"
             />
           </div>
           <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground-soft">
@@ -1708,11 +1788,7 @@ export interface CreateSurfaceFooterProps extends Omit<React.ComponentProps<"div
 }
 
 export function CreateSurfaceFooter({
-  hint = (
-    <>
-      <kbd className="font-mono">⌘↵</kbd> to confirm · <kbd className="font-mono">Esc</kbd> to cancel
-    </>
-  ),
+  hint: hintProp,
   aside,
   onCancel,
   cancelLabel = "Cancel",
@@ -1728,6 +1804,22 @@ export function CreateSurfaceFooter({
   className,
   ...props
 }: CreateSurfaceFooterProps) {
+  // The keyboard contract is only true inside a dialog: the page presentation
+  // ignores Escape, so its footer must not advertise it.
+  const footerInDialog = React.useContext(InDialog)
+  const hint =
+    hintProp !== undefined ? (
+      hintProp
+    ) : (
+      <>
+        <kbd className="font-mono">⌘↵</kbd> to confirm
+        {footerInDialog && (
+          <>
+            {" "}· <kbd className="font-mono">Esc</kbd> to cancel
+          </>
+        )}
+      </>
+    )
   const guard = React.useContext(CloseGuard)
   return (
     <div
@@ -1752,7 +1844,7 @@ export function CreateSurfaceFooter({
         size="sm"
         onClick={() => (guardCancel ? guard(onCancel) : onCancel())}
         disabled={busy}
-        className="h-8 text-xs max-sm:h-12 max-sm:flex-1 max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
+        className="h-8 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm"
       >
         {cancelLabel}
       </Button>
@@ -1763,7 +1855,7 @@ export function CreateSurfaceFooter({
         size="sm"
         onClick={onPrimary}
         disabled={primaryDisabled || busy}
-        className="h-8 gap-1.5 text-xs max-sm:h-12 max-sm:flex-[2] max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
+        className="h-8 gap-1.5 text-xs coarse:h-12 max-sm:flex-[2] coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-[2] group-data-[mobile=true]/surface:text-sm"
       >
         {busy ? <Spinner className="h-3 w-3" /> : PrimaryIcon ? <PrimaryIcon className="h-3 w-3" /> : null}
         {primaryLabel}
@@ -1785,7 +1877,7 @@ export function CreateSurfaceSecondaryAction({
       variant="outline"
       size="sm"
       className={cn(
-        "h-8 gap-1.5 text-xs max-sm:h-12 max-sm:flex-1 max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
+        "h-8 gap-1.5 text-xs coarse:h-12 max-sm:flex-1 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:flex-1 group-data-[mobile=true]/surface:text-sm",
         className,
       )}
       {...props}

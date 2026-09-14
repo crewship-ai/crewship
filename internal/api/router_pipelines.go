@@ -19,9 +19,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// reusable across crews. Runner is wired post-construction by the
 	// orchestrator boot path; an unwired runner returns 503 from /run
 	// so the rest of the surface (List/Get/Delete/DryRun) stays usable
-	// for read-only inspection during boot. There is no public test_run
-	// route — the only draft validation gate is the internal save gate
-	// (/internal/pipelines/test_run, dry-run); a real run is just /run.
+	// for read-only inspection during boot. Public test_run validates a
+	// draft with a workspace-scoped save proof; the internal test_run route
+	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	pipes.storagePath = r.storagePath
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
@@ -91,7 +91,15 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// required. Distinct from /internal/pipelines/save which the
 	// sidecar uses with X-Internal-Token; this route uses normal
 	// JWT auth and records authorship as the calling user.
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/fixture_test", roleCreate, pipes.FixtureTest)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/save", roleCreate, pipes.Save)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/drafts", authed(wsCtx(http.HandlerFunc(pipes.ListDrafts))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", authed(wsCtx(http.HandlerFunc(pipes.GetDraft))))
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/drafts", roleCreate, pipes.SaveDraft)
+	// openapi: responses 201,400,401,403,409,422,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish", roleCreate, pipes.PublishDraft)
+	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft", roleCreate, pipes.DeleteDraft)
+
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions", authed(wsCtx(http.HandlerFunc(pipes.ListVersions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	// #1422 item 5: native version diff (`?from=N&to=M`) — unified diff of
@@ -212,6 +220,12 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// secret rotating only when the caller explicitly opts in.
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.UpdateWebhook)
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}", roleManage, pipes.DeleteWebhook)
+	// Routine webhook receipts — what a routine delivery leaves behind:
+	// its identity, the body's fingerprint and the run it produced. Read
+	// only; the raw payload is never returned.
+	receipts := NewRoutineReceiptsHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts", authed(wsCtx(http.HandlerFunc(receipts.List))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts/{receiptId}", authed(wsCtx(http.HandlerFunc(receipts.Get))))
 	// Public dispatch — no `authed` wrapper. The token in the path
 	// is the auth surface; signing_secret + HMAC layered on top.
 	r.mux.HandleFunc("POST /api/v1/webhooks/{token}", pipes.FireWebhook)

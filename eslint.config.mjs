@@ -79,7 +79,6 @@ const PALETTE_ALLOWLIST = [
   "components/features/routines/routine-dry-run-report.tsx",
   "components/features/routines/routine-flow-diagram.tsx",
   "components/features/routines/routine-mini-trace.tsx",
-  "components/features/routines/routine-overview-tab.tsx",
   "components/features/routines/routine-readable-summary.tsx",
   "components/features/routines/routine-touches.tsx",
   "components/features/settings/sections/general-section.tsx",

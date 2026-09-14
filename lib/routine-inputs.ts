@@ -94,10 +94,11 @@ export function widgetForInputType(inputType: string | undefined): string {
     case "array":
     case "object":
       return "textarea"
-    default:
-      // Undeclared, or a type from a newer DSL than this build. A text
-      // box the server can validate beats rendering nothing.
+    case undefined:
+    case "":
       return "text"
+    default:
+      return "unsupported"
   }
 }
 
@@ -133,28 +134,45 @@ export function formatInputDefault(value: unknown): string {
  * server performs for the slash catalog, for the surface that holds the
  * definition itself rather than a catalog entry.
  */
+function supportedRoutineWidget(widget: string | undefined): boolean {
+  return (
+    !widget || ["text", "textarea", "select", "multiselect", "boolean", "number"].includes(widget)
+  )
+}
+
 export function slashFieldsFromRoutineInputs(
   inputs: RoutineInputSpec[] | undefined,
 ): SlashFormField[] {
   if (!inputs?.length) return []
-  return inputs
-    // An input with no name cannot be keyed by a value, so it is not a
-    // field — the same drop the server makes.
-    .filter((i) => typeof i?.name === "string" && i.name !== "")
-    .map((i) => ({
-      name: i.name,
-      ...(i.label ? { label: i.label } : {}),
-      type: i.options?.length ? (i.type === "array" ? "multiselect" : "select") : i.widget || widgetForInputType(i.type),
-      options: Array.isArray(i.options) ? [...new Set(i.options.filter(o => typeof o === "string" && o !== ""))] : undefined,
-      allow_custom: i.allow_custom,
-      placeholder: i.placeholder,
-      min: i.min,
-      max: i.max,
-      required: Boolean(i.required),
-      default: formatInputDefault(i.default),
-      value_type: i.type ?? "",
-      help: i.description,
-    }))
+  return (
+    inputs
+      // An input with no name cannot be keyed by a value, so it is not a
+      // field — the same drop the server makes.
+      .filter((i) => typeof i?.name === "string" && i.name !== "")
+      .map((i) => ({
+        name: i.name,
+        ...(i.label ? { label: i.label } : {}),
+        type:
+          widgetForInputType(i.type) === "unsupported" || !supportedRoutineWidget(i.widget)
+            ? "unsupported"
+            : i.options?.length
+              ? i.type === "array"
+                ? "multiselect"
+                : "select"
+              : i.widget || widgetForInputType(i.type),
+        options: Array.isArray(i.options)
+          ? [...new Set(i.options.filter((o) => typeof o === "string" && o !== ""))]
+          : undefined,
+        allow_custom: i.allow_custom,
+        placeholder: i.placeholder,
+        min: i.min,
+        max: i.max,
+        required: Boolean(i.required),
+        default: formatInputDefault(i.default),
+        value_type: i.type ?? "",
+        help: i.description,
+      }))
+  )
 }
 
 /** Reading a routine's `inputs` out of its definition JSON, defensively:
@@ -260,7 +278,10 @@ export function coerceRoutineInput(
       // Check the shape here, where the message can name the box the
       // user is looking at.
       if (valueType === "array" && !Array.isArray(parsed)) {
-        throw new RoutineInputError(field, `"${raw}" is valid JSON but not an array — try ["a","b"]`)
+        throw new RoutineInputError(
+          field,
+          `"${raw}" is valid JSON but not an array — try ["a","b"]`,
+        )
       }
       if (
         valueType === "object" &&
@@ -273,8 +294,15 @@ export function coerceRoutineInput(
       }
       return parsed
     }
-    default:
+    case undefined:
+    case "":
+    case "string":
       return raw
+    default:
+      throw new RoutineInputError(
+        field,
+        `This form does not support the declared type ${valueType}. Open Edit to review the input schema.`,
+      )
   }
 }
 
@@ -327,6 +355,16 @@ export function routineInputsFromValues(
   fields: SlashFormField[] | undefined,
   values: Record<string, string>,
 ): Record<string, unknown> {
+  for (const field of fields ?? []) {
+    if (
+      widgetForInputType(field.value_type) === "unsupported" ||
+      !supportedRoutineWidget(field.type)
+    )
+      throw new RoutineInputError(
+        field.name,
+        `This form does not support the declared type ${field.value_type}. Open Edit to review the input schema.`,
+      )
+  }
   const byName = new Map((fields ?? []).map((f) => [f.name, f]))
   const out: Record<string, unknown> = {}
   for (const [name, raw] of Object.entries(values)) {
@@ -335,11 +373,14 @@ export function routineInputsFromValues(
     const parsed = field ? coerceRoutineInput(field.value_type, raw, name) : raw
     if (field?.options?.length && !field.allow_custom) {
       const chosen = Array.isArray(parsed) ? parsed : [parsed]
-      if (chosen.some(v => typeof v !== "string" || !field.options!.includes(v))) throw new RoutineInputError(name, "Choose an available answer")
+      if (chosen.some((v) => typeof v !== "string" || !field.options!.includes(v)))
+        throw new RoutineInputError(name, "Choose an available answer")
     }
     if (typeof parsed === "number" && field) {
-      if (field.min != null && parsed < field.min) throw new RoutineInputError(name, `Minimum is ${field.min}`)
-      if (field.max != null && parsed > field.max) throw new RoutineInputError(name, `Maximum is ${field.max}`)
+      if (field.min != null && parsed < field.min)
+        throw new RoutineInputError(name, `Minimum is ${field.min}`)
+      if (field.max != null && parsed > field.max)
+        throw new RoutineInputError(name, `Maximum is ${field.max}`)
     }
     out[name] = parsed
   }

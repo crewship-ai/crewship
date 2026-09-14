@@ -7,7 +7,9 @@ const h = vi.hoisted(() => ({ role: "MANAGER" as string }))
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, json: async () => [] })) }))
+vi.mock("@/lib/api-fetch", () => ({
+  apiFetch: vi.fn(async () => ({ ok: true, json: async () => [] })),
+}))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: h.role }) }))
 vi.mock("./../routine-definition-canvas", () => ({
   RoutineDefinitionCanvas: () => <div data-testid="graph" />,
@@ -64,11 +66,13 @@ describe("<RoutineCreateDialog>", () => {
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
-    fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
+    fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
+    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
     expect(screen.getByTestId("graph")).toBeInTheDocument()
 
     // And back, without losing the buffer — it is a look, not a mode.
-    fireEvent.click(screen.getByRole("radio", { name: "Code" }))
+    fireEvent.click(screen.getByRole("button", { name: "List", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
   })
 
@@ -76,22 +80,39 @@ describe("<RoutineCreateDialog>", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
-    const typed = "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n";
+    const typed =
+      "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n"
     act(() => lastDocChange?.(typed))
-    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
-    fireEvent.click(screen.getByText("Results", { exact: true }))
-    expect(screen.getByText("report")).toBeVisible()
+    if (screen.queryByRole("button", { name: "Back to recipe" }))
+      fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
+    fireEvent.click(screen.getAllByText("Results", { exact: true })[0])
+    expect(
+      screen.getAllByText("report").some((element) => element.closest("[hidden]") === null),
+    ).toBe(true)
     fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
-    fireEvent.click(screen.getByRole("radio", { name: "Preview" }))
-    fireEvent.click(screen.getByRole("radio", { name: "Code" }))
-    expect(editorProps.at(-1)?.code).toBe(typed)
+    fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
+    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "List", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    // A format switch reads the live buffer; the construction prop stays fixed while typing.
+    fireEvent.click(screen.getByRole("radio", { name: "JSON", exact: true }))
+    expect(JSON.parse(editorProps.at(-1)?.code ?? "{}")).toMatchObject({
+      name: "preserved",
+      steps: [{ id: "result" }],
+      outputs: [{ name: "report" }],
+    })
   })
 
   it("tolerates incomplete output declarations while editing", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    act(() => lastDocChange?.("dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n"))
-    fireEvent.click(screen.getByRole("button", { name: "Step 1: Overview", exact: true }))
+    act(() =>
+      lastDocChange?.(
+        "dsl_version: '1.0'\nname: partial\noutputs: [null, text]\nsteps: [{id: result, type: transform}]\n",
+      ),
+    )
+    if (screen.queryByRole("button", { name: "Back to recipe" }))
+      fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
     expect(screen.getByLabelText("Name")).toBeVisible()
   })
 
@@ -130,8 +151,7 @@ describe("New routine — the three entry tiles", () => {
 
   it("gives each route a colour of its own", () => {
     render(<RoutineCreateDialog {...PROPS} />)
-    const glyphTint = (name: RegExp) =>
-      tile(name).querySelector("span")?.className ?? ""
+    const glyphTint = (name: RegExp) => tile(name).querySelector("span")?.className ?? ""
 
     const describe_ = glyphTint(/^Describe it/)
     const fork = glyphTint(/^Fork an existing routine/)
@@ -283,7 +303,9 @@ describe("New routine — the discard guard follows the draft, not the screen", 
 
   function openDialog() {
     const onClose = vi.fn()
-    render(<RoutineCreateDialog workspaceId="ws-1" open onClose={onClose} onCreated={vi.fn()} />)
+    render(
+      <RoutineCreateDialog workspaceId="ws-1" open onClose={onClose} onCreated={vi.fn()} />,
+    )
     return { onClose }
   }
 
@@ -392,7 +414,9 @@ describe("New routine — a forked definition counts as work", () => {
       if (/\/pipelines$/.test(url))
         return {
           ok: true,
-          json: async () => [{ id: "r1", slug: "nightly", name: "Nightly", invocation_count: 0 }],
+          json: async () => [
+            { id: "r1", slug: "nightly", name: "Nightly", invocation_count: 0 },
+          ],
         }
       return { ok: true, json: async () => [] }
     }) as unknown as typeof apiFetch)
@@ -407,7 +431,9 @@ describe("New routine — a forked definition counts as work", () => {
 
   it("asks before dropping it, even carried back to the entry tiles", async () => {
     const onClose = vi.fn()
-    render(<RoutineCreateDialog workspaceId="ws-1" open onClose={onClose} onCreated={vi.fn()} />)
+    render(
+      <RoutineCreateDialog workspaceId="ws-1" open onClose={onClose} onCreated={vi.fn()} />,
+    )
     fireEvent.click(screen.getByText("Fork an existing routine"))
     fireEvent.click(await screen.findByText("Nightly"))
     await screen.findByTestId("editor")

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -14,7 +13,7 @@ import (
 // link exposes", and it decided by intersecting the live spec with the newest
 // human-authored version — never asking whether that human was allowed to look
 // at the panel they were marking. mayEditSpec is page-level (pages_authz.go),
-// so a MEMBER holding `write` on a page can edit a panel that is SEALED to
+// so historically a MEMBER holding `write` could edit a panel that was SEALED to
 // them; marking it public then served its payload at /api/v1/public/pages/
 // {token}, to anyone holding the link, with no auth at all.
 //
@@ -29,7 +28,7 @@ func TestPublicPanelIDs_APanelSealedToItsAttesterIsNotPublished(t *testing.T) {
 	}
 
 	// A workspace MEMBER who belongs to no crew: crew/lookout's panel is sealed
-	// to them, and a `write` grant lets them edit the page all the same.
+	// to them. Write authority permits metadata changes, not replacing hidden panels.
 	if _, err := h.db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('outsider', 'outsider@example.com', 'Outsider')`); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
@@ -53,8 +52,19 @@ func TestPublicPanelIDs_APanelSealedToItsAttesterIsNotPublished(t *testing.T) {
 	req.SetPathValue("slug", "fleet-201")
 	rr := httptest.NewRecorder()
 	h.Update(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("update by the write grantee: %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("hidden panel update by the write grantee: %d %s, want 403", rr.Code, rr.Body.String())
+	}
+
+	// Preserve coverage of the public-link defense for historical data written
+	// before the authoring gate existed. Refusing PATCH must not make the
+	// original attester-visibility assertion vacuously pass.
+	if _, err := h.db.Exec(`UPDATE pages SET spec_json=json_set(spec_json,'$.spec.panels[0].public',json('true')) WHERE id=?`, pageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO page_versions(page_id,seq,spec_json,author_user_id,created_at)
+SELECT p.id,2,p.spec_json,'outsider',p.updated_at FROM pages p WHERE p.id=?`, pageID); err != nil {
+		t.Fatal(err)
 	}
 
 	ids, err := h.publicPanelIDs(context.Background(), pageID)
@@ -142,7 +152,7 @@ func TestPublicPanelIDs_ARenameByAnOutsiderDoesNotUnpublish(t *testing.T) {
 	pagesGrant(t, h, wsID, userID, "fleet-201",
 		`{"subject_type":"user","subject":"renamer@example.com","level":"write"}`)
 
-	renamed := strings.Replace(published, `"name": "Flotila .201"`, `"name": "Flotila 201"`, 1)
+	renamed := `{"name":"Flotila 201"}`
 	req2 := pagesRequest(t, http.MethodPatch, "/api/v1/pages/fleet-201", wsID, "renamer", "MEMBER", renamed)
 	req2.SetPathValue("slug", "fleet-201")
 	rr2 := httptest.NewRecorder()

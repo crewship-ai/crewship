@@ -56,7 +56,7 @@ function ToolbarButton({
         // target. The toolbar sits above the project brief on a phone, so
         // every one of these is a control someone has to hit.
         // min-h-12, not min-h-11: `--spacing: 0.23rem` makes h-11 40.5px.
-        "max-sm:min-h-12 max-sm:min-w-12 max-sm:p-3",
+        "coarse:min-h-12 coarse:min-w-12 max-sm:p-3",
         "hover:bg-white/[0.08] disabled:pointer-events-none disabled:opacity-30",
         active
           ? "bg-primary/20 text-primary"

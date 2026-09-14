@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/cli"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,6 +34,10 @@ var evalCompareCmd = &cobra.Command{
 	Use:   "compare <scenario-slug>",
 	Short: "Run one eval scenario on two tiers back-to-back and report the head-to-head delta",
 	Long: `Compare worker tiers on a single eval scenario.
+
+Execution mode: live. Both runs use one pinned archived recipe version and
+can perform external writes and incur costs. Agreement compares execution
+status, not semantic quality; examine declared graders and actual outputs.
 
 Examples:
   # Default: fast vs smart on the workspace's authored inputs
@@ -88,21 +94,31 @@ func runEvalCompare(cmd *cobra.Command, args []string) error {
 	client := newAPIClient()
 	ws := client.GetWorkspaceID()
 
-	a, err := runOneSide(client, ws, slug, tierA, inputs)
+	requestedVersion, _ := cmd.Flags().GetInt("version")
+	version, err := resolveComparisonVersion(client, ws, slug, requestedVersion)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Execution mode: live — both sides pinned to v%d (%s); real effects and costs. Agreement compares execution status, not semantic quality.\n", version.Version, version.DefinitionHash)
+	a, err := runPinnedComparisonSide(client, ws, slug, tierA, inputs, &version.Version)
 	if err != nil {
 		return fmt.Errorf("run side A (tier=%s): %w", tierA, err)
 	}
-	b, err := runOneSide(client, ws, slug, tierB, inputs)
+	b, err := runPinnedComparisonSide(client, ws, slug, tierB, inputs, &version.Version)
 	if err != nil {
 		return fmt.Errorf("run side B (tier=%s): %w", tierB, err)
 	}
 
 	f := newFormatter()
 	return f.AutoHuman(map[string]any{
-		"scenario":  slug,
-		"side_a":    a,
-		"side_b":    b,
-		"agreement": semanticAgreementVerdict(a, b),
+		"execution_mode":   "live",
+		"pipeline_version": version.Version,
+		"definition_hash":  version.DefinitionHash,
+		"agreement_basis":  "execution_status",
+		"scenario":         slug,
+		"side_a":           a,
+		"side_b":           b,
+		"agreement":        semanticAgreementVerdict(a, b),
 	}, func() {
 		// markdown is a human-facing format (PR-pasteable), not a
 		// machine one — it stays in the AutoHuman fallback alongside
@@ -115,6 +131,75 @@ func runEvalCompare(cmd *cobra.Command, args []string) error {
 	})
 }
 
+func resolveComparisonVersion(client *cli.Client, ws, slug string, requested int) (pipelineVersionRow, error) {
+	if requested < 0 {
+		return pipelineVersionRow{}, fmt.Errorf("--version must be positive")
+	}
+	path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s/versions", url.PathEscape(ws), url.PathEscape(slug))
+	if requested > 0 {
+		path += fmt.Sprintf("/%d", requested)
+	}
+	resp, err := client.Get(path)
+	if err != nil {
+		return pipelineVersionRow{}, fmt.Errorf("resolve comparison version: %w", err)
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return pipelineVersionRow{}, fmt.Errorf("resolve comparison version: %w", err)
+	}
+	var version pipelineVersionRow
+	if requested > 0 {
+		if err := json.NewDecoder(resp.Body).Decode(&version); err != nil {
+			return version, err
+		}
+		if version.Version != requested {
+			return version, fmt.Errorf("archive returned a different version")
+		}
+	} else {
+		var rows []pipelineVersionRow
+		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+			return version, err
+		}
+		count := 0
+		for _, row := range rows {
+			if row.IsHead {
+				version = row
+				count++
+			}
+		}
+		if count == 0 {
+			// A rollback can put HEAD outside the bounded archive listing.
+			// Resolve its exact number from the recipe, then read that immutable row.
+			headResponse, err := client.Get(strings.TrimSuffix(path, "/versions"))
+			if err != nil {
+				return version, fmt.Errorf("resolve published head: %w", err)
+			}
+			defer headResponse.Body.Close()
+			if err := cli.CheckError(headResponse); err != nil {
+				return version, fmt.Errorf("resolve published head: %w", err)
+			}
+			var head struct {
+				Version int `json:"head_version"`
+			}
+			if err := json.NewDecoder(headResponse.Body).Decode(&head); err != nil {
+				return version, fmt.Errorf("decode published head: %w", err)
+			}
+			if head.Version < 1 {
+				return version, fmt.Errorf("published version unavailable; select an explicit --version")
+			}
+			return resolveComparisonVersion(client, ws, slug, head.Version)
+		}
+		if count != 1 {
+			return version, fmt.Errorf("archive listing contains multiple published versions")
+		}
+
+	}
+	if version.Version < 1 || version.DefinitionHash == "" {
+		return version, fmt.Errorf("comparison needs an archived version and definition hash")
+	}
+	return version, nil
+}
+
 // runOneSide fires one /run with the supplied tier and shapes the
 // response into compareSide. Treats non-2xx HTTP as a "side
 // transport error" — surfaces in the verdict output rather than
@@ -122,7 +207,16 @@ func runEvalCompare(cmd *cobra.Command, args []string) error {
 func runOneSide(client interface {
 	Post(string, any) (*http.Response, error)
 }, ws, slug, tier string, inputs map[string]any) (compareSide, error) {
+	return runPinnedComparisonSide(client, ws, slug, tier, inputs, nil)
+}
+
+func runPinnedComparisonSide(client interface {
+	Post(string, any) (*http.Response, error)
+}, ws, slug, tier string, inputs map[string]any, version *int) (compareSide, error) {
 	body := map[string]any{}
+	if version != nil {
+		body["pinned_version"] = *version
+	}
 	if inputs != nil {
 		body["inputs"] = inputs
 	} else {
@@ -183,6 +277,8 @@ func semanticAgreementVerdict(a, b compareSide) string {
 	pa := isPassStatus(a.Status)
 	pb := isPassStatus(b.Status)
 	switch {
+	case a.Status == "WAITING" || b.Status == "WAITING" || a.Status == "RUNNING" || b.Status == "RUNNING" || a.Status == "QUEUED" || b.Status == "QUEUED":
+		return "AMBIGUOUS"
 	case a.Status == "" || b.Status == "":
 		return "AMBIGUOUS"
 	case strings.HasPrefix(a.Status, "HTTP_") || strings.HasPrefix(b.Status, "HTTP_"):
@@ -279,6 +375,7 @@ func capOutput(s string, n int) string {
 }
 
 func init() {
+	evalCompareCmd.Flags().Int("version", 0, "archive version for both sides; default resolves the published version once")
 	evalCompareCmd.Flags().String("tier-a", "fast", "tier override for side A")
 	evalCompareCmd.Flags().String("tier-b", "smart", "tier override for side B")
 	evalCompareCmd.Flags().String("inputs", "", "JSON inputs forwarded to both sides (default: routine's authored defaults)")

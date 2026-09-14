@@ -37,8 +37,13 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "run.timeout",
     "run.session_init",
     "run.agent_span",
+    "work.accepted",
+    "work.claimed",
+    "work.needs_reconciliation",
+    "work.lease_lost",
   ],
   routine: [
+    "pipeline.published",
     "pipeline.run.started",
     "pipeline.run.completed",
     "pipeline.run.failed",

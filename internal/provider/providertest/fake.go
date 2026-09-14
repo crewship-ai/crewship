@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -143,7 +144,14 @@ var (
 // (internal/orchestrator/orchestrator_exec_env.go), so a test can drive
 // Tier 2 hard termination's actual signal, provider.TmuxKillSessionCmd(name)
 // / provider.TmuxListPanePIDsCmd(name), rather than a bare pid. name is
-// ordinarily orchestrator.TmuxSessionName(agentSlug).
+// ordinarily orchestrator.TmuxSessionName(agentSlug, runID) — since E0 a
+// session names one RUN of an agent, not the agent, so a test that wants two
+// live runs of ONE agent registers two holds under two run-scoped names and
+// they are as independent here as they are in a real container.
+//
+// Sessions registered this way are also what provider.TmuxListSessionsCmd
+// reports back, so the slug → run resolution a caller does when it holds only
+// a slug runs against the fake exactly as it does against tmux.
 func HoldSessionCmd(session string) []string { return []string{"hold", session} }
 
 func fakeExitCmd(code int) []string { return []string{"exit", strconv.Itoa(code)} }
@@ -345,6 +353,27 @@ func (f *FakeProvider) runCommand(ctx context.Context, cfg provider.ExecConfig, 
 			code = 1 // tmux: session not found
 		} else {
 			code = f.signalExec(target, "TERM")
+		}
+	case len(cfg.Cmd) == 4 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-sessions" && cfg.Cmd[2] == "-F":
+		// provider.TmuxListSessionsCmd's argv: one live session name per line.
+		// How a caller holding only an agent slug discovers which RUNS of it
+		// are up — E0 made the session name run-scoped, so a slug alone no
+		// longer names a session. Sorted for a stable read; no sessions at all
+		// exits non-zero, like tmux's "no server running on ..." in a
+		// container where nothing has run yet.
+		f.mu.Lock()
+		names := make([]string, 0, len(f.sessions))
+		for name := range f.sessions {
+			names = append(names, name)
+		}
+		f.mu.Unlock()
+		if len(names) == 0 {
+			code = 1
+		} else {
+			sort.Strings(names)
+			for _, name := range names {
+				_, _ = io.WriteString(pw, name+"\n")
+			}
 		}
 	case len(cfg.Cmd) == 6 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-panes" && cfg.Cmd[2] == "-t":
 		// provider.TmuxListPanePIDsCmd's argv: reports the session's

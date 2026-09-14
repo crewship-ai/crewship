@@ -21,11 +21,31 @@ func (r *webhookErroringRunner) RunStep(_ context.Context, _ pipeline.AgentStepR
 	return pipeline.AgentStepResult{}, errors.New("boom")
 }
 
-// #1429 (2.6) — a FAILED webhook run must RELEASE its idempotency key so a
-// sender redelivery RE-FIRES a fresh run. Previously the key was only freed
-// when Run returned an error; a run that executed and FAILED wedged the key
-// for 24h and every redelivery deduped onto the failed run.
-func TestPipelineWebhooks_Fire_FailedRun_ReleasesIdempotencyKey(t *testing.T) {
+// A FAILED routine run must NOT release its dedup key: a redelivery of the same
+// event is a duplicate, not a re-fire.
+//
+// This test is the deliberate inversion of TestPipelineWebhooks_Fire_FailedRun_
+// ReleasesIdempotencyKey, which pinned the opposite behaviour (#1429, 2.6) —
+// the run ended FAILED, the key was deleted, and the sender's next redelivery
+// re-executed the routine.
+//
+// The old behaviour has a case: a key wedged by a transient failure denies a
+// re-fire for the whole retention window. The new one has a stronger case, and
+// it is §4's. A run that FAILED did not necessarily fail before it touched
+// anything: it may have posted the comment, opened the PR or charged the card
+// and then failed on the next step. Re-running it because a provider's retry
+// timer fired repeats effects that already happened, and the sender never asked
+// for that — it asked for its event to be handled once. §4 is explicit that an
+// unclear external effect needs verification, not a blind repeat.
+//
+// A re-run is therefore an authorized REPLAY — new work carrying replay_of, a
+// reason and a fresh authorization — and not a consequence of a redelivery.
+//
+// What it costs, said plainly so nobody rediscovers it as a bug: a routine that
+// failed for a genuinely transient reason no longer re-fires by itself when the
+// sender retries. Until the dispatcher owns retry_wait, recovering that run is a
+// manual replay.
+func TestPipelineWebhooks_Fire_FailedRun_KeepsItsDeliveryRecorded(t *testing.T) {
 	// The webhook store refuses to persist a plaintext signing secret; give it
 	// a usable key (these async tests otherwise rely on a leaked process env).
 	// Generated at runtime so no secret literal lands in source.
@@ -63,18 +83,30 @@ func TestPipelineWebhooks_Fire_FailedRun_ReleasesIdempotencyKey(t *testing.T) {
 	firstRunID, _ := first["run_id"].(string)
 	h.WaitWebhookDispatches()
 
-	// Redelivery with the SAME key must NOT dedupe onto the failed run — the
-	// key was released, so this re-fires a fresh run.
+	// Redelivery with the SAME key after a FAILED run is a DUPLICATE. It gets
+	// the original run's id back and executes nothing.
 	second := fire()
-	if second["status"] != "PENDING" || second["deduped"] == true {
-		t.Errorf("redelivery of a FAILED run = %v, want a fresh PENDING run (key released)", second)
+	if second["status"] != "DEDUPED" || second["deduped"] != true {
+		t.Errorf("redelivery after a FAILED run = %v, want DEDUPED", second)
 	}
-	if second["run_id"] == firstRunID {
-		t.Errorf("redelivery reused the failed run id %q — the key was not released", firstRunID)
+	if second["run_id"] != firstRunID {
+		t.Errorf("redelivery answered run_id %v, want the original %q", second["run_id"], firstRunID)
 	}
 	h.WaitWebhookDispatches()
 
-	if runner.calls != 2 {
-		t.Errorf("runner invoked %d times, want 2 (delivery + a re-fired redelivery)", runner.calls)
+	if runner.calls != 1 {
+		t.Errorf("runner invoked %d times, want 1 — a redelivery must not repeat effects "+
+			"the failed run may already have performed", runner.calls)
+	}
+
+	// The delivery is still on the record. Nothing is deleted on failure: that
+	// deletion is what let an already-performed effect be repeated.
+	var deliveries int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM routine_webhook_receipts WHERE workspace_id = ?`, wsID).
+		Scan(&deliveries); err != nil {
+		t.Fatalf("count deliveries: %v", err)
+	}
+	if deliveries != 1 {
+		t.Errorf("delivery rows = %d, want 1 — the ledger must keep a failed delivery", deliveries)
 	}
 }

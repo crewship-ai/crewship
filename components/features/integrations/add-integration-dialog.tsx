@@ -182,7 +182,7 @@ export function AddIntegrationDialog({
             aria-label="Search notification services"
             className={cn(
               "min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/40",
-              "max-sm:h-12 max-sm:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm",
+              "coarse:h-12 coarse:text-sm group-data-[mobile=true]/surface:h-12 group-data-[mobile=true]/surface:text-sm",
             )}
           />
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground/50">

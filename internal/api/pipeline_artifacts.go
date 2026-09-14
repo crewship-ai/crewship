@@ -102,7 +102,31 @@ func NewRoutineArtifactPublisher(db *sql.DB, storageRoot string) pipeline.Artifa
 					}
 				}
 			}
-			_, err := db.ExecContext(persistCtx, `INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,content_type,sha256,content,source,error,created_at)
+			// The executor publishes an agent step's declaration twice: as a
+			// draft from the nested invocation that produced it, then as
+			// available from the step that accepted it. That is one
+			// deliverable, so the enclosing step promotes the row its own
+			// subtree already owns instead of adding a second one. Two
+			// UNRELATED steps naming the same file still keep separate rows.
+			// A failed parent records its own draft. A later shared-file
+			// write must not replace the child's earlier snapshot.
+			promoted, err := db.ExecContext(persistCtx, `UPDATE pipeline_run_artifacts SET state=?,content_type=?,sha256=?,content=?,error=?
+              WHERE ?='available' AND run_id=? AND kind=? AND label=? AND source=? AND state='draft' AND step_execution_id IN (
+                SELECT child.id FROM pipeline_step_executions child JOIN pipeline_step_executions parent ON parent.id=?
+                WHERE child.run_id=parent.run_id
+                  AND child.parent_execution_id=parent.id
+                  AND child.kind='agent_attempt' AND child.status='completed'
+                ORDER BY child.attempt DESC,child.started_at DESC LIMIT 1)`,
+				artifactState, contentType, sha, content, reason, state, runID, kind, label, source, executionID)
+			if err != nil {
+				unlock()
+				return fmt.Errorf("promote child artifact: %w", err)
+			}
+			if replaced, _ := promoted.RowsAffected(); replaced > 0 {
+				unlock()
+				continue
+			}
+			_, err = db.ExecContext(persistCtx, `INSERT INTO pipeline_run_artifacts(id,run_id,step_execution_id,kind,label,state,content_type,sha256,content,source,error,created_at)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(step_execution_id,kind,label,source) DO NOTHING`, "art_"+generateCUID(), runID, executionID, kind, label, artifactState, contentType, sha, content, source, reason, tsformat.Format(time.Now()))
 			unlock()
 			if err != nil {

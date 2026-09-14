@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,14 +99,59 @@ type Session struct {
 	cancel  context.CancelFunc
 }
 
+// liveRunSessionTimeout bounds the one `tmux list-sessions` probe attach makes
+// to resolve a slug to a run. It is a read against a local daemon and answers
+// in milliseconds; a container that cannot answer it this fast is not going to
+// give the user a usable terminal either.
+const liveRunSessionTimeout = 2 * time.Second
+
+// liveRunIDs returns the run ids of agentSlug's live tmux sessions inside
+// containerName, sorted (see orchestrator.RunIDsFromSessionNames). Deliberately
+// ALL of them, not "the newest": which run a user meant is not something this
+// layer can infer, so the caller decides — and refuses when it cannot.
+//
+// A non-zero exit from tmux is NOT an error here: `tmux list-sessions` exits
+// non-zero with "no server running on /tmp/tmux-1001/default" when no agent
+// has ever run in this container, which is an ordinary empty result. Only a
+// failure to run the exec at all is reported as an error, so the caller can
+// tell "this agent has no runs" apart from "we could not find out".
+func (h *Handler) liveRunIDs(ctx context.Context, containerName, agentSlug string) ([]string, error) {
+	listCtx, cancel := context.WithTimeout(ctx, liveRunSessionTimeout)
+	defer cancel()
+	res, err := h.container.Exec(listCtx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         provider.TmuxListSessionsCmd(),
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list tmux sessions: %w", err)
+	}
+	out, readErr := io.ReadAll(res.Reader)
+	_ = res.Reader.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read tmux sessions: %w", readErr)
+	}
+	return orchestrator.RunIDsFromSessionNames(string(out), agentSlug), nil
+}
+
 // InitMessage is sent by the client as the first text message after connecting.
 type InitMessage struct {
 	Mode      string `json:"mode"`       // "shell"
 	CrewID    string `json:"crew_id"`    // crew UUID
 	CrewSlug  string `json:"crew_slug"`  // crew slug for container lookup
 	AgentSlug string `json:"agent_slug"` // optional: agent-level shell
-	Rows      uint16 `json:"rows"`
-	Cols      uint16 `json:"cols"`
+	// RunID names WHICH RUN of that agent to attach to (mode "attach").
+	// Optional, and optional on purpose: the existing clients send only a
+	// slug. When it is empty the handler resolves the agent's live sessions
+	// itself and attaches only if there is exactly one — with several it
+	// refuses and names them rather than picking one silently, because
+	// attaching to the wrong run of an agent is indistinguishable from
+	// attaching to the right one until the user types something into it.
+	//
+	// Ignored in "shell" mode: a shell is not a run.
+	RunID string `json:"run_id,omitempty"`
+	Rows  uint16 `json:"rows"`
+	Cols  uint16 `json:"cols"`
 }
 
 // resizeMessage is a control message for terminal resize.
@@ -377,7 +423,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(ws, "agent_slug is required for attach mode")
 			return
 		}
-		tmuxSession := orchestrator.TmuxSessionName(init.AgentSlug)
+		// E0: a tmux session names one RUN of the agent, not the agent
+		// ("agent-<slug>-<runID>"), so the slug the client sent is no longer
+		// enough to attach. Resolve it to a specific run, explicitly.
+		runID := init.RunID
+		if runID != "" && !orchestrator.ValidRunID(runID) {
+			h.writeError(ws, "invalid run_id")
+			return
+		}
+		if runID == "" {
+			live, listErr := h.liveRunIDs(r.Context(), containerName, init.AgentSlug)
+			if listErr != nil {
+				h.logger.Error("terminal: list tmux sessions failed",
+					"agent_slug", init.AgentSlug, "error", listErr)
+				h.writeError(ws, "failed to list the agent's running sessions")
+				return
+			}
+			switch len(live) {
+			case 0:
+				h.writeError(ws, "agent is not running (no active tmux session)")
+				return
+			case 1:
+				runID = live[0]
+			default:
+				// Refuse rather than guess. Two runs of one agent are exactly
+				// what E0 makes possible, and the wrong one is not visibly
+				// wrong once you are inside it. Name them so the client can
+				// re-init with run_id set.
+				h.writeError(ws, fmt.Sprintf(
+					"agent %s has %d runs in progress (%s) — reconnect with run_id set to the one you want",
+					init.AgentSlug, len(live), strings.Join(live, ", ")))
+				return
+			}
+		}
+		tmuxSession := orchestrator.TmuxSessionName(init.AgentSlug, runID)
 		// Check if tmux session exists (agent is running).
 		checkResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
 			ContainerID: containerName,

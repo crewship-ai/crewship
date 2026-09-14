@@ -380,7 +380,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// leak the actual API surface to a probing attacker.
 	mainHandler = pathTraversalRejectMiddleware(mainHandler)
 	// V-10: Wrap with security headers middleware
-	mainHandler = securityHeadersMiddleware(mainHandler)
+	mainHandler = securityHeadersMiddleware(mainHandler, cfg.Storage.PageRuntimeOrigin)
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics
 	// inside securityHeadersMiddleware itself (rare but possible if a
 	// future header derivation path-traverses a nil request). Forwards
@@ -662,7 +662,7 @@ func (s *Server) mountAPIRouter(
 	if cfg.Auth.GoogleClientID != "" {
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
-	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath))
+	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(cfg.Storage.PageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
 
 	// Dynamic catalog fetchers (devcontainer features + mise runtimes).
 	// They default to cached / embedded data; a background goroutine

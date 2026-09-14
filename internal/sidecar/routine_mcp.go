@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/manifest"
+	"github.com/crewship-ai/crewship/internal/pages"
 )
 
 // RoutinesMCPServerName is the server identity the in-container CLI sees in
@@ -182,7 +183,8 @@ var manifestMCPValidateSchema = json.RawMessage(`{
 var routineMCPTools = []memoryMCPToolDescriptor{
 	{
 		Name: "save_routine",
-		Description: "Author a Crewship routine (a durable, versioned, schedulable pipeline). " +
+		Description: "Legacy direct publication of a Crewship routine (a durable, versioned, schedulable pipeline). " +
+			"For Chat authoring that a user will review first, use get_routine_draft and save_routine_draft instead. " +
 			"Supply the routine name, a short description, the DSL `definition` object, and " +
 			"`sample_inputs` for the mandatory test_run. The routine is test-run inline before " +
 			"saving: on success the saved routine is returned; on a DSL or validation error the " +
@@ -217,6 +219,10 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 		InputSchema: routineMCPRunSchema,
 	},
 	{
+		Name:        "page_project",
+		Description: "Edit a custom React Page draft without publishing. First create the Page with save_page. init requires expected_revision=0 and creates the fixed starter; read lists files and the exact @crewship/pages SDK contract, or reads one path; save replaces supplied files/deletes named paths with expected_revision CAS; build starts an isolated compiler; status reports the job without code; check requires build_id and expected_revision. Inspect errors and retry after reading current revision. Never claim saved/built means published. Source changes use page_create policy and the Page owner crew. Use small file batches under the 1 MiB tool envelope; no shell, packages or secrets are installed.",
+		InputSchema: pageProjectMCPSchema,
+	}, {
 		Name: "save_page",
 		Description: "Create a Crewship page (a typed operational dashboard: status/metric/series/table/narrative/embed " +
 			"panels). Supply the page name, a short description, and the `panels` array. If this crew's autonomy level " +
@@ -256,6 +262,8 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 			"to state that already exists in the workspace are rechecked when an apply plan is built.",
 		InputSchema: manifestMCPValidateSchema,
 	},
+	{Name: "get_routine_draft", Description: "Load the saved draft or a revision-zero baseline before authoring. Keep the returned revision envelope for save_routine_draft; do not overwrite another editor's revision. This does not run or publish work.", InputSchema: routineMCPGetDraftSchema},
+	{Name: "save_routine_draft", Description: "Save unpublished routine edits using the exact revision envelope returned by get_routine_draft. Put slug, name, definition and the proposed trigger inside draft.document. Never changes the live recipe or activates schedules. Return the editor_url to the user for Recipe / Test / Publish. A conflict preserves the existing draft; do not reload and blindly overwrite it. Prefer this for authoring in Chat; legacy save_routine publishes directly.", InputSchema: routineMCPSaveDraftSchema},
 }
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
@@ -273,12 +281,12 @@ var routineMCPTools = []memoryMCPToolDescriptor{
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MiB cap — MCP requests are tiny
-	if err != nil {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1)) // Bounded file patches, never an unbounded source upload
+	if err != nil || len(raw) > 1<<20 {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
 			ID:      mcpNullID,
-			Error:   &memoryMCPRPCError{Code: -32700, Message: "parse error: " + err.Error()},
+			Error:   &memoryMCPRPCError{Code: -32700, Message: "invalid or oversized MCP request"},
 		})
 		return
 	}
@@ -382,6 +390,13 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	var status int
 	var bodyBytes []byte
 	switch params.Name {
+	case "get_routine_draft", "save_routine_draft":
+		var args routineDraftArguments
+		if err := json.Unmarshal(params.Arguments, &args); err != nil {
+			s.writeRoutinesMCPToolResult(w, req, http.StatusBadRequest, mustJSON(map[string]string{"error": "invalid draft arguments"}))
+			return
+		}
+		status, bodyBytes = s.routineDraft(r.Context(), args, actingAgentID, params.Name == "save_routine_draft")
 	case "save_routine":
 		var save pipelinesSaveRequest
 		if len(params.Arguments) > 0 {
@@ -391,7 +406,14 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID)
+		status, bodyBytes = s.savePipeline(r.Context(), save, actingAgentID, s.requestChatID(r))
+	case "page_project":
+		var project pageProjectToolRequest
+		if err := pages.DecodeProjectJSON(params.Arguments, &project); err != nil {
+			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid project arguments"}))
+			return
+		}
+		status, bodyBytes = s.pageProject(r.Context(), project, actingAgentID)
 	case "save_page":
 		var save pagesSaveRequest
 		if len(params.Arguments) > 0 {

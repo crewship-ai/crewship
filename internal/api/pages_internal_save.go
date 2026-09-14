@@ -45,6 +45,9 @@ import (
 func (r *Router) registerInternalPageSaveRoute(internalAuth func(http.Handler) http.Handler) {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
 	p.SetPolicyResolver(r.PolicyResolver())
+	// Reuse the public project store and single compiler slot, not another handler.
+	r.pages.SetPolicyResolver(r.PolicyResolver())
+	r.mux.Handle("POST /api/v1/internal/pages/project", internalAuth(http.HandlerFunc(r.pages.InternalProject)))
 	r.mux.Handle("POST /api/v1/internal/pages/save",
 		internalAuth(http.HandlerFunc(p.InternalSave)))
 }

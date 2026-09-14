@@ -62,7 +62,7 @@ func coreResourceSchemas() map[string]any {
 
 	workspace := object(map[string]any{
 		"id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
-		"logo_url": nullableString(), "preferred_language": nullableString(),
+		"logo_url": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
 		"created_at": stringSchema(), "updated_at": stringSchema(),
 		"currentUserRole":              nullableString(),
 		"currentUserCapabilities":      arrayOf(stringSchema()),
@@ -75,7 +75,7 @@ func coreResourceSchemas() map[string]any {
 		"_count":                          ref("WorkspaceCounts"),
 		"_count_crews":                    intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
 	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials",
-		"logo_url", "preferred_language", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days")
+		"logo_url", "preferred_language", "pages_theme", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days")
 
 	crew := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -137,7 +137,7 @@ func coreResourceSchemas() map[string]any {
 			"name": stringSchema(), "slug": stringSchema(), "preferred_language": nullableString(),
 		}, "name", "slug"),
 		"WorkspaceUpdateRequest": requestObject(map[string]any{
-			"name": nullableString(), "slug": nullableString(), "preferred_language": nullableString(),
+			"name": nullableString(), "slug": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
 			"allow_privileged_credentials": nullableBool(), "run_retention_days": nullableInt(),
 			"credential_audit_retention_days": nullableInt(), "audit_log_retention_days": nullableInt(),
 		}),

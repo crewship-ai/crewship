@@ -18,6 +18,7 @@ func opencodeReq(model string, creds ...Credential) AgentRunRequest {
 	return AgentRunRequest{
 		AgentID:     "agent-1",
 		AgentSlug:   "coder",
+		RunID:       "run-1",
 		CrewID:      "crew-1",
 		ChatID:      "chat-1",
 		CLIAdapter:  "OPENCODE",
@@ -127,13 +128,13 @@ func TestBuildEnvVarsSidecar_UnroutedOpenCodeUnchanged(t *testing.T) {
 	)
 
 	want := []string{
-		"HOME=/crew/agents/coder",
+		"HOME=/crew/runs/coder/run-1",
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=agent-1",
 		"CREWSHIP_CREW_ID=crew-1",
 		"CREWSHIP_CHAT_ID=chat-1",
 		"CREWSHIP_CREW_SHARED=/crew/shared",
-		"XDG_DATA_HOME=/crew/agents/coder/.local/share",
+		"XDG_DATA_HOME=/crew/runs/coder/run-1/.local/share",
 		"HTTP_PROXY=http://127.0.0.1:9119",
 		"HTTPS_PROXY=http://127.0.0.1:9119",
 		"http_proxy=http://127.0.0.1:9119",

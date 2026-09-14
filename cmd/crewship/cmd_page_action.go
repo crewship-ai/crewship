@@ -264,7 +264,16 @@ with DIFFERENT inputs is refused (409) rather than silently deduped.`,
 
 		path := fmt.Sprintf("/api/v1/pages/%s/panels/%s/actions/%s",
 			pagePathEscape(slug), pagePathEscape(panel), pagePathEscape(actionID))
-		resp, err := client.Post(path, map[string]any{"inputs": inputs})
+		request := map[string]any{"inputs": inputs}
+		publication, _ := cmd.Flags().GetInt64("publication")
+		if publication < 0 {
+			return fmt.Errorf("publication must be positive")
+		}
+		if publication > 0 {
+			path = fmt.Sprintf("/api/v1/pages/%s/application/actions/%s/%s", pagePathEscape(slug), pagePathEscape(panel), pagePathEscape(actionID))
+			request["publication"] = publication
+		}
+		resp, err := client.Post(path, request)
 		if err != nil {
 			return err
 		}
@@ -353,6 +362,7 @@ func splitPagePanelRef(ref string) (slug, panel string, err error) {
 }
 
 func init() {
+	pageActionCmd.Flags().Int64("publication", 0, "Fence this action to the selected published application version")
 	pageActionCmd.Flags().StringArray("input", nil,
 		"An input the action declared, as k=v. Repeatable.")
 	pageActionCmd.Flags().String("idempotency-key", "",

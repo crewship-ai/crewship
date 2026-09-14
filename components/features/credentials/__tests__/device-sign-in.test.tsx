@@ -120,7 +120,12 @@ describe("the flow", () => {
   it("polls until complete and hands the credential id up once", async () => {
     script([{ status: "pending" }, { status: "pending" }, { status: "complete", credential_id: "cred_9" }])
     const { onComplete, onStateChange } = renderIt()
-    await waitFor(() => expect(onComplete).toHaveBeenCalledWith("cred_9"))
+    // onComplete runs in the poll; onStateChange runs in the later passive
+    // effect. Wait for both before asserting the committed completion UI.
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledWith("cred_9")
+      expect(onStateChange).toHaveBeenLastCalledWith("complete")
+    })
     expect(screen.getByTestId("device-sign-in")).toHaveAttribute("data-phase", "complete")
     expect(screen.getByText(/signed in\. the login is saved with its refresh token sealed/i)).toBeInTheDocument()
     expect(onStateChange).toHaveBeenLastCalledWith("complete")
@@ -156,7 +161,7 @@ describe("the flow", () => {
     h.apiFetch.mockResolvedValue(fail(501, { error: "device flow not available for GOOGLE" }))
     const { onStateChange } = renderIt({ provider: "GOOGLE" })
     expect(await screen.findByRole("alert")).toHaveTextContent("device flow not available for GOOGLE")
-    expect(onStateChange).toHaveBeenLastCalledWith("error")
+    await waitFor(() => expect(onStateChange).toHaveBeenLastCalledWith("error"))
     expect(screen.queryByTestId("device-user-code")).not.toBeInTheDocument()
   })
 

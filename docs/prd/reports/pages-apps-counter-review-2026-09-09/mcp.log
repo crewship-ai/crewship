@@ -1,0 +1,4 @@
+=== RUN   TestPageProjectMCPDockerIntegration
+--- PASS: TestPageProjectMCPDockerIntegration (5.94s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/sidecar	5.974s

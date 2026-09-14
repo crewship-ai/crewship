@@ -189,7 +189,7 @@ func writeMCPClaude(
 	_ string,
 	logger *slog.Logger,
 ) error {
-	return setupMCPConfig(ctx, container, containerID, req.AgentSlug,
+	return setupMCPConfig(ctx, container, containerID, req.AgentSlug, req.RunID,
 		req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, logger)
 }
 
@@ -577,7 +577,7 @@ func writeMCPCodex(
 		b.WriteString("\n")
 	}
 	// HOME-relative path so Codex loads it without project-trust ceremony.
-	homeDir := fmt.Sprintf("/crew/agents/%s", req.AgentSlug)
+	homeDir := agentHomeDir(req.AgentSlug, req.RunID)
 	return writeFileViaContainer(ctx, container, containerID, homeDir, ".codex/config.toml", b.String(), containerFileSecret, logger)
 }
 

@@ -88,7 +88,7 @@ export interface CreateAgentDialogProps {
  *  sets `--spacing: 0.23rem` — see the header comment on create-surface.tsx.
  *  `h-11` would land at 40.5px and look fine while missing the target. */
 const INPUT_CLASS =
-  "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 max-sm:min-h-12 max-sm:text-sm"
+  "w-full bg-background border border-white/[0.15] rounded-md px-2.5 py-1.5 text-[13px] text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/15 coarse:min-h-12 coarse:text-sm"
 
 const TOOL_PROFILES = ["MINIMAL", "CODING", "FULL"] as const
 /** Shared create/edit form with persistent drafts and focused settings sections. */
@@ -425,7 +425,7 @@ export function CreateAgentDialog({
                   <button
                     type="button"
                     aria-label="Choose a template"
-                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-white/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-white/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 max-sm:min-h-12"
+                    className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md border border-white/[0.15] bg-background px-2 py-1.5 text-left text-[13px] transition-colors hover:border-white/[0.28] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 coarse:min-h-12"
                   >
                     {draft.selectedPersona ? (
                       <>
@@ -480,7 +480,7 @@ export function CreateAgentDialog({
                 <button
                   type="button"
                   onClick={handleBlank}
-                  className="shrink-0 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground max-sm:min-h-12"
+                  className="shrink-0 rounded-md px-2 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground coarse:min-h-12"
                 >
                   Clear
                 </button>

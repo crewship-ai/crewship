@@ -228,6 +228,7 @@ func covRunReq() AgentRunRequest {
 		CrewID:      "crew1",
 		WorkspaceID: "ws1",
 		ChatID:      "chat1",
+		RunID:       covRunID,
 		ContainerID: "container-abcdef1234567890",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "please do the thing",
@@ -235,9 +236,15 @@ func covRunReq() AgentRunRequest {
 	}
 }
 
-func covRunStatus(t *testing.T, st *memState, chatID string) string {
+// covRunID is the run id every covRunRequest carries. Deliberately NOT the
+// chat id: the run-state row is keyed by RUN since E0 (two runs of one agent
+// share a chat id on three dispatch paths), and using a distinct value here is
+// what makes a regression to chat-id keying fail this file rather than pass it.
+const covRunID = "run-cov1"
+
+func covRunStatus(t *testing.T, st *memState, runID string) string {
 	t.Helper()
-	raw, _ := st.Get(context.Background(), "agent_runs", chatID)
+	raw, _ := st.Get(context.Background(), "agent_runs", runID)
 	if raw == nil {
 		t.Fatal("no run state persisted")
 	}
@@ -278,7 +285,7 @@ func TestRunAgentForAssignment_SuccessfulRun(t *testing.T) {
 	if err := o.RunAgentForAssignment(context.Background(), covRunReq(), nil); err != nil {
 		t.Fatalf("RunAgentForAssignment: %v", err)
 	}
-	if got := covRunStatus(t, st, "chat1"); got != "completed" {
+	if got := covRunStatus(t, st, covRunID); got != "completed" {
 		t.Errorf("run status = %q, want completed", got)
 	}
 }
@@ -344,7 +351,7 @@ func TestRunAgent_ApprovalRequiredButApprovedProceeds(t *testing.T) {
 	if !hooks.seen("on_approval_requested") || !hooks.seen("pre_agent_start") || !hooks.seen("post_agent_stop") {
 		t.Errorf("hook sequence incomplete: %v", hooks.events)
 	}
-	if got := covRunStatus(t, st, "chat1"); got != "completed" {
+	if got := covRunStatus(t, st, covRunID); got != "completed" {
 		t.Errorf("run status = %q, want completed", got)
 	}
 }
@@ -798,7 +805,7 @@ func TestRunAgent_UnknownNetworkModeFailsRun(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown network mode: yolo") {
 		t.Fatalf("expected unknown network mode error, got %v", err)
 	}
-	if got := covRunStatus(t, st, "chat1"); got != "error" {
+	if got := covRunStatus(t, st, covRunID); got != "error" {
 		t.Errorf("run status = %q, want error", got)
 	}
 }
@@ -890,7 +897,7 @@ func TestRunAgent_SidecarStartFailureAborts(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "start sidecar") {
 		t.Fatalf("expected sidecar start failure, got %v", err)
 	}
-	if got := covRunStatus(t, st, "chat1"); got != "error" {
+	if got := covRunStatus(t, st, covRunID); got != "error" {
 		t.Errorf("run status = %q, want error", got)
 	}
 }
@@ -908,7 +915,7 @@ func TestRunAgent_MCPWriteFailureAbortsWhenMCPConfigured(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "inject MCP config (CLAUDE_CODE)") {
 		t.Fatalf("expected MCP injection failure, got %v", err)
 	}
-	if got := covRunStatus(t, st, "chat1"); got != "error" {
+	if got := covRunStatus(t, st, covRunID); got != "error" {
 		t.Errorf("run status = %q, want error", got)
 	}
 }
@@ -926,7 +933,7 @@ func TestRunAgent_ExitCodeMapping(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "missing or invalid CLI token") {
 			t.Fatalf("expected token guidance for exit 123, got %v", err)
 		}
-		if got := covRunStatus(t, st, "chat1"); got != "error" {
+		if got := covRunStatus(t, st, covRunID); got != "error" {
 			t.Errorf("run status = %q, want error", got)
 		}
 	})
@@ -949,7 +956,7 @@ func TestRunAgent_ExitCodeMapping(t *testing.T) {
 		if err := o.RunAgent(context.Background(), covRunReq(), nil); err != nil {
 			t.Fatalf("still-running exec must return nil: %v", err)
 		}
-		if got := covRunStatus(t, st, "chat1"); got != "running" {
+		if got := covRunStatus(t, st, covRunID); got != "running" {
 			t.Errorf("run status = %q, want running", got)
 		}
 	})
@@ -1037,13 +1044,13 @@ func TestRunAgent_ExecInspectOutcome(t *testing.T) {
 				}
 			}
 
-			if got := covRunStatus(t, st, "chat1"); got != tc.wantStatus {
+			if got := covRunStatus(t, st, covRunID); got != tc.wantStatus {
 				t.Errorf("run status = %q, want %q", got, tc.wantStatus)
 			}
 			// The one assertion that would have failed before the fix: a
 			// run whose outcome could not be determined must never be
 			// recorded as "completed".
-			if got := covRunStatus(t, st, "chat1"); got == "completed" && tc.name == "inspect errors: outcome must not read as success" {
+			if got := covRunStatus(t, st, covRunID); got == "completed" && tc.name == "inspect errors: outcome must not read as success" {
 				t.Fatalf("inspect error was reported as a successful run (status=completed) — the exact regression this test guards against")
 			}
 

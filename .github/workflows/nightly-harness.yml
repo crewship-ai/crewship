@@ -135,6 +135,31 @@ env:
     test-secretless-github.sh
 
 jobs:
+  build-tools:
+    name: Build shared test binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build server and sidecar once
+        run: |
+          make build:sidecar
+          go build -ldflags "$(scripts/build-stamp.sh ldflags)" -o crewship ./cmd/crewship
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+          path: |
+            crewship
+            crewship-sidecar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   # ── Guard: no suite may silently belong to no tier ──
   suite-coverage-guard:
     name: Every harness suite is in a tier
@@ -142,6 +167,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Assert control-plane + runtime + EXCLUDED covers test-*.sh
         # This job exists because the prose in this file already went stale once:
         # it claimed "19 suites" while 20 were on disk, because test-crew-links.sh
@@ -244,6 +271,7 @@ jobs:
 
   # ── Hard gate: control-plane suites, no provider credential needed ──
   harness-control-plane:
+    needs: [build-tools]
     name: "Harness: ${{ matrix.suite }}"
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -326,17 +354,15 @@ jobs:
           - suite: test-session-provenance.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-go-embed
         with:
-          go-version: ${{ env.GO_VERSION }}
+          persist-credentials: false
 
-      - name: Build CLI
-        # The harness resolves its binary as $CREWSHIP → <repo-root>/crewship →
-        # `crewship` on PATH (lib.sh:_resolve_crewship), so building into the
-        # repo root is enough. We pass $CREWSHIP explicitly anyway.
-        run: go build -o crewship ./cmd/crewship
 
+      - name: Download shared test binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+      - run: chmod +x crewship crewship-sidecar
       - name: Generate ephemeral instance secrets
         # Per-run keys: nothing in the repo trips the Gitleaks high-entropy
         # scanner and each run starts from a clean cryptographic slate.
@@ -492,9 +518,19 @@ jobs:
   # harness README documents — but the first run with a real secret should be a
   # `workflow_dispatch`, not a nightly, and should expect to need adjustment
   # (provisioning budget, per-suite timeouts, token spend).
+      - name: Require scheduled runtime credentials
+        if: github.event_name == 'schedule'
+        env:
+          PROVIDER_PRESENT: ${{ steps.check.outputs.present }}
+        run: |
+          if [ "$PROVIDER_PRESENT" != true ]; then
+            echo '::error::Scheduled runtime harness has no provider credential; runtime verification did not run.'
+            exit 1
+          fi
+
   harness-runtime:
     name: "Harness (runtime): ${{ matrix.suite }}"
-    needs: [provider-key]
+    needs: [build-tools, provider-key]
     if: needs.provider-key.outputs.present == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -523,19 +559,15 @@ jobs:
           - suite: test-crew-links.sh
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: ./.github/actions/setup-go-embed
         with:
-          go-version: ${{ env.GO_VERSION }}
+          persist-credentials: false
 
-      - name: Build sidecar + CLI
-        # Unlike the control-plane job, these suites drive agents, so the
-        # container/adapter path matters — build the sidecar too.
-        run: |
-          set -euo pipefail
-          make build:sidecar
-          go build -o crewship ./cmd/crewship
 
+      - name: Download shared test binaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: nightly-test-tools-${{ github.sha }}
+      - run: chmod +x crewship crewship-sidecar
       - name: Generate ephemeral instance secrets
         run: |
           set -euo pipefail
@@ -649,6 +681,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Write the tier coverage table to the run summary
         env:
           KEY_PRESENT: ${{ needs.provider-key.outputs.present }}

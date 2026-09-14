@@ -1,5 +1,6 @@
 "use client"
 
+import { RoutineRunEffects } from "./routine-run-effects"
 import { useState } from "react"
 import {
   Dialog,
@@ -33,11 +34,10 @@ import {
  * component. Two ways in, one form: what `/msn-etn-podklady` asks for in
  * chat is what Run asks for here, prefilled the same way.
  *
- * A routine that declares NO inputs never sees this dialog — the caller
- * checks first and runs straight away, so the button keeps its
- * single-click behaviour everywhere it always had it.
+ * Even without input questions, a real run requires a review of its effects.
  */
 export interface RoutineRunInputsDialogProps {
+  definition?: Record<string, unknown> | null
   submitLabel?: "Run" | "Schedule"
   /** Open when non-null; the specs are the routine's declared inputs. */
   versionChoices?: { value: string; label: string }[]
@@ -53,27 +53,63 @@ export interface RoutineRunInputsDialogProps {
 }
 
 export function RoutineRunInputsDialog({
+  definition,
   inputs,
-  versionChoices, selectedVersion, onVersionChange,
+  versionChoices,
+  selectedVersion,
+  onVersionChange,
   submitLabel = "Run",
   routineName,
   submitting,
   onCancel,
   onRun,
 }: RoutineRunInputsDialogProps) {
-  if (inputs === null || (!inputs.length && !versionChoices?.length)) return null
+  if (inputs === null) return null
   return (
     <Dialog open onOpenChange={(open) => !open && !submitting && onCancel()}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto border-border bg-card sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{submitLabel} {routineName}</DialogTitle>
+          <DialogTitle>
+            {submitLabel} {routineName}
+          </DialogTitle>
           <DialogDescription>
-            Review the inputs for this run. Saved defaults are filled in below.
-            {submitLabel === "Schedule" ? "The routine will start at the selected date and time." : "Starting creates a new run in this routine’s history."}
+            Review the inputs for this run. Saved defaults are filled in below.{" "}
+            {submitLabel === "Schedule"
+              ? "The routine will start at the selected date and time."
+              : "Starting creates a new run in this routine’s history."}
           </DialogDescription>
         </DialogHeader>
-        {versionChoices && <p className="text-xs text-muted-foreground">A new run repeats work using the selected version. It does not resume the previous attempt or undo its actions.</p>}
-        {versionChoices && <div className="space-y-1"><label htmlFor="routine-run-version" className="text-sm font-medium">Recipe version</label><select id="routine-run-version" className="w-full rounded-md border bg-card p-2 text-sm" value={selectedVersion} onChange={e => onVersionChange?.(e.target.value)} disabled={submitting}>{versionChoices.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}</select><p className="text-xs text-muted-foreground">Inputs are copied from the selected historical run where names match. Review them before repeating external actions.</p></div>}
+        <RoutineRunEffects definition={definition} />
+        {versionChoices && (
+          <p className="text-xs text-muted-foreground">
+            A new run repeats work using the selected version. It does not resume the
+            previous attempt or undo its actions.
+          </p>
+        )}
+        {versionChoices && (
+          <div className="space-y-1">
+            <label htmlFor="routine-run-version" className="text-sm font-medium">
+              Recipe version
+            </label>
+            <select
+              id="routine-run-version"
+              className="w-full rounded-md border bg-card p-2 text-sm"
+              value={selectedVersion}
+              onChange={(e) => onVersionChange?.(e.target.value)}
+              disabled={submitting}
+            >
+              {versionChoices.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Inputs are copied from the selected historical run where names match. Review
+              them before repeating external actions.
+            </p>
+          </div>
+        )}
         {/* Keyed on the routine so switching selection in the list
             rebuilds the form at the new routine's defaults rather than
             carrying the previous one's answers across. */}
@@ -100,7 +136,7 @@ export function InputsForm({
   inputs: RoutineInputSpec[]
   submitLabel?: string
   submitting?: boolean
-  onCancel: () => void
+  onCancel?: () => void
   onRun: (inputs: Record<string, unknown>) => void
 }) {
   const fields = slashFieldsFromRoutineInputs(inputs)
@@ -115,7 +151,11 @@ export function InputsForm({
     setValues((prev) => ({ ...prev, [name]: e.target.value }))
     // Clear this field's error as soon as it is edited — leaving it up
     // while the user fixes it reads as "still wrong".
-    setErrors((prev) => (name in prev ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== name)) : prev))
+    setErrors((prev) =>
+      name in prev
+        ? Object.fromEntries(Object.entries(prev).filter(([k]) => k !== name))
+        : prev,
+    )
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -154,18 +194,34 @@ export function InputsForm({
             idPrefix="routine-input-"
           />
           {errors[f.name] && (
-            <p data-testid={`routine-input-error-${f.name}`} className="text-xs text-destructive">
+            <p
+              data-testid={`routine-input-error-${f.name}`}
+              className="text-xs text-destructive"
+            >
               {errors[f.name]}
             </p>
           )}
         </div>
       ))}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
-          Cancel
-        </Button>
+        {onCancel && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+        )}
         <Button type="submit" disabled={submitting}>
-          {submitting ? (submitLabel === "Run" ? "Running…" : "Scheduling…") : submitLabel}
+          {submitting
+            ? submitLabel === "Run"
+              ? "Running…"
+              : submitLabel.toLowerCase().includes("schedule")
+                ? "Scheduling…"
+                : "Working…"
+            : submitLabel}
         </Button>
       </DialogFooter>
     </form>

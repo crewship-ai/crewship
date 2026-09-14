@@ -31,15 +31,20 @@ import (
 // .../pipelines/{slug}/run-records?status=completed — filtered
 // client-side to the --last window. Nothing here creates a pipeline
 // version, changes head_version, or otherwise touches which version
-// live traffic resolves to: a backtest is a read-only evaluation of a
-// candidate, never a promotion.
+// live traffic resolves to. Each replay is real execution (ModeRun), with
+// external effects and costs; preserving HEAD does not make it read-only.
 var routineBacktestCmd = &cobra.Command{
 	Use:   "backtest <slug>",
-	Short: "Replay recent successful runs against a candidate version and diff the outputs",
+	Short: "Run live replays against a candidate version and compare outputs",
 	Long: `Pulls a corpus of recently COMPLETED runs for a routine, replays each one
 (with its ORIGINAL captured inputs) against a candidate pipeline version, and
 grades the candidate's output against what was actually recorded — without
 creating a new version or touching which version is live.
+
+Execution mode: live. Each replay executes the recipe with real credentials,
+can repeat external writes, and can incur model costs. Captured inputs are
+reused; outputs and external actions are not mocked. Use routine validate or
+routine dry-run for checks that do not execute work.
 
 Verdict per run:
   MATCH      — candidate passed and its output is byte-identical to the original
@@ -101,6 +106,7 @@ type backtestRunRow struct {
 // backtestSummary is the top-level report — table / JSON / markdown
 // via the shared formatter.
 type backtestSummary struct {
+	ExecutionMode  string           `json:"execution_mode"`
 	Slug           string           `json:"slug"`
 	AgainstVersion int              `json:"against_version"`
 	Since          string           `json:"since"`
@@ -147,6 +153,7 @@ func runRoutineBacktest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("select backtest corpus: %w", err)
 	}
 
+	fmt.Fprintln(out, "Execution mode: live — replays can repeat external actions and incur costs.")
 	fmt.Fprintf(out, "Backtesting %s against v%d — %d captured run(s) since %s\n",
 		slug, against, len(corpus), since.UTC().Format(time.RFC3339))
 
@@ -291,6 +298,7 @@ func backtestVerdict(sourceOutput, candidateStatus, candidateOutput string) stri
 // clean, so it must not be silently dropped from the count.
 func summariseBacktest(slug string, against int, since time.Time, rows []backtestRunRow) backtestSummary {
 	s := backtestSummary{
+		ExecutionMode:  "live",
 		Slug:           slug,
 		AgainstVersion: against,
 		Since:          since.UTC().Format(time.RFC3339),
@@ -344,6 +352,7 @@ func renderBacktestReport(cmd *cobra.Command, s backtestSummary) error {
 	if err := f.AutoHuman(s, func() {
 		out := cmd.OutOrStdout()
 		fmt.Fprintf(out, "\n────── backtest %s against v%d (since %s) ──────\n\n", s.Slug, s.AgainstVersion, s.Since)
+		fmt.Fprintf(out, "  Execution:  %s\n", s.ExecutionMode)
 		fmt.Fprintf(out, "  Runs:       %d\n", s.Runs)
 		fmt.Fprintf(out, "  Matched:    %d\n", s.Matched)
 		fmt.Fprintf(out, "  Diverged:   %d\n", s.Diverged)

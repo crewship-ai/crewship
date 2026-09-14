@@ -221,3 +221,25 @@ func TestDecideWaitpoint_Errors(t *testing.T) {
 		}
 	})
 }
+
+func TestWaitpointsApprove_NamedTypedAnswer(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnPost(covWaitpointsPath+"/tok-form/approve", clitest.JSONResponse(200, map[string]string{"status": "ok"}))
+	covSetFlagCli9(t, routineWaitpointsApproveCmd, "action", "ship")
+	covSetFlagCli9(t, routineWaitpointsApproveCmd, "input", `{"count":0,"enabled":false}`)
+	covCaptureStdoutCli9(t, func() {
+		if err := routineWaitpointsApproveCmd.RunE(routineWaitpointsApproveCmd, []string{"tok-form"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	calls := s.CallsFor("POST", covWaitpointsPath+"/tok-form/approve")
+	if len(calls) != 1 {
+		t.Fatal(calls)
+	}
+	var body map[string]any
+	json.Unmarshal(calls[0].Body, &body)
+	data, ok := body["data"].(map[string]any)
+	if !ok || data["count"] != float64(0) || data["enabled"] != false || body["action_id"] != "ship" || body["approved"] != true {
+		t.Fatal(body)
+	}
+}

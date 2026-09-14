@@ -64,12 +64,12 @@ describe("widgetForInputType", () => {
     expect(widgetForInputType(type)).toBe(widget)
   })
 
-  it("falls back to text for an undeclared or unknown type", () => {
+  it("keeps legacy text defaults and identifies unsupported declared types", () => {
     expect(widgetForInputType(undefined)).toBe("text")
     expect(widgetForInputType("")).toBe("text")
     // A type from a DSL newer than this build still draws something the
     // server can validate.
-    expect(widgetForInputType("geopoint")).toBe("text")
+    expect(widgetForInputType("geopoint")).toBe("unsupported")
   })
 })
 
@@ -104,7 +104,14 @@ describe("slashFieldsFromRoutineInputs", () => {
         { name: "vypis_odesilatel", type: "string", default: "info@rb.cz" },
       ]),
     ).toEqual([
-      { name: "obdobi", type: "text", required: false, default: "", value_type: "string", help: undefined },
+      {
+        name: "obdobi",
+        type: "text",
+        required: false,
+        default: "",
+        value_type: "string",
+        help: undefined,
+      },
       {
         name: "ucetnictvi_root",
         type: "text",
@@ -193,12 +200,12 @@ describe("coerceRoutineInput", () => {
     )
   })
 
-  it("treats an unknown or absent value_type as a string", () => {
+  it("preserves absent value_type but rejects unsupported declared types", () => {
     // Every field in the static slash catalog, and every field from a
     // server older than this build.
     expect(coerceRoutineInput(undefined, "7")).toBe("7")
     expect(coerceRoutineInput("", "7")).toBe("7")
-    expect(coerceRoutineInput("geopoint", "7")).toBe("7")
+    expect(() => coerceRoutineInput("geopoint", "7")).toThrow(/does not support/)
   })
 
   it("accepts the checkbox encoding for a boolean", () => {
@@ -254,7 +261,9 @@ describe("coerceRoutineInput", () => {
 
 describe("isMissingRequired", () => {
   it("treats an empty required text field as missing", () => {
-    const [field] = slashFieldsFromRoutineInputs([{ name: "obdobi", type: "string", required: true }])
+    const [field] = slashFieldsFromRoutineInputs([
+      { name: "obdobi", type: "string", required: true },
+    ])
     expect(isMissingRequired(field, "")).toBe(true)
     expect(isMissingRequired(field, "   ")).toBe(true)
     expect(isMissingRequired(field, "2026-07")).toBe(false)
@@ -264,7 +273,9 @@ describe("isMissingRequired", () => {
     // A checkbox emits "" when unticked. A blank-string check would
     // report "required" until it was TICKED, leaving no way at all to
     // submit the answer `false` — half of what a boolean is for.
-    const [field] = slashFieldsFromRoutineInputs([{ name: "confirm", type: "boolean", required: true }])
+    const [field] = slashFieldsFromRoutineInputs([
+      { name: "confirm", type: "boolean", required: true },
+    ])
     expect(isMissingRequired(field, "")).toBe(false)
     expect(isMissingRequired(field, "true")).toBe(false)
   })
@@ -358,4 +369,16 @@ describe("routineInputsFromValues", () => {
   it("survives a schema it was given none of", () => {
     expect(routineInputsFromValues(undefined, { a: "1" })).toEqual({ a: "1" })
   })
+})
+
+it("refuses unknown reference widgets even when options are present", () => {
+  for (const options of [undefined, ["saved-reference"]]) {
+    const fields = slashFieldsFromRoutineInputs([
+      { name: "credential", type: "string", widget: "credential", options },
+    ])
+    expect(fields[0].type).toBe("unsupported")
+    expect(() => routineInputsFromValues(fields, { credential: "raw-value" })).toThrow(
+      RoutineInputError,
+    )
+  }
 })

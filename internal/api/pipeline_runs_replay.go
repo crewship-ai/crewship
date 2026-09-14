@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -31,9 +32,9 @@ type replayRequestBody struct {
 	// pipeline_versions row's definition instead of HEAD. This is the
 	// primitive `crewship routine backtest` composes on: N replays of
 	// recent captured-input runs, all pinned to the same candidate
-	// version, diffed against the originals — a read-only evaluation
-	// that never changes which version is HEAD/live (see RunInput.
-	// PinnedVersion doc in internal/pipeline/executor.go).
+	// version, diffed against the originals. These are real ModeRun
+	// executions with external effects and costs; only HEAD/live stays
+	// unchanged (see RunInput.PinnedVersion in internal/pipeline/executor.go).
 	PinnedVersion *int `json:"pinned_version,omitempty"`
 }
 
@@ -67,7 +68,9 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 
 	var inputs map[string]any
 	if orig.InputsJSON != "" {
-		_ = json.Unmarshal([]byte(orig.InputsJSON), &inputs)
+		if err := json.Unmarshal([]byte(orig.InputsJSON), &inputs); err != nil {
+			return nil, http.StatusConflict, errors.New("historical inputs are unreadable; replay was not started")
+		}
 	}
 	// Carry the original run's tags so the replay groups with it.
 	tags, _ := h.runStore.TagsFor(r.Context(), runID)
@@ -119,11 +122,22 @@ func (h *PipelineHandler) ReplayRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body replayRequestBody
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes)).Decode(&body); err != nil {
+	if r.Body != nil {
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxExecBodyBytes))
+		if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 			replyError(w, http.StatusBadRequest, "invalid request body")
 			return
+		} else if err == nil {
+			var extra any
+			if decoder.Decode(&extra) != io.EOF {
+				replyError(w, http.StatusBadRequest, "request body must contain one JSON object")
+				return
+			}
 		}
+	}
+	if body.PinnedVersion != nil && *body.PinnedVersion < 1 {
+		replyError(w, http.StatusBadRequest, "pinned_version must be a positive archive version")
+		return
 	}
 	res, code, err := h.replayRun(r, workspaceID, runID, body.PinnedVersion)
 	if err != nil {

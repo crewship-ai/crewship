@@ -29,6 +29,9 @@ on:
     branches: [main]
     paths:
       - 'internal/database/migrate*.go'
+      - 'internal/database/migrations/**'
+      - 'scripts/lint-migrations/**'
+      - '.github/workflows/migration-lint.yml'
 
 permissions:
   contents: read

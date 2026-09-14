@@ -104,7 +104,7 @@ export function ConversationSearch({ turns, open: openProp, onOpenChange }: Conv
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -16 }}
           transition={spring.smooth}
-          className="absolute top-2 right-16 z-30 w-[400px] rounded-lg border bg-background shadow-xl"
+          className="absolute top-2 right-2 sm:right-16 z-30 w-[calc(100vw-1rem)] sm:w-[400px] rounded-lg border bg-background shadow-xl"
           role="search"
         >
           <div className="flex items-center gap-2 px-2 py-1.5 border-b">

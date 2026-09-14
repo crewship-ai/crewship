@@ -340,6 +340,7 @@ export interface WireUnresolvedRef {
 }
 
 export interface WirePageBundle {
+  project?: { format: string; runtime: string; files: { path: string; encoding: string; content: string }[] }
   format: string
   page: { name: string; slug: string; description?: string; owner?: string; panels: unknown[] }
   references: WireBundleRef[]
@@ -408,11 +409,9 @@ export function usePageImport(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          format: v.bundle.format,
-          page: v.bundle.page,
-          references: v.bundle.references,
-          ...(v.slug ? { slug: v.slug } : {}),
-          ...(Object.keys(v.bind).length > 0 ? { bind: v.bind } : {}),
+          ...(v.bundle.format === "crewship-page-bundle/v2" ? v.bundle : { format: v.bundle.format, page: v.bundle.page, references: v.bundle.references }),
+          slug: v.slug || undefined,
+          bind: Object.keys(v.bind).length > 0 ? v.bind : undefined,
         }),
       },
     }),

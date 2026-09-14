@@ -118,7 +118,7 @@ export function SidebarFilterButton({
         "kit-tap inline-flex items-center gap-1.5 h-8 px-2.5 shrink-0 rounded-md border text-[11px] whitespace-nowrap transition-colors",
         on
           ? "bg-primary/10 border-primary/30 text-primary-hover"
-          : "bg-white/[0.04] border-white/[0.08] text-muted-foreground/70 hover:text-foreground",
+          : "bg-white/[0.04] border-white/[0.08] text-muted-foreground hover:text-foreground",
         className,
       )}
       {...props}
@@ -445,6 +445,7 @@ export function SidebarSection({
   actions,
   className,
   headerClassName,
+  headerProps,
   children,
 }: {
   label: React.ReactNode
@@ -455,6 +456,11 @@ export function SidebarSection({
   actions?: React.ReactNode
   className?: string
   headerClassName?: string
+  /** Extra attributes for the collapsible header button — a `title`, a
+   *  `data-*` hook for a list-level keyboard handler. Ignored when the
+   *  section is not collapsible, because then there is no button. */
+  headerProps?: Omit<React.ComponentProps<"button">, "type" | "onClick" | "className" | "children"> &
+    Record<`data-${string}`, string | undefined>
   children?: React.ReactNode
 }) {
   // Header content WITHOUT actions — this is what goes inside the toggle
@@ -472,7 +478,9 @@ export function SidebarSection({
           )}
         />
       )}
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">{label}</span>
+      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
+        {label}
+      </span>
       {count != null && (
         <span className="ml-auto text-[10px] tabular-nums text-muted-foreground">{count}</span>
       )}
@@ -485,6 +493,7 @@ export function SidebarSection({
         <div className="flex items-center">
           <button
             type="button"
+            {...headerProps}
             onClick={onToggle}
             aria-expanded={!collapsed}
             className={cn(

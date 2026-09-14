@@ -152,7 +152,7 @@ export function PipelineDetailSheet({ workspaceId, slug, open, onClose }: Pipeli
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent className="w-[640px] sm:max-w-[640px] overflow-y-auto">
+      <SheetContent className="sm:w-[640px] sm:max-w-[640px] overflow-y-auto">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <GitBranch className="h-4 w-4" />

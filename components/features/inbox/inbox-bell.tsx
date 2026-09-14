@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 
 import { toast } from "sonner"
 

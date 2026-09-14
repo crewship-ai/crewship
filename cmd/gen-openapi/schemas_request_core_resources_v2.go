@@ -38,7 +38,7 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"name": str(), "slug": str(), "preferred_language": nullable(str()),
 	}, "name", "slug"))
 	request("CoreWorkspaceUpdateRequestV2", object(map[string]any{
-		"name": nullable(str()), "slug": nullable(str()), "preferred_language": nullable(str()),
+		"name": nullable(str()), "slug": nullable(str()), "preferred_language": nullable(str()), "pages_theme": pagesThemeSchema(),
 		"allow_privileged_credentials": nullable(boolean()), "run_retention_days": nullable(integer()),
 		"credential_audit_retention_days": nullable(integer()), "audit_log_retention_days": nullable(integer()),
 	}))

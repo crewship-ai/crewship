@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -197,6 +198,75 @@ func (h *PipelineHandler) resolveWakePipeline(r *http.Request, workspaceID, targ
 // the natural caller — UI fills target_pipeline_slug from the row
 // the user clicks on. ID path is for the CLI (which already has the
 // id from `crewship pipeline get`).
+
+// gateSchedulePreset refuses a plan whose stored inputs its target routine
+// would refuse at dispatch (#2496). Answers true when it has written the
+// response and the caller must return.
+//
+// Same function the run path uses — pipeline.ValidateFormInputs — deliberately
+// and not a second opinion: a preset that this accepts and the executor then
+// rejects would be worse than no check, because the plan would look healthy in
+// the calendar and fail for the first time at 02:30 with no run to inspect.
+// hasInputForm still decides what carries a contract at all, so a legacy
+// untyped recipe stays exactly as permissive as it is today, and `false`, `0`
+// and an empty list stay answers rather than absences.
+//
+// Pinned plans are validated against the version they name, unpinned ones
+// against HEAD — the recipe each would actually execute. A pin that names
+// no archived version is refused outright: there is nothing for the plan
+// to run, and the request that wrote the pin is the moment to say so (the
+// alternative, found by the opponent review of #2503, was an enabled plan
+// pinned to nothing, with a 200). A lookup that FAILS is a 500 for the same
+// reason — the gate could not judge, so it must not answer as if it had.
+// Only a target routine whose definition no longer parses is not held
+// against the plan: the executor surfaces that, and refusing to edit a plan
+// because its target is broken would take away the screen an operator fixes
+// it from. Callers only invoke the gate for a request that writes the pin,
+// the target or the inputs, so `{"enabled": false}` on a broken plan is
+// never judged and stays the way out.
+func (h *PipelineHandler) gateSchedulePreset(w http.ResponseWriter, r *http.Request, pipelineID string, version *int, inputs map[string]any) bool {
+	if h.store == nil || pipelineID == "" {
+		return false
+	}
+	definition := ""
+	if version != nil {
+		v, err := h.store.GetVersion(r.Context(), pipelineID, *version)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, fmt.Sprintf("The target routine has no archived version %d. Pin the plan to a published version, or leave the version out to run the current one.", *version))
+			return true
+		}
+		if err != nil {
+			h.logger.Error("schedule preset gate: load pinned version", "error", err, "pipeline_id", pipelineID, "version", *version)
+			replyError(w, http.StatusInternalServerError, "Could not load the pinned version to check the plan's inputs against it.")
+			return true
+		}
+		definition = v.DefinitionJSON
+	} else {
+		p, err := h.store.GetByID(r.Context(), pipelineID)
+		if errors.Is(err, pipeline.ErrNotFound) {
+			replyError(w, http.StatusBadRequest, "The target routine does not exist.")
+			return true
+		}
+		if err != nil {
+			h.logger.Error("schedule preset gate: load target", "error", err, "pipeline_id", pipelineID)
+			replyError(w, http.StatusInternalServerError, "Could not load the target routine to check the plan's inputs against it.")
+			return true
+		}
+		definition = p.DefinitionJSON
+	}
+	dsl, err := pipeline.Parse([]byte(definition))
+	if err != nil {
+		return false
+	}
+	if verr := pipeline.ValidateFormInputs(dsl, inputs); verr != nil {
+		replyError(w, http.StatusBadRequest, verr.Error())
+		return true
+	}
+	return false
+}
+
+// CreateSchedule attaches a cron plan to a routine. See the slug/id
+// resolution note above resolveSchedulePipelineID's callers.
 func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	if h.schedules == nil {
 		replyError(w, http.StatusServiceUnavailable, "pipeline_schedules backend not wired")
@@ -253,6 +323,15 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, body.Inputs) {
+		return
+	}
+	// The wake gate carries its own preset for its own routine, and fails
+	// the same way at the same 02:30 if that preset does not fit.
+	if wakeID != "" && h.gateSchedulePreset(w, r, wakeID, nil, body.WakeInputs) {
+		return
+	}
+
 	maxFailures := 0
 	if body.MaxConsecutiveFailures != nil {
 		maxFailures = *body.MaxConsecutiveFailures
@@ -272,7 +351,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          body.CatchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
 		// surface them as 400 not 500 so the UI can show "fix the
@@ -485,6 +564,37 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		catchupPolicy = body.CatchupPolicy
 	}
 
+	// Judge the plan this PATCH produces — target routine, effective pin,
+	// effective inputs — whenever the request changes any of the three
+	// things the preset is fed to, or enables a previously disabled plan. A PATCH that touches none of them
+	// (disabling, a new cron, a rename) is not judged, so an operator whose
+	// plan predates this gate can still switch it off or reschedule it
+	// without first repairing a preset the request never mentions.
+	//
+	// body.TargetPipelineVersion is already the EFFECTIVE pin at this point:
+	// absent kept the stored one, explicit null cleared it (see the rawKeys
+	// resolution above). The first version of this gate re-applied the
+	// stored pin on top of that, which validated an explicit unpin against
+	// the OLD version and then saved a plan that runs HEAD with a preset HEAD
+	// rejects; and it only ran when `inputs` was present, so repinning alone
+	// walked a v1 preset onto v2 unjudged. Both reproduced by the opponent
+	// review of #2498.
+	_, versionMentioned := rawKeys["target_pipeline_version"]
+	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
+	enabling := !existing.Enabled && enabled
+	if body.Inputs != nil || targetChanged || enabling {
+		if h.gateSchedulePreset(w, r, pipelineID, body.TargetPipelineVersion, inputs) {
+			return
+		}
+	}
+	_, wakeMentioned := rawKeys["wake_pipeline_id"]
+	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned || enabling) {
+		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
+			return
+		}
+	}
+
 	maxFailures := 0
 	if body.MaxConsecutiveFailures != nil {
 		maxFailures = *body.MaxConsecutiveFailures
@@ -505,7 +615,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          catchupPolicy,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	saved, err := h.schedules.Save(r.Context(), in)
+	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
 			replyError(w, http.StatusBadRequest, err.Error())
@@ -608,7 +718,11 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusNotFound, "schedule not found")
 		return
 	}
-	activated, err := h.schedules.Activate(r.Context(), scheduleID)
+	activated, err := h.schedules.ActivateValidated(r.Context(), scheduleID)
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if errors.Is(err, pipeline.ErrScheduleNotDraft) {
 		writeJSON(w, http.StatusConflict, map[string]string{
 			"error": "schedule is not awaiting activation",
@@ -719,18 +833,19 @@ func (h *PipelineHandler) resolveSchedulePipelineID(r *http.Request, workspaceID
 	return "", "", errors.New("target_pipeline_slug or target_pipeline_id required")
 }
 
-// isUserScheduleError sniffs error strings from the schedule store
-// that come from caller-supplied data (cron expr, timezone). The
-// store wraps these with stable prefixes so we can map to 400 here
-// without pattern-matching deep error chains.
+// isUserScheduleError recognizes typed trigger errors and the legacy store
+// prefixes, including when a transaction stage adds diagnostic context.
 func isUserScheduleError(err error) bool {
-	if err == nil {
-		return false
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		return true
 	}
-	msg := err.Error()
-	return strings.HasPrefix(msg, "invalid cron expression") ||
-		strings.HasPrefix(msg, "invalid timezone") ||
-		strings.HasPrefix(msg, "pipeline_schedules:")
+	for ; err != nil; err = errors.Unwrap(err) {
+		msg := err.Error()
+		if strings.HasPrefix(msg, "invalid cron expression") || strings.HasPrefix(msg, "invalid timezone") || strings.HasPrefix(msg, "pipeline_schedules:") {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultIfBlank(s, fallback string) string {

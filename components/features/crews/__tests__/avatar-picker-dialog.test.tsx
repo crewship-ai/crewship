@@ -71,16 +71,18 @@ describe("<AvatarPickerDialog>", () => {
   it("clicking a quick-pick seed updates the preview", async () => {
     render(<AvatarPickerDialog {...baseProps} />)
     const preview = screen.getByTestId("avatar-preview") as HTMLImageElement
-    expect(preview).not.toBeNull()
-    const initialSrc = preview!.src
-
-    // Quick-pick row has 8 thumbnails. Click the third.
     const quickPickButtons = screen.getByTestId("avatar-quick-pick").querySelectorAll("button")
     expect(quickPickButtons.length).toBe(8)
-    fireEvent.click(quickPickButtons[2])
+    const selected = quickPickButtons[2]
+    const expectedSeed = selected.getAttribute("aria-label")!.replace("Use avatar seed ", "")
+    const expectedImage = selected.querySelector("img")!.src
+    fireEvent.click(selected)
 
+    // Distinct seeds can produce the same finite avatar. Check the selected
+    // seed and its corresponding image, not an assumed visual difference.
     await waitFor(() => {
-      expect(preview!.src).not.toBe(initialSrc)
+      expect(screen.getByLabelText("Avatar seed")).toHaveValue(expectedSeed)
+      expect(preview.src).toBe(expectedImage)
     })
   })
 

@@ -23,6 +23,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,9 @@ type resumePlan struct {
 	// reason distinguishes the boot-scan path from the in-process
 	// approval path in the journal (see resumeReason* constants).
 	reason string
+	// Effective recipe captured before the first step, including overrides.
+	// Empty only for legacy runs that have no execution snapshot.
+	definitionJSON string
 }
 
 // resumeDefinitionDrift is the shared drift gate for resume-from-step:
@@ -270,14 +274,20 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 	if err != nil {
 		return nil, "pipeline not loadable: " + err.Error()
 	}
-	// A pinned run (started from a schedule/webhook with
-	// target_pipeline_version) must resume against the SAME immutable
-	// version it started on — validating against head would strand
-	// every parked pinned run the moment head moves. Versions are
-	// immutable, so the drift gate below then compares the stamped
-	// hash against the very definition that will re-execute.
+	// Prefer the actual executed recipe over today's HEAD or overrides. Normal
+	// manual runs do not stamp PipelineVersion, but production captures this
+	// snapshot before dispatch. Without it, retain the legacy fail-closed drift
+	// checks rather than guessing which recipe produced the saved outputs.
 	definitionJSON, currentHash := p.DefinitionJSON, p.DefinitionHash
-	if rec.PipelineVersion != nil {
+	var captured sql.NullString
+	if e.executionStore != nil {
+		if err := e.runStore.db.QueryRowContext(ctx, `SELECT executed_definition_json FROM pipeline_runs WHERE id=?`, rec.ID).Scan(&captured); err != nil {
+			return nil, "executed recipe unreadable: " + err.Error()
+		}
+	}
+	if captured.Valid {
+		definitionJSON, currentHash = captured.String, rec.DefinitionHash
+	} else if rec.PipelineVersion != nil {
 		v, verr := e.store.GetVersion(ctx, rec.PipelineID, *rec.PipelineVersion)
 		if verr != nil {
 			return nil, fmt.Sprintf("pinned version %d not loadable: %v", *rec.PipelineVersion, verr)
@@ -309,7 +319,7 @@ func (e *Executor) buildResumePlan(ctx context.Context, rec *RunRecord) (*resume
 			return nil, "persisted inputs unreadable: " + err.Error()
 		}
 	}
-	return &resumePlan{rec: rec, inputs: inputs, restored: restored}, ""
+	return &resumePlan{rec: rec, inputs: inputs, restored: restored, definitionJSON: captured.String}, ""
 }
 
 // runResumedRun re-enters one run through the normal Run path with
@@ -370,6 +380,7 @@ func (e *Executor) runResumedRun(ctx context.Context, plan *resumePlan, logger *
 			// state this run actually persisted — see the
 			// ErrResumeDefinitionChanged case below.
 			resumeDefinitionHash: rec.DefinitionHash,
+			resumeDefinitionJSON: plan.definitionJSON,
 			resumeCurrentStepID:  rec.CurrentStepID,
 		})
 		switch {
