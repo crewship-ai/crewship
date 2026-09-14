@@ -353,6 +353,22 @@ describe("groups by owner (#2523)", () => {
     ])
   })
 
+  it("keeps a crew under my crews when the page that proved membership is filtered out", () => {
+    // `fleet` carries `crew:lookout`; a page of the same crew reached through
+    // a role carries no such evidence of its own.
+    const viaRole = toPageView(wirePage({ slug: "lookout-role", owner: "crew/lookout", owner_crew_name: "lookout", reach: ["role"] }))
+    const all = [...pages, viaRole]
+    const displayed = all.filter((p) => p.slug !== "fleet")
+    // Grouping the filtered list alone loses the membership signal…
+    expect(groupPagesByOwner(displayed, ME).find((g) => g.key === "crew/lookout")?.member).toBe(false)
+    // …reading membership from the whole list keeps it, and the tier with it.
+    const groups = groupPagesByOwner(displayed, ME, all)
+    expect(groups.find((g) => g.key === "crew/lookout")?.member).toBe(true)
+    expect(groups.map((g) => g.key).indexOf("crew/lookout")).toBeLessThan(groups.map((g) => g.key).indexOf("crew/alpha"))
+    // A precomputed set is accepted too, so a caller that already has it need not rescan.
+    expect(groupPagesByOwner(displayed, ME, new Set(["lookout"])).find((g) => g.key === "crew/lookout")?.member).toBe(true)
+  })
+
   it("never renders an empty group, and files nothing under Mine without a signed-in user", () => {
     const groups = groupPagesByOwner(pages, null)
     expect(groups.find((g) => g.key === "mine")).toBeUndefined()

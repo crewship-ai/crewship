@@ -780,13 +780,20 @@ export function crewMembershipFromReach(pages: readonly PageView[]): Set<string>
  * pages of other people, each A→Z inside its tier. Pages keep the order they
  * arrived in within a group. A group with nothing in it is not returned, so
  * a rail never draws an empty header.
+ *
+ * `membership` is read from EVERY page the caller can see, not from the
+ * `pages` being grouped: the rail groups the filtered list, and a filter that
+ * hides the one page carrying `crew:<slug>` must not demote the crew's other
+ * pages — reached through a role — from "my crews" to "other crews". Pass the
+ * unfiltered list, or the set already derived from it.
  */
 export function groupPagesByOwner(
   pages: readonly PageView[],
   currentUserId: string | null | undefined,
+  membership: readonly PageView[] | ReadonlySet<string> = pages,
 ): PageGroup[] {
   const me = currentUserId ? `${USER_PREFIX}${currentUserId}` : null
-  const members = crewMembershipFromReach(pages)
+  const members = membership instanceof Set ? membership : crewMembershipFromReach(membership as readonly PageView[])
 
   const mine: PageView[] = []
   const others: PageView[] = []

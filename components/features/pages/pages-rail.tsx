@@ -191,10 +191,12 @@ export function PagesRail({
   // ── Groups ────────────────────────────────────────────────────────────────
   // Grouped from the DISPLAYED list, so a facet or a search narrows every
   // group and a group it empties disappears rather than standing there with
-  // a zero. The header count is therefore "what is in it now".
+  // a zero. The header count is therefore "what is in it now". Membership,
+  // though, is read from every page: which crews are MINE does not change
+  // because a filter hid the page that said so.
   const groups = React.useMemo(
-    () => groupPagesByOwner(displayed, currentUserId),
-    [displayed, currentUserId],
+    () => groupPagesByOwner(displayed, currentUserId, pages),
+    [displayed, currentUserId, pages],
   )
 
   // ── Collapse state ────────────────────────────────────────────────────────
