@@ -178,7 +178,14 @@ export function EmbedPanel({ panel, data, now, publicView = false, className }: 
               allow=""
               referrerPolicy="no-referrer"
               loading="lazy"
-              {...({ credentialless: "" } as Record<string, string>)}
+              // A BOOLEAN prop. React 19.3 lists `credentialless` among the
+              // boolean attributes it knows, and a known boolean given "" is
+              // false and omitted — so with the React bump the frame silently
+              // lost the one attribute that keeps the reader's cookies out of
+              // it, and only the test noticed. On 19.2 the attribute was
+              // unknown and "" passed through as the bare attribute; `true`
+              // is the value that means "present" under the new semantics.
+              {...({ credentialless: true } as Record<string, unknown>)}
               className="aspect-video w-full border-0"
             />
           </div>

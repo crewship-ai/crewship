@@ -58,8 +58,23 @@ import { PagesRequestError, pagesKeys, type WirePage } from "@/hooks/use-pages"
 export const PAGE_GRANT_LEVELS = ["read", "produce", "write"] as const
 export type PageGrantLevel = (typeof PAGE_GRANT_LEVELS)[number]
 
-export const PAGE_SUBJECT_TYPES = ["user", "crew", "agent"] as const
+/** `workspace` — everyone in this workspace, read or write only (#2533). */
+export const PAGE_SUBJECT_TYPES = ["user", "crew", "agent", "workspace"] as const
 export type PageSubjectType = (typeof PAGE_SUBJECT_TYPES)[number]
+
+/** What the subject kind is called where a person picks it. */
+export const PAGE_SUBJECT_TYPE_LABEL: Record<PageSubjectType, string> = {
+  user: "user",
+  crew: "crew",
+  agent: "agent",
+  workspace: "Everyone in this workspace",
+}
+
+/** The levels a subject kind may hold. The workspace never produces: a
+ *  payload has an author, and "everyone" is not one (spec §3/14). */
+export function pageGrantLevelsFor(subjectType: PageSubjectType): readonly PageGrantLevel[] {
+  return subjectType === "workspace" ? ["read", "write"] : PAGE_GRANT_LEVELS
+}
 
 /**
  * What each verb actually means (§7.1b's own table).
@@ -372,7 +387,8 @@ export function usePageVersions(
 export interface PageGrantWriteVariables {
   subjectType: PageSubjectType
   /** A REFERENCE, never an id: an email, a crew slug, an agent slug. The
-   *  server resolves it, exactly as it resolves `owner: crew/lookout`. */
+   *  server resolves it, exactly as it resolves `owner: crew/lookout`.
+   *  Empty, and not sent, for `workspace`. */
   subject: string
   level: PageGrantLevel
   /** Produce only. Empty covers every panel. */
@@ -424,7 +440,7 @@ export function usePageGrantWrite(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject_type: v.subjectType,
-          subject: v.subject,
+          ...(v.subjectType === "workspace" ? {} : { subject: v.subject }),
           level: v.level,
           // Sent only where it means something. The server refuses a panel
           // list against read/write with a 400 rather than storing a scope

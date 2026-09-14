@@ -161,6 +161,10 @@ export type RealtimeEventType =
   | "page.updated"
   | "page.deleted"
   | "page.panel.updated"
+  // A folder was created, renamed, recoloured, deleted, or a page moved in or
+  // out of it (#2527). Carries `{slug}` and no folder body: the client re-reads
+  // the folder list and the page list through the authorised path.
+  | "page.folder.updated"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -301,6 +305,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "page.updated",
   "page.deleted",
   "page.panel.updated",
+  "page.folder.updated",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so

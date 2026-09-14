@@ -66,6 +66,10 @@ import { useEditorRoute } from "@/components/features/pages/editor/use-editor-ro
 import { usePageCapabilities } from "@/components/features/pages/editor/use-page-capabilities"
 import { usePageGrants } from "@/hooks/use-page-grants"
 import { PageEditorShell } from "@/components/features/pages/editor/page-editor-shell"
+import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
+import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
+import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
+import { toast } from "sonner"
 
 export interface PagesLayoutProps {
   workspaceId: string
@@ -109,6 +113,60 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
 
   const { pages, loading, error } = usePages(workspaceId)
   const detail = usePage(workspaceId, selectedSlug)
+
+  // ── Folders (#2527) ──────────────────────────────────────────────────────
+  // The rail groups by folder when the server has them. The dialogs live
+  // here rather than in the rail, which stays a list that reports what was
+  // asked of a row; the state is which dialog is open and for what. The
+  // subject handed to the move dialog is derived from the LIVE list on every
+  // render, so after a 409 re-read the version it sends is the one on screen.
+  const folders = usePageFolders(workspaceId)
+  const folderWrites = usePageFolderMutations(workspaceId)
+  const [folderDialog, setFolderDialog] = React.useState<
+    | { kind: "create" }
+    | { kind: "edit"; slug: string }
+    | { kind: "delete"; slug: string }
+    | { kind: "share"; slug: string }
+    | { kind: "move"; slug: string }
+    | { kind: "move-many"; slugs: string[] }
+    | null
+  >(null)
+  const closeFolderDialog = React.useCallback(() => setFolderDialog(null), [])
+  const folderOf = (slug: string) => folders.folders.find((f) => f.slug === slug) ?? null
+  const moveSubject = React.useMemo(() => {
+    if (folderDialog?.kind !== "move") return null
+    const page = pages.find((p) => p.slug === folderDialog.slug)
+    if (!page) return null
+    return { slug: page.slug, name: page.name, folder: page.folder ?? null, pagesVersion: page.pagesVersion }
+  }, [folderDialog, pages])
+  // Several at once (#2533). Derived from the live list too, so a 409's
+  // re-read puts fresh versions into the next confirm for every page.
+  const moveSubjects = React.useMemo(() => {
+    if (folderDialog?.kind !== "move-many") return null
+    return folderDialog.slugs
+      .map((slug) => pages.find((p) => p.slug === slug))
+      .filter((p): p is (typeof pages)[number] => p !== undefined)
+      .map((p) => ({ slug: p.slug, name: p.name, folder: p.folder ?? null, pagesVersion: p.pagesVersion }))
+  }, [folderDialog, pages])
+
+  const removeFromFolder = React.useCallback(
+    async (page: { slug: string; name: string; folder?: { slug: string; name: string } | null; pagesVersion: number | null }) => {
+      if (!page.folder) return
+      try {
+        await folderWrites.removePage.mutateAsync({
+          folder: page.folder.slug,
+          page: page.slug,
+          pagesVersion: page.pagesVersion,
+        })
+        toast.success(`${page.name} is no longer in ${page.folder.name}.`)
+      } catch (err) {
+        // The lists were re-read on settle; the refusal is said in the
+        // server's words, where the action was.
+        toast.error(err instanceof Error && err.message ? err.message : "The page could not be removed from its folder.")
+      }
+    },
+    [folderWrites.removePage],
+  )
 
   // Who "Mine" belongs to, and half of the key the rail's fold state is saved
   // under. The tolerant variant on purpose: this shell is also mounted in
@@ -301,25 +359,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
-        {/* The list stays MOUNTED. Replacing it with the editor's sections was
-            the first draft's riskiest idea and the review's U05: the promise
-            that a list restores its scroll and filters afterwards is the
-            promise that breaks. While editing it steps off-screen instead
-            (#2515): still in the DOM at its full width, so its scroll
-            position and its filter state are exactly where they were on
-            return — `display: none` would have reset the scroll — but out of
-            layout, out of the tab order and out of the accessibility tree,
-            so the editor has the whole width and nobody can tab into a list
-            they cannot see. */}
+        {/* The list stays MOUNTED and on screen while editing. Replacing it
+            with the editor's sections was the first draft's riskiest idea and
+            the review's U05: the promise that a list restores its scroll and
+            filters afterwards is the promise that breaks. #2515 then slid it
+            off-screen to give a second, section-only rail the width; that
+            rail is gone — the sections are cards on one page, laid out like
+            an issue — and the Pages list is the one rail every surface
+            shares, so it stays exactly where it is. Choosing another Page
+            here goes through the same unsaved-work question as Back does. */}
         <aside
-          inert={editing}
-          aria-hidden={editing || undefined}
-          data-editing={editing || undefined}
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
             isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
-            editing && "pointer-events-none absolute inset-y-0 left-0 -translate-x-full opacity-0",
           )}
         >
           {collapsed ? (
@@ -329,6 +382,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           ) : (
             <PagesRail
               pages={pages}
+              folders={folders.supported ? folders.folders : null}
               workspaceId={workspaceId}
               currentUserId={currentUserId}
               search={search}
@@ -339,6 +393,13 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               onSelectPage={openPage}
               onCreatePage={() => setCreating(true)}
               onToggleCollapse={() => setCollapsed(true)}
+              onMovePage={(page) => setFolderDialog({ kind: "move", slug: page.slug })}
+              onRemoveFromFolder={(page) => void removeFromFolder(page)}
+              onCreateFolder={() => setFolderDialog({ kind: "create" })}
+              onEditFolder={(slug) => setFolderDialog({ kind: "edit", slug })}
+              onShareFolder={(slug) => setFolderDialog({ kind: "share", slug })}
+              onDeleteFolder={(slug) => setFolderDialog({ kind: "delete", slug })}
+              onMovePages={(list) => setFolderDialog({ kind: "move-many", slugs: list.map((p) => p.slug) })}
             />
           )}
         </aside>
@@ -438,6 +499,56 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             setImporting(false)
             openPage(installed)
           }}
+        />
+      )}
+
+      {/* The folder dialogs (#2527). Mounted only while open so each opening
+          starts from the folder or page as it is now. */}
+      {(folderDialog?.kind === "create" || folderDialog?.kind === "edit") && (
+        <FolderEditDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          folder={folderDialog.kind === "edit" ? folderOf(folderDialog.slug) : null}
+          defaultOwner={suggestedOwner}
+        />
+      )}
+      {folderDialog?.kind === "delete" && (
+        <FolderDeleteDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          folder={folderOf(folderDialog.slug)}
+        />
+      )}
+      {folderDialog?.kind === "share" && (
+        <FolderSharingDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          folder={folderOf(folderDialog.slug)}
+          // A reader who may not see the table is shown their own paths to
+          // the page that is open, when it is in this folder.
+          pageSlug={
+            selectedSlug && pages.find((p) => p.slug === selectedSlug)?.folder?.slug === folderDialog.slug ? selectedSlug : null
+          }
+        />
+      )}
+      {folderDialog?.kind === "move" && (
+        <MoveToFolderDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          subject={moveSubject}
+        />
+      )}
+      {folderDialog?.kind === "move-many" && (
+        <MoveToFolderDialog
+          workspaceId={workspaceId}
+          open
+          onOpenChange={(open) => !open && closeFolderDialog()}
+          subject={null}
+          subjects={moveSubjects}
         />
       )}
 

@@ -220,8 +220,13 @@ func (p Profile) requirements(req MutateRequest, hasLedger bool) error {
 		missing = append(missing, "an Authorize func to verify the run and its generation")
 	}
 	if req.Op == OpReplace {
-		if req.ExpectedRevision == 0 {
-			missing = append(missing, "ExpectedRevision (a replace without CAS can silently lose a concurrent write)")
+		if req.ExpectedRevision == 0 && !req.FirstWrite {
+			missing = append(missing, "ExpectedRevision (a replace without CAS can silently lose a concurrent write), "+
+				"or FirstWrite to state that no revision is expected to exist yet")
+		}
+		if req.FirstWrite && req.ExpectedRevision != 0 {
+			missing = append(missing, "a consistent precondition: FirstWrite means revision 0 is expected, "+
+				"ExpectedRevision names another")
 		}
 		if req.Removals == nil {
 			missing = append(missing, "a non-nil Removals declaration (nil means undeclared, not empty)")
@@ -290,6 +295,16 @@ type MutateRequest struct {
 	// diffed against. 0 means "no revision recorded yet" and is correct for
 	// the first contract write to a key. For OpAppend, 0 is unconditional.
 	ExpectedRevision int64
+	// FirstWrite is the explicit first-write precondition for a replace: the
+	// caller states that NO revision is expected to exist for this key yet,
+	// and the write must fail with a conflict if one does. It is the honest
+	// way to CAS a key that has never been written under the contract —
+	// without it a first replace had to be disguised as an append to
+	// establish revision 1, and a missing ExpectedRevision (an omission) was
+	// indistinguishable from a deliberate "I expect none" (a claim). Two
+	// concurrent first writes race on the per-file lock; the second sees
+	// revision 1 and loses, which is the CAS doing its job.
+	FirstWrite bool
 	// ExpectedSHA256 is the optional on-disk CAS. When set, the raw bytes on
 	// disk must hash to it. This is the only CAS available in ledgerless
 	// mode, and it is a useful belt-and-braces check with the ledger too.
